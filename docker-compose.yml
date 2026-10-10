@@ -62,6 +62,7 @@ services:
       - ./web/style.css:/usr/share/nginx/html/app/style.css:ro
       - ./web/app.js:/usr/share/nginx/html/app/app.js:ro
       - ./web/dashboard-shared.js:/usr/share/nginx/html/app/dashboard-shared.js:ro
+      - ./web/dashboard-inbox.js:/usr/share/nginx/html/app/dashboard-inbox.js:ro
       - ./web/dashboard-router.js:/usr/share/nginx/html/app/dashboard-router.js:ro
       - ./web/dashboard-overview.js:/usr/share/nginx/html/app/dashboard-overview.js:ro
       - ./web/dashboard-reviews.js:/usr/share/nginx/html/app/dashboard-reviews.js:ro

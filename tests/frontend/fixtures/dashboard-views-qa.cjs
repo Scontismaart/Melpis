@@ -1,9 +1,10 @@
 // Opt-in, loopback-only view smoke data. No DB, provider, model or credentials.
 const { ORG_A, ORG_B, FIXED_TIME, readFixtures } = require("./dashboard-visual-api.cjs");
+const { INBOX_CASES, inboxReply } = require("./dashboard-inbox-qa.cjs");
 const SCENARIOS = new Set([
   "populated", "empty", "error", "loading", "denied",
   "staff", "mfa-required", "simulator-hostile", "simulator-error", "simulator-timeout",
-  "booking-error", "booking-timeout",
+  "booking-error", "booking-timeout", ...INBOX_CASES,
 ]);
 const FAQ_ID = "synthetic-faq-qa";
 const DOCUMENT_ID = "synthetic-document-qa";
@@ -34,9 +35,10 @@ const webItem = (label) => ({ id: WEB_ID, nome: `Pagina QA ${label}`, fonte: "ht
 function forbidden(reason, mfaRequired = false) {
   return { status: 403, body: mfaRequired ? { detail: "MFA required", code: "mfa_required" } : { detail: reason } };
 }
-function viewReply(method, pathname, scenario, organization = ORG_A) {
+function viewReply(method, pathname, scenario, organization = ORG_A, rawBody = null) {
   const [route, query = ""] = pathname.split("?");
   pathname = route;
+  if (INBOX_CASES.has(scenario) && pathname.startsWith("/api/inbox/")) return inboxReply(method, pathname, scenario, organization, rawBody);
   if (!SCENARIOS.has(scenario)) return null;
   if (![ORG_A, ORG_B].includes(organization)) return forbidden("Organizzazione QA non autorizzata");
   const label = organization === ORG_B ? "B" : "A";

@@ -33,9 +33,8 @@ function harness(view) {
   dom.window.eval(fs.readFileSync(path.join(root, "web/dashboard-bookings.js"), "utf8")
     .replace("let bookingCalendar = null;", "let bookingCalendar = deps.testCalendar;")
     .replace("onEnter, onExit, invalidate, load,", "onEnter, onExit, invalidate, load, apriFormPrenotazione, apriDettaglioPrenotazione, eseguiAzionePrenotazione, currentBooking: () => prenotazioneCorrente,"));
-  const requests = [], callbacks = [], errors = [], toasts = [], intervals = new Map(), gotoDates = [];
+  const requests = [], errors = [], toasts = [], intervals = new Map(), gotoDates = [];
   let intervalId = 0;
-  const inboxState = { tickets: [], team: [], pendingClaims: new Set(), selectedTicketId: null };
   let date = "2026-10-02";
   const bookingCalendar = {
     getDate: () => new Date(`${date}T12:00:00`), removeAllEvents() {}, addEvent() {},
@@ -45,7 +44,7 @@ function harness(view) {
   dom.window.FullCalendar = { Calendar: function () { return bookingCalendar; } };
   const context = vm.createContext({
     document, window: dom.window, console: { error: (...args) => errors.push(args) },
-    API_BASE: "", inboxState, bookingCalendar, Date, Map, Set,
+    API_BASE: "", bookingCalendar, Date, Map, Set,
     _toDateKey: dom.window.MelpisDashboardShared.toDateKey,
     crypto: { randomUUID: () => "test-idempotency-key" },
     apiFetch(url, options = {}) { const pending = deferred(); requests.push({ url, options, ...pending }); return pending.promise; },
@@ -57,15 +56,6 @@ function harness(view) {
     ICONS: { chat: "", check: "" },
     calcolaTrendKpi: () => ({}), applicaBadgeTrend() {}, generaSparklineSvg: () => "",
     caricaStatoOnboarding: () => Promise.resolve({ isFullyConfigured: true }),
-    aggiornaContatoriFiltri() {},
-    renderInboxConversazioni() { document.getElementById("inbox-list").textContent = inboxState.tickets.map(t => t.id).join(","); },
-    getFilteredTickets: () => inboxState.tickets,
-    selezionaTicket(id) { inboxState.selectedTicketId = id; }, mostraPlaceholderDettaglio() {},
-    _getAvatarColors: () => ({ bg: "white", text: "black" }), _getAvatarInitial: () => "C",
-    labelStatoTicketInbox: (value) => value, labelStatoMessaggioInbox: (value) => value,
-    formatInboxDate: (value) => value || "", aggiornaStatoPulsanteClaimInbox() {},
-    _renderMsgRow(message) { const row = document.createElement("div"); row.className = "inbox-msg-row"; row.dataset.msgId = message.id; row.textContent = message.content; return row; },
-    requestAnimationFrame: (fn) => callbacks.push(fn), setTimeout: (fn) => callbacks.push(fn),
     setInterval: (fn) => { const id = ++intervalId; intervals.set(id, fn); return id; }, clearInterval: (id) => intervals.delete(id),
     toast: (...args) => toasts.push(args),
     bookingCalendarEl: document.getElementById("booking-calendar"),
@@ -100,13 +90,12 @@ function harness(view) {
   vm.runInContext(`
     let activeDashboardView = ${JSON.stringify(view)};
     let dashboardViewTransition = 1;
-    let overviewSummaryRequest = 0, overviewPriorityRequest = 0, inboxListRequest = 0, inboxDetailRequest = 0;
+    let overviewSummaryRequest = 0, overviewPriorityRequest = 0;
     let bookingListRequest = 0, bookingAvailabilityRequest = 0;
     let bookingEditingId = null, bookingFormTransition = 0;
     let prenotazioneCorrente = null, bookingDetailTransition = 0;
     let overviewReportRequest = 0;
     let isPanoramicaPollingActive = false, panoramicaPollingTimer = null;
-    let isInboxPollingActive = false, inboxPollingTimer = null;
     let bookingRecords = [], bookingAvailability = new Map(), bookingSnapshot = new Map();
     let prenotazioniInAttesaCount = 0, bookingPendingOnly = false;
     const bookingsModule = window.MelpisDashboardBookings.create({
@@ -126,7 +115,7 @@ function harness(view) {
     };
     for (const name of ["aggiornaPrenotazioni", "aggiornaSemaforo", "apriFormPrenotazione", "apriDettaglioPrenotazione", "eseguiAzionePrenotazione", "currentBooking"]) globalThis[name] = bookingsModule[name];
     globalThis.apriBookingModal = bookingsModule.apriBookingModal;
-    ${["caricaInbox", "caricaDettaglioTicket", "inviaRispostaInbox", "aggiornaReport", "avviaInboxPolling", "fermaInboxPolling"].map(source).join("\n")}
+    ${source("aggiornaReport")}
     const overviewModule = window.MelpisDashboardOverview.create({
       API_BASE, apiFetch, _sanitize, toast, _tDash, t, localeCorrente, _toDateKey,
       _emptyState, _errorState, _skeletonList, ICONS,
@@ -140,7 +129,7 @@ function harness(view) {
     globalThis.fermaPanoramicaPolling = overviewModule.fermaPanoramicaPolling;
     overviewModule.onEnter();
   `, context);
-  return { dom, document, context, requests, callbacks, errors, toasts, intervals, inboxState, gotoDates,
+  return { dom, document, context, requests, errors, toasts, intervals, gotoDates,
     setDate(value) { date = value; }, getDate() { return date; },
     submitBooking() { form.dispatchEvent(new dom.window.Event("submit", { cancelable: true })); return submission; },
   };
@@ -184,55 +173,17 @@ test("priority onboarding await cannot append an obsolete empty state", async (t
   assert.match(h.document.getElementById("priority-list").textContent, /new priority/);
 });
 
-test("Inbox commits tickets and team together after both JSONs, newest response wins", async (t) => {
-  const h = harness("inbox"); t.after(() => h.dom.window.close()); h.dom.window.innerWidth = 500;
-  const oldTeam = deferred(); const teamStarted = deferred();
-  const a = h.context.caricaInbox();
-  h.requests[0].resolve(response({ tickets: [ticket("A")] }));
-  h.requests[1].resolve({ ok: true, json: () => { teamStarted.resolve(); return oldTeam.promise; } });
-  await teamStarted.promise;
-  assert.equal(h.inboxState.tickets.length, 0, "partial ticket state is not committed while team JSON waits");
-  const b = h.context.caricaInbox();
-  h.requests[2].resolve(response({ tickets: [ticket("B")] })); h.requests[3].resolve(response({ members: [{ user_id: "B" }] })); await b;
-  oldTeam.resolve({ members: [{ user_id: "A" }] }); await a;
-  assert.equal(h.document.getElementById("inbox-list").textContent, "B");
-  assert.equal(h.inboxState.team[0].user_id, "B");
+test("Overview repeated polling activation keeps one interval and stop clears it", (t) => {
+  const h = harness("panoramica"); t.after(() => h.dom.window.close());
+  h.context.fermaPanoramicaPolling();
+  for (let visit = 0; visit < 3; visit++) {
+    h.context.avviaPanoramicaPolling(); h.context.avviaPanoramicaPolling();
+    assert.equal(h.intervals.size, 1);
+    h.context.fermaPanoramicaPolling(); assert.equal(h.intervals.size, 0);
+  }
 });
 
-test("Inbox old response on leave/re-enter cannot replace current list", async (t) => {
-  const h = harness("inbox"); t.after(() => h.dom.window.close()); h.dom.window.innerWidth = 500;
-  const a = h.context.caricaInbox(); h.context.navigate("panoramica"); h.context.navigate("inbox");
-  const b = h.context.caricaInbox();
-  h.requests[2].resolve(response({ tickets: [ticket("B")] })); h.requests[3].resolve(response({ members: [] })); await b;
-  h.requests[0].resolve(response({ tickets: [ticket("A")] })); h.requests[1].resolve(response({ members: [] })); await a;
-  assert.equal(h.document.getElementById("inbox-list").textContent, "B");
-});
 
-for (const fail of [false, true]) {
-  test(`Inbox selected B survives stale A ${fail ? "error" : "thread and reply UI"}`, async (t) => {
-    const h = harness("inbox"); t.after(() => h.dom.window.close());
-    h.inboxState.tickets = [ticket("A", "CLAIMED"), ticket("B")]; h.inboxState.selectedTicketId = "A";
-    const a = h.context.caricaDettaglioTicket("A"); h.inboxState.selectedTicketId = "B";
-    const b = h.context.caricaDettaglioTicket("B"); h.requests[1].resolve(response({ messages: [{ id: "B", content: "thread B" }] })); await b;
-    if (fail) h.requests[0].reject(new Error("obsolete A"));
-    else h.requests[0].resolve(response({ messages: [{ id: "A", content: "thread A" }] }));
-    await a;
-    assert.equal(h.document.getElementById("inbox-thread-messages").textContent, "thread B");
-    assert.equal(h.document.getElementById("inbox-reply-form").hidden, true);
-    assert.equal(h.errors.length, 0);
-  });
-}
-
-test("Inbox delayed scrolling from A is ignored after selecting B", async (t) => {
-  const h = harness("inbox"); t.after(() => h.dom.window.close());
-  h.inboxState.tickets = [ticket("A"), ticket("B")]; h.inboxState.selectedTicketId = "A";
-  const a = h.context.caricaDettaglioTicket("A"); h.requests[0].resolve(response({ messages: [{ id: "A", content: "A" }] })); await a;
-  const oldCallbacks = h.callbacks.slice(); h.inboxState.selectedTicketId = "B";
-  const thread = h.document.getElementById("inbox-thread-messages");
-  Object.defineProperty(thread, "scrollHeight", { configurable: true, value: 1000 }); thread.scrollTop = 25;
-  oldCallbacks.forEach(fn => fn());
-  assert.equal(thread.scrollTop, 25);
-});
 
 test("Bookings overlapping refreshes keep newest records after delayed JSON", async (t) => {
   const h = harness("prenotazioni"); t.after(() => h.dom.window.close()); const oldJson = deferred();
@@ -288,15 +239,7 @@ test("Report JSON completing after leave cannot commit and next visit resets loa
   assert.notEqual(h.document.getElementById("report-refresh").textContent, "Generazione in corso...");
 });
 
-test("Inbox detail delayed JSON and leave/re-enter with same selected ticket preserve current thread", async (t) => {
-  const h = harness("inbox"); t.after(() => h.dom.window.close()); const oldJson = deferred();
-  h.inboxState.tickets = [ticket("A")]; h.inboxState.selectedTicketId = "A";
-  const a = h.context.caricaDettaglioTicket("A"); h.requests[0].resolve({ ok: true, json: () => oldJson.promise }); await Promise.resolve();
-  h.context.navigate("panoramica"); h.context.navigate("inbox");
-  const b = h.context.caricaDettaglioTicket("A"); h.requests[1].resolve(response({ messages: [{ id: "B", content: "new visit" }] })); await b;
-  oldJson.resolve({ messages: [{ id: "A", content: "old visit" }] }); await a;
-  assert.equal(h.document.getElementById("inbox-thread-messages").textContent, "new visit");
-});
+
 
 test("Bookings same-date availability overlapping refreshes preserve latest response", async (t) => {
   const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
@@ -316,41 +259,7 @@ for (const loader of ["aggiornaPrenotazioni", "aggiornaSemaforo"]) {
   });
 }
 
-test("Overview and Inbox repeated polling activation has one interval and stop clears it", (t) => {
-  const h = harness("panoramica"); t.after(() => h.dom.window.close());
-  for (let visit = 0; visit < 3; visit++) {
-    h.context.avviaPanoramicaPolling(); h.context.avviaPanoramicaPolling();
-    assert.equal(h.intervals.size, 1); h.context.fermaPanoramicaPolling(); assert.equal(h.intervals.size, 0);
-    h.context.navigate("inbox"); h.context.avviaInboxPolling(); h.context.avviaInboxPolling();
-    assert.equal(h.intervals.size, 1); h.context.fermaInboxPolling(); assert.equal(h.intervals.size, 0);
-    h.context.navigate("panoramica");
-  }
-});
 
-for (const [fail, leave] of [[false, false], [true, true]]) {
-  test(`Inbox reply late ${fail ? "error" : "success"} after ${leave ? "leaving view" : "selecting B"} leaves current draft and controls intact`, async (t) => {
-    const h = harness("inbox"); t.after(() => h.dom.window.close());
-    h.inboxState.tickets = [ticket("A", "CLAIMED"), ticket("B", "CLAIMED")]; h.inboxState.selectedTicketId = "A";
-    const input = h.document.getElementById("inbox-message-input"), send = h.document.getElementById("inbox-send-btn");
-    input.value = "send A";
-    const a = h.context.inviaRispostaInbox();
-    h.inboxState.selectedTicketId = "B";
-    if (leave) h.context.navigate("panoramica");
-    input.value = "draft B"; input.disabled = true; send.disabled = true;
-    if (fail) h.requests[0].reject(new Error("late POST failure"));
-    else h.requests[0].resolve(response({}));
-    // Drain the Promise chain; on buggy code complete its unwanted follow-up
-    // fetches too, so the reproducer fails on visible behavior rather than hangs.
-    await new Promise(resolve => setImmediate(resolve));
-    h.requests.slice(1).forEach(request => request.resolve(response({ tickets: [], members: [] })));
-    await a;
-    assert.equal(input.value, "draft B");
-    assert.equal(input.disabled, true); assert.equal(send.disabled, true);
-    assert.notEqual(h.document.activeElement, input);
-    assert.equal(h.requests.length, 1, "stale reply does not fetch A detail or Inbox again");
-    assert.equal(h.toasts.length, 0); assert.equal(h.errors.length, 0);
-  });
-}
 
 for (const scenario of ["date B", "leave and return", "new form", "stale error"]) {
   test(`Booking save completion ignores obsolete UI context after ${scenario}`, async (t) => {
