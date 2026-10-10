@@ -23,7 +23,7 @@ test("static pages contain no inline style attributes", () => {
 });
 
 test("assigned name is rendered as text, not executable markup", () => {
-  const source = fs.readFileSync("web/app.js", "utf8");
+  const source = fs.readFileSync("web/dashboard-inbox.js", "utf8");
   const fragment = source.match(/statusPill\.innerHTML = statusIcon;[\s\S]*?statusPill\.append\(" ", statusLabel\);/);
   assert.ok(fragment, "safe status rendering must exist");
   const dom = new JSDOM("<div id='pill'></div>");

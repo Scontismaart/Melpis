@@ -4,13 +4,26 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { reply, FIXED_TIME } = require("../tests/frontend/fixtures/dashboard-visual-api.cjs");
 const { SCENARIOS, viewReply } = require("../tests/frontend/fixtures/dashboard-views-qa.cjs");
-const root = path.resolve(__dirname, "..", "web");
+const { safeRequests: inboxRequests } = require("../tests/frontend/fixtures/dashboard-inbox-qa.cjs");
+const defaultRoot = path.resolve(__dirname, "..", "web");
+const interactions = process.env.DASHBOARD_QA_INTERACTIONS === "1";
+const viewStates = interactions && process.env.DASHBOARD_QA_VIEW_STATES === "1";
+function resolveAssetRoot(override, enabled, fallback = defaultRoot) {
+  if (!override || !enabled) return fallback;
+  if (!path.isAbsolute(override) || override.startsWith("\\\\") || override.startsWith("//")) {
+    throw new Error("DASHBOARD_QA_ASSET_ROOT must be an absolute local directory path");
+  }
+  const resolved = path.resolve(override);
+  let stat;
+  try { stat = fs.statSync(resolved); } catch { throw new Error("DASHBOARD_QA_ASSET_ROOT must name an existing local directory"); }
+  if (!stat.isDirectory()) throw new Error("DASHBOARD_QA_ASSET_ROOT must name an existing local directory");
+  return resolved;
+}
+const root = resolveAssetRoot(process.env.DASHBOARD_QA_ASSET_ROOT, interactions && viewStates);
 const port = Number(process.env.DASHBOARD_QA_PORT || 4190);
 const csp = fs.readFileSync(path.join(root, "security-headers.conf"), "utf8").match(/Content-Security-Policy "([^"]+)"/)[1];
 const requests = [];
 // Explicit opt-in for synthetic interaction smoke; baseline mode stays identical.
-const interactions = process.env.DASHBOARD_QA_INTERACTIONS === "1";
-const viewStates = interactions && process.env.DASHBOARD_QA_VIEW_STATES === "1";
 function interactionReply(method, pathname, cookie = "", enabled = interactions) {
   if (!enabled) return reply(method, pathname);
   if (/(?:^|;\s*)dashboard_qa_signed_out=1(?:;|$)/.test(cookie)) {
@@ -36,26 +49,37 @@ const server = http.createServer((req, res) => {
     const cookie = req.headers.cookie || "";
     const scenario = cookie.match(/(?:^|;\s*)dashboard_qa_case=([a-z-]+)(?:;|$)/)?.[1];
     const loggedOut = /(?:^|;\s*)dashboard_qa_signed_out=1(?:;|$)/.test(cookie);
-    const result = !loggedOut && viewStates && viewReply(req.method, url.pathname + url.search, scenario, req.headers["x-organization-id"] || undefined)
+    const isInboxRoute = url.pathname.startsWith("/api/inbox/");
+    const finishApiRequest = (rawBody = null) => {
+    const result = !loggedOut && viewStates && viewReply(req.method, url.pathname + url.search, scenario, req.headers["x-organization-id"] || undefined, isInboxRoute ? rawBody : null)
       || interactionReply(req.method, url.pathname, cookie);
     if (result.signedOut) res.setHeader("Set-Cookie", "dashboard_qa_signed_out=1; Path=/; HttpOnly; SameSite=Strict");
-    // Deliberately record no headers, cookies, query values or request bodies.
+    // Inbox QA stores only allowlisted safe fields; other requests omit bodies.
     requests.push({ method: req.method, path: url.pathname, status: result.status });
-    req.resume();
     const respond = () => res.writeHead(result.status, { "Content-Type": "application/json" }).end(JSON.stringify(result.body));
     if (result.delayMs) setTimeout(respond, result.delayMs);
     else respond();
+    };
+    if (viewStates && isInboxRoute && !loggedOut) {
+      let rawBody = "";
+      req.on("data", (chunk) => { if (rawBody.length < 16384) rawBody += chunk.toString("utf8"); });
+      req.on("end", () => finishApiRequest(rawBody));
+    } else {
+      req.resume();
+      finishApiRequest();
+    }
     return;
   }
   if (req.method !== "GET" && req.method !== "HEAD") { res.writeHead(405).end(); return; }
   if (viewStates && url.pathname === "/__qa/start") {
     const scenario = url.searchParams.get("case");
     const view = url.searchParams.get("view");
-    if (!SCENARIOS.has(scenario) || !["overview", "reviews", "knowledge", "team", "ai-simulator", "bookings"].includes(view)) { res.writeHead(400).end(); return; }
+    if (!SCENARIOS.has(scenario) || !["overview", "inbox", "reviews", "knowledge", "team", "ai-simulator", "bookings"].includes(view)) { res.writeHead(400).end(); return; }
     res.setHeader("Set-Cookie", [`dashboard_qa_case=${scenario}; Path=/; HttpOnly; SameSite=Strict`, "dashboard_qa_signed_out=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"]);
     res.writeHead(302, { Location: `/app/${view}` }).end(); return;
   }
   if (url.pathname === "/__qa/requests") { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(requests)); return; }
+  if (url.pathname === "/__qa/inbox-requests") { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(inboxRequests)); return; }
   if (url.pathname === "/__qa/bootstrap.js") {
     res.writeHead(200, { "Content-Type": "text/javascript" }).end(`
       // This test-only script is never shipped in web/ or its Docker image.
@@ -113,4 +137,4 @@ const server = http.createServer((req, res) => {
   res.end(req.method === "HEAD" ? undefined : content);
 });
 if (require.main === module) server.listen(port, "127.0.0.1", () => console.log(`Synthetic dashboard QA: http://127.0.0.1:${port}/app/overview`));
-module.exports = { server, interactionReply };
+module.exports = { server, interactionReply, resolveAssetRoot, defaultRoot };

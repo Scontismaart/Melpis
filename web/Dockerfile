@@ -34,7 +34,7 @@ COPY i18n-client.js /usr/share/nginx/html/
 COPY login.html login.js register.html register.js auth.js auth.css /usr/share/nginx/html/
 
 # ── Dashboard (sotto /app/) ─────────────────────────────────
-COPY index.html style.css app.js dashboard-router.js dashboard-shared.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
+COPY index.html style.css app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
 COPY design-tokens.css /usr/share/nginx/html/app/
 COPY fonts/ /usr/share/nginx/html/app/fonts/
 COPY vendor/ /usr/share/nginx/html/app/vendor/

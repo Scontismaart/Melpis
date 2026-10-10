@@ -55,6 +55,7 @@ function createIntegratedApp(url) {
     dashboardOverviewModule: null,
     dashboardReviewsModule: null,
     dashboardBookingsModule: null,
+    dashboardInboxModule: null,
     dashboardKnowledgeModule: null,
     dashboardTeamModule: null,
     dashboardAiSimulatorModule: null,

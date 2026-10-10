@@ -9,6 +9,7 @@ const scriptFiles = [
   "web/dialog-focus.js",
   "web/dashboard-router.js",
   "web/dashboard-shared.js",
+  "web/dashboard-inbox.js",
   "web/dashboard-overview.js",
   "web/dashboard-reviews.js",
   "web/dashboard-knowledge.js",

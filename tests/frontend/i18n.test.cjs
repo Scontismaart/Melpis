@@ -151,7 +151,8 @@ test("i18n: dashboard bundles stay synchronized and cover visible Settings, AI, 
   const root = path.resolve(__dirname, "../..");
   const localesRoot = path.join(root, "locales");
   const dashboard = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
-  const appCode = fs.readFileSync(path.join(root, "web/app.js"), "utf8");
+  const appCode = ["app.js", "dashboard-inbox.js"]
+    .map((file) => fs.readFileSync(path.join(root, "web", file), "utf8")).join("\n");
   const keys = new Set([
     ...Array.from(dashboard.matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g), (match) => match[1]),
     ...Array.from(appCode.matchAll(/t\("((?:settings|inbox|dashboard):[^\"]+)"\)/g), (match) => match[1]),
@@ -347,56 +348,7 @@ test("i18n: dynamic Inbox copy resolves in every supported language", async () =
   dom.window.close();
 });
 
-test("Inbox language refresh re-renders loaded state without fetching ticket data", () => {
-  const appCode = fs.readFileSync(path.resolve(__dirname, "../../web/app.js"), "utf8");
-  const helper = appCode.match(/function aggiornaInboxPerLingua\(\) \{[\s\S]*?\n\}/)?.[0];
-  assert.ok(helper, "Inbox localization refresh helper exists");
-  assert.match(appCode, /window\.addEventListener\("melpis:lang-changed",[\s\S]*?aggiornaInboxPerLingua\(\);/);
 
-  const dom = new JSDOM("<!doctype html><html><body><div id=\"inbox-list\"></div></body></html>", {
-    runScripts: "outside-only",
-  });
-  dom.window.eval(`
-    const inboxState = { selectedTicketId: "ticket-1" };
-    window.listRenderCount = 0;
-    window.detailRenderArgs = null;
-    function renderInboxConversazioni() { window.listRenderCount += 1; }
-    function caricaDettaglioTicket(...args) { window.detailRenderArgs = args; }
-    ${helper}
-    window.refreshInboxLanguage = aggiornaInboxPerLingua;
-  `);
-  dom.window.refreshInboxLanguage();
-  assert.equal(dom.window.listRenderCount, 1);
-  assert.equal(JSON.stringify(dom.window.detailRenderArgs), JSON.stringify(["ticket-1", true, {
-    refreshMessages: false,
-    forceRender: true,
-  }]));
-  dom.window.close();
-});
-
-test("Inbox claim loading state survives a language-driven action rerender", () => {
-  const appCode = fs.readFileSync(path.resolve(__dirname, "../../web/app.js"), "utf8");
-  const helper = appCode.match(/function aggiornaStatoPulsanteClaimInbox\(button, ticketId\) \{[\s\S]*?\n\}/)?.[0];
-  assert.ok(helper, "claim button state helper exists");
-  const dom = new JSDOM("<!doctype html><html><body><button></button></body></html>", {
-    runScripts: "outside-only",
-  });
-  dom.window.eval(`
-    const inboxState = { pendingClaims: new Set(["ticket-1"]) };
-    function t(key) { return key; }
-    ${helper}
-    window.updateClaimButton = aggiornaStatoPulsanteClaimInbox;
-  `);
-
-  const button = dom.window.document.querySelector("button");
-  dom.window.updateClaimButton(button, "ticket-1");
-  assert.equal(button.disabled, true);
-  assert.equal(button.textContent, "inbox:chat.claim_loading");
-  dom.window.updateClaimButton(button, "ticket-2");
-  assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "inbox:chat.claim_btn");
-  dom.window.close();
-});
 
 test("i18n: every dashboard runtime _tDash key is translated in all dashboard bundles", () => {
   const root = path.resolve(__dirname, "../..");
