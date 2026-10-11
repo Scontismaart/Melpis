@@ -92,8 +92,14 @@ test("CI active dashboard baseline V2 integrity and provenance remain pinned to 
   assert.equal(manifest.source_ref, "main");
   assert.equal(manifest.source_commit, "3060374cbf4385f305626bde27dde696445e1143");
   assert.equal(manifest.capture_metadata.file, "capture-metadata.json");
+  // Git stores this immutable text artifact as LF; Windows may check it out as CRLF.
+  const metadataSource = fs.readFileSync(path.join(activeBaselineRoot, manifest.capture_metadata.file), "utf8")
+    .replace(/\r\n/g, "\n");
   assert.equal(manifest.capture_metadata.sha256,
-    createHash("sha256").update(fs.readFileSync(path.join(activeBaselineRoot, manifest.capture_metadata.file))).digest("hex"));
+    createHash("sha256").update(metadataSource).digest("hex"));
+  assert.notEqual(manifest.capture_metadata.sha256,
+    createHash("sha256").update(metadataSource + " ").digest("hex"),
+    "metadata content changes remain detectable after EOL normalization");
   assert.equal(manifest.capture.browser.user_agent.includes("Chrome/155.0.0.0"), true);
   assert.equal(manifest.capture.locale, "it");
   assert.equal(manifest.capture.time_zone, "Europe/Rome");

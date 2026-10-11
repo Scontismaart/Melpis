@@ -92,10 +92,19 @@ function buildQaBootstrap(cookie = "") {
   `;
 }
 // Explicit opt-in for synthetic interaction smoke; baseline mode stays identical.
-function interactionReply(method, pathname, cookie = "", enabled = interactions) {
+function interactionReply(method, pathname, cookie = "", enabled = interactions, rawBody = null) {
   if (!enabled) return reply(method, pathname);
-  if (/(?:^|;\s*)dashboard_qa_signed_out=1(?:;|$)/.test(cookie)) {
+  const loginRequest = method === "POST" && pathname === "/api/auth/login";
+  if (/(?:^|;\s*)dashboard_qa_signed_out=1(?:;|$)/.test(cookie) && !loginRequest) {
     return { status: 401, body: { detail: "Sessione QA terminata" } };
+  }
+  if (loginRequest) {
+    let credentials;
+    try { credentials = JSON.parse(rawBody || "{}"); } catch { credentials = null; }
+    if (credentials?.email === "owner@dashboard-qa.invalid" && credentials?.password === "qa-only-password") {
+      return { status: 200, body: { ok: true }, signedIn: true };
+    }
+    return { status: 401, body: { detail: "Credenziali QA non valide" } };
   }
   if (method === "POST" && pathname === "/api/auth/logout") {
     return { status: 200, body: { ok: true }, signedOut: true };
@@ -119,16 +128,25 @@ const server = http.createServer((req, res) => {
     const loggedOut = /(?:^|;\s*)dashboard_qa_signed_out=1(?:;|$)/.test(cookie);
     const isInboxRoute = url.pathname.startsWith("/api/inbox/");
     const finishApiRequest = (rawBody = null) => {
-    const result = !loggedOut && viewStates && viewReply(req.method, url.pathname + url.search, scenario, req.headers["x-organization-id"] || undefined, isInboxRoute ? rawBody : null)
-      || interactionReply(req.method, url.pathname, cookie);
+    const isAuthLogin = req.method === "POST" && url.pathname === "/api/auth/login";
+    const result = isAuthLogin
+      ? interactionReply(req.method, url.pathname, cookie, interactions, rawBody)
+      : !loggedOut && viewStates && viewReply(req.method, url.pathname + url.search, scenario, req.headers["x-organization-id"] || undefined, isInboxRoute ? rawBody : null)
+        || interactionReply(req.method, url.pathname, cookie);
     if (result.signedOut) res.setHeader("Set-Cookie", "dashboard_qa_signed_out=1; Path=/; HttpOnly; SameSite=Strict");
+    if (result.signedIn) {
+      res.setHeader("Set-Cookie", [
+        "dashboard_qa_case=auth-success; Path=/; HttpOnly; SameSite=Strict",
+        "dashboard_qa_signed_out=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict",
+      ]);
+    }
     // Inbox QA stores only allowlisted safe fields; other requests omit bodies.
     requests.push({ method: req.method, path: url.pathname, status: result.status });
     const respond = () => res.writeHead(result.status, { "Content-Type": "application/json" }).end(JSON.stringify(result.body));
     if (result.delayMs) setTimeout(respond, result.delayMs);
     else respond();
     };
-    if (viewStates && isInboxRoute && !loggedOut) {
+    if (viewStates && (isInboxRoute || (req.method === "POST" && url.pathname === "/api/auth/login")) && (!loggedOut || url.pathname === "/api/auth/login")) {
       let rawBody = "";
       req.on("data", (chunk) => { if (rawBody.length < 16384) rawBody += chunk.toString("utf8"); });
       req.on("end", () => finishApiRequest(rawBody));
