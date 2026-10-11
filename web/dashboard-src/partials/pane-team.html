@@ -1,0 +1,103 @@
+    <!-- ---------- VISTA: TEAM & COLLABORATORI ---------- -->
+    <section class="view view-hidden" data-view-panel="team">
+      <div class="view-header-bar">
+        <div>
+          <h2 class="view-title" data-i18n="dashboard:views.team_title">Team &amp; Collaboratori</h2>
+          <p class="view-intro" data-i18n="dashboard:views.team_intro">Gestisci l'accesso e i ruoli dei membri del tuo staff per rispondere ai clienti su WhatsApp, gestire le prenotazioni e monitorare l'attività.</p>
+        </div>
+        <div class="review-header-stats" id="team-header-stats">
+          <span class="review-stat-pill" id="team-stat-limit" data-i18n="dashboard:team.loading_account">Caricamento account...</span>
+          <span class="account-stato-pill" id="team-stat-plan" data-i18n="dashboard:team.plan_loading">Piano...</span>
+          <button type="button" class="btn-refresh-reviews" id="btn-refresh-team" title="Aggiorna elenco team" data-i18n-title="dashboard:team.refresh_title" aria-label="Aggiorna elenco team" data-i18n-aria="dashboard:team.refresh_title">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          </button>
+        </div>
+      </div>
+
+
+      <!-- Banner Limite Raggiunto -->
+      <div class="kb-conflict-banner is-9fe580055ced" id="team-limit-banner" hidden>
+        <div class="kb-conflict-icon is-c783171758fc" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <div class="kb-conflict-content is-6253876a649a">
+          <strong id="team-limit-title" data-i18n="dashboard:team.limit_title">Limite massimo collaboratori raggiunto per il tuo piano</strong>
+          <p id="team-limit-desc" class="is-cd0cabee5e0a" data-i18n="dashboard:team.limit_desc">Hai occupato tutti gli slot collaboratori disponibili. Effettua l'upgrade per aggiungere altri operatori.</p>
+        </div>
+        <button type="button" class="review-analyze is-87ed88936576" id="team-limit-upgrade-btn">
+          <span data-i18n="dashboard:team.upgrade_btn">Passa a un piano superiore</span>
+        </button>
+      </div>
+
+      <div class="team-layout">
+        <!-- Card: Invita / Aggiungi Collaboratore -->
+        <div class="dash-card" id="team-add-card">
+          <div class="dash-card-header">
+            <div>
+          <span class="dash-card-title" data-i18n="dashboard:team.add_title">Invita un collaboratore</span>
+              <span class="dash-card-sub" data-i18n="dashboard:team.add_intro">Il collaboratore accede solo dopo aver verificato la propria email e accettato l'invito.</span>
+            </div>
+          </div>
+          <form id="team-add-form" class="team-add-form is-ff270db33d21">
+            <div class="team-form-grid">
+              <div class="field-group">
+                <label for="team-add-email" class="field-label is-efa9e52e3846"><span data-i18n="dashboard:team.email_label">Email collaboratore</span> <span class="is-316c369cf596">*</span></label>
+                <input type="email" id="team-add-email" class="form-input is-79b4f036689e" placeholder="es. operatore@azienda.it" required autocomplete="off">
+              </div>
+              <div class="field-group">
+                <label for="team-add-ruolo" class="field-label is-efa9e52e3846"><span data-i18n="dashboard:team.role_label">Ruolo assegnato</span> <span class="is-316c369cf596">*</span></label>
+                <select id="team-add-ruolo" class="form-select is-79b4f036689e">
+                  <option value="staff" selected data-i18n="dashboard:team.staff_role">Operatore Staff (Inbox, chat clienti e prenotazioni)</option>
+                  <option value="manager" data-i18n="dashboard:team.manager_role">Manager (Gestione team, listini e report)</option>
+                </select>
+              </div>
+              <div class="field-group team-submit-group is-020227ab5036">
+                <button type="submit" class="btn-primary is-9c2515f5a9c0" id="team-submit-btn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+                   <span data-i18n="dashboard:team.add_btn">Invia invito</span>
+                </button>
+              </div>
+            </div>
+            <p class="field-hint is-2f10a1ccb655">
+               💡 <strong data-i18n="dashboard:team.immediate_access">Invito protetto:</strong> <span data-i18n="dashboard:team.access_help_before_link">Il destinatario può registrarsi su</span> <a href="/registrati/" target="_blank" class="is-0dc9a0685324">melpis.it/registrati</a> <span data-i18n="dashboard:team.access_help_after_link">con la stessa email; dovrà poi accettare il link ricevuto.</span>
+            </p>
+            <div>
+              <strong data-i18n="dashboard:team.pending_title">Inviti in attesa</strong>
+              <ul id="team-invitations-list" aria-live="polite"></ul>
+            </div>
+          </form>
+        </div>
+
+        <!-- Card: Membri attivi del Team -->
+        <div class="dash-card is-936d6bbab286" id="team-members-card">
+          <div class="dash-card-header is-5ffb91a26b04">
+            <div>
+                  <span class="dash-card-title" data-i18n="dashboard:team.members_title">Membri del team attivi</span>
+              <span class="dash-card-sub" data-i18n="dashboard:team.members_intro">Persone autorizzate ad accedere alle conversazioni WhatsApp e alle prenotazioni.</span>
+            </div>
+              <label for="team-org-selector" data-i18n="dashboard:team.organization">Organizzazione</label>
+              <select id="team-org-selector" hidden aria-label="Seleziona organizzazione"></select>
+              <span class="review-stat-pill" id="team-count-badge">0 membri</span>
+          </div>
+
+          <div class="team-table-responsive is-4cf8373417dc">
+            <table class="team-table is-59865a7758e5">
+              <thead>
+                <tr class="is-107f4c00a150">
+          <th class="is-f77aa1f17943" data-i18n="dashboard:team.member">Collaboratore</th>
+                  <th class="is-f77aa1f17943" data-i18n="dashboard:team.email">Email</th>
+                  <th class="is-f77aa1f17943" data-i18n="dashboard:team.role">Ruolo</th>
+                  <th class="is-f77aa1f17943" data-i18n="dashboard:team.joined">Data adesione</th>
+                  <th class="is-a60881cf3c51" data-i18n="dashboard:team.actions">Azioni</th>
+                </tr>
+              </thead>
+              <tbody id="team-members-tbody">
+                <tr>
+                  <td colspan="5" class="is-1196099686e2" data-i18n="dashboard:team.loading_members">Caricamento membri del team...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>

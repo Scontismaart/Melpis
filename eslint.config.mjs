@@ -26,4 +26,12 @@ export default [{
     },
   },
   rules: { "no-undef": "error", "no-dupe-args": "error", "no-unreachable": "error" },
+}, {
+  files: ["web/scripts/**/*.mjs"],
+  languageOptions: {
+    ecmaVersion: "latest",
+    sourceType: "module",
+    globals: globals.node,
+  },
+  rules: { "no-undef": "error", "no-dupe-args": "error", "no-unreachable": "error" },
 }];

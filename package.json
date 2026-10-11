@@ -2,8 +2,10 @@
   "name": "melpis-web-checks",
   "private": true,
   "scripts": {
-    "lint:web": "eslint web/*.js web/landing/app.js",
+    "lint:web": "eslint web/*.js web/landing/app.js web/scripts/compose-dashboard.mjs",
     "test:web": "node --test tests/frontend/*.test.cjs",
+    "build:dashboard": "node web/scripts/compose-dashboard.mjs --write",
+    "check:dashboard": "node web/scripts/compose-dashboard.mjs --check",
     "test:i18n": "node scripts/verify-i18n.js",
     "build:i18n": "node scripts/externalize-fullcalendar-styles.js && node scripts/build-i18n.js",
     "check:fullcalendar-css": "node scripts/externalize-fullcalendar-styles.js --check",

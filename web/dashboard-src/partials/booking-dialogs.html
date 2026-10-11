@@ -1,0 +1,104 @@
+    <div class="booking-modal booking-detail-modal" id="booking-modal" hidden>
+      <div class="booking-modal-backdrop" data-booking-close></div>
+      <aside class="booking-modal-panel booking-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="booking-modal-title">
+        <div class="booking-modal-header">
+          <div>
+          <span class="booking-modal-kicker" data-i18n="dashboard:bookings.detail_title">Dettaglio prenotazione</span>
+            <h2 id="booking-modal-title">Cliente</h2>
+          </div>
+          <button type="button" class="booking-modal-close" data-booking-close aria-label="Chiudi dettaglio" data-i18n-aria="dashboard:bookings.close_detail">&times;</button>
+        </div>
+        <div class="booking-modal-grid">
+          <div><span>Data</span><strong id="booking-detail-date"></strong></div>
+          <div><span>Ora</span><strong id="booking-detail-time"></strong></div>
+          <div><span>Coperti</span><strong id="booking-detail-seats"></strong></div>
+          <div><span>Stato</span><strong id="booking-detail-status"></strong></div>
+          <div><span>Telefono</span><strong id="booking-detail-phone"></strong></div>
+          <div><span>Origine</span><strong class="booking-origin-tag" id="booking-detail-origin"></strong></div>
+        </div>
+        <div class="booking-detail-note">
+          <span>Note</span>
+          <p id="booking-detail-note"></p>
+        </div>
+        <p class="booking-detail-stale-warning" id="booking-detail-stale-warning" role="status" hidden></p>
+        <div class="booking-detail-actions" id="booking-detail-actions" hidden>
+          <button type="button" class="btn-success" id="booking-confirm-btn" hidden data-i18n="dashboard:bookings.confirm">Conferma</button>
+          <button type="button" class="btn-danger-outline" id="booking-reject-btn" hidden data-i18n="dashboard:bookings.reject">Rifiuta</button>
+          <button type="button" class="btn-danger-outline" id="booking-cancel-btn" hidden data-i18n="dashboard:bookings.cancel">Annulla prenotazione</button>
+          <button type="button" class="btn-danger-outline" id="booking-no-show-btn" hidden data-i18n="dashboard:bookings.no_show">No-show</button>
+          <button type="button" class="report-refresh" id="booking-completed-btn" hidden data-i18n="dashboard:bookings.completed">Completata</button>
+          <button type="button" class="report-refresh" id="booking-edit-btn" hidden data-i18n="dashboard:bookings.edit">Modifica</button>
+        </div>
+      </aside>
+    </div>
+
+    <div class="booking-modal" id="booking-create-modal" hidden>
+      <div class="booking-modal-backdrop" data-booking-create-close></div>
+      <section class="booking-modal-panel" role="dialog" aria-modal="true" aria-labelledby="booking-create-title">
+        <div class="booking-modal-header">
+          <div><span class="booking-modal-kicker" data-i18n="dashboard:bookings.booking">Prenotazione</span><h2 id="booking-create-title" data-i18n="dashboard:bookings.new">Nuova prenotazione</h2></div>
+          <button type="button" class="booking-modal-close" data-booking-create-close aria-label="Chiudi" data-i18n-aria="dashboard:bookings.close">&times;</button>
+        </div>
+        <form class="booking-form" id="booking-form">
+          <input class="doc-config-input" id="booking-name" type="text" placeholder="Nome cliente" data-i18n-placeholder="dashboard:bookings.customer_name" required>
+          <input class="doc-config-input" id="booking-phone" type="tel" placeholder="Telefono" data-i18n-placeholder="dashboard:bookings.phone">
+          <input class="doc-config-input" id="booking-date" type="date" required>
+          <input class="doc-config-input" id="booking-time" type="time" step="900" required>
+          <input class="doc-config-input" id="booking-seats" type="number" min="1" max="50" placeholder="Coperti" data-i18n-placeholder="dashboard:bookings.seats" required>
+          <textarea class="doc-query-input booking-note" id="booking-note" rows="2" placeholder="Note (opzionale)" data-i18n-placeholder="dashboard:bookings.notes_optional"></textarea>
+          <button type="submit" class="review-analyze" data-i18n="dashboard:bookings.save">Salva prenotazione</button>
+        </form>
+        <p class="doc-config-status" id="booking-status-text"></p>
+      </section>
+    </div>
+
+    <div class="booking-modal" id="booking-availability-modal" hidden>
+      <div class="booking-modal-backdrop" data-booking-availability-close></div>
+      <section class="booking-modal-panel" role="dialog" aria-modal="true" aria-labelledby="booking-availability-title">
+        <div class="booking-modal-header">
+          <div><span class="booking-modal-kicker" data-i18n="dashboard:bookings.availability">Disponibilità</span><h2 id="booking-availability-title" data-i18n="dashboard:bookings.capacity_slots">Capienza e fasce</h2></div>
+          <button type="button" class="booking-modal-close" data-booking-availability-close aria-label="Chiudi" data-i18n-aria="dashboard:bookings.close">&times;</button>
+        </div>
+        <label class="wizard-label" for="booking-standard-capacity" data-i18n="dashboard:bookings.standard_capacity">Capienza standard</label>
+        <input class="wizard-input" id="booking-standard-capacity" type="number" min="0" max="500" inputmode="numeric">
+        <p class="booking-settings-help" data-i18n="dashboard:bookings.capacity_help">Override per fasce aperte. Imposta 0 per chiudere una fascia.</p>
+        <div class="booking-settings-grid" id="booking-settings-grid"></div>
+        <div class="booking-settings-actions"><button type="button" class="report-refresh" id="capacity-save" data-i18n="dashboard:bookings.save_availability">Salva disponibilità</button></div>
+        <p class="doc-config-status" id="capacity-status"></p>
+        <div class="booking-availability-preview">
+          <div class="dash-card-header"><span class="dash-card-title" data-i18n="dashboard:bookings.capacity_status">Semaforo</span><span class="dash-card-meta" id="availability-date"></span></div>
+          <div class="availability-list" id="availability-list"></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="booking-modal" id="booking-export-modal" hidden>
+      <div class="booking-modal-backdrop" data-booking-export-close></div>
+      <section class="booking-modal-panel" role="dialog" aria-modal="true" aria-labelledby="booking-export-title">
+        <div class="booking-modal-header">
+          <div><span class="booking-modal-kicker" data-i18n="dashboard:bookings.actions">Azioni</span><h2 id="booking-export-title" data-i18n="dashboard:bookings.export_csv">Esporta CSV</h2></div>
+          <button type="button" class="booking-modal-close" data-booking-export-close aria-label="Chiudi" data-i18n-aria="dashboard:bookings.close">&times;</button>
+        </div>
+        <div class="booking-export-fields">
+          <label class="wizard-label" for="booking-export-da">Da</label>
+          <input class="wizard-input" id="booking-export-da" type="date">
+          <label class="wizard-label" for="booking-export-a">A</label>
+          <input class="wizard-input" id="booking-export-a" type="date">
+        </div>
+          <button type="button" class="review-analyze" id="booking-export-csv" data-i18n="dashboard:bookings.export_csv">Esporta CSV</button>
+      </section>
+    </div>
+
+    <div class="booking-modal" id="booking-actions-modal" hidden>
+      <div class="booking-modal-backdrop" data-booking-actions-close></div>
+      <section class="booking-modal-panel booking-actions-panel" role="dialog" aria-modal="true" aria-labelledby="booking-actions-title">
+        <div class="booking-modal-header">
+          <div><span class="booking-modal-kicker" data-i18n="dashboard:views.bookings_title">Prenotazioni</span><h2 id="booking-actions-title" data-i18n="dashboard:bookings.actions">Azioni</h2></div>
+          <button type="button" class="booking-modal-close" data-booking-actions-close aria-label="Chiudi" data-i18n-aria="dashboard:bookings.close">&times;</button>
+        </div>
+        <div class="booking-actions-list">
+          <button type="button" id="booking-open-availability" data-i18n="dashboard:bookings.availability">Disponibilità</button>
+          <button type="button" id="booking-open-export" data-i18n="dashboard:bookings.export_csv">Esporta CSV</button>
+        </div>
+      </section>
+    </div>

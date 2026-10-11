@@ -1,0 +1,96 @@
+    <!-- ---------- VISTA: PRENOTAZIONI ---------- -->
+    <section class="view view-hidden" data-view-panel="prenotazioni">
+      <header class="booking-page-header">
+        <div class="booking-page-heading">
+          <div class="booking-title-row">
+            <h1 data-i18n="dashboard:views.bookings_title">Prenotazioni</h1>
+            <button type="button" class="booking-pending-count" id="booking-pending-count" aria-label="Mostra prenotazioni da confermare" data-i18n-aria="dashboard:bookings.pending_aria">
+              <strong id="booking-pending-value">0</strong> <span data-i18n="dashboard:bookings.pending_label">da confermare</span>
+            </button>
+          </div>
+          <p class="booking-summary" id="booking-summary">0 prenotazioni · 0 coperti · 0 posti liberi</p>
+        </div>
+        <div class="booking-header-actions">
+          <button type="button" class="booking-icon-text-button" id="booking-actions-trigger" aria-haspopup="dialog" aria-controls="booking-actions-modal">
+            <span aria-hidden="true">&#8943;</span> <span data-i18n="dashboard:bookings.actions">Azioni</span>
+          </button>
+          <button type="button" class="review-analyze" id="booking-new-trigger" aria-haspopup="dialog" aria-controls="booking-create-modal">
+            <span aria-hidden="true">+</span> <span data-i18n="dashboard:bookings.new">Nuova prenotazione</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="booking-layout">
+        <div class="booking-calendar-card">
+          <div class="booking-calendar-toolbar" aria-label="Comandi calendario" data-i18n-aria="dashboard:bookings.calendar_controls">
+            <div class="booking-calendar-nav" aria-label="Navigazione calendario" data-i18n-aria="dashboard:bookings.calendar_navigation">
+              <button type="button" data-booking-calendar-command="prev" aria-label="Periodo precedente" data-i18n-aria="dashboard:bookings.previous_period">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <button type="button" data-booking-calendar-command="next" aria-label="Periodo successivo" data-i18n-aria="dashboard:bookings.next_period">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+              <div class="booking-date-control">
+                <button type="button" id="booking-date-picker-trigger" class="booking-date-picker-trigger" aria-label="Seleziona la data delle prenotazioni" data-i18n-aria="dashboard:bookings.select_date" aria-controls="booking-date-picker">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/></svg>
+                </button>
+                <input type="date" id="booking-date-picker" class="booking-date-picker-input" aria-label="Data delle prenotazioni" data-i18n-aria="dashboard:bookings.date" tabindex="-1">
+                <span class="booking-selected-date-label" id="booking-selected-date-label" aria-live="polite"></span>
+              </div>
+            </div>
+            <div class="booking-calendar-views" role="group" aria-label="Vista calendario" data-i18n-aria="dashboard:bookings.calendar_view">
+              <button type="button" data-booking-calendar-view="timeGridDay" aria-pressed="true" data-i18n="dashboard:bookings.day">Giorno</button>
+              <button type="button" data-booking-calendar-view="timeGridWeek" aria-pressed="false" data-i18n="dashboard:bookings.week">Settimana</button>
+              <button type="button" data-booking-calendar-view="dayGridMonth" aria-pressed="false" data-i18n="dashboard:bookings.month">Mese</button>
+            </div>
+          </div>
+          <div class="booking-empty-notice" id="booking-day-empty" hidden>
+            <div class="booking-empty-left">
+              <div class="booking-empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M7 3.5v3M17 3.5v3M4.5 9h15M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div>
+                <span class="booking-empty-title" data-i18n="dashboard:bookings.empty_title">Nessuna prenotazione per questa data</span>
+                <span class="booking-empty-sub" data-i18n="dashboard:bookings.empty_text">Non ci sono prenotazioni per il giorno selezionato.</span>
+              </div>
+            </div>
+            <button type="button" class="review-analyze" id="booking-empty-new-btn">
+              + <span data-i18n="dashboard:bookings.new">Nuova prenotazione</span>
+            </button>
+          </div>
+          <span class="visually-hidden" id="booking-count">0 prenotazioni</span>
+          <div id="booking-calendar"></div>
+        </div>
+
+        <!-- Tabella Cronologica Prenotazioni del Giorno -->
+        <div class="booking-table-card">
+          <div class="booking-table-header">
+            <div>
+              <h3 class="booking-table-title" id="booking-table-day-title">Prenotazioni del giorno</h3>
+            <span class="booking-table-subtitle" id="booking-table-day-subtitle" data-i18n="dashboard:bookings.table_subtitle">Elenco cronologico dettagliato della data selezionata</span>
+            </div>
+            <span class="dash-card-meta" id="booking-table-day-count">0 prenotazioni</span>
+          </div>
+          <div class="booking-table-wrap">
+            <table class="booking-table" id="booking-table">
+              <thead>
+                <tr>
+                  <th>Orario</th>
+                  <th>Cliente</th>
+                  <th>Telefono</th>
+                  <th>Servizio / Pers.</th>
+                  <th>Origine</th>
+                  <th>Note</th>
+                  <th>Stato</th>
+                  <th class="is-37dd0c2a6468">Azione</th>
+                </tr>
+              </thead>
+              <tbody id="booking-table-body">
+                <!-- popolato da app.js -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="booking-new-fab" id="booking-new-fab" aria-label="Nuova prenotazione">+</button>
+    </section>

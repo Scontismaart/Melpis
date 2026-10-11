@@ -2,7 +2,7 @@
 const { ORG_A, ORG_B, FIXED_TIME, readFixtures } = require("./dashboard-visual-api.cjs");
 const { INBOX_CASES, inboxReply } = require("./dashboard-inbox-qa.cjs");
 const SCENARIOS = new Set([
-  "populated", "empty", "error", "loading", "denied",
+  "baseline", "populated", "empty", "error", "loading", "denied",
   "staff", "mfa-required", "simulator-hostile", "simulator-error", "simulator-timeout",
   "booking-error", "booking-timeout", "settings-populated", "settings-error", "settings-denied",
   "settings-staff", "settings-org-b", "settings-org-switch", "settings-mfa-required", "settings-connected", "ai-settings-populated",
@@ -39,6 +39,7 @@ function forbidden(reason, mfaRequired = false) {
   return { status: 403, body: mfaRequired ? { detail: "MFA required", code: "mfa_required" } : { detail: reason } };
 }
 function viewReply(method, pathname, scenario, organization = ORG_A, rawBody = null) {
+  if (scenario === "baseline") return null;
   const [route, query = ""] = pathname.split("?");
   pathname = route;
   if (INBOX_CASES.has(scenario) && pathname.startsWith("/api/inbox/")) return inboxReply(method, pathname, scenario, organization, rawBody);

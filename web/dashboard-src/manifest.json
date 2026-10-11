@@ -1,0 +1,26 @@
+{
+  "entry": "index.html",
+  "envelope": {
+    "prefix": "<!DOCTYPE html>\n<html lang=\"it\" data-theme=\"dark\">\n",
+    "suffix": "</body>\n</html>\n"
+  },
+  "parts": [
+    "partials/sidebar.html",
+    "partials/sidebar-overlay.html",
+    "partials/topbar.html",
+    "partials/pane-overview.html",
+    "partials/pane-onboarding.html",
+    "partials/pane-assistant.html",
+    "partials/pane-bookings.html",
+    "partials/booking-dialogs.html",
+    "partials/pane-reviews.html",
+    "partials/pane-team.html",
+    "partials/pane-knowledge.html",
+    "partials/pane-ai-settings.html",
+    "partials/pane-inbox.html",
+    "partials/pane-settings.html",
+    "partials/pane-account.html",
+    "partials/confirmation-dialog.html",
+    "partials/script-tail.html"
+  ]
+}

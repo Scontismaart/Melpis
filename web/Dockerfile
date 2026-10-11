@@ -9,6 +9,15 @@
 # Per l'envsubst serve gettext; l'entrypoint ufficiale nginx esegue gli
 # script in /docker-entrypoint.d/ prima di avviare il daemon.
 
+FROM node:24-alpine AS dashboard-builder
+
+WORKDIR /workspace
+COPY dashboard-src/ ./web/dashboard-src/
+COPY scripts/compose-dashboard.mjs ./web/scripts/compose-dashboard.mjs
+COPY index.html ./web/index.html
+RUN node ./web/scripts/compose-dashboard.mjs --output /tmp/dashboard.html && \
+    cmp --silent /tmp/dashboard.html ./web/index.html
+
 FROM nginx:1.27-alpine AS runtime
 
 # ── Landing e pagine pubbliche multilingua (root del docroot) ─
@@ -34,7 +43,8 @@ COPY i18n-client.js /usr/share/nginx/html/
 COPY login.html login.js register.html register.js auth.js auth.css /usr/share/nginx/html/
 
 # ── Dashboard (sotto /app/) ─────────────────────────────────
-COPY index.html style.css app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
+COPY style.css app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
+COPY --from=dashboard-builder /tmp/dashboard.html /usr/share/nginx/html/app/index.html
 COPY design-tokens.css /usr/share/nginx/html/app/
 COPY fonts/ /usr/share/nginx/html/app/fonts/
 COPY vendor/ /usr/share/nginx/html/app/vendor/

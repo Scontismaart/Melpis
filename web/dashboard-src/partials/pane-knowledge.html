@@ -1,0 +1,238 @@
+    <!-- ---------- VISTA: CONOSCENZA RISTRUTTURATA (4 CATEGORIE) ---------- -->
+    <section class="view view-hidden" data-view-panel="conoscenza">
+      <div class="kb-header-row">
+        <h2 class="view-title is-6e7202d3fced" data-i18n="dashboard:views.knowledge_title">Base di conoscenza</h2>
+        <p class="view-intro" data-i18n="dashboard:views.knowledge_intro">Informazioni aziendali indicizzate. I <strong>Dati struttura (Priorità 1)</strong> hanno precedenza autoritativa sulle risposte fornite ai clienti.</p>
+      </div>
+
+      <!-- Banner rilevamento conflitti -->
+      <div class="kb-conflict-banner" id="kb-conflitti-banner" hidden>
+        <div class="kb-conflict-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div class="kb-conflict-body">
+          <strong class="is-80223951ea63">Rilevata discrepanza di prezzi tra le fonti</strong>
+          <div id="kb-conflitti-dettagli" class="kb-conflict-details"></div>
+          <div class="kb-conflict-note">L'assistente utilizzerà in priorità il dato autoritativo dei Dati struttura.</div>
+        </div>
+      </div>
+
+      <!-- Barra di stato aggregata Knowledge Base -->
+      <div class="kb-summary-bar" id="kb-summary-bar">
+        <div class="kb-summary-card">
+          <span class="kb-summary-title">FAQ <span class="kb-badge kb-badge-priority">P2</span></span>
+          <span class="kb-summary-value" id="kb-stat-faq">0</span>
+          <span class="kb-summary-meta" id="kb-stat-faq-meta">Caricamento…</span>
+        </div>
+        <div class="kb-summary-card">
+          <span class="kb-summary-title">Documenti <span class="kb-badge kb-badge-priority">P3</span></span>
+          <span class="kb-summary-value" id="kb-stat-doc">0</span>
+          <span class="kb-summary-meta" id="kb-stat-doc-meta">Caricamento…</span>
+        </div>
+        <div class="kb-summary-card">
+          <span class="kb-summary-title">Pagine web <span class="kb-badge kb-badge-priority">P4</span></span>
+          <span class="kb-summary-value" id="kb-stat-web">0</span>
+          <span class="kb-summary-meta" id="kb-stat-web-meta">Caricamento…</span>
+        </div>
+        <div class="kb-summary-card">
+          <span class="kb-summary-title">Dati struttura <span class="kb-badge kb-badge-priority is-9c9f36536527">P1</span></span>
+          <span class="kb-summary-value" id="kb-stat-dati">0</span>
+          <span class="kb-summary-meta" id="kb-stat-dati-meta">Listino & orari</span>
+        </div>
+      </div>
+
+      <!-- Tab Navigation per le 4 categorie -->
+      <div class="kb-tabs" role="tablist" aria-label="Categorie della Knowledge Base" data-i18n-aria="dashboard:knowledge.tabs_aria">
+        <button type="button" class="kb-tab-btn active" data-kb-tab="faq" role="tab" aria-selected="true" tabindex="0" id="kb-tab-btn-faq">
+          <span class="kb-tab-text is-42cb6bab25cc"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> <span data-i18n="dashboard:knowledge.faq_tab">FAQ</span></span> <span class="kb-tab-badge" id="kb-badge-faq">0</span>
+        </button>
+        <button type="button" class="kb-tab-btn" data-kb-tab="documenti" role="tab" aria-selected="false" tabindex="-1" id="kb-tab-btn-documenti">
+          <span class="kb-tab-text is-42cb6bab25cc"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> <span data-i18n="dashboard:knowledge.documents_tab">Documenti</span></span> <span class="kb-tab-badge" id="kb-badge-documenti">0</span>
+        </button>
+        <button type="button" class="kb-tab-btn" data-kb-tab="web" role="tab" aria-selected="false" tabindex="-1" id="kb-tab-btn-web">
+          <span class="kb-tab-text is-42cb6bab25cc"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> <span data-i18n="dashboard:knowledge.web_tab">Pagine web</span></span> <span class="kb-tab-badge" id="kb-badge-web">0</span>
+        </button>
+        <button type="button" class="kb-tab-btn" data-kb-tab="dati-struttura" role="tab" aria-selected="false" tabindex="-1" id="kb-tab-btn-dati-struttura">
+          <span class="kb-tab-text is-42cb6bab25cc"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 0-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg> <span data-i18n="dashboard:knowledge.business_data_tab">Dati struttura</span></span> <span class="kb-tab-badge" id="kb-badge-dati-struttura">0</span>
+        </button>
+      </div>
+
+      <!-- TAB 1: FAQ -->
+      <div class="kb-panel" id="kb-panel-faq" role="tabpanel">
+        <div class="kb-panel-status-bar" id="kb-faq-status-bar">
+          <span id="kb-faq-status-text" data-i18n="dashboard:knowledge.faq_status">6 FAQ attive, tutte indicizzate</span>
+          <span id="kb-faq-updated-text" class="is-8ecd42cd6070" data-i18n="dashboard:knowledge.last_update">Ultimo aggiornamento: mai</span>
+        </div>
+
+        <div class="dash-card is-4933c08820a9">
+          <div class="dash-card-header">
+            <span class="dash-card-title" data-i18n="dashboard:knowledge.faq_title">Domande frequenti (FAQ)</span>
+            <button type="button" class="review-analyze" id="kb-faq-open-form-btn">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span data-i18n="dashboard:knowledge.new_faq">Nuova FAQ</span>
+            </button>
+          </div>
+
+          <!-- Form compatto creazione/modifica FAQ (nascosto di default) -->
+          <div id="kb-faq-form-card" class="is-1cc9b89a4ac2">
+            <input type="hidden" id="kb-faq-edit-id" value="">
+            <label class="is-df723241dd82" for="kb-faq-domanda" data-i18n="dashboard:knowledge.question">Domanda frequente</label>
+            <input type="text" class="doc-config-input is-0b63e9e9da96" id="kb-faq-domanda" placeholder="Es. Quali sono i metodi di pagamento accettati?" data-i18n-placeholder="dashboard:knowledge.question_example">
+
+            <label class="is-df723241dd82" for="kb-faq-risposta" data-i18n="dashboard:knowledge.answer">Risposta fornita dall'assistente</label>
+            <textarea class="doc-query-input is-4636770b4968" id="kb-faq-risposta" rows="3" placeholder="Es. Accettiamo contanti, carte di credito Visa/Mastercard, Bancomat e Satispay." data-i18n-placeholder="dashboard:knowledge.answer_example"></textarea>
+
+            <div class="is-343e192ad9ce">
+              <button type="button" class="report-refresh" id="kb-faq-cancel-btn" data-i18n="dashboard:modals.cancel_btn">Annulla</button>
+              <button type="button" class="review-analyze" id="kb-faq-save-btn">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <span data-i18n="dashboard:knowledge.save_faq">Salva FAQ</span>
+              </button>
+            </div>
+            <p id="kb-faq-form-status" class="is-45bf1d13fe51"></p>
+          </div>
+
+          <!-- Lista FAQ -->
+          <div class="kb-list" id="kb-faq-list">
+            <p class="doc-library-empty" data-i18n="dashboard:knowledge.empty_faq">Nessuna FAQ configurata.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: DOCUMENTI -->
+      <div class="kb-panel" id="kb-panel-documenti" role="tabpanel" hidden>
+        <div class="kb-panel-status-bar" id="kb-doc-status-bar">
+          <span id="kb-doc-status-text">Caricamento documenti…</span>
+          <span id="kb-doc-updated-text" class="is-8ecd42cd6070">Ultimo aggiornamento: mai</span>
+        </div>
+
+        <div class="dash-card is-4933c08820a9">
+          <div class="dash-card-header">
+            <span class="dash-card-title" data-i18n="dashboard:knowledge.upload_title">Carica file</span>
+          </div>
+          <div class="kb-dropzone" id="kb-doc-dropzone">
+            <div class="kb-dropzone-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="kb-dropzone-title" data-i18n="dashboard:knowledge.dropzone_title">Trascina i tuoi documenti qui o clicca per sfogliare</div>
+            <div class="kb-dropzone-hint" data-i18n="dashboard:knowledge.dropzone_hint">PDF, DOCX, CSV, TXT, MD, immagini fino a 20 MB</div>
+            <input class="doc-file-input is-d0466aa33fa8" id="doc-file" type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/plain, image/png, image/jpeg, image/webp">
+          </div>
+
+          <!-- Inserimento testo libero opzionale -->
+          <details class="is-b77ec8bf8e06">
+            <summary class="is-a3b950a6f8e5" data-i18n="dashboard:knowledge.paste_text">Oppure incolla testo libero non formattato</summary>
+            <div class="is-3b6fad0b298d">
+              <textarea class="doc-query-input" id="doc-carica-testo" rows="3" placeholder="Incolla qui testi, menu, note o descrizioni aggiuntive..." data-i18n-placeholder="dashboard:knowledge.text_placeholder"></textarea>
+              <div class="doc-query-row">
+                <input type="text" class="doc-config-input is-50b50bfb349d" id="doc-carica-nome" placeholder="Nome del testo (es. orari_festivi.txt)" data-i18n-placeholder="dashboard:knowledge.text_name_placeholder">
+                <button type="button" class="review-analyze" id="doc-carica-btn" data-i18n="dashboard:knowledge.save_text">Salva testo</button>
+              </div>
+            </div>
+          </details>
+          <p class="doc-config-status" id="doc-carica-status"></p>
+
+          <h3 class="is-a26673541eef" data-i18n="dashboard:knowledge.uploaded_documents">Documenti caricati</h3>
+          <div class="kb-list" id="doc-library">
+            <p class="doc-library-empty" data-i18n="dashboard:knowledge.empty_documents">Nessun documento caricato.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: PAGINE WEB -->
+      <div class="kb-panel" id="kb-panel-web" role="tabpanel" hidden>
+        <div class="kb-panel-status-bar" id="kb-web-status-bar">
+          <span id="kb-web-status-text">Caricamento pagine web…</span>
+          <span id="kb-web-updated-text" class="is-8ecd42cd6070">Ultimo aggiornamento: mai</span>
+        </div>
+
+        <div class="dash-card is-4933c08820a9">
+          <div class="dash-card-header">
+            <span class="dash-card-title">Importa da Pagina Web</span>
+          </div>
+          <p class="is-a0f5bbad976a">Inserisci l'URL del tuo sito web, del listino online o della pagina contatti per estrarne ed indicizzarne automaticamente il contenuto.</p>
+          <div class="is-8241fb74be89">
+            <input type="url" class="doc-config-input is-76b530617eb2" id="kb-web-url-input" placeholder="https://www.tuosito.it/servizi-e-prezzi">
+            <button type="button" class="review-analyze" id="kb-web-import-btn">Importa e indicizza</button>
+          </div>
+          <p id="kb-web-import-status" class="is-2c3e33c6e3a1"></p>
+
+          <h3 class="is-a26673541eef">Pagine web indicizzate</h3>
+          <div class="kb-list" id="kb-web-list">
+            <p class="doc-library-empty">Nessuna pagina web indicizzata.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: DATI STRUTTURA -->
+      <div class="kb-panel" id="kb-panel-dati-struttura" role="tabpanel" hidden>
+        <div class="kb-panel-status-bar" id="kb-dati-status-bar">
+          <span id="kb-dati-status-text">Dati struttura ufficiali — Priorità 1 (Massima autorevolezza)</span>
+          <span id="kb-dati-updated-text" class="is-8ecd42cd6070">Ultimo aggiornamento: mai</span>
+        </div>
+
+        <div class="dash-card is-4933c08820a9">
+          <div class="dash-card-header">
+            <div>
+              <span class="dash-card-title">Listino Servizi Ufficiale</span>
+              <p class="is-0381768571bc">Definisci prezzo, durata e operatore assegnato per ciascun servizio. L'AI risponderà sempre con questi dati autorevoli.</p>
+            </div>
+            <button type="button" class="report-refresh is-5050d26f3761" id="kb-add-servizio-btn">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Aggiungi servizio</span>
+            </button>
+          </div>
+
+          <div class="kb-table-wrap">
+            <table class="kb-table" id="kb-servizi-table">
+              <thead>
+                <tr>
+                  <th class="is-01a3bb680d8d">Nome Servizio</th>
+                  <th class="is-d76d1bd5a0ae">Prezzo (€)</th>
+                  <th class="is-d76d1bd5a0ae">Durata (min)</th>
+                  <th class="is-cb43f8983898">Operatore</th>
+                  <th class="is-cb1ed25984af">Azioni</th>
+                </tr>
+              </thead>
+              <tbody id="kb-servizi-tbody">
+                <!-- Righe servizi generate dinamicamente -->
+              </tbody>
+            </table>
+          </div>
+
+          <h3 class="is-97ebd1466f37">Orari di apertura dell'attività</h3>
+          <p class="is-d0cd3d56efe5">Indica i giorni e le fasce orarie in cui l'attività è aperta al pubblico.</p>
+          <textarea class="doc-query-input" id="kb-orari-input" rows="2" placeholder="Es. Lun-Ven: 09:00 - 19:30 | Sab: 09:00 - 18:00 | Dom: Chiuso"></textarea>
+
+          <div class="is-27632a64b3c0">
+            <button type="button" class="review-analyze is-af4364ed9fb3" id="kb-salva-dati-btn">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              <span>Salva Dati Struttura</span>
+            </button>
+          </div>
+          <p id="kb-dati-save-status" class="is-76056124c37b"></p>
+        </div>
+      </div>
+
+      <!-- TESTER "CHIEDI ALLA KNOWLEDGE BASE" -->
+      <div class="dash-card is-321d1ea5c619">
+        <div class="dash-card-header">
+          <span class="dash-card-title">Test Assistente: Chiedi alla Knowledge Base</span>
+        </div>
+        <p class="is-03c32cd4377d">Verifica istantaneamente come risponde l'assistente basandosi sui tuoi Dati struttura, FAQ, Documenti e Pagine web.</p>
+        <textarea class="doc-query-input" id="doc-query" rows="2" placeholder="Es. «Quanto costa un taglio uomo?» oppure «Quali sono gli orari di apertura?»" data-i18n-placeholder="dashboard:knowledge.ask_placeholder" data-i18n-aria="dashboard:knowledge.ask_placeholder"></textarea>
+        <div class="doc-query-row is-c804002a4185">
+          <button type="button" class="review-analyze" id="doc-chiedi-btn">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Fai una domanda di test</span>
+          </button>
+        </div>
+        <div class="doc-risposta" id="doc-risposta" hidden>
+          <div class="doc-risposta-text" id="doc-risposta-text"></div>
+          <div class="doc-fonti" id="doc-fonti" hidden>
+            <span class="doc-fonti-title">Fonti consultate dall'AI:</span>
+            <ul class="doc-fonti-list" id="doc-fonti-list"></ul>
+          </div>
+        </div>
+      </div>
+    </section>
