@@ -121,9 +121,14 @@ test("CI active dashboard baseline V2 integrity and provenance remain pinned to 
     assert.equal(createHash("sha256").update(asset).digest("hex"), manifest.capture.fonts.assets_sha256[manifestPath],
       `${webPath} still matches the font used by active V2`);
   }
-  const styleCss = fs.readFileSync(path.join(__dirname, "..", "..", "web", "style.css"));
-  assert.equal(createHash("sha256").update(styleCss).digest("hex"), manifest.capture.fonts.style_css_sha256,
-    "web/style.css still matches the active V2 capture source");
+  const styleCss = fs.readFileSync(path.join(__dirname, "..", "..", "web", "style.css"), "utf8");
+  const normalizedStyleCss = styleCss.replace(/\r\n/g, "\n");
+  const normalizedStyleHash = createHash("sha256").update(normalizedStyleCss).digest("hex");
+  assert.equal(normalizedStyleHash, manifest.capture.fonts.style_css_normalized_lf_sha256,
+    "web/style.css still matches the active V2 capture source after CRLF-to-LF normalization");
+  assert.notEqual(createHash("sha256").update(normalizedStyleCss + " ").digest("hex"),
+    manifest.capture.fonts.style_css_normalized_lf_sha256,
+    "CSS content changes remain detectable after EOL normalization");
   const entries = manifest.cases.flatMap((captureCase) => Object.entries(captureCase.images)
     .map(([viewport, filename]) => ({ captureCase, viewport, filename })));
   assert.equal(entries.length, 12);

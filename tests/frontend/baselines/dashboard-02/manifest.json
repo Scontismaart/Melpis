@@ -55,7 +55,8 @@
         "fonts/outfit-latin-ext.woff2": "0f53d1c03b3918d744a843b5039001ee31695ca1e255e3914188df81beb461e9",
         "fonts/inter-latin.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
       },
-      "style_css_sha256": "fe6a38633a14779a9b6e4a226ce3a0edd44e9743888464e122872d412336ce18"
+      "style_css_sha256": "fe6a38633a14779a9b6e4a226ce3a0edd44e9743888464e122872d412336ce18",
+      "style_css_normalized_lf_sha256": "cb1c181a4e617c43998b62ebde1b2c57ca77f56b4c297fe1ccf44a9fb5ae1fa1"
     },
     "screenshot": {
       "capture": "Codex in-app browser; fullPage capture clipped to viewport CSS-pixel dimensions",

@@ -9,6 +9,7 @@
 - Codex in-app browser on Windows; browser UA reports Chrome 155.0.0.0 / Win32. A running Edge WebView2 155.0.4283.45 host runtime was observed, but its exact mapping to the capture tab is unverified.
 - Desktop 1440x900 and mobile 375x812 CSS pixels. Runtime DPR reported `1.0000000149011612` (approximately 1); visual viewport scale 1. Locale `it`, timezone `Europe/Rome`, Italian, dark theme, fixed clock `2026-10-08T10:00:00.000Z`.
 - Loaded font faces: Inter and Outfit. Body computed stack is Outfit; heading stack requests Geist Sans then Inter. Font and stylesheet SHA-256 values are in `manifest.json`.
+- The manifest retains the raw stylesheet SHA from capture and also pins its canonical LF SHA for CI. CI normalizes only CRLF to LF before checking; this accounts for Windows-versus-Linux checkout line endings without ignoring CSS content changes.
 - Dataset is the empty synthetic dashboard fixture with synthetic owner identity. No production API, credentials, database, or provider is used.
 
 ## Reproduction
