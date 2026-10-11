@@ -21,6 +21,31 @@ test("view QA supplies observable loading, empty, error, denied and non-operatio
   assert.deepEqual(viewReply("GET", "/api/reviews/google/status", "populated").body.operational, false);
 });
 
+test("Settings and AI Settings scenarios remain synthetic, org-specific, and fail closed by role", () => {
+  assert.deepEqual(viewReply("GET", "/api/impostazioni/organizzazione", "settings-populated").body.timezone_disponibili,
+    ["Europe/Rome", "Europe/London", "America/New_York"]);
+  assert.equal(viewReply("PUT", "/api/impostazioni/organizzazione", "settings-populated").status, 200);
+  assert.equal(viewReply("GET", "/api/billing/subscription", "settings-staff").status, 403);
+  assert.equal(viewReply("GET", "/api/billing/subscription", "settings-populated").body.plan, "pro");
+  assert.equal(viewReply("GET", "/api/impostazioni/organizzazione", "settings-error").status, 500);
+  assert.equal(viewReply("GET", "/api/impostazioni/organizzazione", "settings-denied").status, 403);
+  assert.equal(viewReply("GET", "/api/onboarding/profilo", "ai-settings-populated", ORG_A).body.profilo.nome_attivita, "Ristorante QA A");
+  assert.equal(viewReply("GET", "/api/onboarding/profilo", "ai-settings-org-b", ORG_B).body.profilo.nome_attivita, "Ristorante QA B");
+  assert.equal(viewReply("POST", "/api/onboarding/profilo", "ai-settings-staff").status, 403);
+  assert.equal(viewReply("GET", "/api/onboarding/profilo", "ai-settings-error").status, 500);
+  assert.equal(viewReply("GET", "/api/onboarding/profilo", "ai-settings-denied").status, 403);
+  assert.equal(viewReply("POST", "/api/onboarding/profilo", "ai-settings-populated").body.profilo.nome_attivita, "Ristorante QA A");
+});
+
+test("connected Settings dialog fixture accepts only the fixed synthetic Calendar disconnect", () => {
+  assert.deepEqual(viewReply("GET", "/api/calendar/status", "settings-connected").body, {
+    connected: true, calendar_id: "synthetic-calendar-qa@dashboard-qa.invalid", sync_enabled: true,
+  });
+  assert.deepEqual(viewReply("DELETE", "/api/calendar/disconnect", "settings-connected").body, { ok: true, disconnected: true });
+  assert.equal(viewReply("DELETE", "/api/calendar/disconnect", "settings-populated"), null);
+  assert.equal(viewReply("DELETE", "/api/calendar/arbitrary", "settings-connected"), null);
+});
+
 test("Knowledge view reads are synthetic, organization-scoped, and only fixed actions are accepted", () => {
   const summary = viewReply("GET", "/api/conoscenza/summary", "populated");
   assert.equal(summary.body.faq.totale, 1);

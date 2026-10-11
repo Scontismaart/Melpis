@@ -27,8 +27,9 @@ def test_prezzi_mensili_coerenti_tra_api_dashboard_e_locali():
     for slug, price in expected.items():
         assert PLANS[slug].price_monthly_eur == price
 
-    dashboard = (REPO_ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    account_plans = dashboard.split("const ACCOUNT_PLANS = [", 1)[1].split("\n];", 1)[0]
+    dashboard_settings = (REPO_ROOT / "web" / "dashboard-settings.js").read_text(encoding="utf-8")
+    assert "const accountPlans = [" in dashboard_settings, "account plan data remains owned by dashboard-settings.js"
+    account_plans = dashboard_settings.split("const accountPlans = [", 1)[1].split("\n      ];", 1)[0]
     dashboard_prices = {
         slug: int(price)
         for slug, price in re.findall(r'slug: "(starter|pro|business)"[\s\S]*?prezzo: "€(\d+)"', account_plans)

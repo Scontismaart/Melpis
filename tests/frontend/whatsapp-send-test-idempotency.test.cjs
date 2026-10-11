@@ -4,14 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
 
-const app = fs.readFileSync(path.resolve(__dirname, "../../web/app.js"), "utf8").replace(/\r\n/g, "\n");
+const integrations = fs.readFileSync(path.resolve(__dirname, "../../web/dashboard-integrations.js"), "utf8").replace(/\r\n/g, "\n");
 
 function functionSource(name) {
-  const start = app.search(new RegExp(`function ${name}\\(`));
+  const start = integrations.search(new RegExp(`function ${name}\\(`));
   assert.notEqual(start, -1, `missing ${name}`);
-  const end = app.indexOf("\n}", start);
+  const end = integrations.indexOf("\n}", start);
   assert.notEqual(end, -1, `missing ${name} end`);
-  return app.slice(start, end + 2);
+  return integrations.slice(start, end + 2);
 }
 
 test("WhatsApp send-test retries reuse one recipient key until confirmed delivery", (t) => {
@@ -39,7 +39,7 @@ test("WhatsApp send-test retries reuse one recipient key until confirmed deliver
 });
 
 test("both WhatsApp test-send handlers send their stable key when a recipient is supplied", () => {
-  const whatsapp = app.split("// WhatsApp Wizard Event Listeners", 2)[1].split("// Instagram", 1)[0];
+  const whatsapp = integrations.split("// WhatsApp Wizard Event Listeners", 2)[1].split("// Instagram", 1)[0];
   assert.equal((whatsapp.match(/const idempotencyKey = _getWhatsAppTestIdempotencyKey\(/g) || []).length, 2);
   assert.equal((whatsapp.match(/idempotency_key:\s*idempotencyKey/g) || []).length, 2);
   assert.equal((whatsapp.match(/_completeWhatsAppTestIntent\([^\n]+true\)/g) || []).length, 2);

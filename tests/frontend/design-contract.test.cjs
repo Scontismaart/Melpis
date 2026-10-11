@@ -104,10 +104,11 @@ test('dashboard theme controls inherit colors and Google Reviews has no static c
   assert.ok(status);
   assert.equal(status.classList.contains('ready'), false);
   assert.equal(status.dataset.state, 'loading');
-  assert.match(read('web/app.js'), /\/api\/reviews\/google\/status/);
-  assert.match(read('web/app.js'), /const operational = d\.operational === true/);
-  assert.match(read('web/app.js'), /setSummaryStatus\(operational \? true : null\)/);
-  assert.match(read('web/app.js'), /setSummaryStatus\(false\)/);
+  const integrations = read('web/dashboard-integrations.js');
+  assert.match(integrations, /\/api\/reviews\/google\/status/);
+  assert.match(integrations, /const operational = d\.operational === true/);
+  assert.match(integrations, /setSummaryStatus\(operational \? true : null\)/);
+  assert.match(integrations, /setSummaryStatus\(false\)/);
   assert.match(css, /\.nav-item \.nav-icon[\s\S]*?color:\s*currentColor/);
   assert.match(css, /\.sidebar-lang-select[\s\S]*?appearance:\s*none/);
   assert.match(css, /\.priority-item-badge[\s\S]*?background:\s*var\(--dashboard-surface-subtle\)/);

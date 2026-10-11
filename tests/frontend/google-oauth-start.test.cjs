@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const app = fs.readFileSync(path.resolve(__dirname, "../../web/app.js"), "utf8").replace(/\r\n/g, "\n");
+const integrations = fs.readFileSync(path.resolve(__dirname, "../../web/dashboard-integrations.js"), "utf8").replace(/\r\n/g, "\n");
 const selectedOrg = "11111111-1111-1111-1111-111111111111";
 const providers = [
   { id: "integ-calendar-connect", pathname: "/api/calendar/auth" },
@@ -13,11 +13,11 @@ const providers = [
 
 function connectHandlerSource(id) {
   const marker = `document.getElementById("${id}")?.addEventListener("click", async () => {`;
-  const start = app.indexOf(marker);
+  const start = integrations.indexOf(marker);
   assert.notEqual(start, -1, `missing click handler for ${id}`);
-  const end = app.indexOf("\n});", start + marker.length);
+  const end = integrations.indexOf("\n});", start + marker.length);
   assert.notEqual(end, -1, `missing end of click handler for ${id}`);
-  return app.slice(start, end + 4);
+  return integrations.slice(start, end + 4);
 }
 
 function setup(provider, preflight) {
@@ -35,7 +35,7 @@ function setup(provider, preflight) {
     return preflight;
   };
   vm.runInNewContext(
-    `const API_BASE = "";\n${connectHandlerSource(provider.id)}`,
+    `const API_BASE = "";\nfunction captureIntegrationContext() { return {}; }\nfunction claimAction() { return () => {}; }\nfunction isIntegrationContextCurrent() { return true; }\n${connectHandlerSource(provider.id)}`,
     { document, window, localStorage: { getItem: () => selectedOrg }, URL, apiFetch },
   );
   return { calls, window, click: listeners.get(`${provider.id}:click`) };

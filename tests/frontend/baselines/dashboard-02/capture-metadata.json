@@ -1,0 +1,410 @@
+{
+  "main-a-desktop-overview": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:51.527Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/overview",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-desktop-inbox": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:52.556Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/inbox",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-desktop-bookings": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:53.605Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/bookings",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-desktop-settings": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:54.687Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/settings",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-desktop-simulator": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:55.686Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/ai-simulator",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-desktop-sidebar": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 1440,
+      "height": 900,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:56.769Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/overview",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-overview": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:58.168Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/overview",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-inbox": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:29:59.133Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/inbox",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-bookings": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:30:00.283Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/bookings",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-settings": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:30:01.298Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/settings",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-simulator": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:30:02.363Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/ai-simulator",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  },
+  "main-a-mobile-sidebar": {
+    "browser": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "mobile": false
+    },
+    "viewport": {
+      "width": 375,
+      "height": 812,
+      "devicePixelRatio": 1.0000000149011612,
+      "zoom": 1
+    },
+    "locale": "it",
+    "timeZone": "Europe/Rome",
+    "fixedClock": "2026-10-08T10:00:00.000Z",
+    "capturedAt": "2026-10-11T00:30:03.446Z",
+    "theme": "dark",
+    "language": "it",
+    "fonts": {
+      "loadedFamilies": [
+        "Inter",
+        "Outfit"
+      ],
+      "bodyComputed": "Outfit, -apple-system, sans-serif",
+      "headingComputed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    },
+    "fixture": {
+      "scenario": "baseline",
+      "fixedTime": "2026-10-08T10:00:00.000Z",
+      "fixture": "synthetic-loopback",
+      "route": "/app/overview",
+      "animations": "finite-complete; infinite-paused-at-zero"
+    }
+  }
+}

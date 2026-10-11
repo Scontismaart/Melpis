@@ -59,12 +59,17 @@ function generate(source) {
   };
 }
 
+function normalizeCssEol(css) {
+  return css.replace(/\r\n/g, "\n");
+}
+
 function main() {
   const check = process.argv.includes("--check");
   const source = fs.readFileSync(sourcePath, "utf8");
   const generated = generate(source);
   if (check) {
-    if (fs.readFileSync(bundlePath, "utf8") !== generated.bundle || fs.readFileSync(cssPath, "utf8") !== generated.css) {
+    if (fs.readFileSync(bundlePath, "utf8") !== generated.bundle
+      || normalizeCssEol(fs.readFileSync(cssPath, "utf8")) !== normalizeCssEol(generated.css)) {
       throw new Error("FullCalendar externalized artifacts are stale; run node scripts/externalize-fullcalendar-styles.js");
     }
     console.log("FullCalendar static CSS externalization is current (5 blocks, no CSSOM injection).");
@@ -77,4 +82,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { extractStyles, generate };
+module.exports = { extractStyles, generate, normalizeCssEol };

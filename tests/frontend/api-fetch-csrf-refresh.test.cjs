@@ -39,6 +39,8 @@ function setup(fetchImpl) {
     const dashboardAiSimulatorModule = { invalidate() {} };
     const dashboardBookingsModule = { invalidate() {} };
     const dashboardInboxModule = { invalidate() {} };
+    const dashboardAiSettingsModule = { invalidate() {} };
+    const dashboardSettingsModule = { invalidate() {} };
     ${functionSource("leggiCookie")}
     ${functionSource("csrfToken")}
     ${functionSource("tentaRefresh")}

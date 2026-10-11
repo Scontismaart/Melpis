@@ -151,7 +151,7 @@ test("i18n: dashboard bundles stay synchronized and cover visible Settings, AI, 
   const root = path.resolve(__dirname, "../..");
   const localesRoot = path.join(root, "locales");
   const dashboard = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
-  const appCode = ["app.js", "dashboard-inbox.js"]
+  const appCode = ["app.js", "dashboard-inbox.js", "dashboard-ai-settings.js", "dashboard-settings.js", "dashboard-integrations.js"]
     .map((file) => fs.readFileSync(path.join(root, "web", file), "utf8")).join("\n");
   const keys = new Set([
     ...Array.from(dashboard.matchAll(/data-i18n(?:-[a-z]+)?="([^"]+)"/g), (match) => match[1]),
@@ -225,7 +225,7 @@ test("i18n: dashboard bundles stay synchronized and cover visible Settings, AI, 
     "settings:ai_configuration.load_loading",
     "settings:ai_configuration.load_error",
   ]) {
-    assert.ok(appCode.includes(`t("${key}")`), `dynamic AI copy uses ${key}`);
+    assert.ok(appCode.includes(`translate("${key}")`), `dynamic AI copy uses ${key}`);
   }
 });
 

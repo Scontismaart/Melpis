@@ -23,6 +23,8 @@ function fixture(pathname = "/app/overview") {
     dashboardReviewsModule: { onExit: () => { viewExits += 1; } },
     dashboardBookingsModule: { onExit: () => { viewExits += 1; } },
     dashboardInboxModule: { onExit: () => { viewExits += 1; } },
+    dashboardAiSettingsModule: { invalidate() {} },
+    dashboardSettingsModule: { invalidate() {} },
     dashboardKnowledgeModule: { onExit: () => { viewExits += 1; } },
     dashboardTeamModule: { onExit: () => { viewExits += 1; } },
     dashboardAiSimulatorModule: { onExit: () => { viewExits += 1; } },

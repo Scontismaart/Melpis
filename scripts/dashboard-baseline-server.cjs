@@ -23,6 +23,74 @@ const root = resolveAssetRoot(process.env.DASHBOARD_QA_ASSET_ROOT, interactions 
 const port = Number(process.env.DASHBOARD_QA_PORT || 4190);
 const csp = fs.readFileSync(path.join(root, "security-headers.conf"), "utf8").match(/Content-Security-Policy "([^"]+)"/)[1];
 const requests = [];
+function buildQaBootstrap(cookie = "") {
+  const scenario = cookie.match(/(?:^|;\s*)dashboard_qa_case=([a-z-]+)(?:;|$)/)?.[1];
+  const config = JSON.stringify({
+    scenario: SCENARIOS.has(scenario) ? scenario : "baseline",
+    fixedTime: FIXED_TIME,
+    fixture: "synthetic-loopback",
+  });
+  return `
+    // This test-only script is never shipped in web/ or its Docker image.
+    const RealDate = Date;
+    const qaCaptureConfig = Object.freeze(${config});
+    window.Date = class extends RealDate { constructor(...args) { super(...(args.length ? args : [${JSON.stringify(FIXED_TIME)}])); } static now() { return new RealDate(${JSON.stringify(FIXED_TIME)}).getTime(); } };
+    localStorage.setItem('melpis_lang', 'it');
+    localStorage.setItem('melpis-theme', 'dark');
+    document.cookie = 'melpis_lang=it; Path=/; SameSite=Strict';
+    document.cookie = 'wa_csrf=synthetic-qa-only; Path=/; SameSite=Strict';
+    const nativeFetch = window.fetch.bind(window);
+    let pending = 0, revision = 0;
+    function recordQaEnvironment() {
+      const dateOptions = Intl.DateTimeFormat().resolvedOptions();
+      const visualViewport = window.visualViewport;
+      const loadedFonts = Array.from(document.fonts || [])
+        .filter(face => face.status === 'loaded')
+        .map(face => face.family)
+        .filter((family, index, all) => all.indexOf(family) === index)
+        .sort();
+      const heading = document.querySelector('h1');
+      document.body.dataset.qaEnvironment = JSON.stringify({
+        browser: { userAgent: navigator.userAgent, platform: navigator.platform || 'unknown', mobile: Boolean(navigator.userAgentData?.mobile) },
+        viewport: { width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio, zoom: visualViewport?.scale ?? 1 },
+        locale: dateOptions.locale,
+        timeZone: dateOptions.timeZone,
+        fixedClock: new Date().toISOString(),
+        capturedAt: new RealDate().toISOString(),
+        theme: localStorage.getItem('melpis-theme'),
+        language: localStorage.getItem('melpis_lang'),
+        fonts: { loadedFamilies: loadedFonts, bodyComputed: getComputedStyle(document.body).fontFamily, headingComputed: heading ? getComputedStyle(heading).fontFamily : null },
+        fixture: { ...qaCaptureConfig, route: location.pathname, animations: 'finite-complete; infinite-paused-at-zero' },
+      });
+    }
+    async function ready() {
+      const visit = ++revision;
+      await document.fonts.ready;
+      // Wait for production entrance transitions; do not alter their CSS/rendering.
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      // Capture the live-status pulse at frame zero, rather than a random instant.
+      // This exists only in the isolated screenshot server, not shipped assets.
+      document.getAnimations().filter(animation => !Number.isFinite(animation.effect.getComputedTiming().endTime))
+        .forEach(animation => { animation.pause(); animation.currentTime = 0; });
+      await Promise.all(document.getAnimations()
+        .filter(animation => Number.isFinite(animation.effect.getComputedTiming().endTime))
+        .map(animation => animation.finished.catch(() => {})));
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!pending && revision === visit && document.body) {
+          recordQaEnvironment();
+          document.body.dataset.qaReady = 'true';
+        }
+      }));
+    }
+    window.fetch = async (...args) => {
+      pending++; revision++;
+      if (document.body) document.body.dataset.qaReady = 'false';
+      try { return await nativeFetch(...args); }
+      finally { pending--; if (!pending) ready(); }
+    };
+    document.addEventListener('DOMContentLoaded', ready, {once:true});
+  `;
+}
 // Explicit opt-in for synthetic interaction smoke; baseline mode stays identical.
 function interactionReply(method, pathname, cookie = "", enabled = interactions) {
   if (!enabled) return reply(method, pathname);
@@ -74,47 +142,14 @@ const server = http.createServer((req, res) => {
   if (viewStates && url.pathname === "/__qa/start") {
     const scenario = url.searchParams.get("case");
     const view = url.searchParams.get("view");
-    if (!SCENARIOS.has(scenario) || !["overview", "inbox", "reviews", "knowledge", "team", "ai-simulator", "bookings"].includes(view)) { res.writeHead(400).end(); return; }
+    if (!SCENARIOS.has(scenario) || !["overview", "inbox", "reviews", "knowledge", "team", "ai-simulator", "bookings", "settings", "ai-settings"].includes(view)) { res.writeHead(400).end(); return; }
     res.setHeader("Set-Cookie", [`dashboard_qa_case=${scenario}; Path=/; HttpOnly; SameSite=Strict`, "dashboard_qa_signed_out=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict"]);
     res.writeHead(302, { Location: `/app/${view}` }).end(); return;
   }
   if (url.pathname === "/__qa/requests") { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(requests)); return; }
   if (url.pathname === "/__qa/inbox-requests") { res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(inboxRequests)); return; }
   if (url.pathname === "/__qa/bootstrap.js") {
-    res.writeHead(200, { "Content-Type": "text/javascript" }).end(`
-      // This test-only script is never shipped in web/ or its Docker image.
-      const RealDate = Date;
-      window.Date = class extends RealDate { constructor(...args) { super(...(args.length ? args : [${JSON.stringify(FIXED_TIME)}])); } static now() { return new RealDate(${JSON.stringify(FIXED_TIME)}).getTime(); } };
-      localStorage.setItem('melpis_lang', 'it');
-      localStorage.setItem('melpis-theme', 'dark');
-      document.cookie = 'melpis_lang=it; Path=/; SameSite=Strict';
-      document.cookie = 'wa_csrf=synthetic-qa-only; Path=/; SameSite=Strict';
-      const nativeFetch = window.fetch.bind(window);
-      let pending = 0, revision = 0;
-      async function ready() {
-        const visit = ++revision;
-        await document.fonts.ready;
-        // Wait for production entrance transitions; do not alter their CSS/rendering.
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        // Capture the live-status pulse at frame zero, rather than a random instant.
-        // This exists only in the isolated screenshot server, not shipped assets.
-        document.getAnimations().filter(animation => !Number.isFinite(animation.effect.getComputedTiming().endTime))
-          .forEach(animation => { animation.pause(); animation.currentTime = 0; });
-        await Promise.all(document.getAnimations()
-          .filter(animation => Number.isFinite(animation.effect.getComputedTiming().endTime))
-          .map(animation => animation.finished.catch(() => {})));
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (!pending && revision === visit && document.body) document.body.dataset.qaReady = 'true';
-        }));
-      }
-      window.fetch = async (...args) => {
-        pending++; revision++;
-        if (document.body) document.body.dataset.qaReady = 'false';
-        try { return await nativeFetch(...args); }
-        finally { pending--; if (!pending) ready(); }
-      };
-      document.addEventListener('DOMContentLoaded', ready, {once:true});
-    `);
+    res.writeHead(200, { "Content-Type": "text/javascript" }).end(buildQaBootstrap(req.headers.cookie || ""));
     return;
   }
   if (url.pathname === "/config.js") { res.writeHead(200, { "Content-Type": "text/javascript" }).end("window.MELPIS_API_BASE = '';\n"); return; }
@@ -137,4 +172,4 @@ const server = http.createServer((req, res) => {
   res.end(req.method === "HEAD" ? undefined : content);
 });
 if (require.main === module) server.listen(port, "127.0.0.1", () => console.log(`Synthetic dashboard QA: http://127.0.0.1:${port}/app/overview`));
-module.exports = { server, interactionReply, resolveAssetRoot, defaultRoot };
+module.exports = { server, interactionReply, resolveAssetRoot, defaultRoot, buildQaBootstrap };
