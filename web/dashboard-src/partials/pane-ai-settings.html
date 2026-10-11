@@ -1,0 +1,135 @@
+    <!-- ---------- VISTA: CONFIGURAZIONE AI (Identità, Tono, Multilingua, Regole) ---------- -->
+    <section class="view view-hidden" data-view-panel="configurazione-ai">
+      <div class="kb-header-row">
+        <h2 class="view-title is-6e7202d3fced" data-i18n="dashboard:views.ai_config_title">Configurazione AI</h2>
+        <p class="view-intro" data-i18n="dashboard:views.ai_config_intro">Personalizza l'identità dell'attività, lo stile comunicativo, le lingue supportate e le regole di escalation a operatore umano.</p>
+      </div>
+
+      <form id="ai-config-form" autocomplete="off">
+        <div class="ai-config-grid">
+          <h3 class="ai-config-group-title" data-i18n="settings:ai_configuration.group_main">Configurazioni principali</h3>
+          <!-- CARD 1: IDENTITÀ & SETTORE -->
+          <div class="dash-card settings-card">
+            <div class="dash-card-header">
+              <div class="is-68443324e11c">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v21"/></svg>
+                <span class="dash-card-title" data-i18n="settings:ai_configuration.identity_title">Identità dell'attività</span>
+              </div>
+            </div>
+            <p class="settings-help" data-i18n="settings:ai_configuration.identity_help">Dati essenziali utilizzati dall'assistente per presentarsi ed elaborare le risposte.</p>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-nome" data-i18n="settings:ai_configuration.business_name">Nome dell'attività</label>
+              <input class="wizard-input" id="ai-cfg-nome" type="text" placeholder="Es. Salone Bellavista, Ristorante La Pergola..." data-i18n-placeholder="settings:ai_configuration.business_name_placeholder" required>
+            </div>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-verticale" data-i18n="settings:ai_configuration.category">Settore / Categoria</label>
+              <select class="wizard-input" id="ai-cfg-verticale">
+                <option value="ristorante">Ristorante / Pizzeria</option>
+                <option value="parrucchiere">Parrucchiere / Barber</option>
+                <option value="centro_estetico">Centro estetico / SPA</option>
+                <option value="studio_medico_dentista">Studio medico / Dentista</option>
+                <option value="hotel_bnb">Hotel / B&B</option>
+              </select>
+            </div>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-descrizione" data-i18n="settings:ai_configuration.description">Descrizione per l'AI</label>
+              <textarea class="wizard-input" id="ai-cfg-descrizione" rows="3" placeholder="Es. Salone di bellezza specializzato in tagli moda, trattamenti benessere e colorazioni naturali." data-i18n-placeholder="settings:ai_configuration.description_placeholder"></textarea>
+            </div>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-orari" data-i18n="settings:ai_configuration.opening_hours">Orari di apertura ufficiali</label>
+              <textarea class="wizard-input" id="ai-cfg-orari" rows="2" placeholder="Es. Mar-Sab: 09:00 - 19:30 | Dom-Lun: Chiuso" data-i18n-placeholder="settings:ai_configuration.opening_hours_placeholder"></textarea>
+              <span class="settings-help-sm is-e644456d5ccc">
+                <span data-i18n="settings:ai_configuration.hours_sync_note">Gli orari sono sincronizzati automaticamente con Priorità 1 nella scheda <em>Dati struttura</em>.</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- CARD 2: PERSONALITÀ & TONO DI VOCE -->
+          <div class="dash-card settings-card">
+            <div class="dash-card-header">
+              <div class="is-68443324e11c">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                <span class="dash-card-title" data-i18n="settings:ai_configuration.communication_title">Tono di voce e stile</span>
+              </div>
+            </div>
+            <p class="settings-help" data-i18n="settings:ai_configuration.communication_help">Stile comunicativo adottato dall'assistente nei messaggi verso i clienti.</p>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-tono-select" data-i18n="settings:ai_configuration.communication_default">Stile di comunicazione predefinito</label>
+              <select class="wizard-input" id="ai-cfg-tono-select">
+                <option value="professionale_caloroso" data-i18n="settings:ai_configuration.tone_professional">Professionale e caloroso (consigliato)</option>
+                <option value="informale_amichevole" data-i18n="settings:ai_configuration.tone_informal">Informale e amichevole</option>
+                <option value="formale_elegante" data-i18n="settings:ai_configuration.tone_formal">Formale ed elegante</option>
+              </select>
+            </div>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" for="ai-cfg-tono-custom" data-i18n="settings:ai_configuration.custom_style">Istruzioni specifiche di stile</label>
+              <textarea class="wizard-input" id="ai-cfg-tono-custom" rows="3" placeholder="Es. Accogliente, chiaro, dai del 'tu', usa emoji con moderazione ed evidenzia la cura per i dettagli." data-i18n-placeholder="settings:ai_configuration.custom_style_placeholder"></textarea>
+            </div>
+          </div>
+
+          <h3 class="ai-config-group-title ai-config-group-title--advanced" data-i18n="settings:ai_configuration.group_advanced">Lingue e regole avanzate</h3>
+          <!-- CARD 3: MULTILINGUA -->
+          <div class="dash-card settings-card">
+            <div class="dash-card-header">
+              <div class="is-68443324e11c">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                <span class="dash-card-title" data-i18n="settings:ai_configuration.languages_title">Lingue supportate</span>
+              </div>
+            </div>
+            <p class="settings-help" data-i18n="settings:ai_configuration.languages_help">Rilevamento automatico della lingua del cliente. L'italiano è predefinito.</p>
+
+            <div class="settings-field-group">
+              <label class="wizard-label" data-i18n="settings:ai_configuration.enabled_languages">Lingue abilitate</label>
+              <div class="settings-lang-grid" id="ai-cfg-lang-grid">
+                <label class="settings-lang-checkbox"><input type="checkbox" id="ai-cfg-lang-it" value="it" checked disabled> <span class="lang-tag">IT</span> <span data-i18n="settings:ai_configuration.italian_default">Italiano (predefinita)</span></label>
+                <label class="settings-lang-checkbox"><input type="checkbox" class="ai-cfg-lang-opt" value="en"> <span class="lang-tag">EN</span> English</label>
+                <label class="settings-lang-checkbox"><input type="checkbox" class="ai-cfg-lang-opt" value="es"> <span class="lang-tag">ES</span> Español</label>
+                <label class="settings-lang-checkbox"><input type="checkbox" class="ai-cfg-lang-opt" value="fr"> <span class="lang-tag">FR</span> Français</label>
+                <label class="settings-lang-checkbox"><input type="checkbox" class="ai-cfg-lang-opt" value="de"> <span class="lang-tag">DE</span> Deutsch</label>
+              </div>
+            </div>
+
+            <div class="settings-field-group is-ff270db33d21">
+              <label class="wizard-label" for="ai-cfg-lingua-default" data-i18n="settings:ai_configuration.fallback_default">Lingua predefinita (se messaggio ambiguo)</label>
+              <select class="wizard-input is-1be58912b6a6" id="ai-cfg-lingua-default">
+                <option value="it">Italiano (IT)</option>
+                <option value="en">English (EN)</option>
+                <option value="es">Español (ES)</option>
+                <option value="fr">Français (FR)</option>
+                <option value="de">Deutsch (DE)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- CARD 4: REGOLE DI PRUDENZA ED ESCALATION A UMANO -->
+          <div class="dash-card settings-card">
+            <div class="dash-card-header">
+              <div class="is-68443324e11c">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span class="dash-card-title" data-i18n="settings:ai_configuration.escalation_title">Regole di escalation e sicurezza</span>
+              </div>
+            </div>
+            <p class="settings-help" data-i18n="settings:ai_configuration.escalation_help">Condizioni per il passaggio immediato della conversazione allo staff.</p>
+
+            <div class="settings-rules-list" id="ai-cfg-rules-list"></div>
+
+            <div class="settings-rule-add-row is-cc50b98ea4cc">
+              <input type="text" class="wizard-input" id="ai-cfg-new-rule-input" placeholder="Aggiungi una nuova regola (es. Richieste per eventi privati o convenzioni)" data-i18n-placeholder="settings:ai_configuration.new_rule_placeholder" data-i18n-aria="settings:ai_configuration.new_rule_placeholder">
+              <button type="button" class="report-refresh is-58d7da1d74b0" id="ai-cfg-add-rule-btn" data-i18n="settings:ai_configuration.add_rule">+ Aggiungi regola</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- BARRA AZIONI SALVATAGGIO -->
+        <div class="settings-actions is-b13ab5d6a8aa">
+          <button type="submit" class="report-refresh is-49d7f2a061b8" id="ai-cfg-save-btn" data-i18n="settings:ai_configuration.save_btn" disabled>Salva Configurazione AI</button>
+          <span class="security-status" id="ai-cfg-save-status" role="status"></span>
+        </div>
+      </form>
+    </section>

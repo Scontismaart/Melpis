@@ -1,0 +1,167 @@
+    <!-- ---------- VISTA: INBOX ---------- -->
+    <section class="view view-hidden inbox-view" data-view-panel="inbox">
+      <div class="inbox-grid-layout" id="inbox-grid">
+        <!-- Lista conversazioni -->
+        <div class="inbox-col-list" id="inbox-list-panel" aria-label="Lista conversazioni" data-i18n-aria="inbox:filters.list_aria">
+          <div class="inbox-list-header">
+            <div class="inbox-list-header-top">
+              <h3 class="inbox-panel-title" data-i18n="inbox:filters.inbox_title">Inbox</h3>
+              <span class="inbox-list-count" id="inbox-total-count">0</span>
+            </div>
+
+            <!-- Filtri rapidi: canale e modalità di gestione -->
+            <div class="inbox-filter-groups">
+              <div class="inbox-filter-row inbox-channel-filter-row" role="group" aria-label="Filtra per canale" data-i18n-aria="inbox:filters.channel_aria">
+                <div class="inbox-chips-group">
+                  <button type="button" class="inbox-chip active" data-inbox-channel="all">
+                    <span data-i18n="inbox:filters.all">Tutti</span>
+                    <span class="chip-count" id="chip-cnt-all">0</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-channel="whatsapp">
+                    <span class="conv-channel-icon icon-wa" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" width="12" height="12"><path d="M12 21a9 9 0 1 0-4.5-1.2L3 21l1.2-4.5A9 9 0 0 0 12 21Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span>WhatsApp</span>
+                    <span class="chip-count" id="chip-cnt-wa">0</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-channel="instagram">
+                    <span class="conv-channel-icon icon-ig" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" width="12" height="12"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>
+                    </span>
+                    <span>Instagram</span>
+                    <span class="chip-count" id="chip-cnt-ig">0</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="inbox-filter-row inbox-status-filter-row" role="group" aria-label="Filtra per stato e gestione" data-i18n-aria="inbox:filters.status_aria">
+                <span class="inbox-filter-row-label" data-i18n="inbox:filters.status">Stato</span>
+                <div class="inbox-chips-group">
+                  <button type="button" class="inbox-chip active" data-inbox-status="all">
+                    <span data-i18n="inbox:filters.all">Tutti</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-status="ai" aria-label="Filtra conversazioni gestite dall'assistente AI" data-i18n-aria="inbox:filters.ai_filter_aria">
+                    <svg viewBox="0 0 24 24" fill="none" width="12" height="12" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><circle cx="8.5" cy="12" r="1.5" fill="currentColor"/><circle cx="15.5" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v4"/></svg>
+                    <span>AI</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-status="human">
+                    <svg viewBox="0 0 24 24" fill="none" width="12" height="12" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span data-i18n="inbox:filters.operator">Operatore</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-status="escalated">
+                    <span class="inbox-dot-red" aria-hidden="true"></span>
+                    <span data-i18n="inbox:filters.escalated">Escalated</span>
+                    <span class="chip-count chip-badge-red" id="chip-cnt-escalated">0</span>
+                  </button>
+                  <button type="button" class="inbox-chip" data-inbox-status="resolved">
+                    <svg viewBox="0 0 24 24" fill="none" width="12" height="12" stroke="var(--green-deep)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
+                    <span data-i18n="inbox:filters.resolved">Risolte</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ricerca veloce -->
+            <div class="inbox-search-wrap">
+              <svg class="inbox-search-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="search" class="inbox-search-input" id="inbox-search-input" placeholder="Cerca per numero o testo…" data-i18n-placeholder="inbox:filters.search_chats" aria-label="Cerca nelle conversazioni" data-i18n-aria="inbox:filters.search_aria" autocomplete="off">
+            </div>
+          </div>
+
+          <!-- Elenco conversazioni scrollabile -->
+          <div class="inbox-conversations-wrap" id="inbox-list"></div>
+        </div>
+
+        <!-- Conversazione e stato di presa in carico -->
+        <section class="inbox-col-detail" id="inbox-detail-panel" aria-label="Dettaglio conversazione" data-i18n-aria="inbox:filters.detail_aria">
+          <!-- Stato vuoto se nessuna conversazione selezionata -->
+          <div class="inbox-detail-placeholder" id="inbox-detail-empty">
+            <div class="inbox-empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" width="28" height="28" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m3 7 9 6 9-6"/></svg>
+            </div>
+            <h4 data-i18n="inbox:filters.empty_title">Nessun messaggio in questa conversazione.</h4>
+            <p data-i18n="inbox:filters.empty_text">Seleziona una conversazione dall'elenco per visualizzare lo storico dei messaggi e rispondere.</p>
+          </div>
+
+          <!-- Contenitore dettaglio conversazione attiva -->
+          <div class="inbox-detail-content" id="inbox-detail-content" hidden>
+            <!-- Header dettaglio -->
+            <header class="inbox-detail-header">
+              <div class="inbox-detail-header-row1">
+                <div class="inbox-detail-header-left">
+                  <button type="button" class="inbox-back-btn" id="inbox-back-to-list" aria-label="Torna all'elenco conversazioni" data-i18n-aria="inbox:filters.back_aria">
+                    <svg viewBox="0 0 24 24" fill="none" width="18" height="18" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                  <div class="inbox-detail-avatar" id="inbox-detail-avatar"></div>
+                  <div class="inbox-detail-user-meta">
+                    <h3 class="inbox-detail-name" id="inbox-detail-name">Mario Rossi</h3>
+                    <span class="inbox-detail-phone" id="inbox-detail-phone">+39 333 1234567</span>
+                  </div>
+                </div>
+
+                <div class="inbox-detail-header-badges">
+                  <span class="inbox-channel-badge" id="inbox-detail-channel"></span>
+                  <span class="inbox-detail-status" id="inbox-detail-status"></span>
+                </div>
+              </div>
+            </header>
+
+            <!-- Banner di stato discreto (AI attiva / Richiesta staff) -->
+            <div class="inbox-status-strip" id="inbox-status-strip">
+              <div class="inbox-ai-badge" id="inbox-ai-badge">
+                <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="12" r="1.5" fill="currentColor"/><circle cx="15.5" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v4" stroke="currentColor" stroke-width="1.8"/></svg>
+                <span id="inbox-ai-badge-text">L'assistente sta gestendo la conversazione</span>
+              </div>
+            </div>
+
+            <!-- Thread messaggi scrollabile -->
+            <div class="inbox-messages-container" id="inbox-thread-messages"></div>
+
+            <!-- Box invio risposta -->
+            <div class="inbox-reply-container" id="inbox-reply-container">
+              <!-- Form attivo (quando CLAIMED) -->
+              <form class="inbox-reply-form" id="inbox-reply-form">
+                <div class="inbox-input-wrapper">
+                  <input type="text" class="inbox-text-input" id="inbox-message-input" placeholder="Scrivi un messaggio…" data-i18n-placeholder="inbox:filters.message_placeholder" autocomplete="off" aria-label="Scrivi messaggio" data-i18n-aria="inbox:filters.message_aria">
+                  <button type="submit" class="inbox-send-btn" id="inbox-send-btn" aria-label="Invia messaggio">
+                    <svg viewBox="0 0 24 24" fill="none" width="18" height="18" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
+              </form>
+
+              <!-- Avviso quando non CLAIMED -->
+              <div class="inbox-reply-disabled-banner" id="inbox-reply-disabled-banner" hidden>
+                <span id="inbox-reply-disabled-text" data-i18n="inbox:filters.manual_reply_claim">Per rispondere manualmente, prendi prima in carico la conversazione.</span>
+                <button type="button" class="inbox-btn-claim-inline" id="inbox-claim-inline-btn" data-i18n="inbox:chat.claim_btn">Prendi in carico</button>
+              </div>
+            </div>
+
+            <!-- Dettagli contatto e azioni esistenti -->
+            <aside class="inbox-context-panel" id="inbox-context-panel" aria-label="Dettagli e azioni conversazione" data-i18n-aria="inbox:filters.context_aria">
+              <section class="inbox-context-section">
+                <h3 class="inbox-context-title" data-i18n="inbox:filters.details_title">Dettagli</h3>
+                <h4 class="inbox-context-kicker" data-i18n="inbox:filters.information">Informazioni</h4>
+                <dl class="inbox-detail-facts">
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.number">Numero</dt><dd id="inbox-context-number">—</dd></div>
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.channel">Canale</dt><dd id="inbox-context-channel">—</dd></div>
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.status">Stato</dt><dd id="inbox-context-status">—</dd></div>
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.priority">Priorità</dt><dd id="inbox-context-priority">—</dd></div>
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.assigned_to">Assegnato a</dt><dd id="inbox-context-assigned">—</dd></div>
+                  <div class="inbox-detail-fact"><dt data-i18n="inbox:filters.last_message">Ultimo messaggio</dt><dd id="inbox-context-last-message">—</dd></div>
+                </dl>
+              </section>
+
+              <section class="inbox-context-section inbox-context-actions-section">
+                <h4 class="inbox-context-kicker" data-i18n="inbox:filters.quick_actions">Azioni rapide</h4>
+                <div class="inbox-detail-actions" id="inbox-detail-actions"></div>
+              </section>
+
+              <section class="inbox-context-section inbox-context-notes">
+                <h4 class="inbox-context-kicker" data-i18n="inbox:filters.notes_title">Note</h4>
+                <p class="inbox-note-unavailable" data-i18n="inbox:filters.notes_unavailable">Le note interne non sono ancora disponibili.</p>
+              </section>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </section>

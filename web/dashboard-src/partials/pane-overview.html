@@ -1,0 +1,181 @@
+    <!-- ---------- VISTA: PANORAMICA ---------- -->
+    <section class="view" data-view-panel="panoramica">
+
+      <div class="kpi-row">
+        <!-- KPI: Ricevuti oggi -->
+        <div class="kpi-card" id="kpi-card-totale">
+          <div class="kpi-card-main">
+            <div class="kpi-icon-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 6h16v12H4V6Z"/><path d="M4 7l8 6 8-6"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label" data-i18n="dashboard:kpi.total_received">Messaggi ricevuti</span>
+              <span class="kpi-value" id="stat-totale">0</span>
+            </div>
+          </div>
+          <div class="kpi-card-middle">
+            <span class="kpi-trend-badge trend-neutral" id="trend-totale">
+              <span class="trend-icon">—</span>
+              <span class="trend-text" data-i18n="dashboard:kpi.trend_neutral">In linea con ieri</span>
+            </span>
+            <div class="kpi-sparkline-svg" id="sparkline-totale"></div>
+          </div>
+          <div class="kpi-sparkline-footer">
+            <span class="kpi-sparkline-caption" data-i18n="dashboard:kpi.sparkline_caption">Ultimi 7 giorni</span>
+            <span class="kpi-sparkline-val" id="sparkline-totale-val">0 <span data-i18n="dashboard:kpi.sparkline_unit">sett.</span></span>
+          </div>
+        </div>
+
+        <!-- KPI: Gestiti da AI -->
+        <div class="kpi-card" id="kpi-card-ai">
+          <div class="kpi-card-main">
+            <div class="kpi-icon-box kpi-icon-ai">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label" data-i18n="dashboard:kpi.handled_by_ai">Gestiti dall'assistente</span>
+              <span class="kpi-value" id="stat-ai">0</span>
+            </div>
+          </div>
+          <div class="kpi-card-middle">
+            <span class="kpi-trend-badge trend-positive" id="trend-ai">
+              <span class="trend-icon">—</span>
+              <span class="trend-text" data-i18n="dashboard:kpi.trend_neutral">In linea con ieri</span>
+            </span>
+            <div class="kpi-sparkline-svg" id="sparkline-ai"></div>
+          </div>
+          <div class="kpi-sparkline-footer">
+            <span class="kpi-sparkline-caption" data-i18n="dashboard:kpi.sparkline_caption">Ultimi 7 giorni</span>
+            <span class="kpi-sparkline-val" id="sparkline-ai-val">0 <span data-i18n="dashboard:kpi.sparkline_unit">sett.</span></span>
+          </div>
+        </div>
+
+        <!-- KPI: Girati a Umano -->
+        <div class="kpi-card" id="kpi-card-umano">
+          <div class="kpi-card-main">
+            <div class="kpi-icon-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-label" data-i18n="dashboard:kpi.escalated_human">Girati a un umano</span>
+              <span class="kpi-value" id="stat-umano">0</span>
+            </div>
+          </div>
+          <div class="kpi-card-middle">
+            <span class="kpi-trend-badge trend-neutral" id="trend-umano">
+              <span class="trend-icon">—</span>
+              <span class="trend-text" data-i18n="dashboard:kpi.trend_none">Nessuna escalation</span>
+            </span>
+            <div class="kpi-sparkline-svg" id="sparkline-umano"></div>
+          </div>
+          <div class="kpi-sparkline-footer">
+            <span class="kpi-sparkline-caption" data-i18n="dashboard:kpi.sparkline_caption">Ultimi 7 giorni</span>
+            <span class="kpi-sparkline-val" id="sparkline-umano-val">0 <span data-i18n="dashboard:kpi.sparkline_unit">sett.</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panorama-grid">
+
+        <div class="dash-card priority-card" id="priority-section">
+          <div class="dash-card-header">
+            <div class="dash-card-header-left">
+              <svg class="dash-card-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M18 9.5a6 6 0 1 0-12 0v2.9c0 .6-.24 1.18-.66 1.6L4.1 15.24c-.63.63-.19 1.76.71 1.76h14.38c.9 0 1.34-1.13.71-1.76l-1.24-1.24a2.26 2.26 0 0 1-.66-1.6V9.5Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>
+              <span class="dash-card-title" data-i18n="dashboard:overview.attention_title">Richiede la tua attenzione</span>
+            </div>
+            <span class="priority-count-badge" id="priority-count-badge"></span>
+          </div>
+          <ul class="priority-list" id="priority-list"></ul>
+          <a class="priority-inbox-link" id="priority-inbox-link" href="/app/inbox" data-app-view="inbox" data-view="inbox">
+            <span class="priority-inbox-link-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M4 6.5h16v11H4v-11Z"/><path d="M4 8l8 6 8-6"/></svg>
+              <span data-i18n="dashboard:overview.go_to_inbox">Vai all'Inbox</span>
+            </span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="m9 18 6-6-6-6"/></svg>
+          </a>
+        </div>
+
+        <div class="dash-card activity-card">
+          <div class="dash-card-header">
+            <div class="dash-card-header-left">
+              <svg class="dash-card-header-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>
+              <span class="dash-card-title" data-i18n="dashboard:overview.recent_activity">Attività recente</span>
+            </div>
+            <a class="activity-view-all-btn" id="activity-view-all-btn" href="/app/inbox" data-app-view="inbox" data-view="inbox">
+              <span data-i18n="dashboard:overview.view_all">Visualizza tutte</span> →
+            </a>
+          </div>
+          <ul class="ticket-list" id="ticket-list"></ul>
+        </div>
+
+      </div>
+
+      <!-- Report e andamento: consultazione, non navigazione (ex vista Report) -->
+      <div class="report-panoramica" id="report-panoramica">
+        <h2 class="report-panoramica-title" data-i18n="dashboard:overview.reports_title">Report e andamento</h2>
+
+          <div class="dash-card chart-card" id="chart-section" aria-label="Andamento dei messaggi" data-i18n-aria="dashboard:overview.chart_aria" hidden>
+          <div class="dash-card-header">
+            <span class="dash-card-title" data-i18n="dashboard:overview.messages_chart_title">Messaggi: andamento ultimi 7 giorni</span>
+          </div>
+          <div class="chart-legend">
+            <span class="chart-legend-item"><span class="chart-legend-dot is-f6d31a338ad4"></span><span data-i18n="dashboard:overview.received">Ricevuti</span></span>
+            <span class="chart-legend-item"><span class="chart-legend-dot is-2bb8c300e8e5"></span><span data-i18n="dashboard:overview.handled_by_ai">Gestiti da AI</span></span>
+          </div>
+          <div class="chart-svg-wrap" id="chart-svg-wrap"></div>
+        </div>
+
+        <div class="insights-grid" id="insights-grid" hidden>
+          <div class="insight-card insights-card" aria-label="Insight principali" data-i18n-aria="dashboard:overview.insights_aria">
+            <div class="insight-card-header">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4a3 3 0 0 0-3 3v.2A3 3 0 0 0 4.5 10a3 3 0 0 0 1 5.6A3 3 0 0 0 8 20a3 3 0 0 0 4-2.6M9 4a3 3 0 0 1 3 2.6M9 4v13.4M15 4a3 3 0 0 1 3 3v.2a3 3 0 0 1 1.5 2.8 3 3 0 0 1-1 5.6A3 3 0 0 1 16 20a3 3 0 0 1-4-2.6M15 4v13.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span data-i18n="dashboard:overview.key_insights">Insights principali</span>
+            </div>
+            <ul class="insight-list" id="insight-list"></ul>
+          </div>
+        </div>
+
+        <div class="dash-card report-card" id="report-section" hidden>
+          <div class="dash-card-header">
+            <span class="dash-card-title" data-i18n="dashboard:overview.daily_report">Report giornaliero</span>
+            <span class="dash-card-meta" id="report-date"></span>
+          </div>
+          <div class="report-stats">
+            <div class="report-stat">
+              <span class="report-stat-value" id="report-totale">0</span>
+              <span class="report-stat-label" data-i18n="dashboard:overview.messages">messaggi</span>
+            </div>
+            <div class="report-stat">
+              <span class="report-stat-value" id="report-ai">0</span>
+              <span class="report-stat-label" data-i18n="dashboard:overview.ai_handled_short">gestiti AI</span>
+            </div>
+            <div class="report-stat">
+              <span class="report-stat-value" id="report-umano">0</span>
+              <span class="report-stat-label" data-i18n="dashboard:overview.handed_to_human">girati a umano</span>
+            </div>
+          </div>
+          <div class="report-body" id="report-body">
+            <p class="report-body-text" id="report-analisi"></p>
+          </div>
+          <div class="report-suggestions" id="report-suggestions" hidden>
+            <span class="report-suggestions-title" data-i18n="dashboard:overview.suggestions">Suggerimenti</span>
+            <ul class="report-suggestions-list" id="report-suggestions-list"></ul>
+          </div>
+          <div class="report-footer">
+            <span class="report-timestamp" id="report-timestamp"></span>
+            <div class="report-footer-actions">
+              <button type="button" class="report-refresh" id="report-print" aria-label="Stampa il report" data-i18n-aria="dashboard:overview.print_aria">
+                <span data-i18n="dashboard:overview.print">Stampa</span>
+              </button>
+              <button type="button" class="report-refresh" id="report-export-csv" aria-label="Esporta prenotazioni in CSV" data-i18n-aria="dashboard:overview.export_aria">
+                <span data-i18n="dashboard:bookings.export_csv">Esporta CSV</span>
+              </button>
+              <button type="button" class="report-refresh" id="report-refresh" aria-label="Rigenera report" data-i18n-aria="dashboard:overview.regenerate_aria">
+                <span data-i18n="dashboard:overview.regenerate">Rigenera</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="report-empty-hint" id="report-empty-hint" data-i18n="dashboard:overview.empty_report">Nessun report ancora generato per oggi.</p>
+      </div>
+    </section>

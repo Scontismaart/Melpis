@@ -74,6 +74,7 @@ jobs:
           npm run build:i18n
           npm run lint:web
           npm run test:web
+          npm run check:dashboard
           npm run test:i18n
           npm run audit:csp
           npm run audit:assets

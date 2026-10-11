@@ -1,0 +1,258 @@
+    <!-- ---------- VISTA: RECENSIONI ---------- -->
+    <section class="view view-hidden" data-view-panel="recensioni">
+      <div class="view-header-bar">
+        <div>
+          <h2 class="view-title" data-i18n="dashboard:views.reviews_title">Gestione Recensioni &amp; Feedback</h2>
+          <p class="view-intro" data-i18n="dashboard:views.reviews_intro">Analizza le recensioni dei tuoi clienti da Google, TripAdvisor o inserimento manuale. L'AI valuta il sentiment, identifica i temi chiave e prepara bozze di risposta professionali.</p>
+        </div>
+        <div class="review-header-stats" id="review-header-stats">
+          <span class="review-stat-pill" id="review-stat-count">0 recensioni</span>
+          <span class="review-stat-pill is-1de2b011518d" id="review-stat-rating"><svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg><span>0.0</span></span>
+          <button type="button" class="btn-refresh-reviews" id="btn-refresh-reviews" title="Aggiorna recensioni">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="recensioni-layout">
+        <!-- Colonna Principale (Form + Bozza Attiva + Storico) -->
+        <div class="recensioni-main">
+          
+          <!-- Card Inserimento / Analisi Rapida -->
+          <div class="dash-card review-compose-card">
+            <div class="dash-card-header">
+              <div class="compose-header-left">
+                <span class="dash-card-title" data-i18n="dashboard:reviews.compose_title">Analizza nuova recensione</span>
+                <span class="dash-card-sub" data-i18n="dashboard:reviews.compose_intro">Incolla il testo per estrarre sentiment e generare la bozza di risposta con l'AI</span>
+              </div>
+            </div>
+            
+            <textarea class="review-textarea" id="review-text" rows="3" placeholder="Incolla qui il testo della recensione ricevuta (es. 'Cibo eccellente e personale molto cortese, ma l\'attesa è stata un po\' lunga...')..." data-i18n-placeholder="dashboard:reviews.text_placeholder" data-i18n-aria="dashboard:reviews.text_placeholder"></textarea>
+            
+            <div class="review-controls-bar">
+              <div class="review-input-group author-group">
+                <label for="review-author" class="review-control-label">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                  <span data-i18n="dashboard:reviews.author_label">Autore:</span>
+                </label>
+                <input type="text" class="review-author-input" id="review-author" placeholder="Nome cliente (opzionale)" data-i18n-placeholder="dashboard:reviews.author_placeholder">
+              </div>
+
+              <div class="review-input-group stars-group">
+                <label for="review-stars" class="review-control-label">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                  <span data-i18n="dashboard:reviews.rating_label">Valutazione:</span>
+                </label>
+                <select class="review-stars-select" id="review-stars">
+                  <option value="" data-i18n="dashboard:reviews.select_rating">Seleziona valutazione...</option>
+                  <option value="5" data-i18n="dashboard:reviews.rating_5">5 stelle — Eccellente</option>
+                  <option value="4" data-i18n="dashboard:reviews.rating_4">4 stelle — Buono</option>
+                  <option value="3" data-i18n="dashboard:reviews.rating_3">3 stelle — Medio</option>
+                  <option value="2" data-i18n="dashboard:reviews.rating_2">2 stelle — Scarso</option>
+                  <option value="1" data-i18n="dashboard:reviews.rating_1">1 stella — Insufficiente</option>
+                </select>
+              </div>
+
+              <div class="review-input-group source-group">
+                <label for="review-source" class="review-control-label">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <span data-i18n="dashboard:reviews.channel_label">Canale:</span>
+                </label>
+                <select class="review-source-select" id="review-source">
+                  <option value="manuale" data-i18n="dashboard:reviews.manual_direct">Manuale / Diretto</option>
+                  <option value="google">Google Business</option>
+                  <option value="tripadvisor">TripAdvisor</option>
+                </select>
+              </div>
+
+              <button type="button" class="review-analyze-btn" id="review-analyze">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                <span data-i18n="dashboard:reviews.analyze_btn">Analizza e genera bozza</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Card Bozza & Dettaglio Risposta Attiva (Output Area - Problema 1) -->
+          <div class="dash-card review-draft-panel" id="review-draft" hidden>
+            <div class="draft-panel-header">
+              <div class="draft-title-group">
+                <div class="draft-icon-bubble">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <div>
+                  <div class="draft-title-row">
+                    <span class="draft-card-title" id="draft-panel-title">Bozza di risposta generata</span>
+                    <span class="review-status-badge" id="draft-status-badge">Bozza pronta</span>
+                  </div>
+                  <span class="draft-card-sub" id="draft-meta-info">Autore sconosciuto • Canale Manuale</span>
+                </div>
+              </div>
+              <div class="draft-header-badges">
+                <span class="review-sentiment-badge" id="review-draft-sentiment">Positivo</span>
+                <span class="review-cat-badge" id="review-draft-cat">Generico</span>
+                <div class="draft-actions-header">
+                  <button type="button" class="btn-close-draft" id="btn-close-draft" title="Chiudi dettaglio" data-i18n-title="dashboard:reviews.close_detail" aria-label="Chiudi dettaglio" data-i18n-aria="dashboard:reviews.close_detail">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Box Recensione Originale -->
+            <div class="review-original-box" id="review-original-box">
+              <span class="original-box-label" data-i18n="dashboard:reviews.original_text">Testo recensione cliente:</span>
+              <p class="original-box-text" id="review-original-text"></p>
+            </div>
+
+            <!-- Box Risposta AI -->
+            <div class="review-response-box">
+              <div class="response-box-header">
+                <span class="response-box-label" data-i18n="dashboard:reviews.reply_draft">Bozza di risposta suggerita dall'AI:</span>
+                <span class="response-editable-hint" data-i18n="dashboard:reviews.editable_hint">(Modificabile prima dell'approvazione)</span>
+              </div>
+              <textarea class="review-draft-textarea" id="review-draft-text" rows="4" placeholder="La bozza di risposta apparirà qui..." data-i18n-placeholder="dashboard:reviews.draft_placeholder"></textarea>
+              
+              <div class="review-draft-actions">
+                <div class="draft-action-feedback" id="draft-feedback-text"></div>
+                <div class="draft-buttons-group">
+                  <button type="button" class="btn-review-copy" id="review-copy">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span data-i18n="dashboard:reviews.copy_text">Copia testo</span>
+                  </button>
+                  <button type="button" class="btn-review-approve" id="review-approve">
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span data-i18n="dashboard:reviews.approve_reply">Approva risposta</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card Storico Recensioni Gestite (Problema 2) -->
+          <div class="dash-card review-history-card" id="review-history-card">
+            <div class="dash-card-header history-header">
+              <div>
+                <span class="dash-card-title" data-i18n="dashboard:reviews.history_title">Storico Recensioni</span>
+                <span class="dash-card-sub" data-i18n="dashboard:reviews.history_intro">Consulta tutte le recensioni analizzate, lo stato delle risposte e filtra per sentiment</span>
+              </div>
+              <div class="history-quick-counts" id="history-quick-counts">
+                <!-- Badges contatori -->
+              </div>
+            </div>
+
+            <!-- Toolbar Filtri e Ricerca -->
+            <div class="review-toolbar">
+              <div class="review-tabs" id="review-filter-tabs">
+                <button type="button" class="review-tab active" data-tab="tutte"><span data-i18n="dashboard:reviews.filter_all">Tutte</span> <span class="tab-count" id="count-all">0</span></button>
+                <button type="button" class="review-tab" data-tab="bozza"><span data-i18n="dashboard:reviews.filter_pending">Da approvare</span> <span class="tab-count" id="count-pending">0</span></button>
+                <button type="button" class="review-tab" data-tab="approvata"><span data-i18n="dashboard:reviews.filter_approved">Approvate</span> <span class="tab-count" id="count-approved">0</span></button>
+                <button type="button" class="review-tab" data-tab="negativa"><span data-i18n="dashboard:reviews.filter_urgent">Richiede attenzione</span> <span class="tab-count" id="count-urgent">0</span></button>
+              </div>
+
+              <div class="review-search-wrap">
+                <div class="search-input-box">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input type="text" class="review-search-input" id="review-search-input" placeholder="Cerca per autore o testo..." data-i18n-placeholder="dashboard:reviews.search_placeholder" data-i18n-aria="dashboard:reviews.search_placeholder">
+                </div>
+                <select class="review-filter-source" id="review-filter-source" data-i18n-aria="dashboard:reviews.all_sources">
+                  <option value="" data-i18n="dashboard:reviews.all_sources">Tutti i canali</option>
+                  <option value="google">Google</option>
+                  <option value="tripadvisor">TripAdvisor</option>
+                  <option value="manuale">Manuale</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Lista Storico Recensioni -->
+            <div class="review-history-list" id="review-history-list">
+              <!-- Render dinamico o empty state -->
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Colonna Laterale (Trends & Analytics - Problema 3) -->
+        <div class="recensioni-sidebar">
+          
+          <!-- Card 1: Score & Distribuzione Sentiment -->
+          <div class="dash-card review-stats-sidebar-card">
+            <div class="dash-card-header">
+              <span class="dash-card-title" data-i18n="dashboard:reviews.sentiment_title">Sentiment &amp; Valutazione</span>
+            </div>
+            
+            <div class="review-overall-rating" id="review-overall-rating">
+              <div class="rating-number-big" id="sidebar-rating-num">--</div>
+              <div class="rating-stars-visual" id="sidebar-rating-stars">★★★★★</div>
+              <span class="rating-total-label" id="sidebar-rating-total" data-i18n="dashboard:reviews.rating_total">Basato su 0 recensioni</span>
+            </div>
+
+            <div class="sentiment-bars-wrap" id="sentiment-bars-wrap">
+              <div class="sentiment-bar-row">
+                <div class="sentiment-bar-label-wrap">
+                  <span class="sentiment-dot pos"></span>
+                  <span class="sentiment-bar-name" data-i18n="dashboard:reviews.positive">Positive</span>
+                  <span class="sentiment-bar-pct" id="pct-pos-val">0%</span>
+                </div>
+                <div class="sentiment-track"><div class="sentiment-fill fill-pos is-72dd1572d65e" id="bar-pos-fill"></div></div>
+              </div>
+
+              <div class="sentiment-bar-row">
+                <div class="sentiment-bar-label-wrap">
+                  <span class="sentiment-dot neut"></span>
+                  <span class="sentiment-bar-name" data-i18n="dashboard:reviews.neutral">Neutre</span>
+                  <span class="sentiment-bar-pct" id="pct-neut-val">0%</span>
+                </div>
+                <div class="sentiment-track"><div class="sentiment-fill fill-neut is-72dd1572d65e" id="bar-neut-fill"></div></div>
+              </div>
+
+              <div class="sentiment-bar-row">
+                <div class="sentiment-bar-label-wrap">
+                  <span class="sentiment-dot neg"></span>
+                  <span class="sentiment-bar-name" data-i18n="dashboard:reviews.negative">Negative</span>
+                  <span class="sentiment-bar-pct" id="pct-neg-val">0%</span>
+                </div>
+                <div class="sentiment-track"><div class="sentiment-fill fill-neg is-72dd1572d65e" id="bar-neg-fill"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Top Trends & Temi Ricorrenti (Problema 3) -->
+          <div class="dash-card trends-card">
+            <div class="dash-card-header">
+              <span class="dash-card-title" data-i18n="dashboard:reviews.trends_title">Top Trends &amp; Temi</span>
+            </div>
+            <ul class="trend-list" id="trend-list"></ul>
+          </div>
+
+          <!-- Card 3: Canali e Sincronizzazione -->
+          <div class="dash-card channels-card">
+            <div class="dash-card-header">
+              <span class="dash-card-title" data-i18n="dashboard:reviews.channels_title">Canali Collegati</span>
+            </div>
+            <div class="channel-status-list">
+              <div class="channel-status-item">
+                <div class="channel-item-left">
+                  <span class="channel-badge-icon google">G</span>
+                  <div>
+                    <span class="channel-name">Google Business</span>
+                    <span class="channel-desc" data-i18n="dashboard:reviews.google_sync">Sincronizzazione recensioni</span>
+                  </div>
+                </div>
+                <span class="channel-badge manual" id="reviews-google-summary-status" data-state="loading" aria-live="polite">Verifica stato…</span>
+              </div>
+              <div class="channel-status-item">
+                <div class="channel-item-left">
+                  <span class="channel-badge-icon tripadvisor">TA</span>
+                  <div>
+                    <span class="channel-name">TripAdvisor</span>
+                    <span class="channel-desc" data-i18n="dashboard:reviews.import_replies">Importazione &amp; Risposte</span>
+                  </div>
+                </div>
+                <span class="channel-badge manual" data-i18n="dashboard:reviews.manual">Manuale</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>

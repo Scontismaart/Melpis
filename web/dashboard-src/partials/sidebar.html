@@ -1,0 +1,120 @@
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-header-row">
+        <span class="sidebar-brand-name">Melpis</span>
+        <div class="sidebar-header-actions">
+          <div class="global-search" id="global-search">
+            <button type="button" class="global-search-toggle" id="global-search-toggle" aria-label="Ricerca globale" data-i18n-aria="dashboard:topbar.search_aria" title="Ricerca globale" data-i18n-title="dashboard:topbar.search_aria" aria-expanded="false" aria-controls="global-search-input">
+              <svg class="global-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+            <input type="search" id="global-search-input" placeholder="Cerca ticket, prenotazioni, clienti..." data-i18n-placeholder="dashboard:topbar.search_placeholder" aria-label="Ricerca globale" data-i18n-aria="dashboard:topbar.search_aria" autocomplete="off" hidden>
+            <div class="global-search-results" id="global-search-results" hidden></div>
+          </div>
+          <div class="notif-wrap">
+            <button type="button" class="bell-btn" id="notif-bell" aria-haspopup="menu" aria-expanded="false" aria-controls="notif-panel" aria-label="Centro notifiche" data-i18n-aria="dashboard:topbar.notifications" title="Novità non ancora viste" data-i18n-title="dashboard:topbar.notifications_title">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M18 9.5a6 6 0 1 0-12 0v2.9c0 .6-.24 1.18-.66 1.6L4.1 15.24c-.63.63-.19 1.76.71 1.76h14.38c.9 0 1.34-1.13.71-1.76l-1.24-1.24a2.26 2.26 0 0 1-.66-1.6V9.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 20a2 2 0 0 0 4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+              <span class="bell-badge" id="bell-badge" hidden></span>
+            </button>
+            <div class="notif-panel" id="notif-panel" role="menu" aria-label="Elenco notifiche" hidden>
+              <span class="notif-panel-title" data-i18n="dashboard:topbar.notifications_title">Notifiche</span>
+              <div class="notif-list" id="notif-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <nav class="sidebar-nav" id="sidebar-nav" aria-label="Sezioni del pannello" data-i18n-aria="dashboard:sidebar.nav_aria">
+      <span class="nav-group-label" aria-hidden="true" data-i18n="dashboard:sidebar.group_main">Principale</span>
+      <a class="nav-item active" href="/app/overview" data-app-view="panoramica" data-view="panoramica" aria-current="page">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.8"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.5" stroke="currentColor" stroke-width="1.8"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_panoramica">Panoramica</span>
+      </a>
+      <a class="nav-item" href="/app/inbox" data-app-view="inbox" data-view="inbox">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 6.5h16v11H4v-11Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 8l8 6 8-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_inbox">Inbox</span> <span class="nav-badge" data-notification-badge="inbox" hidden></span>
+      </a>
+      <a class="nav-item" href="/app/bookings" data-app-view="prenotazioni" data-view="prenotazioni">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 3.5v3M17 3.5v3M4.5 9h15M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_prenotazioni">Prenotazioni</span> <span class="nav-badge" data-notification-badge="prenotazioni" hidden></span>
+      </a>
+      <a class="nav-item" href="/app/reviews" data-app-view="recensioni" data-view="recensioni">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5l2.66 5.4 5.96.87-4.31 4.2 1.02 5.93L12 17l-5.33 2.9 1.02-5.93-4.31-4.2 5.96-.87L12 3.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_recensioni">Recensioni</span> <span class="nav-badge" data-notification-badge="recensioni" hidden></span>
+      </a>
+      <a class="nav-item" href="/app/team" data-app-view="team" data-view="team" id="nav-item-team">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.8"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_team">Team &amp; Collaboratori</span>
+      </a>
+
+      <span class="nav-group-label" aria-hidden="true" data-i18n="dashboard:sidebar.group_assistant">Assistente</span>
+      <a class="nav-item" href="/app/ai-simulator" data-app-view="assistente" data-view="assistente">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v10H9l-4 4v-4H4v-10Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_assistente">Simulatore AI</span>
+      </a>
+      <a class="nav-item" href="/app/knowledge" data-app-view="conoscenza" data-view="conoscenza">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21V5.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20M8.5 7.5h7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_conoscenza">Conoscenza</span> <span class="nav-badge" data-notification-badge="conoscenza" hidden></span>
+      </a>
+      <a class="nav-item" href="/app/ai-settings" data-app-view="configurazione-ai" data-view="configurazione-ai">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="14" rx="3" stroke="currentColor" stroke-width="1.8"/><circle cx="8.5" cy="12" r="1.5" fill="currentColor"/><circle cx="15.5" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v4M9 16h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </span>
+        <span data-i18n="dashboard:sidebar.nav_configurazione_ai">Configurazione AI</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-account-wrap">
+      <div class="sidebar-account-container">
+        <button type="button" class="sidebar-account-btn" id="sidebar-account-trigger" aria-haspopup="menu" aria-expanded="false" aria-controls="sidebar-account-dropdown">
+          <span class="sidebar-avatar-dot" id="sidebar-avatar-initial" aria-hidden="true">U</span>
+          <div class="sidebar-account-info">
+            <span class="sidebar-account-email" id="sidebar-account-email">utente@melpis.it</span>
+            <span class="sidebar-account-plan" id="sidebar-account-plan">Piano e abbonamento</span>
+            <span id="business-name" hidden></span>
+          </div>
+          <svg class="sidebar-account-chevron" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="sidebar-account-dropdown" id="sidebar-account-dropdown" role="menu" hidden>
+          <a class="sidebar-dropdown-item" id="sidebar-menu-impostazioni" href="/app/settings" data-app-view="impostazioni" data-view="impostazioni" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.55a.5.5 0 0 0 .12-.64l-1.9-3.3a.5.5 0 0 0-.61-.22l-2.36.95a7.6 7.6 0 0 0-2.6-1.5L13.7.94a.5.5 0 0 0-.5-.42h-3.8a.5.5 0 0 0-.5.42l-.35 2.5c-.96.35-1.83.87-2.6 1.5l-2.36-.95a.5.5 0 0 0-.6.22l-1.91 3.3a.5.5 0 0 0 .12.64l2.01 1.56a7.6 7.6 0 0 0 0 3L2.2 14.27a.5.5 0 0 0-.12.64l1.9 3.3c.13.21.39.3.61.21l2.36-.95c.77.64 1.64 1.16 2.6 1.51l.35 2.5c.04.24.25.42.5.42h3.8c.25 0 .46-.18.5-.42l.35-2.5c.96-.35 1.83-.87 2.6-1.5l2.36.94c.22.09.48 0 .6-.22l1.91-3.3a.5.5 0 0 0-.12-.63l-2.01-1.57Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+            <span data-i18n="dashboard:sidebar.menu_impostazioni">Impostazioni</span>
+          </a>
+          <button type="button" class="sidebar-dropdown-item" id="sidebar-menu-piano" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><rect x="3" y="5.5" width="18" height="13" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M6.5 14.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span data-i18n="dashboard:sidebar.menu_piano">Piano e abbonamento</span>
+          </button>
+          <div class="sidebar-dropdown-divider"></div>
+          <div class="sidebar-dropdown-lang-item">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="currentColor" stroke-width="1.8"/></svg>
+            <select class="sidebar-lang-select" id="sidebar-lang-select" aria-label="Seleziona lingua">
+              <option value="it">🇮🇹 Italiano</option>
+              <option value="en">🇬🇧 English</option>
+              <option value="es">🇪🇸 Español</option>
+              <option value="fr">🇫🇷 Français</option>
+              <option value="de">🇩🇪 Deutsch</option>
+            </select>
+          </div>
+          <div class="sidebar-dropdown-divider"></div>
+          <button type="button" class="sidebar-dropdown-item logout" id="sidebar-logout-btn" role="menuitem">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M14 4h4v16h-4M10 8l-4 4 4 4M6 12h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span data-i18n="dashboard:sidebar.menu_logout">Esci</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>

@@ -1,0 +1,1156 @@
+    <!-- ---------- VISTA: IMPOSTAZIONI & ACCOUNT (due riquadri con sotto-sidebar) ---------- -->
+    <section class="view view-hidden" data-view-panel="impostazioni">
+      <div class="settings-shell">
+        <!-- SOTTO-SIDEBAR SINISTRA -->
+        <aside class="settings-subnav" aria-label="Categorie impostazioni">
+          <div class="settings-search-wrap">
+            <svg class="settings-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input type="search" id="settings-search-input" placeholder="Cerca nelle impostazioni…" aria-label="Cerca nelle impostazioni" autocomplete="off">
+          </div>
+
+          <div class="settings-nav-groups" id="settings-nav-groups">
+            <!-- Gruppo GENERALE -->
+            <div class="settings-nav-group">
+              <span class="settings-nav-group-label">Generale</span>
+              <button type="button" class="settings-cat-btn active" data-settings-cat-btn="generale" data-keywords="fuso orario timezone lingua formato preferenze">
+                <span class="settings-cat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3.1" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.55a.5.5 0 0 0 .12-.64l-1.9-3.3a.5.5 0 0 0-.61-.22l-2.36.95a7.6 7.6 0 0 0-2.6-1.5L13.7.94a.5.5 0 0 0-.5-.42h-3.8a.5.5 0 0 0-.5.42l-.35 2.5c-.96.35-1.83.87-2.6 1.5l-2.36-.95a.5.5 0 0 0-.6.22l-1.91 3.3a.5.5 0 0 0 .12.64l2.01 1.56a7.6 7.6 0 0 0 0 3L2.2 14.27a.5.5 0 0 0-.12.64l1.9 3.3c.13.21.39.3.61.21l2.36-.95c.77.64 1.64 1.16 2.6 1.51l.35 2.5c.04.24.25.42.5.42h3.8c.25 0 .46-.18.5-.42l.35-2.5c.96-.35 1.83-.87 2.6-1.5l2.36.94c.22.09.48 0 .6-.22l1.91-3.3a.5.5 0 0 0-.12-.63l-2.01-1.57Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+                </span>
+                <span>Generali</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="sicurezza" data-keywords="sicurezza password email credenziali cambio accesso">
+                <span class="settings-cat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </span>
+                <span>Sicurezza</span>
+              </button>
+            </div>
+
+            <!-- Gruppo INTEGRAZIONI -->
+            <div class="settings-nav-group">
+              <span class="settings-nav-group-label">Integrazioni</span>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="whatsapp" data-keywords="whatsapp business meta canale chat messaggi numero">
+                <span class="settings-cat-icon icon-wa" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 1 0-4.5-1.2L3 21l1.2-4.5A9 9 0 0 0 12 21Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 9.5c.3-.7.8-.7 1.1-.7h.6c.2 0 .4.1.5.4.3.7.8 1.9.8 2 0 .1 0 .3-.1.4l-.5.6c-.1.1-.2.2-.1.4.3.5.7 1 1.2 1.5.5.5 1 .9 1.5 1.2.2.1.3 0 .4-.1l.6-.5c.1-.1.3-.1.4-.1.1 0 1.3.5 2 .8.3.1.4.3.4.5v.6c0 .3 0 .8-.7 1.1-.8.4-1.8.2-3.3-.6-1.5-.8-2.8-2.1-3.6-3.6-.8-1.5-1-2.5-.6-3.3Z" fill="currentColor"/></svg>
+                </span>
+                <span>WhatsApp Business</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="instagram" data-keywords="instagram direct dm meta social">
+                <span class="settings-cat-icon icon-ig" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>
+                </span>
+                <span>Instagram Direct</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="calendar" data-keywords="google calendar prenotazioni sync sincronizzazione agenda">
+                <span class="settings-cat-icon icon-cal" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M3 9h18" stroke="currentColor" stroke-width="1.8"/><path d="M8 1v3M16 1v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </span>
+                <span>Google Calendar</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="reviews" data-keywords="google recensioni business reviews feedback reputazione sync gmb stelle">
+                <span class="settings-cat-icon icon-reviews" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <span>Google Recensioni</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="booking-pms" data-keywords="gestionale pms prenotazioni simplybook calcom cal.com apaleo beds24 zak wubook booking agenda motore">
+                <span class="settings-cat-icon icon-booking-pms" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="1.8"/><path d="m9 16 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <span>Gestionale (PMS)</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="airtable" data-keywords="airtable crm database tabelle sync base pat webhook fogli dati">
+                <span class="settings-cat-icon icon-airtable" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 2 7.5l10 4.5 10-4.5L12 3Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m2 12 10 4.5 10-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="m2 16.5 10 4.5 10-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <span>Airtable</span>
+              </button>
+            </div>
+
+            <!-- Gruppo ACCOUNT -->
+            <div class="settings-nav-group">
+              <span class="settings-nav-group-label">Account</span>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="piano" data-keywords="piano abbonamento stripe upgrade prezzi rinnovo essenziale crescita scala">
+                <span class="settings-cat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="5.5" width="18" height="13" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M3 10h18M6.5 14.5h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </span>
+                <span>Piano e abbonamento</span>
+              </button>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="fatturazione" data-keywords="fatturazione pagamenti fatture stripe portale ricevute metodo pagamento disdetta cancellazione">
+                <span class="settings-cat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="1.8"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </span>
+                <span>Fatturazione</span>
+              </button>
+            </div>
+
+            <!-- Gruppo SICUREZZA E LOG -->
+            <div class="settings-nav-group">
+              <span class="settings-nav-group-label">Sicurezza e Log</span>
+              <button type="button" class="settings-cat-btn" data-settings-cat-btn="audit" data-keywords="audit registro log attività eventi storico modifiche">
+                <span class="settings-cat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" stroke-width="1.8"/><rect x="9" y="3" width="6" height="4" rx="1" stroke="currentColor" stroke-width="1.8"/><path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </span>
+                <span>Registro Audit</span>
+              </button>
+            </div>
+          </div>
+
+          <p class="settings-nav-empty" id="settings-search-empty" hidden>Nessuna voce trovata</p>
+        </aside>
+
+        <!-- AREA CONTENUTO DESTRA -->
+        <main class="settings-content-area" id="settings-content-area">
+
+          <!-- PANNELLO: GENERALI -->
+          <div class="settings-panel" data-settings-panel="generale">
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title" data-i18n="settings.tabs.general">Generali</h2>
+              <p class="settings-panel-subtitle" data-i18n="settings.general_section.subtitle">Localizzazione, fuso orario e preferenze operative del pannello.</p>
+            </header>
+
+            <div class="dash-card settings-card">
+              <div class="dash-card-header">
+                <span class="dash-card-title" data-i18n="settings.timezone_section.title">Localizzazione e Fuso orario</span>
+              </div>
+              <p class="settings-help" data-i18n="settings.timezone_section.description">Il fuso orario è usato per reminder prenotazioni, report di fine giornata e calcolo degli SLA.</p>
+              <div class="settings-field-group">
+                <label class="wizard-label" for="settings-timezone" data-i18n="settings.timezone_section.label">Fuso orario dell'attività</label>
+                <div class="wizard-inline">
+                  <select class="wizard-input is-c388235ac698" id="settings-timezone"></select>
+                  <button type="button" class="report-refresh" id="settings-timezone-save" data-i18n="settings.timezone_section.save_btn" disabled>Salva fuso orario</button>
+                </div>
+                <p class="security-status" id="settings-timezone-status" role="status"></p>
+              </div>
+            </div>
+
+            <div class="dash-card settings-card">
+              <div class="dash-card-header">
+                <span class="dash-card-title" data-i18n="settings.language_section.title">Lingua e Formato</span>
+              </div>
+              <p class="settings-help" data-i18n="settings.language_section.description">Lingua predefinita per l'interfaccia, data e report operativi.</p>
+              <div class="settings-row-item">
+                <div>
+                  <strong data-i18n="settings.language_section.select_label">Lingua interfaccia</strong>
+                  <p class="settings-help-sm" data-i18n="settings.language_section.note">La preferenza viene applicata immediatamente alla tua sessione.</p>
+                </div>
+                <div class="wizard-inline">
+                  <select class="wizard-input is-c388235ac698" id="settings-lang-select" aria-label="Lingua interfaccia">
+                    <option value="it">Italiano (IT)</option>
+                    <option value="en">English (EN)</option>
+                    <option value="es">Español (ES)</option>
+                    <option value="fr">Français (FR)</option>
+                    <option value="de">Deutsch (DE)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARD 3: ASPETTO E TEMA -->
+            <div class="dash-card settings-card">
+              <div class="dash-card-header">
+                <div class="is-378e76576ae0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                  <span class="dash-card-title" data-i18n="settings:appearance.title">Aspetto e Tema</span>
+                </div>
+              </div>
+              <p class="settings-help" data-i18n="settings:appearance.description">Personalizza l'aspetto visivo dell'interfaccia. La modalità sistema adatterà i colori in base al tuo dispositivo.</p>
+              <div class="settings-theme-segmented" id="theme-segmented-control" role="radiogroup" aria-label="Selezione tema" data-i18n-aria="settings:appearance.aria">
+                <button type="button" class="theme-seg-btn active" data-theme-val="light" role="radio" aria-checked="true">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                  <span data-i18n="settings:appearance.light">Chiaro</span>
+                </button>
+                <button type="button" class="theme-seg-btn" data-theme-val="dark" role="radio" aria-checked="false">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                  <span data-i18n="settings:appearance.dark">Scuro</span>
+                </button>
+                <button type="button" class="theme-seg-btn" data-theme-val="system" role="radio" aria-checked="false">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  <span data-i18n="settings:appearance.system">Sistema</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: SICUREZZA -->
+          <div class="settings-panel" data-settings-panel="sicurezza" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Sicurezza account</h2>
+              <p class="settings-panel-subtitle">Gestione credenziali di accesso, password e indirizzo email registrato.</p>
+            </header>
+
+            <div class="security-grid">
+              <!-- CARD 1: CAMBIO PASSWORD -->
+              <div class="security-card">
+                <div class="security-card-header">
+                  <div class="security-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="security-card-title">Password di accesso</h3>
+                    <p class="security-card-desc">Aggiorna la chiave segreta per l'autenticazione.</p>
+                  </div>
+                </div>
+
+                <div class="security-req-row">
+                  <span class="security-req-pill">Minimo 10 caratteri</span>
+                  <span class="security-req-pill">1 simbolo o numero</span>
+                </div>
+
+                <form id="security-password-form" autocomplete="off" class="is-379fabac31b1">
+                  <div>
+                    <label class="wizard-label is-f3e91bf1fae3" for="security-password-current">Password attuale</label>
+                    <input class="wizard-input is-15e6a03c581f" id="security-password-current" type="password" autocomplete="current-password" placeholder="Inserisci la password in uso" required>
+                  </div>
+                  <div>
+                    <label class="wizard-label is-f3e91bf1fae3" for="security-password">Nuova password</label>
+                    <input class="wizard-input is-15e6a03c581f" id="security-password" type="password" autocomplete="new-password" placeholder="Inserisci nuova password" required>
+                  </div>
+                  <div>
+                    <label class="wizard-label is-f3e91bf1fae3" for="security-password-confirm">Conferma nuova password</label>
+                    <input class="wizard-input is-15e6a03c581f" id="security-password-confirm" type="password" autocomplete="new-password" placeholder="Ripeti la nuova password" required>
+                  </div>
+                  <button type="submit" class="review-analyze security-submit is-a72e2fe48c52">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    <span>Aggiorna password</span>
+                  </button>
+                  <p class="security-status" id="security-password-status" role="status"></p>
+                </form>
+
+                <div class="security-email-reset-divider is-ce67deaa584d"></div>
+
+                <div class="security-reset-email-box">
+                  <div class="is-7483a1f1059e">Non ricordi la password attuale?</div>
+                  <button type="button" class="btn-link-action is-b2828b4f5407" id="security-send-reset-btn">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                    <span>Invia link di reset alla mia email</span>
+                  </button>
+                  <p class="security-status is-70ae72af2fce" id="security-reset-email-status" role="status"></p>
+                </div>
+              </div>
+
+              <!-- CARD 2: CAMBIO EMAIL -->
+              <div class="security-card">
+                <div class="security-card-header">
+                  <div class="security-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="security-card-title">Indirizzo email</h3>
+                    <p class="security-card-desc">Indirizzo per il recupero e le notifiche di sistema.</p>
+                  </div>
+                </div>
+
+                <div class="security-req-row">
+                  <span class="security-req-pill">Riceverai le conferme su questo recapito</span>
+                </div>
+
+                <form id="security-email-form" autocomplete="off" class="is-379fabac31b1">
+                  <div>
+                    <label class="wizard-label is-f3e91bf1fae3" for="security-email">Nuova email</label>
+                    <input class="wizard-input is-15e6a03c581f" id="security-email" type="email" autocomplete="email" placeholder="nuova@tua-attivita.it">
+                  </div>
+                  <button type="submit" class="review-analyze security-submit is-a72e2fe48c52">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                    <span>Aggiorna email</span>
+                  </button>
+                  <p class="security-status" id="security-email-status" role="status"></p>
+                </form>
+              </div>
+
+              <!-- Card MFA TOTP: QR e chiave restano solo in memoria durante la configurazione. -->
+              <section class="security-card security-mfa-card" id="security-mfa-card" aria-labelledby="security-mfa-title">
+                <div class="security-card-header">
+                  <div class="security-card-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="security-card-title" id="security-mfa-title" data-i18n="settings:mfa.title">Verifica in due passaggi</h3>
+                    <p class="security-card-desc" data-i18n="settings:mfa.description">Configura un'app authenticator per confermare le operazioni sensibili.</p>
+                  </div>
+                </div>
+                <p class="security-status" id="security-mfa-status" role="status" aria-live="polite" data-i18n="settings:mfa.loading">Controllo dello stato MFA…</p>
+                <div id="security-mfa-factors" class="security-mfa-factors" aria-live="polite"></div>
+                <button type="button" class="review-analyze security-submit" id="security-mfa-enroll-start" hidden data-i18n="settings:mfa.enroll_start">Configura app authenticator</button>
+
+                <div id="security-mfa-enrollment" class="security-mfa-flow" hidden>
+                  <p data-i18n="settings:mfa.scan_qr">Scansiona il codice QR con la tua app authenticator. Se non puoi scansionarlo, inserisci manualmente la chiave.</p>
+                  <img id="security-mfa-qr" class="security-mfa-qr" alt="Codice QR per configurare l'app authenticator" hidden referrerpolicy="no-referrer">
+                  <div class="security-mfa-secret-wrap">
+                    <span data-i18n="settings:mfa.manual_secret">Chiave di configurazione</span>
+                    <code id="security-mfa-secret"></code>
+                  </div>
+                  <form id="security-mfa-enrollment-form" autocomplete="off" novalidate>
+                    <label class="wizard-label" for="security-mfa-enrollment-code" data-i18n="settings:mfa.code_label">Codice a 6 cifre</label>
+                    <input class="wizard-input" id="security-mfa-enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+                    <div class="security-mfa-actions">
+                      <button type="submit" class="review-analyze security-submit" data-i18n="settings:mfa.verify_enable">Verifica e attiva</button>
+                      <button type="button" class="btn-link-action" id="security-mfa-enrollment-cancel" data-i18n="settings:mfa.cancel">Annulla</button>
+                    </div>
+                  </form>
+                  <p class="security-status" id="security-mfa-enrollment-status" role="status" aria-live="polite"></p>
+                </div>
+
+                <div id="security-mfa-challenge" class="security-mfa-flow" hidden>
+                  <p data-i18n="settings:mfa.challenge_help">Inserisci il codice attuale della tua app authenticator per autorizzare l'operazione sensibile.</p>
+                  <form id="security-mfa-challenge-form" autocomplete="off" novalidate>
+                    <label class="wizard-label" for="security-mfa-challenge-code" data-i18n="settings:mfa.code_label">Codice a 6 cifre</label>
+                    <input class="wizard-input" id="security-mfa-challenge-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+                    <div class="security-mfa-actions">
+                      <button type="submit" class="review-analyze security-submit" data-i18n="settings:mfa.challenge_submit">Verifica codice</button>
+                      <button type="button" class="btn-link-action" id="security-mfa-challenge-cancel" data-i18n="settings:mfa.cancel">Annulla</button>
+                    </div>
+                  </form>
+                  <p class="security-status" id="security-mfa-challenge-status" role="status" aria-live="polite"></p>
+                </div>
+              </section>
+            </div>
+
+            <!-- CARD GARANZIE CRITTOGRAFICHE -->
+            <div class="security-posture-card">
+              <div class="security-posture-icon">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+              </div>
+              <div>
+                <h4 class="security-posture-title">Crittografia di grado bancario e isolamento dei dati</h4>
+                <p class="security-posture-text">Tutte le credenziali sono protette tramite algoritmo irreversibile di hashing crittografico (PBKDF2/Argon2 con salt univoco). Le sessioni web utilizzano cookie HTTP-Only crittografati su canale TLS 1.3 protetto da isolamento multi-tenant a livello applicativo.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: WHATSAPP BUSINESS -->
+          <div class="settings-panel" data-settings-panel="whatsapp" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">WhatsApp Business</h2>
+              <p class="settings-panel-subtitle">Collega il tuo numero WhatsApp per ricevere e rispondere automaticamente ai clienti giorno e notte.</p>
+            </header>
+
+            <!-- STATO 1: Account Connesso -->
+            <div class="dash-card integrazione-card" id="integ-whatsapp-connected-card" hidden>
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-wa">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 21a9 9 0 1 0-4.5-1.2L3 21l1.2-4.5A9 9 0 0 0 12 21Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 9.5c.3-.7.8-.7 1.1-.7h.6c.2 0 .4.1.5.4.3.7.8 1.9.8 2 0 .1 0 .3-.1.4l-.5.6c-.1.1-.2.2-.1.4.3.5.7 1 1.2 1.5.5.5 1 .9 1.5 1.2.2.1.3 0 .4-.1l.6-.5c.1-.1.3-.1.4-.1.1 0 1.3.5 2 .8.3.1.4.3.4.5v.6c0 .3 0 .8-.7 1.1-.8.4-1.8.2-3.3-.6-1.5-.8-2.8-2.1-3.6-3.6-.8-1.5-1-2.5-.6-3.3Z" fill="currentColor"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo" id="integ-wa-connected-title">WhatsApp Business</h3>
+                  <span class="integrazione-sub" id="integ-wa-connected-sub">Credenziali collegate; ricezione e consegna da verificare.</span>
+                </div>
+                <span class="integrazione-stato badge-status connected" id="integ-whatsapp-stato">
+                  <span class="badge-status-dot"></span>
+                  <span class="badge-status-label">Connesso</span>
+                </span>
+              </div>
+
+              <div class="integrazione-meta-grid">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Numero WhatsApp</span>
+                  <strong class="integrazione-meta-val" id="integ-wa-phone-number-display">+39 ••• ••• ••••</strong>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Ricezione messaggi</span>
+                  <span class="integrazione-meta-val is-47a8704c613e">
+                    <span id="integ-wa-reception-status">Non verificata</span>
+                  </span>
+                </div>
+              </div>
+
+              <div class="integrazione-actions">
+                <button type="button" class="report-refresh" id="integ-wa-open-test-btn">
+                  <svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Invia messaggio di prova
+                </button>
+                <button type="button" class="btn-test-conn" id="integ-wa-reconfig-btn">Riconfigura</button>
+                <button type="button" class="btn-danger-outline" id="integ-wa-disconnect-btn">Disconnetti</button>
+              </div>
+
+              <!-- Box di test rapido -->
+              <div class="integ-test-box is-bdd4c5f19930" id="integ-wa-test-box" hidden>
+                <h4 class="integ-test-title is-bde5a206ff85">Fai una prova reale sul tuo smartphone</h4>
+                <p class="settings-help-sm is-20ae16361338">Inserisci il tuo numero per ricevere subito un messaggio di verifica dal tuo assistente.</p>
+                <div class="wizard-inline">
+                  <input class="wizard-input is-d33655fc4721" id="integ-wa-test-phone-input" type="tel" placeholder="Es. +39 340 1234567">
+                  <button type="button" class="review-analyze" id="integ-wa-send-test-submit">Invia prova</button>
+                </div>
+                <div class="integ-test-feedback" id="integ-wa-test-feedback" hidden></div>
+              </div>
+            </div>
+
+            <!-- STATO 2: Wizard Guidato di Connessione (Se non connesso) -->
+            <div class="dash-card wizard-setup-card" id="integ-whatsapp-wizard-card">
+              <div class="wizard-stepper">
+                <div class="wizard-step-item active" id="wa-step-tab-1">
+                  <span class="step-num">1</span>
+                  <span class="step-txt">Prerequisiti</span>
+                </div>
+                <div class="wizard-step-sep"></div>
+                <div class="wizard-step-item" id="wa-step-tab-2">
+                  <span class="step-num">2</span>
+                  <span class="step-txt">Dati di connessione</span>
+                </div>
+                <div class="wizard-step-sep"></div>
+                <div class="wizard-step-item" id="wa-step-tab-3">
+                  <span class="step-num">3</span>
+                  <span class="step-txt">Verifica e Test</span>
+                </div>
+              </div>
+
+              <!-- Step 1: Spiegazione & Prerequisiti -->
+              <div class="wizard-step-panel" id="wa-wz-panel-1">
+                <div class="wizard-intro-box">
+                  <div class="wizard-intro-icon icon-wa">
+                    <svg viewBox="0 0 24 24" fill="none" width="28" height="28"><path d="M12 21a9 9 0 1 0-4.5-1.2L3 21l1.2-4.5A9 9 0 0 0 12 21Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 9.5c.3-.7.8-.7 1.1-.7h.6c.2 0 .4.1.5.4.3.7.8 1.9.8 2 0 .1 0 .3-.1.4l-.5.6c-.1.1-.2.2-.1.4.3.5.7 1 1.2 1.5.5.5 1 .9 1.5 1.2.2.1.3 0 .4-.1l.6-.5c.1-.1.3-.1.4-.1.1 0 1.3.5 2 .8.3.1.4.3.4.5v.6c0 .3 0 .8-.7 1.1-.8.4-1.8.2-3.3-.6-1.5-.8-2.8-2.1-3.6-3.6-.8-1.5-1-2.5-.6-3.3Z" fill="currentColor"/></svg>
+                  </div>
+                  <div>
+                    <h3 class="wizard-section-title">Collega il tuo numero WhatsApp in 2 minuti</h3>
+                    <p class="settings-help">Per attivare le risposte automatiche ufficiali Meta ti servono due cose:</p>
+                    <ul class="wizard-checklist is-10d41abfaa94">
+                      <li><strong>Un numero di telefono dedicato</strong> per la tua attività (non registrato sull'app WhatsApp personale).</li>
+                      <li><strong>Un account Meta Business</strong> (se non ne hai ancora uno, puoi crearlo gratis su Meta).</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div class="wizard-footer-actions is-181d1b99d9e4">
+                  <button type="button" class="review-analyze" id="wa-wz-goto-step2">Inizia configurazione guidata →</button>
+                  <a href="https://business.facebook.com/" target="_blank" rel="noopener" class="report-refresh is-b48b3c39f8d6">Apri Meta Business Suite ↗</a>
+                </div>
+              </div>
+
+              <!-- Step 2: Form inserimento credenziali -->
+              <div class="wizard-step-panel" id="wa-wz-panel-2" hidden>
+                <div class="wizard-step-header is-8d16d0ba00f7">
+                  <h3 class="wizard-section-title">Inserisci i dati del tuo numero WhatsApp Business</h3>
+                  <p class="settings-help">Trovi questi dati nella sezione WhatsApp Cloud API del tuo pannello Meta Business Suite.</p>
+                </div>
+
+                <form id="wa-connect-form" autocomplete="off">
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="wa-phone-number-id">ID Numero di Telefono (Phone Number ID) <span class="req">*</span></label>
+                    <input class="wizard-input" id="wa-phone-number-id" type="text" placeholder="Es. 104859203948571" required>
+                    <span class="settings-help-sm">È l'identificativo numerico del numero generato da Meta.</span>
+                  </div>
+
+                  <div class="settings-field-group is-f2fecb34dcad">
+                    <label class="wizard-label" for="wa-waba-id">ID Account WhatsApp Business (WABA ID) <span class="req">*</span></label>
+                    <input class="wizard-input" id="wa-waba-id" type="text" placeholder="Es. 109283746501928" required>
+                    <span class="settings-help-sm">Identificativo del tuo account aziendale WhatsApp.</span>
+                  </div>
+
+                  <div class="settings-field-group is-f2fecb34dcad">
+                    <label class="wizard-label" for="wa-access-token">Token di accesso permanente (System User Token) <span class="req">*</span></label>
+                    <input class="wizard-input" id="wa-access-token" type="password" placeholder="Incolla il token generato su Meta (inizia con EAA...)" required>
+                    <span class="settings-help-sm">Il token viene crittografato in modo sicuro con cifratura AES-128.</span>
+                  </div>
+
+                  <p class="security-status" id="wa-connect-status" role="status"></p>
+
+                  <div class="wizard-footer-actions is-181d1b99d9e4">
+                    <button type="button" class="report-refresh" id="wa-wz-back-step1">← Indietro</button>
+                    <button type="submit" class="review-analyze" id="wa-connect-submit">Verifica e Salva Collegamento</button>
+                  </div>
+                </form>
+              </div>
+
+              <!-- Step 3: Test e Completamento -->
+              <div class="wizard-step-panel" id="wa-wz-panel-3" hidden>
+                <div class="wizard-success-header is-7eb316cca68f">
+                  <div class="wizard-success-badge is-fd495e6e9416">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  </div>
+                  <h3 class="wizard-section-title">Numero collegato con successo!</h3>
+                  <p class="settings-help">Il canale è configurato. Invia un messaggio di prova per verificare che arrivi correttamente sul tuo smartphone.</p>
+                </div>
+
+                <div class="wizard-test-form-box is-871053fd381c">
+                  <label class="wizard-label" for="wa-wz-test-phone">Numero di cellulare per il test</label>
+                  <div class="wizard-inline is-70ae72af2fce">
+                    <input class="wizard-input is-d33655fc4721" id="wa-wz-test-phone" type="tel" placeholder="+39 340 1234567">
+                    <button type="button" class="report-refresh" id="wa-wz-send-test-btn">Invia messaggio di test</button>
+                  </div>
+                  <p class="security-status" id="wa-wz-test-status" role="status"></p>
+                </div>
+
+                <div class="wizard-footer-actions is-fb5ec070f2bf">
+                  <button type="button" class="review-analyze" id="wa-wz-finish-btn">Fine e torna alla dashboard</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: INSTAGRAM DIRECT -->
+          <div class="settings-panel" data-settings-panel="instagram" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Instagram Direct</h2>
+              <p class="settings-panel-subtitle">Integrazione per la gestione dei messaggi diretti dai follower su Instagram.</p>
+            </header>
+
+            <!-- STATO 1: Instagram Connesso -->
+            <div class="dash-card integrazione-card" id="integ-instagram-connected-card" hidden>
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-ig">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo">Instagram Direct DM</h3>
+                  <span class="integrazione-sub" id="integ-instagram-sub">Connesso</span>
+                </div>
+                <span class="integrazione-stato badge-status connected" id="integ-instagram-stato"><span class="badge-status-dot"></span><span class="badge-status-label">Connesso</span></span>
+              </div>
+              <div class="integrazione-meta-grid" id="integ-instagram-meta">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Account Instagram</span>
+                  <strong class="integrazione-meta-val" id="integ-ig-id">@account</strong>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Canale</span>
+                  <span class="integrazione-meta-val">Direct Messaging Meta</span>
+                </div>
+              </div>
+              <div class="integrazione-actions">
+                <button type="button" class="btn-test-conn" id="integ-instagram-test" data-canale="instagram">
+                  <svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Test connessione
+                </button>
+                <button type="button" class="btn-danger-outline" id="integ-instagram-disconnect">Disconnetti</button>
+              </div>
+              <div class="integ-test-feedback" id="integ-instagram-feedback" hidden></div>
+            </div>
+
+            <!-- STATO 2: Wizard Guidato Instagram -->
+            <div class="dash-card wizard-setup-card" id="integ-instagram-wizard-card">
+              <div class="wizard-intro-box is-4933c08820a9">
+                <h3 class="wizard-section-title">Collega il tuo account Instagram Professionale</h3>
+                <p class="settings-help">Permette all'assistente AI di rispondere ai messaggi diretti (DM) ricevuti dai tuoi follower.</p>
+              </div>
+
+              <form id="ig-connect-form" autocomplete="off">
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="ig-user-id-input">ID Account Instagram (IG User ID) <span class="req">*</span></label>
+                  <input class="wizard-input" id="ig-user-id-input" type="text" placeholder="Es. 1784140530928374" required>
+                  <span class="settings-help-sm">L'ID dell'account Instagram Professionale collegato alla tua Pagina Meta.</span>
+                </div>
+
+                <div class="settings-field-group is-f2fecb34dcad">
+                  <label class="wizard-label" for="ig-token-input">Token di accesso Meta (Page Access Token) <span class="req">*</span></label>
+                  <input class="wizard-input" id="ig-token-input" type="password" placeholder="Incolla il token generato per la Pagina" required>
+                </div>
+
+                <p class="security-status" id="ig-connect-status" role="status"></p>
+
+                <div class="wizard-footer-actions is-a9739ef0adee">
+                  <button type="submit" class="review-analyze" id="ig-connect-submit">Collega Instagram Direct</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- PANNELLO: GOOGLE CALENDAR -->
+          <div class="settings-panel" data-settings-panel="calendar" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Google Calendar</h2>
+              <p class="settings-panel-subtitle">Sincronizzazione automatica e bidirezionale delle prenotazioni con la tua agenda Google.</p>
+            </header>
+
+            <div class="dash-card integrazione-card" id="integ-calendar">
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-cal">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M3 9h18" stroke="currentColor" stroke-width="2"/><path d="M8 1v3M16 1v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo">Google Calendar Sync</h3>
+                  <span class="integrazione-sub" id="integ-calendar-sub">Verifica stato…</span>
+                </div>
+                <span class="integrazione-stato badge-status disconnected" id="integ-calendar-stato"><span class="badge-status-dot"></span><span class="badge-status-label">Verifica…</span></span>
+              </div>
+              <div class="integrazione-meta-grid" id="integ-calendar-meta">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Calendario associato</span>
+                  <span class="integrazione-meta-val" id="integ-calendar-id">Predefinito (Primary)</span>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Modalità sync</span>
+                  <span class="integrazione-meta-val" id="integ-calendar-sync-mode">Bidirezionale automatica</span>
+                </div>
+              </div>
+              <p class="settings-help" id="integ-calendar-help">Sincronizza le prenotazioni confermate con Google Calendar con 1 solo click senza configurazioni complesse.</p>
+              <div class="integrazione-actions" id="integ-calendar-actions">
+                <button type="button" class="review-analyze" id="integ-calendar-connect" hidden>Connetti Google Calendar</button>
+                <button type="button" class="btn-test-conn" id="integ-calendar-test" data-canale="calendar" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Testa sincronizzazione
+                </button>
+                <button type="button" class="btn-danger-outline" id="integ-calendar-disconnect" hidden>Disconnetti agenda</button>
+              </div>
+              <div class="integ-test-feedback" id="integ-calendar-feedback" hidden></div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: GOOGLE RECENSIONI -->
+          <div class="settings-panel" data-settings-panel="reviews" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Google Recensioni</h2>
+              <p class="settings-panel-subtitle">Sincronizzazione e gestione automatica delle recensioni da Google Business Profile.</p>
+            </header>
+
+            <div class="dash-card integrazione-card" id="integ-reviews">
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-reviews">
+                  <svg viewBox="0 0 24 24" fill="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo">Google Business Profile</h3>
+                  <span class="integrazione-sub" id="integ-reviews-sub">Verifica stato…</span>
+                </div>
+                <span class="integrazione-stato badge-status disconnected" id="integ-reviews-stato"><span class="badge-status-dot"></span><span class="badge-status-label">Verifica…</span></span>
+              </div>
+              <div class="integrazione-meta-grid" id="integ-reviews-meta">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Account associato</span>
+                  <span class="integrazione-meta-val" id="integ-reviews-account">Nessun account</span>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Sede / Location</span>
+                  <span class="integrazione-meta-val" id="integ-reviews-location">—</span>
+                </div>
+              </div>
+              <p class="settings-help" id="integ-reviews-help">Collega Google Business Profile per importare le recensioni dei clienti e generare risposte AI automatiche.</p>
+              <div class="integrazione-actions" id="integ-reviews-actions">
+                <button type="button" class="review-analyze" id="integ-reviews-connect" hidden>Connetti Google Recensioni</button>
+                <button type="button" class="btn-test-conn" id="integ-reviews-sync" hidden>
+                  <svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Sincronizza ora
+                </button>
+                <button type="button" class="btn-danger-outline" id="integ-reviews-disconnect" hidden>Disconnetti profilo</button>
+              </div>
+              <div class="integ-test-feedback" id="integ-reviews-feedback" hidden></div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: GESTIONALE PRENOTAZIONI (PMS) -->
+          <div class="settings-panel" data-settings-panel="booking-pms" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Gestionale Prenotazioni (PMS)</h2>
+              <p class="settings-panel-subtitle">Configura il motore di prenotazione: collega un gestionale esterno o utilizza il calendario integrato di Melpis.</p>
+            </header>
+
+            <!-- STATO ATTUALE: Card Stato (Built-in o Esterno Connesso) -->
+            <div class="dash-card integrazione-card" id="integ-booking-card">
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-booking-pms">
+                  <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="3" stroke="currentColor" stroke-width="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="2"/><path d="m9 16 2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo" id="integ-booking-title">Melpis Interno</h3>
+                  <span class="integrazione-sub" id="integ-booking-sub">Verifica stato…</span>
+                </div>
+                <span class="integrazione-stato badge-status connected" id="integ-booking-stato">
+                  <span class="badge-status-dot"></span><span class="badge-status-label">Built-in</span>
+                </span>
+              </div>
+
+              <!-- Honest badge per Cal.com / Apaleo / Beds24 -->
+              <div id="integ-booking-honest-badge-container" class="is-3b6fad0b298d" hidden>
+                <span class="badge-status-honest" id="integ-booking-honest-badge">Verifica live consigliata</span>
+              </div>
+
+              <!-- Warning banner per SimplyBook o ZaK -->
+              <div class="pms-banner-box warning" id="integ-booking-warning-banner" hidden></div>
+
+              <div class="integrazione-meta-grid is-f2fecb34dcad" id="integ-booking-meta">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Provider Attivo</span>
+                  <strong class="integrazione-meta-val" id="integ-booking-meta-provider">Melpis Interno (Built-in)</strong>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Modalità Operativa</span>
+                  <strong class="integrazione-meta-val" id="integ-booking-meta-mode">Local Only</strong>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">DPA Sanitario (GDPR)</span>
+                  <span class="integrazione-meta-val" id="integ-booking-meta-dpa">Non attivo</span>
+                </div>
+                <div class="integrazione-meta-item" id="integ-booking-meta-sync-item">
+                  <span class="integrazione-meta-label">Ultima Sincronizzazione</span>
+                  <span class="integrazione-meta-val" id="integ-booking-meta-sync">—</span>
+                </div>
+              </div>
+
+              <p class="settings-help is-f2fecb34dcad" id="integ-booking-help">Il motore interno gestisce disponibilità, fasce orarie e capienze direttamente su database sicuro PostgreSQL senza software terzi.</p>
+
+              <!-- Sezione Quick Mode (solo se provider esterno attivo) -->
+              <div class="integ-booking-quick-mode is-314c1f8f3471" id="integ-booking-quick-mode" hidden>
+                <div class="is-e444455cfad2">
+                  <div>
+                    <span class="is-0d5155434a17">Cambia modalità operativa:</span>
+                    <p class="settings-help-sm is-3e967279bfee" id="integ-booking-quick-mode-help">Aggiorna la politica di instradamento del gestionale senza reinserire credenziali.</p>
+                  </div>
+                  <div class="is-378e76576ae0">
+                    <select class="wizard-input is-0d2dc503da82" id="integ-booking-quick-mode-select">
+                      <option value="authoritative" id="opt-quick-authoritative">Authoritative (Primario)</option>
+                      <option value="shadow" id="opt-quick-shadow">Shadow (Monitoraggio)</option>
+                      <option value="local_only" id="opt-quick-local">Local Only</option>
+                    </select>
+                    <button type="button" class="report-refresh is-37797b9c209e" id="integ-booking-quick-mode-btn">Aggiorna modalità</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="integrazione-actions is-ff270db33d21" id="integ-booking-actions">
+                <button type="button" class="review-analyze" id="integ-booking-toggle-form-btn">Configura gestionale esterno</button>
+                <button type="button" class="btn-danger-outline" id="integ-booking-disconnect-btn" hidden>Disconnetti gestionale</button>
+              </div>
+              <div class="integ-test-feedback" id="integ-booking-feedback" hidden></div>
+            </div>
+
+            <!-- FORM DI CONFIGURAZIONE PROVIDER -->
+            <div class="dash-card wizard-setup-card is-a9739ef0adee" id="integ-booking-form-card" hidden>
+              <div class="wizard-intro-box is-4933c08820a9">
+                <h3 class="wizard-section-title" id="integ-booking-form-title">Configura Motore di Prenotazione</h3>
+                <p class="settings-help">Seleziona il provider e inserisci le credenziali richieste. I token vengono cifrati at-rest con envelope AES-256 e non vengono mai restituiti in chiaro.</p>
+              </div>
+
+              <form id="booking-config-form" autocomplete="off">
+                <!-- 1. Picker Provider -->
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="booking-provider-select">Provider Gestionale <span class="req">*</span></label>
+                  <select class="wizard-input" id="booking-provider-select" required>
+                    <option value="internal">Melpis Interno (Built-in — Nessuna credenziale)</option>
+                    <option value="calcom">Cal.com (Appuntamenti 1:1, Consulenze)</option>
+                    <option value="simplybook">SimplyBook.me (Beauty, Benessere, Saloni)</option>
+                    <option value="apaleo">Apaleo PMS (Hotel, Hospitality Cloud)</option>
+                    <option value="beds24">Beds24 PMS (Hotel, Case Vacanze, Channel Manager)</option>
+                    <option value="zak">WuBook ZaK (Hotel — Gated / Solo Shadow)</option>
+                  </select>
+                  <span class="settings-help-sm" id="booking-provider-help">Scegli il provider desiderato. La configurazione si adatta automaticamente ai parametri necessari.</span>
+                </div>
+
+                <!-- Info / Honest Badge Box -->
+                <div class="pms-banner-box info" id="booking-form-honest-box" hidden>
+                  <span>ℹ️</span>
+                  <div id="booking-form-honest-text"></div>
+                </div>
+
+                <!-- Warning Box -->
+                <div class="pms-banner-box warning" id="booking-form-warning-box" hidden>
+                  <span>⚠️</span>
+                  <div id="booking-form-warning-text"></div>
+                </div>
+
+                <!-- 2. Form per-provider (campi esatti §7 audit) -->
+
+                <!-- Form: INTERNAL -->
+                <div class="booking-provider-fields" id="fields-provider-internal">
+                  <p class="settings-help is-4a1bde2ad009">
+                    <strong>Nessuna credenziale richiesta.</strong> Melpis gestisce orari, capienze e disponibilità direttamente nel database locale PostgreSQL.
+                  </p>
+                </div>
+
+                <!-- Form: CALCOM -->
+                <div class="booking-provider-fields" id="fields-provider-calcom" hidden>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="calcom-api-key">API Key Cal.com <span class="req">*</span></label>
+                    <input class="wizard-input" id="calcom-api-key" type="password" placeholder="cal_live_..." autocomplete="new-password">
+                    <span class="settings-help-sm">API Key generata dal dashboard Cal.com (Settings &gt; Security &gt; API Keys).</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="calcom-event-type-id">ID Tipo Evento (Event Type ID)</label>
+                    <input class="wizard-input" id="calcom-event-type-id" type="text" placeholder="Es. 123456 (opzionale, auto-discovery se vuoto)">
+                    <span class="settings-help-sm">Identificativo dell'evento Cal.com. Se omesso, l'adapter effettua l'auto-discovery del primo evento attivo.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="calcom-timezone">Fuso Orario Predefinito</label>
+                    <input class="wizard-input" id="calcom-timezone" type="text" value="Europe/Rome" placeholder="Europe/Rome">
+                    <span class="settings-help-sm">Fuso orario IANA di riferimento (predefinito: Europe/Rome).</span>
+                  </div>
+                </div>
+
+                <!-- Form: SIMPLYBOOK -->
+                <div class="booking-provider-fields" id="fields-provider-simplybook" hidden>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="simplybook-company-login">Company Login <span class="req">*</span></label>
+                    <input class="wizard-input" id="simplybook-company-login" type="text" placeholder="Es. salone_milano">
+                    <span class="settings-help-sm">Il nome dell'azienda utilizzato per l'accesso a SimplyBook.me.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="simplybook-api-key">API Key SimplyBook <span class="req">*</span></label>
+                    <input class="wizard-input" id="simplybook-api-key" type="password" placeholder="Es. sb_live_..." autocomplete="new-password">
+                    <span class="settings-help-sm">Chiave segreta API generata da Custom Features &gt; API in SimplyBook.</span>
+                  </div>
+                </div>
+
+                <!-- Form: APALEO -->
+                <div class="booking-provider-fields" id="fields-provider-apaleo" hidden>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="apaleo-client-id">Client ID Apaleo <span class="req">*</span></label>
+                    <input class="wizard-input" id="apaleo-client-id" type="text" placeholder="Es. IGAR-SP-TEST">
+                    <span class="settings-help-sm">Client ID dell'applicazione creata su Apaleo Developer Portal.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="apaleo-client-secret">Client Secret <span class="req">*</span></label>
+                    <input class="wizard-input" id="apaleo-client-secret" type="password" placeholder="Client secret Apaleo" autocomplete="new-password">
+                    <span class="settings-help-sm">Client Secret associato. Cifrato at-rest prima del salvataggio.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="apaleo-property-id">ID Struttura (Property ID)</label>
+                    <input class="wizard-input" id="apaleo-property-id" type="text" placeholder="Es. BER (opzionale, auto-discovery se vuoto)">
+                    <span class="settings-help-sm">Identificativo della proprietà. Se omesso, l'adapter effettua l'auto-discovery della prima proprietà attiva.</span>
+                  </div>
+                </div>
+
+                <!-- Form: BEDS24 -->
+                <div class="booking-provider-fields" id="fields-provider-beds24" hidden>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="beds24-invite-code">Invite Code Beds24 <span class="req">*</span></label>
+                    <input class="wizard-input" id="beds24-invite-code" type="password" placeholder="Invite Code generato su Beds24" autocomplete="new-password">
+                    <span class="settings-help-sm">Generato da (SETTINGS) ACCOUNT &gt; ACCOUNT ACCESS con permessi bookings, inventory e properties.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="beds24-property-id">ID Proprietà (Property ID) <span class="req">*</span></label>
+                    <input class="wizard-input" id="beds24-property-id" type="text" placeholder="Es. 98765">
+                    <span class="settings-help-sm">ID numerico della struttura ricettiva in Beds24.</span>
+                  </div>
+                </div>
+
+                <!-- Form: ZAK -->
+                <div class="booking-provider-fields" id="fields-provider-zak" hidden>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="zak-property-id">Property ID ZaK <span class="req">*</span></label>
+                    <input class="wizard-input" id="zak-property-id" type="text" placeholder="Es. hotel_roma">
+                    <span class="settings-help-sm">Identificativo della struttura registrata su WuBook ZaK.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="zak-api-key">Token API KAPI <span class="req">*</span></label>
+                    <input class="wizard-input" id="zak-api-key" type="password" placeholder="Token API ZaK KAPI" autocomplete="new-password">
+                    <span class="settings-help-sm">Token di autenticazione KAPI generato dal pannello WuBook.</span>
+                  </div>
+                </div>
+
+                <!-- 3. Mode Selector (authoritative/shadow/local_only) con descrizioni corrette e gating ZaK -->
+                <div class="settings-field-group is-a9739ef0adee">
+                  <label class="wizard-label" for="booking-mode-select">Modalità Operativa <span class="req">*</span></label>
+                  <select class="wizard-input" id="booking-mode-select" required>
+                    <option value="authoritative" id="opt-form-authoritative">Authoritative (Primario — Fa fede il gestionale)</option>
+                    <option value="shadow" id="opt-form-shadow">Shadow (Monitoraggio / Test — Fa fede Melpis locale)</option>
+                    <option value="local_only" id="opt-form-local">Local Only (Solo Database Locale — Nessun invio esterno)</option>
+                  </select>
+                  <div class="settings-help-sm is-6ed44d7db366" id="booking-mode-description">
+                    <!-- Descrizione dinamica -->
+                  </div>
+                </div>
+
+                <!-- 4. DPA Sanitario (GDPR Invariante 6) -->
+                <div class="settings-field-group is-bdb1d25f47ea" id="booking-dpa-group">
+                  <label class="is-58db64abc44a">
+                    <input type="checkbox" id="booking-medical-dpa-check" class="is-273c6fc681ac">
+                    <span>DPA Sanitario firmato (Art. 9 GDPR)</span>
+                  </label>
+                  <span class="settings-help-sm is-d75fb4de2808">
+                    Attiva solo se è stato sottoscritto un Data Processing Agreement per dati sanitari. Se disattivato, per le attività sanitarie le note cliente vengono sbiancate prima dell'invio esterno (Data Minimization fail-closed).
+                  </span>
+                </div>
+
+                <div class="wizard-footer-actions is-ebfc4b7209be">
+                  <button type="button" class="report-refresh" id="booking-form-cancel-btn">Annulla</button>
+                  <button type="submit" class="review-analyze" id="booking-form-submit-btn">Salva Configurazione</button>
+                </div>
+              </form>
+              <div class="integ-test-feedback" id="booking-form-feedback" hidden></div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: AIRTABLE (FASE 3) -->
+          <div class="settings-panel" data-settings-panel="airtable" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Airtable</h2>
+              <p class="settings-panel-subtitle">Connessione Basi tramite Personal Access Token (PAT), validazione schema e gestione notifiche webhook.</p>
+            </header>
+
+            <!-- Banner vincolo di perimetro: Mapping tabelle in arrivo (§5, §11, §15 audit) -->
+            <div class="pms-banner-box info is-4933c08820a9" id="airtable-mapping-incoming-banner">
+              <span class="is-fa119741b913">ℹ️</span>
+              <div>
+                <strong>Mapping tabelle: in arrivo</strong>
+                <p class="is-7b7d28a2f1dc">
+                  La configurazione visuale dei campi e il mapping bidirezionale delle entità sono attualmente in fase di rilascio.
+                  È possibile connettere le proprie Basi con Personal Access Token (PAT), verificarne preventivamente la conformità dello schema e monitorare gli eventi webhook in tempo reale.
+                </p>
+              </div>
+            </div>
+
+            <!-- STATO ATTUALE: Card Stato & Lista Basi Connesse -->
+            <div class="dash-card integrazione-card" id="integ-airtable-card">
+              <div class="integrazione-head">
+                <span class="integrazione-icona icon-airtable">
+                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 2 7.5l10 4.5 10-4.5L12 3Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="m2 12 10 4.5 10-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="m2 16.5 10 4.5 10-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+                <div class="integrazione-info-main">
+                  <h3 class="integrazione-titolo">Airtable Workspace</h3>
+                  <span class="integrazione-sub" id="integ-airtable-sub">Verifica connessioni…</span>
+                </div>
+                <span class="integrazione-stato badge-status disconnected" id="integ-airtable-stato">
+                  <span class="badge-status-dot"></span>
+                  <span class="badge-status-label">Non connesso</span>
+                </span>
+              </div>
+
+              <div class="integrazione-meta-grid" id="integ-airtable-meta">
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Basi collegate</span>
+                  <span class="integrazione-meta-val" id="integ-airtable-bases-count">0</span>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Tipo Autenticazione</span>
+                  <span class="integrazione-meta-val" id="integ-airtable-auth-type">PAT (AES-256)</span>
+                </div>
+                <div class="integrazione-meta-item">
+                  <span class="integrazione-meta-label">Ultimo Aggiornamento</span>
+                  <span class="integrazione-meta-val" id="integ-airtable-last-update">—</span>
+                </div>
+              </div>
+
+              <!-- Lista Basi Configurate -->
+              <div id="airtable-bases-container" class="is-ff270db33d21">
+                <h4 class="is-432a3182dd45">Basi Airtable Configurate:</h4>
+                <div id="airtable-bases-list" class="airtable-bases-grid">
+                  <!-- Renderizzato via JavaScript da app.js -->
+                </div>
+                <div id="airtable-bases-empty" class="empty-state-sm is-44453bf5092d">
+                  Nessuna Base Airtable attualmente connessa. Collega una Base tramite Personal Access Token.
+                </div>
+              </div>
+
+              <div class="integrazione-actions is-ff270db33d21">
+                <button type="button" class="review-analyze" id="airtable-toggle-connect-btn">Connetti nuova Base</button>
+              </div>
+              <div class="integ-test-feedback" id="integ-airtable-feedback" hidden></div>
+            </div>
+
+            <!-- FORM DI CONNESSIONE NUOVA BASE (PAT) -->
+            <div class="dash-card wizard-setup-card is-a9739ef0adee" id="integ-airtable-connect-card" hidden>
+              <div class="wizard-intro-box is-4933c08820a9">
+                <h3 class="wizard-section-title">Connetti Base Airtable</h3>
+                <p class="settings-help">Inserisci il Personal Access Token generato dal Builder Hub di Airtable e l'identificativo univoco della Base. Il token viene cifrato a riposo tramite envelope AES-256 e non viene mai restituito in chiaro.</p>
+              </div>
+
+              <form id="airtable-connect-form" autocomplete="off">
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-token">Personal Access Token (PAT) <span class="req">*</span></label>
+                  <input class="wizard-input" id="airtable-token" type="password" placeholder="patXXXXXXXXXXXXXX..." autocomplete="new-password" required>
+                  <span class="settings-help-sm">Generato da Airtable &gt; Builder Hub &gt; Personal Access Tokens. Scopes richiesti: <code>data.records:read</code>, <code>data.records:write</code>, <code>schema.bases:read</code>.</span>
+                </div>
+
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-base-id">ID della Base (Base ID) <span class="req">*</span></label>
+                  <input class="wizard-input" id="airtable-base-id" type="text" placeholder="appXXXXXXXXXXXXXX" required>
+                  <span class="settings-help-sm">Identificativo della Base Airtable visibile nell'URL del browser (inizia con <code>app</code>).</span>
+                </div>
+
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-base-name">Nome Base (Opzionale)</label>
+                  <input class="wizard-input" id="airtable-base-name" type="text" placeholder="Es. CRM Prenotazioni &amp; Clienti">
+                  <span class="settings-help-sm">Nome mnemonico da visualizzare nella dashboard.</span>
+                </div>
+
+                <div class="integ-test-feedback" id="airtable-connect-feedback" hidden></div>
+
+                <div class="is-80af712cb197">
+                  <button type="submit" class="review-analyze" id="airtable-connect-submit-btn">Verifica e Connetti Base</button>
+                  <button type="button" class="report-refresh" id="airtable-connect-cancel-btn">Annulla</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- VALIDAZIONE PREVENTIVA DELLO SCHEMA -->
+            <div class="dash-card wizard-setup-card is-a9739ef0adee" id="integ-airtable-validate-card">
+              <div class="wizard-intro-box is-4933c08820a9">
+                <h3 class="wizard-section-title">Validazione Preventiva Schema</h3>
+                <p class="settings-help">Gate bloccante: verifica che la tabella e i campi specificati esistano nella Base prima di attivare workflow o automazioni.</p>
+              </div>
+
+              <form id="airtable-validate-form" autocomplete="off">
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-val-base-select">Base di Riferimento <span class="req">*</span></label>
+                  <select class="wizard-input" id="airtable-val-base-select" required>
+                    <option value="">Seleziona una Base connessa…</option>
+                  </select>
+                </div>
+
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-val-table">Nome o ID Tabella <span class="req">*</span></label>
+                  <input class="wizard-input" id="airtable-val-table" type="text" placeholder="Es. Prenotazioni o tblXXXXXXXXXXXXXX" required>
+                </div>
+
+                <div class="settings-field-group">
+                  <label class="wizard-label" for="airtable-val-fields">Campi Richiesti (separati da virgola) <span class="req">*</span></label>
+                  <input class="wizard-input" id="airtable-val-fields" type="text" placeholder="Es. Nome, Telefono, Data, Stato" required>
+                  <span class="settings-help-sm">Elenco dei nomi esatti delle colonne che devono essere presenti nella tabella.</span>
+                </div>
+
+                <div class="integ-test-feedback" id="airtable-validate-feedback" hidden></div>
+
+                <div class="is-b034d5553764">
+                  <button type="submit" class="review-analyze" id="airtable-validate-submit-btn">Valida Schema Tabella</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- WEBHOOK AIRTABLE (RICEZIONE NOTIFICHE THIN-PING) -->
+            <div class="dash-card wizard-setup-card is-a9739ef0adee" id="integ-airtable-webhooks-card">
+              <div class="wizard-intro-box is-8d16d0ba00f7">
+                <h3 class="wizard-section-title">Webhook Airtable (Notifiche Eventi)</h3>
+                <p class="settings-help">Ricezione notifiche in tempo reale (thin-ping asincrono con elaborazione in background). Configura il webhook su Airtable e registra qui l'identificativo e il segreto MAC crittografico.</p>
+              </div>
+
+              <!-- URL Endpoint di Ricezione -->
+              <div class="settings-field-group is-cd6ad93927fb">
+                <span class="wizard-label is-d6aa1fb65637">Endpoint di notifica Melpis (URL Webhook):</span>
+                <div class="is-f1851c22ddb7">
+                  <code id="airtable-webhook-endpoint-url" class="is-4040b966931f">
+                    /api/v1/integrations/airtable/webhook
+                  </code>
+                </div>
+                <span class="settings-help-sm is-c98a9f1869e2">Inserisci questo URL nelle impostazioni del webhook su Airtable con validazione HMAC-SHA256 (header <code>X-Airtable-Content-MAC</code>).</span>
+              </div>
+
+              <!-- Form Registrazione Sottoscrizione Webhook -->
+              <details class="is-37abb705cf93">
+                <summary class="is-f33ffa485773">
+                  Registra Sottoscrizione Webhook (Webhook ID &amp; Segreto MAC)
+                </summary>
+                <form id="airtable-webhook-sub-form" class="is-ff270db33d21" autocomplete="off">
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="airtable-sub-base-select">Base Airtable <span class="req">*</span></label>
+                    <select class="wizard-input" id="airtable-sub-base-select" required>
+                      <option value="">Seleziona una Base connessa…</option>
+                    </select>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="airtable-sub-webhook-id">Webhook ID (ach...) <span class="req">*</span></label>
+                    <input class="wizard-input" id="airtable-sub-webhook-id" type="text" placeholder="achXXXXXXXXXXXXXX" required>
+                    <span class="settings-help-sm">L'identificativo univoco del webhook generato da Airtable.</span>
+                  </div>
+                  <div class="settings-field-group">
+                    <label class="wizard-label" for="airtable-sub-mac-secret">Segreto MAC (macSecretBase64) <span class="req">*</span></label>
+                    <input class="wizard-input" id="airtable-sub-mac-secret" type="password" placeholder="macSecretBase64 fornito da Airtable" autocomplete="new-password" required>
+                    <span class="settings-help-sm">Chiave segreta per la verifica dell'header <code>X-Airtable-Content-MAC</code> (HMAC-SHA256).</span>
+                  </div>
+                  <div class="integ-test-feedback" id="airtable-sub-feedback" hidden></div>
+                  <div class="is-f2fecb34dcad">
+                    <button type="submit" class="review-analyze" id="airtable-sub-submit-btn">Registra Sottoscrizione Webhook</button>
+                  </div>
+                </form>
+              </details>
+
+              <!-- Feed Eventi Webhook Ricevuti -->
+              <div class="is-a9739ef0adee">
+                <div class="is-e4fc022ec9f5">
+                  <h4 class="is-9efe47ffa0f4">Registro Eventi Webhook Ricevuti:</h4>
+                  <button type="button" class="report-refresh is-a99036c4e2d6" id="airtable-events-refresh-btn">Aggiorna eventi</button>
+                </div>
+                <div class="airtable-events-container is-c737410b7ceb">
+                  <table class="report-table is-f161f75353d1">
+                    <thead>
+                      <tr>
+                        <th class="is-86d2ea6100c7">Data / Ora</th>
+                        <th class="is-86d2ea6100c7">Base ID</th>
+                        <th class="is-86d2ea6100c7">Webhook ID</th>
+                        <th class="is-86d2ea6100c7">Event ID</th>
+                        <th class="is-86d2ea6100c7">Stato</th>
+                      </tr>
+                    </thead>
+                    <tbody id="airtable-events-tbody">
+                      <tr>
+                        <td colspan="5" class="is-cb90cf9cb450">Caricamento eventi…</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: PIANO E ABBONAMENTO -->
+          <div class="settings-panel" data-settings-panel="piano" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Piano e abbonamento</h2>
+              <p class="settings-panel-subtitle">Visualizza il piano attivo, i limiti operativi e gestisci l'upgrade.</p>
+            </header>
+
+            <p class="doc-config-status" id="account-status" hidden></p>
+
+            <div class="dash-card account-summary" id="account-summary">
+              <div class="dash-card-header is-93e5d15d24f6">
+                <div class="is-378e76576ae0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <span class="dash-card-title is-2470a4539b2f">Abbonamento in corso</span>
+                </div>
+                <span class="account-stato-pill" id="account-stato">…</span>
+              </div>
+              <div class="account-summary-body">
+                <div class="account-summary-main">
+                  <span class="account-plan-nome" id="account-plan-nome">…</span>
+                  <span class="account-plan-prezzo" id="account-plan-prezzo"></span>
+                </div>
+                <p class="settings-help is-c98a9f1869e2" id="account-rinnovo"></p>
+              </div>
+            </div>
+
+            <h3 class="account-section-title">Piani disponibili</h3>
+            <div class="account-plans" id="account-plans"></div>
+          </div>
+
+          <!-- PANNELLO: FATTURAZIONE -->
+          <div class="settings-panel" data-settings-panel="fatturazione" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Fatturazione</h2>
+              <p class="settings-panel-subtitle">Metodi di pagamento, ricevute, storico fatture e cancellazione.</p>
+            </header>
+
+            <div class="dash-card settings-card">
+              <div class="dash-card-header">
+                <div class="is-378e76576ae0">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                  <span class="dash-card-title">Metodo di pagamento e fatture</span>
+                </div>
+                <span class="doc-badge-priorita is-22be9933c4d5">Stripe Verified</span>
+              </div>
+              <p class="settings-help">Pagamenti, ricevute fiscali e metodi di pagamento gestiti su infrastruttura certificata PCI-DSS Stripe. Nessun dato di carta transita sui nostri server.</p>
+              <div class="settings-actions is-ff270db33d21">
+                <button type="button" class="review-analyze" id="account-portal-btn">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                  <span>Apri il portale di fatturazione Stripe</span>
+                </button>
+              </div>
+            </div>
+
+            <h3 class="account-section-title account-danger-title">Zona di rischio</h3>
+            <div class="dash-card settings-card settings-security">
+              <div class="dash-card-header">
+                <span class="dash-card-title">Cancellazione abbonamento</span>
+              </div>
+              <p class="settings-help">Puoi cancellare l'abbonamento in qualsiasi momento dal portale Stripe: il servizio resta attivo fino a fine periodo, poi va in pausa senza perdere i dati.</p>
+              <div class="settings-actions">
+                <button type="button" class="btn-danger" id="account-cancel-btn">Gestisci la cancellazione su Stripe</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANNELLO: REGISTRO AUDIT -->
+          <div class="settings-panel" data-settings-panel="audit" hidden>
+            <header class="settings-panel-header">
+              <h2 class="settings-panel-title">Registro Audit</h2>
+              <p class="settings-panel-subtitle">Storico tracciato e immutabile delle azioni e delle modifiche sensibili.</p>
+            </header>
+
+            <div class="dash-card settings-card">
+              <div class="dash-card-header">
+                <span class="dash-card-title">Attività recente</span>
+                <span class="dash-card-meta" id="audit-count"></span>
+              </div>
+              <div class="audit-list" id="audit-list"></div>
+            </div>
+          </div>
+
+        </main>
+      </div>
+    </section>

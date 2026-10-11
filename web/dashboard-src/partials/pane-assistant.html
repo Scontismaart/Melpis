@@ -1,0 +1,44 @@
+    <!-- ---------- VISTA: SIMULATORE AI ---------- -->
+    <section class="view view-hidden" data-view-panel="assistente">
+      <p class="view-intro" data-i18n="dashboard:views.simulator_intro">Simula una conversazione come farebbe un cliente reale per verificare le risposte e il comportamento del tuo assistente AI.</p>
+
+      <div class="chat-window">
+        <div class="chat-header">
+          <div class="chat-avatar" id="chat-avatar" aria-hidden="true">A</div>
+          <div class="chat-header-text">
+            <span class="chat-name" id="chat-business-name">La tua attività</span>
+            <span class="chat-status" id="chat-status">online</span>
+          </div>
+        </div>
+
+        <div class="chat-body" id="chat-body">
+          <div class="chat-day-divider"><span>Oggi</span></div>
+          <div class="chat-instructions"><strong>Istruzioni per te:</strong> interagisci con l'assistente AI come farebbe un cliente. L'assistente imparerà dalle risposte e migliorerà nel tempo.</div>
+          <div class="bubble bubble-in">
+            <p>Ciao! Sono qui per aiutarti a gestire le comunicazioni. Come posso esserti utile oggi?</p>
+          </div>
+        </div>
+
+        <div class="chat-suggestions" id="chat-suggestions">
+          <button class="suggestion-chip" type="button">Siete aperti domenica sera?</button>
+          <button class="suggestion-chip" type="button">Avete un tavolo per 4 persone domani?</button>
+          <button class="suggestion-chip" type="button">Ho un'allergia seria al glutine, cosa posso mangiare?</button>
+          <button class="suggestion-chip" type="button">Vorrei prenotare per 15 persone, è un compleanno</button>
+        </div>
+
+        <form class="chat-input-row" id="chat-form">
+          <input
+            type="text"
+            id="chat-input"
+            placeholder="Scrivi un messaggio…"
+            autocomplete="off"
+            aria-label="Scrivi un messaggio come farebbe un cliente"
+          >
+          <button type="submit" class="send-button" aria-label="Invia messaggio">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 11L21 3L13 21L11 13L3 11Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+      </div>
+    </section>
