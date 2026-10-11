@@ -19,6 +19,7 @@ const scriptFiles = [
   "web/dashboard-team.js",
   "web/dashboard-ai-simulator.js",
   "web/dashboard-bookings.js",
+  "web/dashboard-auth-transport.js",
   "web/app.js",
   "web/mfa.js",
 ];

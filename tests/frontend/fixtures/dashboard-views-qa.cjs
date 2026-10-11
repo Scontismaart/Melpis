@@ -5,9 +5,9 @@ const SCENARIOS = new Set([
   "populated", "empty", "error", "loading", "denied",
   "staff", "mfa-required", "simulator-hostile", "simulator-error", "simulator-timeout",
   "booking-error", "booking-timeout", "settings-populated", "settings-error", "settings-denied",
-  "settings-staff", "settings-org-b", "settings-mfa-required", "settings-connected", "ai-settings-populated",
+  "settings-staff", "settings-org-b", "settings-org-switch", "settings-mfa-required", "settings-connected", "ai-settings-populated",
   "ai-settings-error", "ai-settings-denied", "ai-settings-staff", "ai-settings-org-b",
-  "ai-settings-mfa-required", ...INBOX_CASES,
+  "ai-settings-mfa-required", "auth-success", "auth-expired", ...INBOX_CASES,
 ]);
 const FAQ_ID = "synthetic-faq-qa";
 const DOCUMENT_ID = "synthetic-document-qa";
@@ -43,6 +43,10 @@ function viewReply(method, pathname, scenario, organization = ORG_A, rawBody = n
   pathname = route;
   if (INBOX_CASES.has(scenario) && pathname.startsWith("/api/inbox/")) return inboxReply(method, pathname, scenario, organization, rawBody);
   if (!SCENARIOS.has(scenario)) return null;
+  if (scenario === "auth-expired" && ((method === "GET" && pathname === "/api/auth/me")
+    || (method === "POST" && pathname === "/api/auth/refresh"))) {
+    return { status: 401, body: { detail: "Sessione QA scaduta" } };
+  }
   if (![ORG_A, ORG_B].includes(organization)) return forbidden("Organizzazione QA non autorizzata");
   const label = organization === ORG_B ? "B" : "A";
   const denied = scenario === "denied" || scenario === "staff";

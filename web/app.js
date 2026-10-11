@@ -46,18 +46,6 @@ let aggiornaPrenotazioni;
 let aggiornaSemaforo;
 let apriBookingModal;
 
-function leggiCookie(nome) {
-  return document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${nome}=`))
-    ?.slice(nome.length + 1) || "";
-}
-
-function csrfToken() {
-  return decodeURIComponent(leggiCookie("__Host-wa_csrf") || leggiCookie("wa_csrf"));
-}
-
 /* ============================================================
    STATO RETE — banner "connessione persa / ripristinata"
    ============================================================ */
@@ -106,91 +94,35 @@ window.addEventListener("online", () => {
   else mostraBannerRete("Connessione ripristinata.", true, 3000);
 });
 
-async function tentaRefresh() {
-  try {
-    return await fetch(`${API_BASE}/api/auth/refresh`, {
-      method: "POST",
-      headers: csrfToken() ? { "X-CSRF-Token": csrfToken() } : {},
-      credentials: "include",
-    });
-  } catch (err) {
-    segnalaErroreRete();
-    throw err;
-  }
-}
-
-async function apiFetch(url, options = {}) {
-  const method = (options.method || "GET").toUpperCase();
-  const safeMethod = ["GET", "HEAD", "OPTIONS"].includes(method);
-  const headers = { ...(options.headers || {}) };
-  const selectedOrg = localStorage.getItem("melpis_selected_organization");
-  if (selectedOrg) headers["X-Organization-Id"] = selectedOrg;
-  async function tenta() {
-    if (!safeMethod) {
-      const token = csrfToken();
-      if (token) headers["X-CSRF-Token"] = token;
-      else delete headers["X-CSRF-Token"];
-    }
-    try {
-      return await fetch(url, { ...options, headers, credentials: "include" });
-    } catch (err) {
-      segnalaErroreRete();
-      throw err;
-    }
-  }
-  let res = await tenta();
-  if (res.status === 401 && !url.includes("/api/auth/")) {
-    try {
-      const refreshRes = await tentaRefresh();
-      if (refreshRes.ok) res = await tenta();
-    } catch (err) {
-      invalidaSessione();
-      vaiAdAccesso();
-      throw err;
-    }
-    if (res.status === 401) {
-      invalidaSessione();
-      vaiAdAccesso();
-    }
-  }
-  if (res.status === 403) {
-    const mfaHeader = res.headers.get("X-MFA-Required");
-    let isMfa = mfaHeader === "true";
-    if (!isMfa) {
-      try {
-        const cloned = res.clone();
-        const data = await cloned.json();
-        if (
-          data &&
-          typeof data.detail === "string" &&
-          (data.detail.includes("MFA") || data.detail.includes("due fattori"))
-        ) {
-          isMfa = true;
-        }
-      } catch (_) {}
-    }
-    if (isMfa) {
-      res.mfaRequired = true;
-      const mfaMessage = typeof t === "function"
-        ? t("settings:mfa.required_toast")
-        : "Questa operazione richiede una verifica in due passaggi.";
-      toast(
-        mfaMessage,
-        "warning",
-        8000,
-        {
-          testo: typeof t === "function" ? t("settings:mfa.open_security") : "Apri Sicurezza",
-          onClick: () => {
-            if (window.MelpisMfa?.openForStepUp) window.MelpisMfa.openForStepUp();
-            else apriVistaImpostazioni("sicurezza");
-          },
-        }
-      );
-    }
-  }
-  segnaReteOk();
-  return res;
-}
+const dashboardAuthTransport = window.MelpisDashboardAuthTransport.create({
+  API_BASE,
+  fetch: window.fetch.bind(window),
+  document,
+  storage: window.localStorage,
+  onNetworkError: () => segnalaErroreRete(),
+  onNetworkOk: () => segnaReteOk(),
+  invalidateSession: () => invalidaSessione(),
+  redirectToLogin: () => vaiAdAccesso(),
+  showMfaRequired: (openSecurity) => {
+    const mfaMessage = typeof t === "function"
+      ? t("settings:mfa.required_toast")
+      : "Questa operazione richiede una verifica in due passaggi.";
+    toast(
+      mfaMessage,
+      "warning",
+      8000,
+      {
+        testo: typeof t === "function" ? t("settings:mfa.open_security") : "Apri Sicurezza",
+        onClick: openSecurity,
+      }
+    );
+  },
+  openSecurity: () => {
+    if (window.MelpisMfa?.openForStepUp) window.MelpisMfa.openForStepUp();
+    else apriVistaImpostazioni("sicurezza");
+  },
+});
+const { apiFetch, tentaRefresh } = dashboardAuthTransport;
 
 // Small bridge for the isolated MFA UI module; session tokens remain in cookies.
 window.MelpisAPI = window.MelpisAPI || {};

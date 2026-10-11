@@ -209,7 +209,7 @@ test("API requests keep selected organization, cookie credentials, and CSRF; an 
   t.after(harness.dispose);
   await harness.ready();
 
-  const result = await harness.window.eval('apiFetch("/api/test/org-denied", { method: "POST", body: JSON.stringify({ organization_id: "org-other" }) })');
+  const result = await harness.window.eval('window.MelpisAPI.fetch("/api/test/org-denied", { method: "POST", body: JSON.stringify({ organization_id: "org-other" }) })');
   const request = harness.requests.find((item) => item.pathname === "/api/test/org-denied");
   assert.equal(result.status, 403);
   assert.equal(result.mfaRequired, undefined);
@@ -229,7 +229,7 @@ test("MFA-required API response reaches the real MFA bridge through the toast ac
   t.after(harness.dispose);
   await harness.ready();
 
-  const result = await harness.window.eval('apiFetch("/api/test/mfa-required", { method: "POST" })');
+  const result = await harness.window.eval('window.MelpisAPI.fetch("/api/test/mfa-required", { method: "POST" })');
   assert.equal(result.status, 403);
   assert.equal(result.mfaRequired, true);
   const action = harness.document.querySelector(".toast-action-btn");
