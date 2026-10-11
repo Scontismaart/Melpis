@@ -4,7 +4,10 @@ const { INBOX_CASES, inboxReply } = require("./dashboard-inbox-qa.cjs");
 const SCENARIOS = new Set([
   "populated", "empty", "error", "loading", "denied",
   "staff", "mfa-required", "simulator-hostile", "simulator-error", "simulator-timeout",
-  "booking-error", "booking-timeout", ...INBOX_CASES,
+  "booking-error", "booking-timeout", "settings-populated", "settings-error", "settings-denied",
+  "settings-staff", "settings-org-b", "settings-mfa-required", "settings-connected", "ai-settings-populated",
+  "ai-settings-error", "ai-settings-denied", "ai-settings-staff", "ai-settings-org-b",
+  "ai-settings-mfa-required", ...INBOX_CASES,
 ]);
 const FAQ_ID = "synthetic-faq-qa";
 const DOCUMENT_ID = "synthetic-document-qa";
@@ -49,9 +52,57 @@ function viewReply(method, pathname, scenario, organization = ORG_A, rawBody = n
   const review = { id: `synthetic-review-${label}`, autore: `Cliente sintetico ${label}`, testo: `Recensione QA ${label}`, bozza_risposta: "Grazie per il feedback sintetico.", fonte: "google", valutazione_stelle: 4, sentiment: "positiva", categoria: "servizio", stato: "bozza_generata", created_at: FIXED_TIME };
 
   if (method === "GET" && pathname === "/api/auth/me") {
-    const auth = { ...readFixtures[pathname], organization_id: organization, ruolo: scenario === "staff" ? "staff" : "owner" };
-    if (mfaRequired) auth.aal = "aal1";
+    const auth = { ...readFixtures[pathname], organization_id: scenario.endsWith("org-b") ? ORG_B : organization,
+      ruolo: scenario === "staff" || scenario.endsWith("-staff") ? "staff" : "owner" };
+    if (mfaRequired || scenario.endsWith("mfa-required")) auth.aal = "aal1";
     return { status: 200, body: auth };
+  }
+  if (pathname === "/api/impostazioni/organizzazione") {
+    const isSettings = scenario.startsWith("settings-");
+    if (!isSettings) return null;
+    if (scenario.endsWith("denied")) return forbidden("Accesso alle impostazioni QA negato");
+    if (scenario.endsWith("error")) return { status: 500, body: { detail: "Errore impostazioni QA sintetico" } };
+    if (method === "GET") return { status: 200, body: {
+      timezone: "Europe/Rome", timezone_disponibili: ["Europe/Rome", "Europe/London", "America/New_York"],
+    } };
+    if (method === "PUT") {
+      if (scenario.endsWith("staff") || scenario.endsWith("mfa-required")) return forbidden("Permesso impostazioni QA richiesto", scenario.endsWith("mfa-required"));
+      return { status: 200, body: { timezone: "Europe/Rome", ok: true } };
+    }
+    return null;
+  }
+  if (scenario === "settings-connected" && method === "GET" && pathname === "/api/calendar/status") {
+    return { status: 200, body: { connected: true, calendar_id: "synthetic-calendar-qa@dashboard-qa.invalid", sync_enabled: true } };
+  }
+  if (scenario === "settings-connected" && method === "DELETE" && pathname === "/api/calendar/disconnect") {
+    return { status: 200, body: { ok: true, disconnected: true } };
+  }
+  if (pathname === "/api/billing/subscription") {
+    if (!scenario.startsWith("settings-")) return null;
+    if (scenario.endsWith("denied") || scenario.endsWith("staff")) return forbidden("Billing QA non disponibile per questo ruolo");
+    if (scenario.endsWith("error")) return { status: 500, body: { detail: "Errore billing QA sintetico" } };
+    return { status: 200, body: { plan: "pro", subscription_status: "active", current_period_end: FIXED_TIME } };
+  }
+  if (pathname === "/api/audit") {
+    if (!scenario.startsWith("settings-")) return null;
+    if (scenario.endsWith("denied") || scenario.endsWith("staff")) return forbidden("Audit QA non disponibile per questo ruolo");
+    if (scenario.endsWith("error")) return { status: 500, body: { detail: "Errore audit QA sintetico" } };
+    const offset = Number(new URLSearchParams(query).get("offset") || 0);
+    return { status: 200, body: { eventi: offset ? [] : [{ id: "synthetic-audit-qa", action: "profile.updated", created_at: FIXED_TIME, details: { name: "Attività QA sintetica" } }], has_more: false } };
+  }
+  if (pathname === "/api/onboarding/profilo") {
+    if (!scenario.startsWith("ai-settings-")) return null;
+    if (scenario.endsWith("denied")) return forbidden("Profilo AI QA non disponibile", scenario.endsWith("mfa-required"));
+    if (scenario.endsWith("error")) return { status: 500, body: { detail: "Errore profilo AI QA sintetico" } };
+    if (method !== "GET" && (scenario.endsWith("staff") || scenario.endsWith("mfa-required"))) {
+      return forbidden("Modifica profilo AI QA riservata a owner o manager", scenario.endsWith("mfa-required"));
+    }
+    const label = scenario.endsWith("org-b") || organization === ORG_B ? "B" : "A";
+    const profilo = { verticale: "ristorante", nome_attivita: `Ristorante QA ${label}`, orari: "Lun-Ven 09:00-18:00",
+      descrizione: `Attività sintetica QA ${label}`, tono: "professionale_caloroso", servizi: [{ nome: "Servizio QA", prezzo: 10 }],
+      regole_escalation: ["Passa a un operatore per richieste complesse"], lingue_supportate: ["it"], lingua_default: "it",
+      whatsapp_collegato: false, documenti_importati: false };
+    return { status: 200, body: { profilo } };
   }
   if (pathname === "/api/bookings" || pathname.startsWith("/api/bookings/")) {
     if (scenario === "denied") return forbidden("Accesso prenotazioni QA negato");

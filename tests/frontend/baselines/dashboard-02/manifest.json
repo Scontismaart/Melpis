@@ -1,0 +1,118 @@
+{
+  "schema_version": 2,
+  "baseline_set": "dashboard-02",
+  "active_for_ci": true,
+  "source_ref": "main",
+  "source_commit": "3060374cbf4385f305626bde27dde696445e1143",
+  "image_sha256": {
+    "desktop-bookings.jpg": "6ab15f01ec99ab56c742fdc25bf3a12178c9cb3eeb9eb77bdb63ca88f3bf3760",
+    "desktop-inbox.jpg": "d4b786d2ee108aff0b6525f35348877e156063cc05f014ee2e94c3bb4d7aea9b",
+    "desktop-overview.jpg": "39206c439f77a4d7ee342647f0264a3eee744a1c1e7398d3ccdb069663a254f1",
+    "desktop-settings.jpg": "bf90d81b0d8303e315581051525abb92fec5e1debec4c7f6998e231ce14e9438",
+    "desktop-sidebar.jpg": "8f8e84662129bb4790c1aa7af7fd2ec280ae2ba4af282700943be0efcaf77b96",
+    "desktop-simulator.jpg": "1efbf81b943dd849b472e8916294825f87f79176698e50e821a682babc21e21c",
+    "mobile-bookings.jpg": "9a01768527494f252e670e4e6e3634118c5b1e630619ade8c5cbce7e3dea6137",
+    "mobile-inbox.jpg": "787802730430f86d63bb4306e06a5fb1e514db7422b03edf2957661dc1ea9109",
+    "mobile-overview.jpg": "0ddc396bc6b47828b028645d9ae492315c2de37c237291928ec89c0765b00667",
+    "mobile-settings.jpg": "28d9a65a596b97d704753f33dbbe20413faa90b940b62a85ddb96218fba5078f",
+    "mobile-sidebar.jpg": "f3ce8ff8b307ee88d4e00d649eb72ab2e84184603496245e025faa99dce323e6",
+    "mobile-simulator.jpg": "a09880ff43b3d23a012750a5fc0cbe054df3f112c083bb9312014e0c9473b7e1"
+  },
+  "capture_metadata": {
+    "file": "capture-metadata.json",
+    "sha256": "3081c5dedd4c0fadcc25c87e63641cad248365b1f587c7ee46ab1af7ec86ea9c"
+  },
+  "capture": {
+    "execution_environment": "Windows desktop Codex in-app browser; no container browser",
+    "browser": {
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "platform": "Win32",
+      "host_runtime_observed": "Microsoft Edge WebView2 155.0.4283.45; exact CUA tab process mapping unverified"
+    },
+    "system": "Windows NT 10.0; Win64; x64 (reported by browser UA)",
+    "viewports": {
+      "desktop": { "width": 1440, "height": 900, "device_pixel_ratio": 1.0000000149011612, "reported_approximately": 1, "zoom": 1 },
+      "mobile": { "width": 375, "height": 812, "device_pixel_ratio": 1.0000000149011612, "reported_approximately": 1, "zoom": 1 }
+    },
+    "locale": "it",
+    "time_zone": "Europe/Rome",
+    "fixed_time": "2026-10-08T10:00:00.000Z",
+    "captured_at_utc": "2026-10-11T00:29:51Z to 2026-10-11T00:30:30Z; per-image timestamps in capture-metadata.json",
+    "theme": "dark",
+    "language": "it",
+    "dataset_profile": "empty synthetic dashboard fixtures",
+    "identity": {
+      "role": "owner",
+      "email": "owner@dashboard-qa.invalid",
+      "organization": "QA A"
+    },
+    "fonts": {
+      "loaded_faces": ["Inter", "Outfit"],
+      "body_computed": "Outfit, -apple-system, sans-serif",
+      "heading_computed": "\"Geist Sans\", Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+      "assets_sha256": {
+        "fonts/outfit-latin.woff2": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+        "fonts/outfit-latin-ext.woff2": "0f53d1c03b3918d744a843b5039001ee31695ca1e255e3914188df81beb461e9",
+        "fonts/inter-latin.woff2": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+      },
+      "style_css_sha256": "fe6a38633a14779a9b6e4a226ce3a0edd44e9743888464e122872d412336ce18"
+    },
+    "screenshot": {
+      "capture": "Codex in-app browser; fullPage capture clipped to viewport CSS-pixel dimensions",
+      "encoding": "JPEG",
+      "comparison": "decoded RGB, exact pixel equality",
+      "ready_gate": "body[data-qa-ready=true] after document.fonts.ready; finite animations completed and infinite animations paused at zero"
+    },
+    "fixture_server": "scripts/dashboard-baseline-server.cjs with synthetic interaction/view-state fixtures; no production APIs"
+  },
+  "certification": {
+    "main_repeatability": { "series": ["main-a", "main-b"], "identical_images": 12, "total_images": 12 },
+    "main_vs_block4a": { "identical_images": 12, "total_images": 12 },
+    "dynamic_main_vs_block4a": { "identical_images": 10, "total_images": 10 },
+    "historical_dashboard_01_matches": 0,
+    "historical_gate": "fails on immutable main; V1 retained unchanged; this V2 was explicitly authorized"
+  },
+  "ci_gate": {
+    "active_baseline": "dashboard-02",
+    "checks": ["manifest schema and case mapping", "per-file SHA256", "JPEG dimensions", "capture metadata SHA256"],
+    "limitation": "integrity gate only; CI does not run a real-browser screenshot capture or RGB comparison"
+  },
+  "cases": [
+    {
+      "id": "overview",
+      "route": "/app/overview",
+      "state": "Overview with synthetic empty activity and booking datasets.",
+      "images": { "desktop": "desktop-overview.jpg", "mobile": "mobile-overview.jpg" }
+    },
+    {
+      "id": "inbox",
+      "route": "/app/inbox",
+      "state": "Inbox with no conversations.",
+      "images": { "desktop": "desktop-inbox.jpg", "mobile": "mobile-inbox.jpg" }
+    },
+    {
+      "id": "bookings",
+      "route": "/app/bookings",
+      "state": "Bookings calendar and list with no bookings.",
+      "images": { "desktop": "desktop-bookings.jpg", "mobile": "mobile-bookings.jpg" }
+    },
+    {
+      "id": "settings",
+      "route": "/app/settings?tab=generale",
+      "state": "General settings with synthetic organization profile.",
+      "images": { "desktop": "desktop-settings.jpg", "mobile": "mobile-settings.jpg" }
+    },
+    {
+      "id": "simulator",
+      "route": "/app/ai-simulator",
+      "state": "AI simulator with an empty synthetic conversation.",
+      "images": { "desktop": "desktop-simulator.jpg", "mobile": "mobile-simulator.jpg" }
+    },
+    {
+      "id": "sidebar",
+      "route": "/app/overview",
+      "state": "Desktop account dropdown open; mobile primary navigation drawer open.",
+      "images": { "desktop": "desktop-sidebar.jpg", "mobile": "mobile-sidebar.jpg" }
+    }
+  ]
+}

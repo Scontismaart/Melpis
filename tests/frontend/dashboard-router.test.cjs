@@ -3,7 +3,6 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { JSDOM } = require("jsdom");
-const vm = require("node:vm");
 const routerApi = require("../../web/dashboard-router.js");
 
 const root = path.resolve(__dirname, "../..");
@@ -32,55 +31,50 @@ function createIntegratedApp(url) {
   const dom = new JSDOM(html, { url, pretendToBeVisual: true, runScripts: "outside-only" });
   const { window } = dom;
   window.MelpisDashboardRouter = routerApi;
-
-  const app = fs.readFileSync(path.join(root, "web/app.js"), "utf8");
-  const section = (startMarker, endMarker) => {
-    const start = app.indexOf(startMarker);
-    assert.notEqual(start, -1, `missing app source marker: ${startMarker}`);
-    const end = app.indexOf(endMarker, start + startMarker.length);
-    assert.notEqual(end, -1, `missing app source marker: ${endMarker}`);
-    return app.slice(start, end);
-  };
-  const renderer = section("async function renderDashboardView(", "\n/* Destinazioni di fallback");
-  const settingsActivation = section("function attivaCategoriaImpostazioni(", "\nfunction aggiornaTitoloImpostazioni(");
-  const settingsTitle = section("function aggiornaTitoloImpostazioni(", "\nfunction navigaTabImpostazioni(");
-  const settingsEntry = section("function apriVistaImpostazioni(", "\nfunction apriView(");
-  const settingsNavigation = section("function navigaTabImpostazioni(", "\nfunction attivaTabImpostazioni(");
-  const context = vm.createContext({
-    window,
-    document: window.document,
-    navItems: window.document.querySelectorAll(".nav-item"),
-    views: window.document.querySelectorAll(".view"),
-    topbarTitle: window.document.getElementById("topbar-title"),
-    dashboardOverviewModule: null,
-    dashboardReviewsModule: null,
-    dashboardBookingsModule: null,
-    dashboardInboxModule: null,
-    dashboardKnowledgeModule: null,
-    dashboardTeamModule: null,
-    dashboardAiSimulatorModule: null,
+  window.eval(fs.readFileSync(path.join(root, "web/dashboard-settings.js"), "utf8"));
+  let currentView = null;
+  let router = null;
+  const settings = window.MelpisDashboardSettings.create({
+    API_BASE: "",
+    apiFetch: async () => ({ ok: true, json: async () => ({}) }),
+    getContext: () => ({ view: currentView, userId: "qa-user", sessionOrganizationId: "qa-org", selectedOrganizationId: "qa-org" }),
+    getRole: () => "owner",
     t: (key) => key,
-    segnaNotificheViste() {},
-    chiudiMenuMobile() {},
-    chiudiSidebarAccountMenu() {},
-    resetDashboardScroll() {},
-    avviaPanoramicaPolling() {},
-    aggiornaRiepilogo() {},
-    aggiornaPrioritari() {},
-    aggiornaReport() {},
-    fermaPanoramicaPolling() {},
-    fermaInboxPolling() {},
-    sincronizzaPollingPrenotazioni() {},
+    _tDash: (_key, fallback) => fallback,
+    sanitize: (value) => String(value ?? ""),
+    toast() {},
+    securityStatus() {},
+    localeCorrente: () => "it-IT",
+    navigateTo: (...args) => router.navigateTo(...args),
+    normalizeSettingsTab: (tab) => routerApi.normalizeSettingsTab(tab),
+    settingsSearchForTab: (search, tab) => routerApi.settingsSearchForTab(search, tab),
+    closeAccountMenu() {},
+    loadMfaStatus() {},
+    getIntegrationsApi: () => null,
   });
-  vm.runInContext(
-    `let activeDashboardView = null;\nlet dashboardViewTransition = 0;\nlet dashboardRouter = null;\nglobalThis.setTestDashboardRouter = (router) => { dashboardRouter = router; };\n${renderer}\n${settingsActivation}\n${settingsTitle}\n${settingsEntry}\n${settingsNavigation}`,
-    context,
-  );
-  const router = routerApi.createDashboardRouter({
+  const context = {
+    settings,
+    apriVistaImpostazioni: (category) => settings.openCategory(category),
+    navigaTabImpostazioni: (category) => settings.openCategory(category),
+  };
+  router = routerApi.createDashboardRouter({
     window,
-    render: (view) => context.renderDashboardView(view),
+    render: (view) => {
+      if (currentView === "impostazioni" && view !== "impostazioni") settings.onExit();
+      currentView = view;
+      window.document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+        panel.classList.toggle("view-hidden", panel.dataset.viewPanel !== view);
+      });
+      if (view === "impostazioni") {
+        const tab = routerApi.settingsTabFromSearch(window.location.search);
+        const search = routerApi.settingsSearchForTab(window.location.search, tab);
+        if (search !== window.location.search) {
+          window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}${window.location.hash}`);
+        }
+        settings.onEnter(tab);
+      }
+    },
   });
-  context.setTestDashboardRouter(router);
   return { dom, router, context };
 }
 
@@ -505,21 +499,25 @@ test("changing dashboard language does not rewrite canonical route hrefs", () =>
 
 test("settings route rendering and category actions are wired to the allowlisted tab helpers", () => {
   const app = fs.readFileSync(path.join(root, "web/app.js"), "utf8");
+  const settings = fs.readFileSync(path.join(root, "web/dashboard-settings.js"), "utf8");
   assert.match(app, /settingsTabFromSearch\(window\.location\.search\)/);
   assert.match(app, /settingsSearchForTab\(window\.location\.search, tab\)/);
-  assert.match(app, /btn\.addEventListener\("click", \(\) => navigaTabImpostazioni\(btn\.dataset\.settingsCatBtn\)\)/);
+  assert.match(settings, /button\.addEventListener\("click", \(\) => navigateTab\(button\.dataset\.settingsCatBtn\)\)/);
+  assert.match(settings, /function navigateTab\(category\)/);
+  assert.match(settings, /settingsSearchForTab\(root\.location\.search, tab\)/);
   assert.match(app, /if \(key === "account"\) \{\s*apriVistaImpostazioni\("piano"\)/);
   assert.match(app, /getElementById\("sidebar-menu-impostazioni"\)\?\.addEventListener\("click", \(event\) => \{\s*if \(!window\.MelpisDashboardRouter\?\.isOrdinaryPrimaryClick\(event\)\) return;\s*chiudiSidebarAccountMenu\(\);\s*\}\);/);
   assert.doesNotMatch(app.match(/getElementById\("sidebar-menu-impostazioni"\)\?\.addEventListener\("click",[\s\S]*?\);/)?.[0] || "", /apriVistaImpostazioni/);
 });
 
 test("Calendar and Reviews OAuth callbacks preserve unrelated URL state and route into Settings", () => {
+  const integrations = fs.readFileSync(path.join(root, "web/dashboard-integrations.js"), "utf8");
   const app = fs.readFileSync(path.join(root, "web/app.js"), "utf8");
   const callbackBody = (name) => {
-    const start = app.indexOf(`function ${name}(`);
+    const start = integrations.indexOf(`function ${name}(`);
     assert.notEqual(start, -1, `${name} exists`);
-    const end = app.indexOf("\nfunction ", start + 1);
-    return app.slice(start, end === -1 ? undefined : end);
+    const end = integrations.indexOf("\nfunction ", start + 1);
+    return integrations.slice(start, end === -1 ? undefined : end);
   };
   const deletedParams = (body) => [...new Set(
     [...body.matchAll(/url\.searchParams\.delete\("([^"]+)"\)/g)].map((match) => match[1]),
@@ -536,7 +534,10 @@ test("Calendar and Reviews OAuth callbacks preserve unrelated URL state and rout
   assert.match(reviews, /apriVistaImpostazioni\("reviews"\)/);
   assert.match(reviews, preservesStateAndHash);
 
-  const settingsEntry = callbackBody("apriVistaImpostazioni");
-  assert.match(settingsEntry, /settingsSearchForTab\(window\.location\.search,\s*tab\)/);
-  assert.match(settingsEntry, /hash:\s*window\.location\.hash/);
+  const settingsEntryStart = app.indexOf("function apriVistaImpostazioni(");
+  assert.notEqual(settingsEntryStart, -1, "app shell exposes Settings routing");
+  const settingsEntryEnd = app.indexOf("\nfunction ", settingsEntryStart + 1);
+  const settingsEntry = app.slice(settingsEntryStart, settingsEntryEnd);
+  assert.match(settingsEntry, /dashboardSettingsModule\?\.openCategory\(cat\)/);
+  assert.match(integrations, /apriVistaImpostazioni\("calendar"\)/);
 });
