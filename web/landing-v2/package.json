@@ -7,10 +7,19 @@
     "preview": "node tools/preview.mjs",
     "check": "node tools/check.mjs",
     "test": "node --test tests/*.test.mjs",
-    "test:browser": "node tests/browser-qa.cjs"
+    "test:components": "node tests/component-qa.cjs",
+    "test:browser": "node tests/browser-qa.cjs",
+    "performance": "node tools/performance.cjs"
   },
   "devDependencies": {
+    "@astrojs/react": "6.0.2",
+    "astro": "7.3.8",
     "axe-core": "4.14.0",
-    "playwright": "1.62.1"
+    "playwright": "1.62.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

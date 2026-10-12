@@ -47,6 +47,8 @@ jobs:
           npm test
       - name: Install isolated test browser
         run: npx playwright install --with-deps chromium
+      - name: React island SSR and visible hydration checks
+        run: npm run test:components
       - name: Browser and accessibility checks
         run: npm run test:browser
       - uses: actions/upload-artifact@v4

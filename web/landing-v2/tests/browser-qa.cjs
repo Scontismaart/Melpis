@@ -12,7 +12,7 @@ const allowedOrigin = new URL(url).origin;
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw new Error('Browser QA only accepts a loopback preview URL.');
 const report = { generatedAt: new Date().toISOString(), url, browserChannel: process.env.V2_BROWSER_CHANNEL || 'bundled chromium', checks: [], viewports: [], errors: [], limitations: ['Mobile viewport emulation, not physical-device validation.', 'Axe and focus checks do not replace a screen-reader audit.', 'No trusted V1 pixel baseline: visual regression comparison is inconclusive.', 'No field performance or Core Web Vitals claims.'] };
 function check(name, pass, evidence) { report.checks.push({ name, pass: Boolean(pass), evidence }); }
-async function sourceHashes() { return Object.fromEntries(await Promise.all(['index.html', 'styles.css', 'app.js'].map(async file => [file, createHash('sha256').update(await fs.readFile(path.join(root, 'dist', file))).digest('hex')]))); }
+async function sourceHashes() { const files = []; async function walk(dir) { for (const entry of await fs.readdir(dir, { withFileTypes: true })) { const file = path.join(dir, entry.name); if (entry.isDirectory()) await walk(file); else files.push(file); } } await walk(path.join(root, 'dist')); return Object.fromEntries(await Promise.all(files.map(async file => [path.relative(path.join(root, 'dist'), file).replaceAll('\\', '/'), createHash('sha256').update(await fs.readFile(file)).digest('hex')]))); }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function startPreview() {
   if (process.env.V2_QA_URL) return null;
@@ -68,7 +68,7 @@ async function keyboard(page, label) {
     report.sourceHashesBefore = await sourceHashes();
     server = await startPreview();
     browser = await chromium.launch({ headless: true, ...(process.env.V2_BROWSER_CHANNEL ? { channel: process.env.V2_BROWSER_CHANNEL } : {}) });
-    for (const width of [1440, 1024, 768, 390, 360]) {
+    for (const width of [1440, 1024, 768, 390, 360, 320]) {
       const context = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: 'no-preference' });
       const page = await context.newPage(), watched = await watch(page, `${width}`);
       const response = await page.goto(url, { waitUntil: 'networkidle' }); await page.evaluate(() => document.fonts.ready);
@@ -76,15 +76,23 @@ async function keyboard(page, label) {
       check(`${width}: noindex meta + HTTP header`, meta?.includes('noindex') && headers['x-robots-tag']?.includes('noindex'), { meta, header: headers['x-robots-tag'] });
       check(`${width}: restrictive preview CSP`, headers['content-security-policy']?.includes("connect-src 'none'") && headers['content-security-policy']?.includes("form-action 'none'") && !headers['content-security-policy']?.includes('unsafe-'), headers['content-security-policy']);
       const initial = await geometry(page);
+      const island = page.locator('.mv2-control-options');
+      check(`${width}: SSR renders initial team state without eager hydration`, await island.locator('button').nth(0).getAttribute('aria-pressed') === 'false' && await island.locator('button').nth(0).isDisabled() && await island.locator('button').nth(1).getAttribute('aria-pressed') === 'true', 'Buttons are server-rendered with the original active team state and remain disabled before visibility.');
+      await island.scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => { const b = document.querySelector('.mv2-control-options button'); return b && !b.disabled; });
+      await island.getByRole('button', { name: /Richiesta fuori dalle informazioni/ }).click();
+      check(`${width}: visible island hydrates and changes state`, await island.locator('button').nth(0).getAttribute('aria-pressed') === 'true' && /Richiesta in attesa/.test(await page.locator('.mv2-control-footer').innerText()), 'Visible client island enables interaction and updates its live status.');
+      await island.getByRole('button', { name: /Team in conversazione/ }).click();
+      check(`${width}: state returns to the original team selection`, await island.locator('button').nth(1).getAttribute('aria-pressed') === 'true' && /Passaggio visibile/.test(await page.locator('.mv2-control-footer').innerText()), 'State can be returned to the initial selection.');
       const pricing = await page.locator('#mv2-piani').innerText();
       check(`${width}: reference monthly prices and internal configuration CTAs`, ['29', '69', '149'].every(price => pricing.includes(price)) && /mensile|mese/i.test(pricing) && await page.locator('#mv2-piani a[href="#mv2-setup"]').count() === 3, pricing);
       check(`${width}: no document overflow`, initial.overflow <= 0, initial);
+      await page.screenshot({ path: path.join(out, `v2-${width}-hero.png`) });
+      await page.screenshot({ path: path.join(out, `v2-${width}-full.png`), fullPage: true });
       check(`${width}: all anchors have existing internal targets`, initial.anchors.length > 5 && initial.anchors.every(a => a.valid), initial.anchors);
       check(`${width}: only V2 same-origin browser assets`, initial.resources.length > 2 && initial.resources.every(r => new URL(r.name).origin === allowedOrigin && new URL(r.name).pathname.startsWith('/landing-v2/')), initial.resources);
       check(`${width}: two self-hosted fonts loaded`, new Set(initial.fonts.filter(f => f.status === 'loaded').map(f => f.family)).size >= 2 && initial.resources.filter(r => r.name.endsWith('.woff2')).length >= 2, initial.fonts);
       check(`${width}: demo is labelled synthetic, no form`, await page.locator('body').innerText().then(t => /Esempio sintetico|dati fittizi/.test(t)) && await page.locator('form').count() === 0, 'Static illustrative data; no form submission.');
-      await page.screenshot({ path: path.join(out, `v2-${width}-hero.png`) });
-      await page.screenshot({ path: path.join(out, `v2-${width}-full.png`), fullPage: true });
       const toggle = page.locator('.mv2-menu-toggle'), nav = page.locator('#mv2-nav');
       if (width <= 680) {
         check(`${width}: mobile menu starts closed`, await toggle.getAttribute('aria-expanded') === 'false' && !await nav.isVisible());
@@ -142,8 +150,9 @@ async function keyboard(page, label) {
       return { html: document.body.outerHTML, margin: body.margin, color: body.color, background: body.backgroundColor, font: body.fontFamily, size: body.fontSize, boxSizing: body.boxSizing, buttonPadding: button.padding, buttonBorder: button.borderWidth };
     });
     const beforeImport = await sentinel();
-    await isolatedPage.addStyleTag({ url: `${allowedOrigin}/landing-v2/styles.css` });
-    await isolatedPage.addScriptTag({ type: 'module', url: `${allowedOrigin}/landing-v2/app.js` });
+    const v2Css = (await fs.readdir(path.join(root, 'dist', '_astro'))).find(f => f.endsWith('.css'));
+    if (v2Css) await isolatedPage.addStyleTag({ url: `${allowedOrigin}/landing-v2/_astro/${v2Css}` });
+    await isolatedPage.keyboard.press('Escape');
     await isolatedPage.keyboard.press('Escape');
     check('V2 CSS and module do not affect an unopted V1 document', JSON.stringify(beforeImport) === JSON.stringify(await sentinel()), beforeImport);
     await isolatedContext.close();

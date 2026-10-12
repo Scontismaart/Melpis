@@ -1,0 +1,30 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import TrustStrip from '../components/TrustStrip.astro';
+import Journey from '../components/Journey.astro';
+import Sectors from '../components/Sectors.astro';
+import ControlSection from '../components/ControlSection.astro';
+import SetupSection from '../components/SetupSection.astro';
+import PricingSection from '../components/PricingSection.astro';
+import FaqSection from '../components/FaqSection.astro';
+import FinalCta from '../components/FinalCta.astro';
+import Footer from '../components/Footer.astro';
+---
+<BaseLayout>
+  <Header />
+  <main id="mv2-contenuto">
+    <Hero />
+    <TrustStrip />
+    <Journey />
+    <Sectors />
+    <ControlSection />
+    <SetupSection />
+    <PricingSection />
+    <FaqSection />
+    <FinalCta />
+  </main>
+  <Footer />
+</BaseLayout>
+<script src="../scripts/mobile-menu.js"></script>

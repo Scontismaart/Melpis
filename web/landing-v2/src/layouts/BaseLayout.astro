@@ -1,0 +1,24 @@
+---
+import '../styles/landing.css';
+const base = import.meta.env.BASE_URL;
+const title = 'Melpis — Le conversazioni, sotto controllo';
+const description = 'Melpis aiuta le attività a gestire richieste, prenotazioni e conversazioni dal pannello. Scopri un percorso illustrativo.';
+---
+<!doctype html>
+<html lang="it" class="mv2-document">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07090a" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    <link rel="icon" href={`${base}assets/favicon.svg`} type="image/svg+xml" />
+    <link rel="preload" href={`${base}assets/fonts/mv2-inter-latin.woff2`} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={`${base}assets/fonts/mv2-outfit-latin.woff2`} as="font" type="font/woff2" crossorigin />
+  </head>
+  <body class="mv2-page">
+    <a class="mv2-skip" href="#mv2-contenuto">Vai al contenuto</a>
+    <slot />
+  </body>
+</html>

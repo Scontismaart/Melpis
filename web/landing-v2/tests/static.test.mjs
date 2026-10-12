@@ -12,7 +12,7 @@ const node = process.execPath;
 test('V2 symbol and favicon preserve the canonical Melpis SVG', async () => {
   const canonical = await readFile(path.resolve(root, '../landing/brand/melpis-symbol-dark.svg'), 'utf8');
   const normalize = (svg) => svg.replace(/\r\n/g, '\n');
-  for (const file of ['assets/mv2-symbol.svg', 'assets/favicon.svg']) {
+  for (const file of ['public/assets/mv2-symbol.svg', 'public/assets/favicon.svg']) {
     const svg = await readFile(path.join(root, file), 'utf8');
     assert.equal(normalize(svg), normalize(canonical));
     assert.match(svg, /viewBox="0 0 200 144"/);
@@ -50,7 +50,10 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.equal(home.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
   assert.match(await home.text(), /Melpis/);
 
-  const font = await fetch(`${origin}/landing-v2/assets/fonts/mv2-outfit-latin.woff2`);
+  const css = await readFile(path.join(root, 'dist', '_astro', (await (await import('node:fs/promises')).readdir(path.join(root, 'dist', '_astro'))).find(f => f.endsWith('.css'))), 'utf8');
+  const fontPath = css.match(/url\((\/landing-v2\/assets\/fonts\/[^)]+\.woff2)\)/)?.[1];
+  assert.ok(fontPath, 'built CSS must reference a self-hosted font');
+  const font = await fetch(`${origin}${fontPath}`);
   assert.equal(font.status, 200);
   assert.equal(font.headers.get('content-type'), 'font/woff2');
   assert.ok(Number(font.headers.get('content-length')) > 1000);

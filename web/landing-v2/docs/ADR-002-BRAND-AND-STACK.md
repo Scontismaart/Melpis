@@ -1,6 +1,6 @@
 # Revisione Fase 1 — brand autentico e stack
 
-12 ottobre 2026 · Decisione Sol · PR #79 resta aperta. **Brand corretto nella V2; migrazione proposta, NON eseguita. Fase 2 NON iniziata.** Questo documento sostituisce la precedente scelta avorio/verde bosco per la direzione visiva futura, senza riscrivere il blueprint Fase 0 storico.
+12 ottobre 2026 · Decisione Sol · snapshot precedente alla review/merge PR #79 e all'autorizzazione Phase 1B. **In questa snapshot la migrazione era proposta e non ancora eseguita.** L'utente ha poi autorizzato il merge PR #79 e una Phase 1B limitata ad Astro + React Islands; l'implementazione corrente e i gate sono in [PHASE-1B-VALIDATION.md](PHASE-1B-VALIDATION.md). Fase 2 resta non iniziata. Questo documento sostituisce la precedente scelta avorio/verde bosco per la direzione visiva futura, senza riscrivere il blueprint Fase 0 storico.
 
 ## Brand: riscontro e proposta
 
@@ -16,7 +16,7 @@ I riferimenti sono stati letti realmente, incluse le regole in coda: `web/landin
 | CTA / stato positivo | #10B981 | Emerald esplicitamente richiesto dall'utente; scelta di direzione, non affermazione sull'attuale CTA V1 |
 | Testo sulla CTA | #07090A | Contrasto: non mettere piccolo testo bianco sull'emerald |
 
-Geometria, viewBox, tre path e gradienti del simbolo preservati: copie byte-identiche dell'originale in `assets/mv2-symbol.svg` e `assets/favicon.svg`. Header/footer usano l'immagine autentica, non la M inventata. Il file V1 è soltanto letto. SVG esterno evita collisioni dei gradient ID tra istanze.
+Geometria, viewBox, tre path e gradienti del simbolo preservati: in questa snapshot, copie byte-identiche dell'originale in `assets/mv2-symbol.svg` e `assets/favicon.svg`. Nella build Astro corrente gli asset pubblici sono `public/assets/mv2-symbol.svg` e `public/assets/favicon.svg`. Header/footer usano l'immagine autentica, non la M inventata. Il file V1 è soltanto letto. SVG esterno evita collisioni dei gradient ID tra istanze.
 
 La revisione mantiene struttura e tipografia della Fase 1, aggiornando superfici, pannelli conversazionali, icone, focus e stati. I gradienti metallici restano piccoli e statici nelle barre di pannello; nessun nuovo shader, effetto cinematografico o ricerca competitor. La firma futura sarà il rapporto fra conversazione e risultato operativo, non il logo ridisegnato.
 
