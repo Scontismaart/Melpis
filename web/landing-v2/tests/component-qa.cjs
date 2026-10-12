@@ -23,7 +23,9 @@ const root = require('node:path').resolve(__dirname, '..');
     assert.equal(await noJs.locator('.mv2-ps-nav-button').count(), 6, 'SSR includes all six sections');
     assert.equal(await noJs.locator('.mv2-ps-nav-button[aria-pressed="true"]').innerText(), 'Panoramica');
     assert.equal(await noJs.locator('.mv2-ps-nav-button:not([aria-pressed="true"])').first().isDisabled(), true, 'without JS, navigation stays visibly disabled');
-    assert.match(await noJs.locator('noscript').innerText(), /navigazione tra sezioni richiede JavaScript/i);
+    assert.match(await noJs.locator('.mv2-ps-content noscript').innerText(), /navigazione tra sezioni richiede JavaScript/i);
+    assert.match(await noJs.locator('.mv2-story-fallback').innerText(), /nessun posto disponibile[\s\S]*informazioni non bastano/i);
+    assert.equal(await noJs.locator('.mv2-story-demo').isVisible(), false, 'no-JS story remains fully in the static fallback');
     assert.match(await noJs.locator('.mv2-ps-overview').innerText(), /Messaggi ricevuti[\s\S]*Gestiti assistente[\s\S]*Girati a umano/);
     await noJs.close();
 

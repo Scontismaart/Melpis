@@ -28,7 +28,7 @@ must(/Anteprima dimostrativa · dati sintetici/.test(html), 'Synthetic example d
 must(/Ogni conversazione\.<br\s*\/?><em>Sotto controllo\.<\/em>/.test(html), 'Phase 2 hero headline is missing.');
 must(/Listino mensile di riferimento/.test(html), 'Monthly reference price qualifier missing.');
 must(!/\/landing-v2\/(?:styles\.css|app\.js)/.test(html), 'Legacy direct CSS or JS resource remains.');
-const sourceFiles = ['src/styles/landing.css','src/components/ProductShowcase.jsx','src/components/Journey.astro','src/components/Hero.astro'];
+const sourceFiles = ['src/styles/landing.css','src/components/ProductShowcase.jsx','src/components/ConversationStory.jsx','src/components/booking-guard.mjs','src/components/Journey.astro','src/components/Hero.astro'];
 for (const file of sourceFiles) {
   const source = await readFile(path.join(root,file),'utf8');
   must(!/10b981|34d399|16,\s*185,\s*129|52,\s*211,\s*153|emerald/i.test(source), `Emerald palette reference remains in ${file}.`);

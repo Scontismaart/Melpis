@@ -1,13 +1,21 @@
-<section class="mv2-section mv2-container" id="mv2-percorso" aria-labelledby="mv2-path-title">
-      <div class="mv2-section-heading"><div><p class="mv2-kicker">01 / DAL MESSAGGIO ALL’AZIONE</p><h2 id="mv2-path-title">Ogni richiesta trova<br><em>il suo prossimo passo.</em></h2></div><p>Un esempio illustrativo mostra come una conversazione può diventare un’attività da seguire. Nessun messaggio viene inviato e nessuna prenotazione viene creata.</p></div>
-      <div class="mv2-flow-layout">
-        <ol class="mv2-steps">
-          <li><span class="mv2-step-index">01</span><div><strong>Arriva una domanda</strong><p>Una persona chiede un tavolo per due stasera.</p></div><span class="mv2-step-mark">↘</span></li>
-          <li><span class="mv2-step-index">02</span><div><strong>Si controllano le informazioni</strong><p>L’assistente usa le regole configurate e verifica la disponibilità.</p></div><span class="mv2-step-mark">↘</span></li>
-          <li><span class="mv2-step-index">03</span><div><strong>Il team segue il risultato</strong><p>La richiesta e il suo stato restano visibili nel pannello.</p></div><span class="mv2-step-mark">↘</span></li>
-          <li><span class="mv2-step-index">04</span><div><strong>Una persona interviene se serve</strong><p>Lo staff può prendere in carico la conversazione.</p></div><span class="mv2-step-mark">✓</span></li>
-        </ol>
-        <aside class="mv2-flow-card"><div class="mv2-window-bar"><span></span><span></span><span></span><small>Anteprima · dati di esempio</small></div><div class="mv2-flow-card-content"><div class="mv2-flow-title"><span class="mv2-mini-avatar">A</span><span><strong>Attività · esempio</strong><small>Richiesta in corso</small></span><span class="mv2-live-dot"></span></div><div class="mv2-flow-message"><small>CLIENTE</small><p>Avete un tavolo per due stasera?</p></div><div class="mv2-flow-message mv2-flow-message-assistant"><small>MELPIS</small><p>Controllo la disponibilità per te.</p></div><div class="mv2-result"><span class="mv2-result-check">✓</span><span><small>ESITO DEL CONTROLLO</small><strong>Orario disponibile: 19:30</strong></span></div><div class="mv2-human"><span class="mv2-avatar">T</span><span><strong>Team</strong><small>Può prendere in carico la richiesta</small></span><span class="mv2-human-arrow">→</span></div></div></aside>
-      </div>
-      <p class="mv2-disclaimer">Esempio dimostrativo con dati sintetici. Non invia messaggi e non crea prenotazioni.</p>
-    </section>
+---
+import ConversationStory from './ConversationStory.jsx';
+---
+
+<section class="mv2-section mv2-container mv2-story" id="mv2-percorso" aria-labelledby="mv2-path-title">
+  <div class="mv2-story-heading">
+    <div><p class="mv2-kicker">01 / DAL MESSAGGIO AL PROSSIMO PASSO</p><h2 id="mv2-path-title">Da una domanda,<br /><em>al prossimo passo.</em></h2></div>
+    <p>Una richiesta diventa un’attività chiara: le informazioni vengono verificate e il team segue ciò che serve.</p>
+  </div>
+  <div class="mv2-story-fallback">
+    <p class="mv2-story-disclosure">Demo illustrativa · dati sintetici</p>
+    <h3>Un martedì di esempio · 13 ottobre 2026</h3>
+    <ol>
+      <li><strong>Disponibilità e conferma</strong><p>«Avete un tavolo per due martedì 13 ottobre alle 19:30?» · Il controllo dello slot nell’esempio mostra 2 posti disponibili. Dopo la conferma esplicita e la verifica di capienza, il risultato illustrativo compare nel pannello.</p></li>
+      <li><strong>Nessun posto disponibile</strong><p>Per le 19:30 risultano 0 posti disponibili. La richiesta resta senza prenotazione.</p></li>
+      <li><strong>Informazione da verificare</strong><p>Per una richiesta sul menu di un evento le informazioni non bastano: la conversazione è da seguire dal team.</p></li>
+    </ol>
+    <noscript><p>La demo interattiva richiede JavaScript; i tre esiti e le relative condizioni sono descritti qui.</p></noscript>
+  </div>
+  <ConversationStory client:visible />
+</section>

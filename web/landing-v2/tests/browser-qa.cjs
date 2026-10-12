@@ -5,17 +5,17 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
-const out = path.join(root, 'artifacts', 'phase2-review');
-const url = process.env.V2_QA_URL || 'http://127.0.0.1:4176/landing-v2/';
+const out = path.join(root, 'artifacts', 'phase3-review');
+const url = process.env.V2_QA_URL || 'http://127.0.0.1:4175/landing-v2/';
 const origin = new URL(url).origin;
 if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname)) throw new Error('Browser QA accepts loopback previews only.');
-const results = { generatedAt: new Date().toISOString(), url, browser: null, viewports: [], views: [], errors: [], externalRequests: [], failures: [] };
+const results = { generatedAt: new Date().toISOString(), url, browser: null, viewports: [], views: [], errors: [], externalRequests: [], unexpectedRequests: [], failures: [] };
 const labels = ['Panoramica', 'Inbox', 'Prenotazioni', 'Recensioni', 'Knowledge Base', 'Team'];
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 function check(pass, name, evidence) { if (!pass) results.failures.push({ name, evidence }); }
 async function startPreview() {
   if (process.env.V2_QA_URL) return null;
-  const child = spawn(process.execPath, ['tools/preview.mjs'], { cwd: root, env: { ...process.env, MV2_PORT: '4176' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['tools/preview.mjs'], { cwd: root, env: { ...process.env, MV2_PORT: '4175' }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; child.stdout.on('data', c => log += c); child.stderr.on('data', c => log += c);
   for (let i = 0; i < 100; i++) { if (child.exitCode !== null) throw new Error(`Preview exited: ${log}`); if (log.includes('Preview V2:')) return child; await wait(100); }
   child.kill(); throw new Error(`Preview startup timeout: ${log}`);
@@ -25,7 +25,10 @@ async function monitor(page, width) {
   page.on('pageerror', error => results.errors.push(`${width}: ${String(error)}`));
   page.on('requestfailed', request => results.errors.push(`${width}: ${request.url()} ${request.failure()?.errorText}`));
   page.on('response', response => { if (response.status() >= 400) results.errors.push(`${width}: HTTP ${response.status()} ${response.url()}`); });
-  page.on('request', request => { if (new URL(request.url()).origin !== origin) results.externalRequests.push(request.url()); });
+  page.on('request', request => {
+    if (new URL(request.url()).origin !== origin) results.externalRequests.push(request.url());
+    if (['fetch','xhr'].includes(request.resourceType()) || !['GET','HEAD'].includes(request.method())) results.unexpectedRequests.push({ url: request.url(), method: request.method(), type: request.resourceType() });
+  });
   await page.addInitScript(() => { window.__mv2Csp = []; document.addEventListener('securitypolicyviolation', e => window.__mv2Csp.push({ directive: e.violatedDirective, blockedURI: e.blockedURI })); });
 }
 async function open(page, width) {
@@ -69,8 +72,8 @@ async function axeRun(page) {
       check(accessibility.violations.length === 0, `${width}: Axe WCAG A/AA`, accessibility.violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })));
       check((await page.evaluate(() => window.__mv2Csp)).length === 0, `${width}: no CSP violations`, await page.evaluate(() => window.__mv2Csp));
       if (width === 1440 || width === 768 || width === 390) {
-        await page.screenshot({ path: path.join(out, `phase2-${width}-viewport.png`) });
-        await page.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase2-${width}-hero.png`) });
+        await page.screenshot({ path: path.join(out, `phase3-${width}-viewport.png`) });
+        await page.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase3-${width}-hero.png`) });
       }
       results.viewports.push({ width, height, initial, axeViolations: accessibility.violations.length });
       await context.close();
@@ -84,12 +87,64 @@ async function axeRun(page) {
       await desktop.getByRole('heading', { name: label, exact: true }).waitFor();
       check(await button.getAttribute('aria-pressed') === 'true', `${label}: aria-pressed selected`);
       check(mainFrameCount === 0, `${label}: view switch does not navigate`, desktop.url());
-      if (['Inbox', 'Prenotazioni', 'Recensioni', 'Knowledge Base', 'Team'].includes(label)) await desktop.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase2-view-${label.toLowerCase().replaceAll(' ','-')}.png`) });
+      if (['Panoramica', 'Inbox', 'Prenotazioni', 'Recensioni', 'Knowledge Base', 'Team'].includes(label)) await desktop.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase3-view-${label.toLowerCase().replaceAll(' ','-')}.png`) });
       results.views.push(label);
     }
     await desktop.getByRole('button', { name: /Inbox/ }).focus(); await desktop.keyboard.press('Enter');
     check(await desktop.getByRole('button', { name: /Inbox/ }).getAttribute('aria-pressed') === 'true', 'Keyboard activation selects a view');
     check(await desktop.evaluate(() => document.activeElement?.classList.contains('mv2-ps-nav-button')), 'Keyboard focus remains on navigation');
+    const beforeStory = await desktop.evaluate(() => ({ storage: localStorage.length, session: sessionStorage.length }));
+    const story = desktop.locator('.mv2-story-demo');
+    await story.scrollIntoViewIfNeeded();
+    await desktop.waitForFunction(() => !document.querySelector('#mv2-story-scenario')?.disabled);
+    const scenarioSelect = desktop.locator('#mv2-story-scenario');
+    check(await scenarioSelect.boundingBox().then(box => box.height >= 44), 'Story scenario selector touch target is at least 44px');
+    const storyButtons = story.getByRole('button');
+    check(await storyButtons.count() === 3, 'Story has only the three necessary manual controls');
+    await story.getByRole('button', { name: 'Avvia la demo' }).click();
+    await story.getByText('Informazioni consultate', { exact: true }).waitFor();
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    await story.getByText('Disponibilità verificata', { exact: true }).waitFor();
+    check(await story.locator('.mv2-story-result').getByText(/2 posti disponibili/).isVisible(), 'Positive scenario verifies capacity before confirmation');
+    check(/Martedì 13 ottobre 2026[\s\S]*19:30[\s\S]*2 disponibili/.test(await story.locator('.mv2-story-availability').innerText()), 'Availability panel exposes day, time and synthetic capacity');
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    await story.getByText('Conferma della cliente', { exact: true }).waitFor();
+    check(await story.locator('.mv2-story-customer-confirmation').getByText('«Confermo, grazie.»').isVisible(), 'Positive scenario requires an explicit customer confirmation');
+    check(!(await story.locator('.mv2-story-record').count()), 'No booking appears before the application guard passes');
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    await story.getByText('Tutto pronto per la prenotazione', { exact: true }).waitFor();
+    check(!(await story.locator('.mv2-story-record').count()), 'Application validation precedes the illustrative panel record');
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    check(await story.locator('.mv2-story-record').getByText('Confermata nell’esempio').isVisible(), 'Positive scenario records the illustrative booking only after confirmation');
+    check(/Cliente demo · 2 persone[\s\S]*Martedì 13 ottobre 2026 · 19:30[\s\S]*Conversazione in Inbox/.test(await story.locator('.mv2-story-record').innerText()), 'Illustrative booking row includes customer, date, time and inbox context');
+    await desktop.screenshot({ path: path.join(out, 'phase3-story-positive.png'), fullPage: false });
+    await scenarioSelect.selectOption('unavailable');
+    await story.getByText('Richiesta ricevuta', { exact: true }).waitFor();
+    await story.getByRole('button', { name: 'Avvia la demo' }).click();
+    await story.getByText('Disponibilità verificata', { exact: true }).waitFor();
+    check(await story.locator('.mv2-story-result').getByText(/non ci sono posti disponibili/).isVisible(), 'Unavailable scenario reports no availability');
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    check(await story.getByText(/Prenotazione non creata/).isVisible(), 'Unavailable scenario never creates a booking');
+    check(/0 disponibili/.test(await story.locator('.mv2-story-availability').innerText()), 'Unavailable capacity panel shows zero slots');
+    check(!(await story.locator('.mv2-story-record').count()), 'Unavailable scenario has no booking row');
+    await desktop.screenshot({ path: path.join(out, 'phase3-story-unavailable.png'), fullPage: false });
+    await scenarioSelect.selectOption('team');
+    await story.getByRole('button', { name: 'Avvia la demo' }).click();
+    await story.getByText('Informazioni non sufficienti', { exact: true }).waitFor();
+    await story.getByRole('button', { name: 'Passaggio successivo' }).click();
+    check(await story.locator('.mv2-story-team-record').getByText('Da prendere in carico').isVisible(), 'Missing knowledge routes the conversation to team follow-up');
+    check(!(await story.locator('.mv2-story-record').count()), 'Team scenario has no booking row');
+    await desktop.screenshot({ path: path.join(out, 'phase3-story-team.png'), fullPage: false });
+    await story.getByRole('button', { name: 'Indietro' }).click();
+    await story.getByRole('button', { name: 'Ricomincia' }).click();
+    check(await story.getByText('Passaggio 1 di 3').isVisible(), 'Story resets and can be replayed');
+    await scenarioSelect.focus(); await desktop.keyboard.press('Tab');
+    check(await desktop.evaluate(() => document.activeElement?.tagName === 'BUTTON'), 'Story controls remain keyboard reachable');
+    const storyAxe = await axeRun(desktop);
+    check(storyAxe.violations.length === 0, 'Story states: Axe WCAG A/AA', storyAxe.violations.map(item => ({ id: item.id, nodes: item.nodes.map(node => node.target) })));
+    const afterStory = await desktop.evaluate(() => ({ storage: localStorage.length, session: sessionStorage.length }));
+    check(afterStory.storage === beforeStory.storage && afterStory.session === beforeStory.session, 'Story uses no browser persistence');
+    check(!results.errors.some(error => /4175/.test(error)), 'Story scenario replay has no browser errors');
     await desktop.close();
 
     const mobile = await browser.newPage({ viewport: { width: 390, height: 900 } }); await open(mobile, 'mobile');
@@ -106,20 +161,26 @@ async function axeRun(page) {
 
     const noJs = await browser.newPage({ viewport: { width: 390, height: 900 }, javaScriptEnabled: false }); await open(noJs, 'no-js');
     check(await noJs.locator('h1').isVisible() && await noJs.locator('.mv2-ps-overview').isVisible(), 'No-JS fallback shows readable hero and overview');
-    check(await noJs.locator('.mv2-ps-nav-button').first().isDisabled() && await noJs.locator('noscript').isVisible(), 'No-JS navigation is disabled with an explanation');
+    check(await noJs.locator('.mv2-story-fallback').innerText().then(text => /2 posti disponibili[\s\S]*Nessun posto disponibile[\s\S]*0 posti disponibili[\s\S]*Informazione da verificare/.test(text)), 'No-JS story fallback explains all three outcomes');
+    check(!(await noJs.locator('.mv2-story-demo').isVisible()), 'No-JS view uses only the complete static story fallback');
+    check(await noJs.locator('.mv2-ps-nav-button').first().isDisabled() && await noJs.locator('.mv2-ps-content noscript').isVisible(), 'No-JS navigation is disabled with an explanation');
     check(await noJs.locator('#mv2-nav').isVisible() && !(await noJs.locator('.mv2-menu-toggle').isVisible()), 'No-JS mobile navigation remains expanded without layout-dependent enhancement');
     await noJs.close();
 
     const reduced = await browser.newPage({ viewport: { width: 390, height: 900 }, reducedMotion: 'reduce' }); await open(reduced, 'reduced-motion');
     check(await reduced.locator('.mv2-ps-view').evaluate(el => getComputedStyle(el).animationName === 'none'), 'Reduced-motion preference disables view entrance');
+    await reduced.locator('.mv2-story-demo').scrollIntoViewIfNeeded();
+    await reduced.waitForFunction(() => !document.querySelector('#mv2-story-scenario')?.disabled);
+    await reduced.locator('#mv2-story-scenario').selectOption('available');
+    check(await reduced.locator('.mv2-story-scene').evaluate(el => getComputedStyle(el).animationDuration === '0s'), 'Reduced motion keeps story transitions static');
     check(await reduced.evaluate(() => window.__mv2Csp.length === 0), 'Reduced-motion state has no CSP violation');
     await reduced.close();
   } catch (error) { results.errors.push(String(error.stack || error)); }
   finally {
     if (browser) await browser.close(); if (server) server.kill();
-    results.passed = results.failures.length === 0 && results.errors.length === 0 && results.externalRequests.length === 0;
+    results.passed = results.failures.length === 0 && results.errors.length === 0 && results.externalRequests.length === 0 && results.unexpectedRequests.length === 0;
     await fs.writeFile(path.join(out, 'browser-qa.json'), JSON.stringify(results, null, 2));
-    console.log(JSON.stringify({ passed: results.passed, viewports: results.viewports.length, views: results.views, failures: results.failures, errors: results.errors, externalRequests: results.externalRequests, artifacts: out }, null, 2));
+    console.log(JSON.stringify({ passed: results.passed, viewports: results.viewports.length, views: results.views, failures: results.failures, errors: results.errors, externalRequests: results.externalRequests, unexpectedRequests: results.unexpectedRequests, artifacts: out }, null, 2));
     if (!results.passed) process.exitCode = 1;
   }
 })();

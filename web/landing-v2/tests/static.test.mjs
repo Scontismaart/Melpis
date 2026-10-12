@@ -30,6 +30,11 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.match(html, /Ogni conversazione\./);
   assert.match(html, /Sotto controllo\./);
   assert.match(html, /client="load"/);
+  assert.match(html, /client="visible"/);
+  assert.match(html, /Da una domanda,/);
+  assert.match(html, /Demo illustrativa · dati sintetici/);
+  assert.match(html, /0 posti disponibili/);
+  assert.match(html, /informazioni non bastano/);
   assert.match(html, /Anteprima dimostrativa · dati sintetici/);
   for (const label of ['Panoramica','Inbox','Prenotazioni','Recensioni','Knowledge Base','Team']) assert.match(html, new RegExp(`>${label}<`), `SSR product navigation includes ${label}`);
   assert.match(html, /disabled="" aria-pressed="true"/);
