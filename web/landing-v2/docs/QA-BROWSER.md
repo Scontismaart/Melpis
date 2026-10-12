@@ -1,3 +1,5 @@
+> Nota di revisione: documento della Fase 1 iniziale (8ce2c2d). Per palette, logo e raccomandazione stack correnti prevale ADR-002-BRAND-AND-STACK.md; nessuna migrazione approvata o effettuata.
+
 # QA finale browser — Fase 1
 
 12 ottobre 2026. Eseguito da Sol dopo le correzioni di Luna sul build congelato: **97 controlli, 97 PASS, zero errori**. Evidenza locale `artifacts/browser-qa/results.json`; include SHA256 prima/dopo identici dei tre file runtime. Il workflow ripete gli stessi test su Chromium e sullo SHA head esatto; il risultato remoto va verificato nella PR, non dedotto da questo report locale.

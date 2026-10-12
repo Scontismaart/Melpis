@@ -28,7 +28,7 @@ Testi completi scaricati dagli URL ufficiali Google Fonts; entrambi SIL Open Fon
 - Immagini generate: NONE. Nessun tool generativo chiamato in questa fase.
 - Screenshot competitor: solo pacchetto ricerca precedente, fuori bundle e allowlist V2; nessuna immagine/identità copiata nella landing.
 - Fotografie, video, audio, shader, canvas, texture di terzi: NONE.
-- SVG corrente: un solo assets/favicon.svg scritto manualmente dal Developer; lettera m geometrica e palette Melpis, originale senza copia competitor. SHA256: 5D12FF8478974EB306E3C610A8324F4D497791AFE03033F43275FBC13BB2999D. Contiene solo svg/rect/path, nessun script/external href/foreignObject. Resto delle decorazioni UI HTML/CSS/Unicode. Nessun tool generativo chiamato.
+- SVG correnti dopo revisione brand: `assets/mv2-symbol.svg` e `assets/favicon.svg` sono copie del simbolo autentico `web/landing/brand/melpis-symbol-dark.svg`. Geometria, viewBox 200×144, tre path e gradienti preservati; SHA256 locale di entrambi uguale all'originale: 714F9EB037919E51681BF6AC094140C0591B851E9F84C5E21E4DB377758B5BDE. La favicon manuale a lettera M della prima bozza è stata sostituita. Header/footer caricano l'asset copiato nella V2, senza dipendenza runtime dalla V1. Il test confronta i testi SVG normalizzando soltanto i line endings di checkout; non altera geometria o colori. Nessun script/external href/foreignObject, nessun tool generativo chiamato. Asset Melpis preesistente fornito come riferimento dall'utente; nessun asset concorrente o nuovo marchio.
 - Logo/wordmark V2: composizione testuale Melpis originale; nessun marchio cliente/partner/certificazione implicito.
 - Icone correnti: CSS/simboli Unicode, senza librerie/font icon/asset remote. Simboli decorativi con aria-hidden nel markup pertinente.
 

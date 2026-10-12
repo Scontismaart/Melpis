@@ -9,6 +9,17 @@ import test from 'node:test';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const node = process.execPath;
 
+test('V2 symbol and favicon preserve the canonical Melpis SVG', async () => {
+  const canonical = await readFile(path.resolve(root, '../landing/brand/melpis-symbol-dark.svg'), 'utf8');
+  const normalize = (svg) => svg.replace(/\r\n/g, '\n');
+  for (const file of ['assets/mv2-symbol.svg', 'assets/favicon.svg']) {
+    const svg = await readFile(path.join(root, file), 'utf8');
+    assert.equal(normalize(svg), normalize(canonical));
+    assert.match(svg, /viewBox="0 0 200 144"/);
+    assert.equal([...svg.matchAll(/<path\b/g)].length, 3);
+  }
+});
+
 test('build allowlist is self-contained and preview is isolated', async (t) => {
   const build = spawn(node, ['tools/build.mjs'], { cwd: root, stdio: 'inherit' });
   const [buildCode] = await once(build, 'exit');

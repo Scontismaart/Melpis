@@ -1,3 +1,5 @@
+> Nota di revisione: documento della Fase 1 iniziale (8ce2c2d). Per palette, logo e raccomandazione stack correnti prevale ADR-002-BRAND-AND-STACK.md; nessuna migrazione approvata o effettuata.
+
 # Landing V2 — Fase 1: decisione Sol
 
 Base: origin/main `2994fae7ea54094482a40374ea46c08aae8d0407`, aggiornato il 12 ottobre 2026. Integrazione `codex/landing-v2`; implementazione `codex/landing-v2-phase-1`. Nessuna sostituzione V1, merge o deploy autorizzati.

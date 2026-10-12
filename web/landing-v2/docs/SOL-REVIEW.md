@@ -1,3 +1,5 @@
+> Nota di revisione: documento della Fase 1 iniziale (8ce2c2d). Per palette, logo e raccomandazione stack correnti prevale ADR-002-BRAND-AND-STACK.md; nessuna migrazione approvata o effettuata.
+
 # Sol — revisione della direzione e confini Fase 1
 
 Riferimento effettivamente letto: `docs/reference/BLUEPRINT.md` e allegati, provenienti dal pacchetto Fase 0 del 12 ottobre 2026. La richiesta successiva limita questa fase alle fondamenta, mantenendo la hero completa e il movimento nelle fasi successive.

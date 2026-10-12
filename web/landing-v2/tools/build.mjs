@@ -17,4 +17,5 @@ for (const file of fontFiles) await cp(path.join(sourceFonts, file), path.join(d
 for (const file of fontLicenses) await cp(path.join(sourceFonts, 'licenses', file), path.join(distFonts, 'licenses', file));
 await cp(path.join(root, 'robots.txt'), path.join(dist, 'robots.txt'));
 await cp(path.join(root, 'assets', 'favicon.svg'), path.join(dist, 'assets', 'favicon.svg'));
+await cp(path.join(root, 'assets', 'mv2-symbol.svg'), path.join(dist, 'assets', 'mv2-symbol.svg'));
 console.log(`Landing V2 pronta: ${path.relative(root, dist)} (${files.length} pagine/app + ${fontFiles.length} font)`);

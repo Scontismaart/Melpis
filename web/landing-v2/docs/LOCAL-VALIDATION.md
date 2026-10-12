@@ -1,3 +1,5 @@
+> Nota di revisione: documento della Fase 1 iniziale (8ce2c2d). Per palette, logo e raccomandazione stack correnti prevale ADR-002-BRAND-AND-STACK.md; nessuna migrazione approvata o effettuata.
+
 # Fase 1 — verifiche locali e approvazione tecnica Sol
 
 **PASS locale · blueprint utilizzato YES · design Fase 1 approvato da Sol.** La PR e la CI identificano il commit finale; questo documento registra prove locali e non anticipa il risultato remoto.
