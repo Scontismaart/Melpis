@@ -1,25 +1,39 @@
-# Melpis Landing V2 — Fase 1
+# Melpis Landing V2 — Astro static page
 
-Landing statica dimostrativa, isolata dalla V1. Usa HTML semantico, CSS e JavaScript vanilla; non contiene account, backend, API, invio di messaggi o prenotazioni. I casi mostrati sono esempi sintetici. I tre prezzi sono un listino mensile di riferimento e non attivano un acquisto.
+An isolated static marketing-page experiment at `/landing-v2/`. Astro renders the layout and editorial sections to HTML; one existing synthetic control panel is a React island hydrated with `client:visible`. The page contains no account, backend, API request, message/booking submission, or tracking. Its initial copy, structure, and design follow the approved V2 baseline.
 
-## Comandi
+## Local commands
 
-Da questa cartella:
+Use Node.js 24. From this directory:
 
-- La build e la preview richiedono Node.js 24 e non richiedono librerie client.
-- Per i controlli browser: `npm ci --ignore-scripts`, poi `npx playwright install chromium`. Su Windows con Chrome già disponibile: `$env:V2_BROWSER_CHANNEL='chrome'` prima del test.
+- `npm ci --ignore-scripts` installs the pinned, local development toolchain.
+- `npm run build` compiles the page into `dist/` and disables telemetry for the build process.
+- `npm run check` validates output paths, generated CSP, static markup, font/license assets, and isolation requirements.
+- `npm test` runs static and preview-server tests.
+- `npm run test:components` checks React SSR, the no-JavaScript fallback, visible hydration, and both local state changes.
+- `npx playwright install chromium` installs the isolated browser used by `npm run test:browser`.
+- `npm run test:browser` runs browser, accessibility, keyboard, CSP, JavaScript-off, responsive, and page-isolation checks.
+- `npm run performance` measures three fresh-context samples at six viewports against the local PR 79 baseline; it saves ignored screenshots and `performance.json` under `artifacts/phase1b-after/`.
+- `npm audit --audit-level=low` checks all dependency severities.
+- `npm run preview` serves only `dist/` on loopback at `/landing-v2/` (default port 4175; set `MV2_PORT` to choose another port).
 
-- `npm run build` compila solo la allowlist V2 dentro `dist/`.
-- `npm run check` verifica struttura, ancore, namespace, font e vincoli statici della build.
-- `npm test` esegue i test statici e quelli del server preview.
-- `npm run preview` serve `dist/` solo su `127.0.0.1:4175`, al percorso `/landing-v2/`.
-- `npm run test:browser` è riservato al QA browser della fase.
-- `node tools/isolation.mjs` confronta scope e byte dei file protetti con il baseline documentato.
+The preview is a local QA server, not a production server. It uses the generated CSP hashes in both the document and response header, adds `frame-ancestors 'none'`, sets noindex headers, permits only GET/HEAD, and rejects traversal. It cannot reach a backend; the CSP sets `connect-src 'none'`.
 
-La build non modifica file fuori da `web/landing-v2/`. Il preview serve esclusivamente `dist/`, imposta CSP senza connessioni in uscita e intestazioni noindex, e rifiuta richieste traversal. Non è un server di produzione. Nessun link di account è abilitato: le call to action portano a sezioni presenti in questa pagina.
+## Structure and assets
 
-## Ambito
+- `src/layouts/` and `src/components/*.astro` provide the static layout and page sections.
+- `src/components/ControlPanelDemo.jsx` is the only hydrated React island. It server-renders its initial state and is enhanced only when visible.
+- `src/styles/landing.css` is local, page-scoped styling. `src/scripts/mobile-menu.js` retains the small vanilla menu behavior.
+- `public/` holds stable, self-hosted browser assets, including all local fonts, their OFL texts, brand SVGs, and robots policy. The extended Outfit font is preserved with its license; the page's declared Unicode range does not require it for the Italian page copy, so it is not preloaded.
+- `dist/` is generated inside this directory and is never deployed by these commands.
+- `.astroignore` excludes future test files under `src` from Astro compilation; `.gitignore` excludes Astro's generated cache.
 
-Navbar con menu mobile accessibile, percorso dimostrativo statico, quattro verticali (ristoranti, hotel, barbieri e centri estetici), controlli e passaggio al team, configurazione, prezzi di riferimento e FAQ. La hero resta statica; non ci sono demo animate, shader, librerie runtime, tracker o moduli di conversione.
+## Review records
 
-Evidenze e approvazione tecnica: [validazione locale](docs/LOCAL-VALIDATION.md), [QA browser](docs/QA-BROWSER.md), [review Sol](docs/SOL-REVIEW.md), [Security](docs/SECURITY-REVIEW.md). Screenshot in `artifacts/browser-qa/` esclusi dal bundle; workflow di CI ripetibile su commit esatto, senza deploy.
+- [Phase 1B validation and measurements](docs/PHASE-1B-VALIDATION.md)
+- [Phase 1B architecture and security review](docs/SOL-PHASE-1B-REVIEW.md)
+- [Brand and stack evidence](docs/BRAND-STACK-EVIDENCE.md)
+- [Asset provenance and licenses](docs/ASSET-PROVENANCE.md)
+- [Phase 1 architecture baseline](docs/PHASE-1-ARCHITECTURE.md)
+
+The baseline and Phase 1B screenshots and raw measurements are ignored local artifacts; the validation record includes the source SHAs and exact capture conditions so the measurements can be reproduced.

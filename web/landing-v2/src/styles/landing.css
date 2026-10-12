@@ -226,3 +226,6 @@ body.mv2-page{margin:0;background:var(--mv2-ink);color:var(--mv2-paper);font-fam
 .mv2-page .mv2-footer-top>a:last-child{color:#d7d9dc}
 @media(max-width:680px){.mv2-page .mv2-nav{background:#07090a}}
 .mv2-page .mv2-faq-layout>div:first-child>p:last-child{color:#aab2c0}
+.mv2-page .mv2-control-row-button{appearance:none;width:100%;margin:0;border:0;border-bottom:1px solid rgba(215,217,220,.08);border-radius:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mv2-page .mv2-control-row-button.mv2-control-row-active{background:rgba(16,185,129,.06)}
+.mv2-page .mv2-control-row-button:focus-visible{position:relative;z-index:1;outline:2px solid #d7d9dc;outline-offset:-3px}

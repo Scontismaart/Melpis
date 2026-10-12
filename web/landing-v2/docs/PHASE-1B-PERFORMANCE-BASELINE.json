@@ -1,0 +1,22 @@
+{
+  "sourceHead": "e61ac6509173e5c2fbfd8d92cddae86d10c899b4",
+  "capture": {
+    "engine": "Chromium 151.0.7922.34",
+    "headless": true,
+    "viewportHeight": 900,
+    "deviceScaleFactor": 1,
+    "cpuThrottleRate": 4,
+    "samplesPerWidth": 3,
+    "cache": "fresh context per sample",
+    "serveEncoding": "uncompressed localhost HTTP; Content-Length body bytes, not network wire estimates",
+    "inlineJsBytes": 0
+  },
+  "widths": {
+    "320": { "lcpMs": 448, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 },
+    "360": { "lcpMs": 428, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 },
+    "390": { "lcpMs": 492, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 },
+    "768": { "lcpMs": 448, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 },
+    "1024": { "lcpMs": 444, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 },
+    "1440": { "lcpMs": 472, "cls": 0, "htmlBytes": 15276, "cssBytes": 33400, "externalJsBytes": 1135, "resourceBodyBytes": 116567, "requestCount": 6 }
+  }
+}

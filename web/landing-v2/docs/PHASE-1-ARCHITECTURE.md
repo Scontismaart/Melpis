@@ -2,6 +2,8 @@
 
 # Landing V2 — Fase 1: decisione Sol
 
+> Snapshot storico anteriore alla migrazione Astro autorizzata. Descrive il baseline Phase 1, non la build corrente. Per implementazione e verifica Phase 1B, vedere [PHASE-1B-VALIDATION.md](PHASE-1B-VALIDATION.md) e la decisione aggiornata in [ADR-002](ADR-002-BRAND-AND-STACK.md).
+
 Base: origin/main `2994fae7ea54094482a40374ea46c08aae8d0407`, aggiornato il 12 ottobre 2026. Integrazione `codex/landing-v2`; implementazione `codex/landing-v2-phase-1`. Nessuna sostituzione V1, merge o deploy autorizzati.
 
 Riferimento: blueprint e allegati originali in `C:/Users/muzzo/Desktop/whatsapp-ai-responder/docs/marketing/melpis-phase0-2026-10-12/`. Copie testuali in `docs/reference/` conservano contenuti storici senza correggere la Fase 0 retroattivamente; link a screenshot/galleria nei riferimenti rimandano al pacchetto originale, non sono pagine distribuibili. 110 immagini di benchmark restano fuori dal bundle V2.
