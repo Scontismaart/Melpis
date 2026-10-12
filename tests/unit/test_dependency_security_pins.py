@@ -23,3 +23,14 @@ def test_torch_pin_is_cpu_only_for_release_images() -> None:
     assert "--find-links https://download.pytorch.org/whl/cpu/torch/" in requirements
     assert "--extra-index-url" not in requirements
     assert re.search(r"(?m)^torch==2\.14\.0\+cpu$", requirements)
+
+
+def test_pyjwt_pin_fixes_raw_token_revocation_advisory() -> None:
+    """GHSA-hxm8-2xgr-2p9m is fixed in PyJWT 2.14.0 and later."""
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    match = re.search(r"(?mi)^PyJWT\[crypto\]==(\d+)\.(\d+)\.(\d+)$", requirements)
+
+    assert match, "PyJWT[crypto] must remain exactly pinned"
+    version = tuple(int(part) for part in match.groups())
+    assert version >= (2, 15, 1)
+    assert not re.search(r"(?mi)^python-jose(?:\[.*\])?==", requirements)

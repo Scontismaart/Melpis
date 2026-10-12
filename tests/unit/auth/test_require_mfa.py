@@ -10,15 +10,20 @@ Cosa si testa qui:
    la richiesta "test con iss sbagliato" andando oltre il solo livello
    funzione gia' coperto in test_jwt_issuer.py.
 
-Questi test non richiedono un JWKS reale: monkeypatchiamo _get_supabase_jwks
-e jose.jwt.decode per controllare claim e signature separatamente.
+Questi test isolano il gate MFA; la verifica crittografica e issuer sono
+coperte dai test JWT con chiavi sintetiche reali.
 """
 import uuid
+import time
+import json
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+import jwt
+from cryptography.hazmat.primitives.asymmetric import ec
+from jwt.algorithms import ECAlgorithm
 
 from src.core.auth.dependencies import (
     get_current_user,
@@ -26,6 +31,33 @@ from src.core.auth.dependencies import (
     SENSITIVE_AAL2_PATHS,
 )
 import src.core.auth.dependencies as deps
+
+
+def _install_signed_test_tokens(monkeypatch):
+    key = ec.generate_private_key(ec.SECP256R1())
+    jwk = json.loads(ECAlgorithm.to_jwk(key.public_key()))
+    jwk.update({"kid": "mfa-test", "alg": "ES256", "use": "sig"})
+
+    async def jwks():
+        return [jwk]
+
+    async def not_revoked(_token):
+        return False
+
+    monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
+    monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
+    monkeypatch.setattr(deps, "_get_supabase_jwks", jwks)
+    monkeypatch.setattr(deps, "is_token_revoked", not_revoked)
+
+    def token(sub, *, aal="aal2", iss="https://myproj.supabase.co/auth/v1", exp_offset=600):
+        now = int(time.time())
+        return jwt.encode(
+            {"sub": sub, "aal": aal, "aud": "authenticated", "iss": iss,
+             "iat": now, "exp": now + exp_offset},
+            key, algorithm="ES256", headers={"kid": jwk["kid"]},
+        )
+
+    return token
 
 
 # ── Fixture: mini-app con un endpoint Tier-1 fittizio ──────────────────
@@ -144,24 +176,17 @@ class TestJwtIssuerRejectionEndToEnd:
     la dipendenza usata da tutti gli endpoint."""
 
     async def test_wrong_issuer_rejected_at_get_current_user(self, monkeypatch):
-        monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
-
-        from jose import JWTError
-        import jose.jwt as jose_jwt_module
-
-        def _reject_with_wrong_iss(token, key, algorithms, audience, issuer, options):
-            raise JWTError("Signature validation failed: issuer mismatch")
-
-        monkeypatch.setattr(jose_jwt_module, "decode", _reject_with_wrong_iss)
+        make_token = _install_signed_test_tokens(monkeypatch)
 
         from unittest.mock import MagicMock
         mock_request = MagicMock()
         mock_request.app.state.repo = MagicMock()
 
         with pytest.raises(HTTPException) as exc:
-            await get_current_user(request=mock_request, token="eyJ.token.from.another.project.xyz")
+            await get_current_user(
+                request=mock_request,
+                token=make_token("user-wrong-issuer", iss="https://other.supabase.co/auth/v1"),
+            )
         assert exc.value.status_code == 403
         assert "non valido" in exc.value.detail.lower()
 
@@ -179,15 +204,9 @@ class TestMfaGateOnRoute:
 
         # JWT decodificato con successo (iss/aud ok) ma aal="aal1":
         # sessione password-only, niente secondo fattore.
-        def _fake_decode(token, key, algorithms, audience, issuer, options):
-            return {"sub": "user-no-mfa", "aal": "aal1"}
-        monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
-        import jose.jwt as jose_jwt_module
-        monkeypatch.setattr(jose_jwt_module, "decode", _fake_decode)
+        signed_token = _install_signed_test_tokens(monkeypatch)("user-no-mfa", aal="aal1")
 
-        resp = client.get("/api/gdpr/export", headers={"Authorization": "Bearer fake.jwt.token"})
+        resp = client.get("/api/gdpr/export", headers={"Authorization": f"Bearer {signed_token}"})
         assert resp.status_code == 403, resp.text
         assert resp.headers.get("x-mfa-required") == "true"
 
@@ -195,14 +214,21 @@ class TestMfaGateOnRoute:
         app = _build_test_app_real()
         client = TestClient(app)
 
-        def _fake_decode(token, key, algorithms, audience, issuer, options):
-            return {"sub": "user-with-mfa", "aal": "aal2"}
-        monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
-        import jose.jwt as jose_jwt_module
-        monkeypatch.setattr(jose_jwt_module, "decode", _fake_decode)
+        signed_token = _install_signed_test_tokens(monkeypatch)("user-with-mfa", aal="aal2")
 
-        resp = client.get("/api/gdpr/export", headers={"Authorization": "Bearer fake.jwt.token"})
+        resp = client.get("/api/gdpr/export", headers={"Authorization": f"Bearer {signed_token}"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["aal"] == "aal2"
+
+    def test_expired_signed_session_is_denied_on_normal_api(self, monkeypatch):
+        app = _build_test_app_real()
+        client = TestClient(app)
+        signed_token = _install_signed_test_tokens(monkeypatch)(
+            "user-expired", exp_offset=-60
+        )
+
+        response = client.get(
+            "/api/gdpr/export", headers={"Authorization": f"Bearer {signed_token}"}
+        )
+
+        assert response.status_code == 401, response.text

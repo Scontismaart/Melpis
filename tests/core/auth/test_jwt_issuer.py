@@ -1,74 +1,64 @@
+"""Issuer and required-claim checks using real signed tokens."""
+
 import pytest
-from unittest.mock import AsyncMock
 from fastapi import HTTPException
 
-import src.core.auth.dependencies as deps
+from src.core.auth import dependencies as deps
+from tests.core.auth.test_jwt_verification import (
+    ISS, SUPABASE_URL, _make_jwk, _make_token, _ec_key,
+)
 
 
-class TestVerifySupabaseJwtIssuer:
-    """Audit 1.4: verify_supabase_jwt deve validare l'issuer (iss), non solo
-    l'audience. Verifichiamo che il claim iss atteso sia costruito da
-    SUPABASE_URL e passato correttamente a jose, e che un iss non
-    corrispondente faccia fallire la verifica con 403."""
+@pytest.fixture(autouse=True)
+def jwt_env(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", SUPABASE_URL)
+    monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
+    monkeypatch.setattr(deps, "JWKS_CACHE", {"keys": None, "expires_at": 0})
 
-    async def test_matching_issuer_accepted(self, monkeypatch):
-        monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
 
-        captured = {}
+@pytest.fixture
+def install_jwks(monkeypatch):
+    async def install(keys):
+        async def get_keys():
+            return keys
+        monkeypatch.setattr(deps, "_get_supabase_jwks", get_keys)
+    return install
 
-        def fake_decode(token, key, algorithms, audience, issuer, options):
-            captured["issuer"] = issuer
-            captured["verify_iss"] = options.get("verify_iss")
-            assert issuer == "https://myproj.supabase.co/auth/v1"
-            return {"sub": "user-1"}
 
-        import jose.jwt as jose_jwt_module
-        monkeypatch.setattr(jose_jwt_module, "decode", fake_decode)
+@pytest.mark.asyncio
+async def test_valid_issuer_accepted_with_real_signature(install_jwks):
+    key = _ec_key()
+    jwk = _make_jwk(key, "ES256")
+    await install_jwks([jwk])
+    payload = await deps.verify_supabase_jwt(_make_token(key, "ES256", kid=jwk["kid"]))
+    assert payload["iss"] == ISS
 
-        payload = await deps.verify_supabase_jwt("fake.token.here")
-        assert payload == {"sub": "user-1"}
-        assert captured["verify_iss"] is True
 
-    async def test_mismatched_issuer_rejected(self, monkeypatch):
-        monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
+@pytest.mark.asyncio
+async def test_audience_uses_existing_authenticated_default(monkeypatch, install_jwks):
+    monkeypatch.delenv("SUPABASE_JWT_AUD")
+    key = _ec_key()
+    jwk = _make_jwk(key, "ES256")
+    await install_jwks([jwk])
+    assert (await deps.verify_supabase_jwt(_make_token(key, "ES256", kid=jwk["kid"]))) ["sub"] == "user-1"
 
-        import jose.jwt as jose_jwt_module
-        from jose import JWTError
 
-        def fake_decode_wrong_iss(token, key, algorithms, audience, issuer, options):
-            # simula jose che rifiuta perche' il token porta un iss diverso
-            # da quello atteso passato come parametro issuer
-            raise JWTError("Invalid issuer")
+@pytest.mark.asyncio
+async def test_wrong_issuer_rejected(install_jwks):
+    key = _ec_key()
+    jwk = _make_jwk(key, "ES256")
+    await install_jwks([jwk])
+    with pytest.raises(HTTPException) as exc:
+        await deps.verify_supabase_jwt(
+            _make_token(key, "ES256", iss="https://other.supabase.co/auth/v1", kid=jwk["kid"])
+        )
+    assert exc.value.status_code == 403
 
-        monkeypatch.setattr(jose_jwt_module, "decode", fake_decode_wrong_iss)
 
-        with pytest.raises(HTTPException) as exc:
-            await deps.verify_supabase_jwt("token.from.other.project")
-        assert exc.value.status_code == 403
-
-    async def test_missing_supabase_url_skips_iss_verification(self, monkeypatch):
-        # Se SUPABASE_URL non e' configurato non possiamo costruire l'iss
-        # atteso: verify_iss deve essere False per non rompere in ambienti
-        # di test/demo senza Supabase configurato, invece di crashare.
-        monkeypatch.delenv("SUPABASE_URL", raising=False)
-        monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
-        monkeypatch.setattr(deps, "_get_supabase_jwks", AsyncMock(return_value=[{"kid": "k1"}]))
-
-        captured = {}
-
-        def fake_decode(token, key, algorithms, audience, issuer, options):
-            captured["verify_iss"] = options.get("verify_iss")
-            captured["issuer"] = issuer
-            return {"sub": "user-1"}
-
-        import jose.jwt as jose_jwt_module
-        monkeypatch.setattr(jose_jwt_module, "decode", fake_decode)
-
-        payload = await deps.verify_supabase_jwt("fake.token")
-        assert payload == {"sub": "user-1"}
-        assert captured["verify_iss"] is False
-        assert captured["issuer"] is None
+@pytest.mark.asyncio
+async def test_missing_supabase_url_fails_closed(monkeypatch, install_jwks):
+    monkeypatch.delenv("SUPABASE_URL")
+    await install_jwks([{"kid": "k1"}])
+    with pytest.raises(HTTPException) as exc:
+        await deps.verify_supabase_jwt("malformed.token.value")
+    assert exc.value.status_code == 500

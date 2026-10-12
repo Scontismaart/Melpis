@@ -55,7 +55,7 @@ pypdf==6.14.2
 pytest==8.4.2
 pytest-asyncio==0.26.0
 python-dotenv==1.2.2
-python-jose[cryptography]==3.5.0
+PyJWT[crypto]==2.15.1
 python-multipart==0.0.32
 rapidocr-onnxruntime==1.4.4
 redis==6.4.0

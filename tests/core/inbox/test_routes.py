@@ -397,12 +397,10 @@ class TestRealJwtPropagatesUserId:
         wrepo = WRepo(pool=pg_pool)
         await wrepo.escalate_to_human(str(conv["id"]), str(org["id"]))
 
-        import jose.jwt as jose_jwt_module
-
-        def _fake_decode(token, key, algorithms, audience, issuer, options):
+        async def _fake_verify(token, *, allow_expired=False):
             return {"sub": str(auth_user["id"]), "aal": "aal2"}
 
-        monkeypatch.setattr(jose_jwt_module, "decode", _fake_decode)
+        monkeypatch.setattr(deps, "verify_supabase_jwt", _fake_verify)
 
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -440,12 +438,10 @@ class TestRealJwtPropagatesUserId:
         await wrepo.escalate_to_human(str(conv["id"]), str(org["id"]))
         await wrepo.claim_ticket(str(conv["id"]), str(profile["id"]), expected_version=2, organization_id=str(org["id"]))
 
-        import jose.jwt as jose_jwt_module
-
-        def _fake_decode(token, key, algorithms, audience, issuer, options):
+        async def _fake_verify(token, *, allow_expired=False):
             return {"sub": str(auth_user["id"]), "aal": "aal2"}
 
-        monkeypatch.setattr(jose_jwt_module, "decode", _fake_decode)
+        monkeypatch.setattr(deps, "verify_supabase_jwt", _fake_verify)
 
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"

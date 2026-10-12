@@ -18,7 +18,7 @@ provider configuration, production credentials or real users are in scope.
 | Phase 7 final full Python rerun | BLOCKER CLOSED BETA | Phase 8 cannot certify unmerged Phase 7 |
 | Email provider, DNS/domain | DEFERRED BEFORE PUBLIC/PRODUCTION | No deliverability claim |
 | Calendar scheduler/Airtable reaper fixes | DEFERRED in unmerged Phase 7 | Known fixes are not imported into this branch |
-| python-jose residual CVE-2026-85394 | NON-BLOCKING, mitigated not fixed | RS256/ES256-only verification; exact-version/advisory policy and regression |
+| python-jose residual CVE-2026-85394 | Superseded by dedicated migration pending merge | See `docs/ai/phase5-hardening.md`; Dependabot alert #16 remains open pending default-branch reevaluation |
 | Staging deployment and provider smoke | DEFERRED BEFORE PUBLIC/PRODUCTION | No deployment in this task |
 | Backup/restore for real customer data | BLOCKER BEFORE REAL CUSTOMER DATA | `docs/DEPLOY.md` explicitly requires a verified encrypted backup/restore drill |
 | Complete access revocation / JIT provisioning | RESOLVED | Durable server-only lifecycle prevents reprovisioning and gates old JWTs |
@@ -63,8 +63,9 @@ delivery, legal approval, production secret rotation or backup recovery.
 - Frontend: 132/132 DOM tests, lint, i18n (3,148 keys), CSP, assets, links, SEO,
   images and advisory hardcoded checks passed; npm audit high: zero findings.
 - Python dependency audit: 201 packages; only exact-version/advisory reviewed
-  residuals accepted. No new exception, dependency change or claim of upstream
-  python-jose remediation. The algorithm-confusion regressions remain required.
+  residuals accepted at the time of this report. The later dedicated JWT
+  migration removes python-jose and its audit exception; algorithm-confusion
+  regressions remain required.
 - Compose production syntax and both Caddy configurations validated with only
   synthetic/public configuration; no deployment or image publication.
 - Existing offline bootstrap and backup/restore shell guard tests PASS; no VM,
