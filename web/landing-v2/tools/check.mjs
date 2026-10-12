@@ -20,12 +20,20 @@ must(/default-src 'self'/.test(policy) && /connect-src 'none'/.test(policy) && /
 must(/script-src[^;]*'sha256-[A-Za-z0-9+/=]+'/.test(policy), 'Astro CSP does not contain a generated script hash.');
 must(!/unsafe-(?:inline|eval)|strict-dynamic/.test(policy), 'CSP contains a prohibited relaxation.');
 must(!/<form\b|https?:\/\//i.test(html), 'Static page must not add forms or external URLs.');
-must(/client="visible"/.test(html) && /aria-label="Simulazione del passaggio al team"/.test(html), 'React SSR island or its accessible group is missing.');
-const controlGroup = html.match(/<div class="mv2-control-options"[\s\S]*?<\/div>/)?.[0] ?? '';
-must(/aria-pressed="false"[^>]*disabled=""/.test(controlGroup) && /aria-pressed="true"[^>]*disabled=""/.test(controlGroup) && /Passaggio visibile e gestito dal pannello/.test(html), 'React island SSR fallback state is missing.');
-must(/Esempio dimostrativo con dati sintetici/.test(html), 'Synthetic example disclosure missing.');
+must(/client="load"/.test(html) && /Anteprima interattiva del pannello Melpis/.test(html), 'Hero React SSR island is missing.');
+const productNav = html.match(/<div class="mv2-ps-nav-list"[\s\S]*?<\/div><\/div>/)?.[0] ?? '';
+for (const label of ['Panoramica','Inbox','Prenotazioni','Recensioni','Knowledge Base','Team']) must(productNav.includes(label), `SSR product navigation is missing ${label}.`);
+must(/disabled="" aria-pressed="true"/.test(productNav) && /Sezione selezionata:[\s\S]*?Panoramica/.test(html), 'SSR selected navigation or no-JavaScript state is missing.');
+must(/Anteprima dimostrativa · dati sintetici/.test(html), 'Synthetic example disclosure missing.');
+must(/Ogni conversazione\.<br\s*\/?><em>Sotto controllo\.<\/em>/.test(html), 'Phase 2 hero headline is missing.');
 must(/Listino mensile di riferimento/.test(html), 'Monthly reference price qualifier missing.');
 must(!/\/landing-v2\/(?:styles\.css|app\.js)/.test(html), 'Legacy direct CSS or JS resource remains.');
+const sourceFiles = ['src/styles/landing.css','src/components/ProductShowcase.jsx','src/components/Journey.astro','src/components/Hero.astro'];
+for (const file of sourceFiles) {
+  const source = await readFile(path.join(root,file),'utf8');
+  must(!/10b981|34d399|16,\s*185,\s*129|52,\s*211,\s*153|emerald/i.test(source), `Emerald palette reference remains in ${file}.`);
+  must(!/class(?:Name)?="[^"]*(?:^|\s)ps-[a-z-]+/.test(source), `Unnamespaced showcase styles remain in ${file}.`);
+}
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
   const value = match[1];
   if (value.startsWith('/')) must(value.startsWith('/landing-v2/'), `Asset escapes base path: ${value}`);

@@ -4,8 +4,6 @@ if (mv2Root) {
   const mv2Toggle = mv2Root.querySelector('.mv2-menu-toggle');
   const mv2Nav = mv2Root.querySelector('#mv2-nav');
   const mv2Mobile = window.matchMedia('(max-width: 680px)');
-  mv2Root.dataset.mv2Enhanced = 'true';
-
   function mv2SetMenu(open) {
     if (!mv2Toggle || !mv2Nav) return;
     mv2Toggle.setAttribute('aria-expanded', String(open));
