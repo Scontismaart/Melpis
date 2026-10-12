@@ -1,3 +1,5 @@
 /web/index.html text eol=lf
 /web/dashboard-src/** text eol=lf
 /web/dashboard-src/partials/pane-reviews.html whitespace=-blank-at-eol
+/web/style.css -text
+/web/dashboard-css/** -text

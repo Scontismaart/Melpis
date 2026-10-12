@@ -72,6 +72,7 @@ jobs:
           npm ci --ignore-scripts
           npm audit --audit-level=high --include=dev
           npm run build:i18n
+          npm run check:dashboard-css
           npm run lint:web
           npm run test:web
           npm run check:dashboard

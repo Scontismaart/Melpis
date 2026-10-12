@@ -1,0 +1,417 @@
+@import url('/app/design-tokens.css');
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/inter-latin.woff2') format('woff2');
+}
+
+/* Font self-hosted: Outfit variabile (300 — 800), stesso set della landing. */
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('fonts/outfit-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+  src: url('fonts/outfit-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ==========================================================================
+   TECH DEBT TRACKER — Issue #CSS-DARK-HARDCODED-AUDIT
+   Rilevate 70 occorrenze totali di colori hardcoded (#fff/#000/white/black).
+   - Risolti in questa sessione: Sezione Recensioni (10 casi) & Modale Prenotazioni (1 caso).
+   - Restanti (60 casi) da migrare a variabili CSS semantiche nelle prossime fasi:
+     * Settings & Knowledge Base: ~23 occorrenze (righe 4000-7000)
+     * Tipografia & Global storici: ~15 occorrenze (righe 400-1500)
+     * Modali secondari & Responsive overrides: ~14 occorrenze (righe 7000+)
+     * Ticket & Dettaglio Inbox: ~8 occorrenze (righe 1500-2200)
+
+   ⚠️ RISCHIO ARCHITETTURALE SEPARATO: Doppio blocco :root (righe ~35 e ~4845).
+   Qualsiasi modifica ai token base (:root) deve essere allineata in entrambi i blocchi
+   finché non viene eseguito il refactoring di unificazione dei token.
+   ========================================================================== */
+
+/* ============================================================
+   DESIGN TOKENS  —  Allineati alla Landing Page Melpis
+   Luxury Obsidian & Light Slate / Nero, Grigio, Bianco
+   Canvas #F8F9FA · Testo #0F172A · Accenti Monochrome & Emerald #10b981
+
+   ⚠️ ATTENZIONE ARCHITETTURALE:
+   Esiste un secondo blocco :root (PREMIUM REDESIGN OVERRIDE) a riga ~4845
+   che sovrascrive questi valori. Verificare e sincronizzare SEMPRE entrambi
+   i blocchi :root prima di modificare o aggiungere un token colore!
+   ============================================================ */
+:root {
+  /* ============================================================
+     MELPIS DASHBOARD SHELL TOKENS (Onyx / Dark / Silver)
+     ============================================================ */
+  --dashboard-bg:               #07090A;
+  --dashboard-surface:          #0A0C0E;
+  --dashboard-surface-raised:   #111416;
+  --dashboard-surface-subtle:   #15181A;
+  --dashboard-border:           rgba(255, 255, 255, 0.08);
+  --dashboard-border-strong:    rgba(235, 240, 245, 0.18);
+  --dashboard-border-silver:    rgba(235, 240, 245, 0.45);
+  --dashboard-text:             #F7F7F5;
+  --dashboard-text-muted:       #AAB2C0;
+  --dashboard-text-dim:         #636D7B;
+  --dashboard-accent:           #10B981;
+  --dashboard-radius:           28px;
+  --dashboard-radius-card:      24px;
+  --dashboard-radius-sm:        14px;
+  --dashboard-radius-pill:      999px;
+  --dashboard-glow:             0 0 18px rgba(225, 235, 240, 0.10);
+
+  /* Superfici */
+  --bg:               #F8F9FA;
+  --bg-elev:          #F1F5F9;
+  --bg-elev-2:        #E2E8F0;
+
+  --sidebar-bg:       rgba(255, 255, 255, 0.85);
+  --sidebar-bg-2:     #F1F5F9;
+  --sidebar-text:     #475569;
+  --sidebar-active:   #0F172A;
+  --sidebar-brand:    #0F172A;
+  --sidebar-hover:    rgba(15, 23, 42, 0.05);
+
+  --main-bg:          #F8F9FA;
+  --card-bg:          #FFFFFF;
+  --card-border:      var(--line);
+
+  /* Testo */
+  --ink:              #0F172A;
+  --ink-soft:         #475569;
+  --ink-muted:        #64748B;
+
+  /* Accenti Brand (Monochrome alta leggibilità come Landing + Emerald) */
+  --brand:            #059669;
+  --brand-soft:       rgba(5, 150, 105, 0.10);
+  --accent:           #08090c;
+  --accent-hover:     #1E293B;
+  --accent-2:         #0F172A;
+  --accent-soft:      rgba(15, 23, 42, 0.06);
+
+  /* Accenti Semantici WCAG AA */
+  --green-deep:       #059669;
+  --green-glow:       rgba(5, 150, 105, 0.20);
+  --sage:             #059669;
+  --sage-soft:        rgba(5, 150, 105, 0.10);
+  --amber:            #D97706;
+  --amber-soft:       rgba(217, 119, 6, 0.10);
+  --red:              #DC2626;
+  --red-soft:         rgba(220, 38, 38, 0.08);
+  --gold:             #D97706;
+  --gold-soft:        rgba(217, 119, 6, 0.10);
+
+  /* Bordi e linee */
+  --line:             rgba(15, 23, 42, 0.08);
+  --line-strong:      rgba(15, 23, 42, 0.16);
+
+  /* Alias */
+  --border:           var(--line);
+  --muted:            #64748B;
+
+  --font-display:     "Outfit", -apple-system, sans-serif;
+  --font-body:        "Outfit", -apple-system, sans-serif;
+  --font-mono:        ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+
+  /* Raggi  —  scala landing */
+  --radius-xl:        32px;
+  --radius-lg:        24px;
+  --radius:           16px;
+  --radius-sm:        12px;
+
+  /* Ombre — tinte su slate/nero naturale */
+  --shadow-card:      0 10px 30px -10px rgba(15, 23, 42, 0.06);
+  --shadow-glow:      0 0 40px -10px rgba(16, 185, 129, 0.20);
+  --shadow:           0 1px 3px rgba(15, 23, 42, 0.04), 0 6px 18px -4px rgba(15, 23, 42, 0.06);
+  --shadow-sm:        0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-lift:      0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 16px 36px -12px rgba(15, 23, 42, 0.12);
+
+  /* Motion  —  curve della landing */
+  --spring:           cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out:         cubic-bezier(0.16, 1, 0.3, 1);
+
+  --sidebar-w:        248px;
+  --topbar-h:         64px;
+
+  /* --- BREAKPOINTS: unica scala ammessa ---
+     sm = 640px | md = 768px | lg = 1024px | xl = 1280px
+     Il drawer di navigazione si attiva a <= lg (1024px).
+     Non introdurre altri valori di media query. */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+
+/* L'attributo hidden deve vincere su qualunque display della classe
+   (i backdrop dei modal usano display:flex e lo sovrascriverebbero). */
+[hidden] { display: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  background:
+    radial-gradient(circle at 85% -10%, rgba(15, 23, 42, 0.03), transparent 45%),
+    radial-gradient(circle at -5% 35%, rgba(15, 23, 42, 0.02), transparent 40%),
+    var(--main-bg);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 2.5px solid var(--ink);
+  outline-offset: 3px;
+}
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+
+#toast-container {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 44px));
+}
+
+.toast {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-left-width: 3px;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--ink);
+  box-shadow: 0 12px 34px rgba(0,0,0,0.45);
+  opacity: 0;
+  transform: translateX(14px);
+  transition: opacity 0.3s cubic-bezier(0.32,0.72,0,1), transform 0.3s cubic-bezier(0.32,0.72,0,1);
+}
+
+.toast-in { opacity: 1; transform: translateX(0); }
+
+.toast-error { border-left-color: var(--red); }
+.toast-success { border-left-color: var(--sage); }
+.toast-info { border-left-color: var(--gold); }
+
+/* ============================================================
+   SKELETON LOADING
+   ============================================================ */
+
+.skeleton {
+  pointer-events: none;
+  position: relative;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 8px;
+  min-height: 14px;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(15, 23, 42, 0.07),
+    transparent
+  );
+  animation: skeleton-shimmer 1.4s infinite;
+}
+
+@keyframes skeleton-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 2px;
+}
+
+.skeleton-line-lg { height: 40px; border-radius: 10px; }
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--dashboard-bg, #07090A);
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease-in;
+}
+
+body.authenticated .app-shell {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+
+.sidebar {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0;
+  z-index: 100;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--dashboard-border, rgba(255, 255, 255, 0.08));
+  width: var(--sidebar-w, 280px);
+  margin: 0;
+  height: calc(100dvh - 32px);
+  bottom: auto;
+  border-radius: var(--dashboard-radius, 28px);
+  background: var(--dashboard-surface, #0A0C0E);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.sidebar-brand {
+  padding: 24px 20px 18px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.sidebar-mark {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.22);
+  box-shadow: 0 0 20px -4px rgba(16, 185, 129, 0.20);
+}
+
+.sidebar-mark img {
+  width: 28px;
+  height: 28px;
+  display: block;
+  object-fit: contain;
+}
+
+.sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar-brand-eyebrow {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--dashboard-text-muted, #AAB2C0);
+  letter-spacing: 0.16em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+html[data-theme="dark"] .sidebar-brand-eyebrow {
+  color: var(--dashboard-text-muted, #AAB2C0);
+}
+
+.sidebar-brand-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--dashboard-text, #F7F7F5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 1.22rem;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 14px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Etichette di gruppo (Principale / Assistente / Gestione / Account):
+   non navigabili, fuori dalla gerarchia del Tab. */
+.nav-group-label {
+  margin: 14px 10px 4px;
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dashboard-text-dim, #5A6474);
+  user-select: none;
+}
+
+.nav-group-label:first-child { margin-top: 4px; }
+
+.nav-sep {
+  height: 1px;
+  margin: 12px 14px 2px;
+  background: var(--line);
+}
+
+/* Riga testa del wizard: progress + chiudi configurazione */
+.onboarding-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* --- Tab Impostazioni (Generale / Integrazioni / Audit) --- */

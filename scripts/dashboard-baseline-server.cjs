@@ -40,7 +40,7 @@ function buildQaBootstrap(cookie = "") {
     document.cookie = 'melpis_lang=it; Path=/; SameSite=Strict';
     document.cookie = 'wa_csrf=synthetic-qa-only; Path=/; SameSite=Strict';
     const nativeFetch = window.fetch.bind(window);
-    let pending = 0, revision = 0;
+    let pending = 0, revision = 0, scheduled = false, stableFrames = 0, lastLayout = '';
     function recordQaEnvironment() {
       const dateOptions = Intl.DateTimeFormat().resolvedOptions();
       const visualViewport = window.visualViewport;
@@ -61,27 +61,44 @@ function buildQaBootstrap(cookie = "") {
         language: localStorage.getItem('melpis_lang'),
         fonts: { loadedFamilies: loadedFonts, bodyComputed: getComputedStyle(document.body).fontFamily, headingComputed: heading ? getComputedStyle(heading).fontFamily : null },
         fixture: { ...qaCaptureConfig, route: location.pathname, animations: 'finite-complete; infinite-paused-at-zero' },
+        capture: { pendingRequests: pending, stableFrames, revision, mode: 'viewport-only' },
       });
     }
-    async function ready() {
-      const visit = ++revision;
-      await document.fonts.ready;
-      // Wait for production entrance transitions; do not alter their CSS/rendering.
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      // Capture the live-status pulse at frame zero, rather than a random instant.
-      // This exists only in the isolated screenshot server, not shipped assets.
-      document.getAnimations().filter(animation => !Number.isFinite(animation.effect.getComputedTiming().endTime))
-        .forEach(animation => { animation.pause(); animation.currentTime = 0; });
-      await Promise.all(document.getAnimations()
-        .filter(animation => Number.isFinite(animation.effect.getComputedTiming().endTime))
-        .map(animation => animation.finished.catch(() => {})));
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (!pending && revision === visit && document.body) {
-          recordQaEnvironment();
-          document.body.dataset.qaReady = 'true';
-        }
-      }));
+    function sample() {
+      scheduled = false;
+      if (!document.body) return ready();
+      const animations = document.getAnimations();
+      animations.filter(animation => !Number.isFinite(animation.effect.getComputedTiming().endTime))
+        .forEach(animation => { if (animation.playState !== 'paused') { animation.pause(); animation.currentTime = 0; } });
+      const busy = pending || document.fonts.status === 'loading' ||
+        Array.from(document.images).some(image => !image.complete) ||
+        animations.some(animation => Number.isFinite(animation.effect.getComputedTiming().endTime) &&
+          (animation.playState === 'running' || animation.pending));
+      const layout = JSON.stringify(Array.from(document.querySelectorAll('body, body *'))
+        .filter(element => element.getClientRects().length)
+        .map(element => { const rect = element.getBoundingClientRect(); return [rect.x, rect.y, rect.width, rect.height, element.scrollTop, element.scrollLeft]; }));
+      stableFrames = !busy && layout === lastLayout ? stableFrames + 1 : 0;
+      lastLayout = layout;
+      if (stableFrames >= 3) {
+        recordQaEnvironment();
+        document.body.dataset.qaReady = 'true';
+      } else if (!scheduled) { scheduled = true; requestAnimationFrame(sample); }
     }
+    function ready() {
+      if (!document) return;
+      revision++; stableFrames = 0;
+      if (document.body) document.body.dataset.qaReady = 'false';
+      if (!scheduled) { scheduled = true; requestAnimationFrame(sample); }
+    }
+    new MutationObserver(records => {
+      if (records.some(record => record.type !== 'attributes' ||
+          !['data-qa-ready', 'data-qa-environment'].includes(record.attributeName))) ready();
+    }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true });
+    for (const event of ['pointermove', 'focusin', 'scroll', 'transitionrun', 'animationstart']) {
+      document.addEventListener(event, ready, true);
+    }
+    window.addEventListener('resize', ready);
+    document.fonts.ready.then(ready);
     window.fetch = async (...args) => {
       pending++; revision++;
       if (document.body) document.body.dataset.qaReady = 'false';

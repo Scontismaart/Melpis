@@ -1,0 +1,1427 @@
+
+/* ============================================================
+   DASHBOARD SHELL — integrated canvas and inset workspace
+   ============================================================ */
+.app-shell {
+  --app-bg: #0b0b0b;
+  --panel-bg: #111111;
+  --workspace-bg: var(--panel-bg);
+  --view-bg: var(--panel-bg);
+  --surface-1: var(--panel-bg);
+  --control-bg: #171717;
+  --control-hover: #1d1d1d;
+  --control-selected: #202123;
+  --surface-2: var(--control-bg);
+  --surface-hover: var(--control-hover);
+  --surface-selected: var(--control-selected);
+  --panel-border: rgba(255, 255, 255, .045);
+  --divider-subtle: rgba(255, 255, 255, .03);
+  --border-subtle: rgba(255, 255, 255, .04);
+  --border-default: rgba(255, 255, 255, .055);
+  --border-strong: rgba(255, 255, 255, .085);
+  --text-primary: #eeeeee;
+  --text-secondary: #a1a1a1;
+  --text-tertiary: rgba(255, 255, 255, .52);
+  --icon-stroke-subtle: #777777;
+  --melpis-canvas: var(--view-bg);
+  --melpis-surface: var(--panel-bg);
+  --melpis-surface-raised: var(--surface-2);
+  --melpis-surface-hover: var(--surface-hover);
+  --melpis-line: var(--border-default);
+  --melpis-line-strong: var(--border-strong);
+  --melpis-ink: var(--text-primary);
+  --melpis-muted: var(--text-secondary);
+  --melpis-subtle: var(--text-tertiary);
+  --font-body: "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --sidebar-w: 228px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  padding: 8px;
+  overflow: hidden;
+  font-family: var(--font-body);
+  color: var(--text-primary);
+  background: var(--app-bg);
+}
+
+.app-shell > .sidebar,
+body .app-shell:has(.inbox-view:not(.view-hidden)) > .sidebar {
+  position: relative;
+  inset: auto;
+  flex: 0 0 var(--sidebar-w);
+  width: var(--sidebar-w);
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  border-top: 0;
+  border-radius: 0;
+  background: var(--app-bg);
+  box-shadow: none;
+  outline: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  z-index: 1;
+}
+.app-shell > .sidebar::after { display: none; }
+
+.sidebar-brand {
+  padding: 8px 10px 6px;
+  margin: 0;
+  border: 0;
+}
+
+.sidebar-brand-row { gap: 9px; }
+.sidebar-mark { width: 28px; height: 28px; }
+
+.sidebar-nav {
+  gap: 2px;
+  padding: 0 6px;
+}
+
+.nav-group-label {
+  margin: 11px 8px 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: .09em;
+  color: var(--text-tertiary);
+}
+
+.nav-item {
+  min-height: 32px;
+  padding: 5px 8px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: color .14s ease, background .14s ease;
+}
+
+.nav-item:hover:not(.active) {
+  border-color: transparent;
+  background: rgba(255, 255, 255, .035);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.nav-item.active,
+.nav-item.active:hover {
+  border-color: transparent !important;
+  background: rgba(255, 255, 255, .07) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
+
+.nav-item.active .nav-icon { color: var(--text-primary); }
+.app-shell > .sidebar .nav-item:not(.active) .nav-icon { color: var(--icon-stroke-subtle); }
+.app-shell > .sidebar .nav-item:hover:not(.active) .nav-icon { color: var(--text-secondary); }
+.nav-icon, .nav-icon svg { width: 16px; height: 16px; }
+
+.sidebar-account-wrap {
+  padding: 9px 6px 4px;
+  border-top: 0;
+}
+
+.sidebar-account-btn,
+html[data-theme="dark"] .sidebar-account-btn {
+  min-height: 38px;
+  padding: 5px 7px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+}
+
+.sidebar-account-btn:hover,
+.sidebar-account-btn[aria-expanded="true"],
+html[data-theme="dark"] .sidebar-account-btn:hover {
+  border-color: var(--border-subtle);
+  background: rgba(255, 255, 255, .045);
+  box-shadow: none;
+}
+
+.sidebar-avatar-dot { width: 26px; height: 26px; font-size: 11px; }
+.sidebar-account-email { font-size: 12px; }
+.sidebar-account-plan { font-size: 10px; }
+.sidebar-account-dropdown { border-radius: var(--radius-md); }
+
+.app-shell > .main,
+body .app-shell:has(.inbox-view:not(.view-hidden)) > .main {
+  position: relative;
+  flex: 1 1 0;
+  width: 0;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--workspace-bg);
+  box-shadow: none;
+}
+
+.main > .topbar {
+  position: relative;
+  inset: auto;
+  flex: 0 0 48px;
+  height: 48px;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body .app-shell > .main > .topbar,
+body .app-shell:has(.inbox-view:not(.view-hidden)) > .main > .topbar {
+  background: var(--workspace-bg);
+}
+
+.topbar-title { font-size: 15px; font-weight: 600; letter-spacing: -.025em; }
+.main > .view { min-height: 0; overflow: auto; }
+
+/* Inbox is one workspace frame: list, thread and details are divider-separated regions. */
+body .app-shell:has(.inbox-view:not(.view-hidden)) .main > .topbar { display: none; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-view:not(.view-hidden) {
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--view-bg);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-grid-layout {
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  grid-template-columns: minmax(300px, clamp(312px, 24vw, 370px)) minmax(0, 1fr);
+  gap: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-col-list,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-col-detail {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 0 !important;
+  border-radius: 0;
+  background: var(--surface-1) !important;
+  box-shadow: none !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-col-list {
+  border-right: 1px solid var(--border-default) !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-list-header {
+  gap: 8px;
+  padding: 14px 12px 10px;
+  border-bottom: 1px solid var(--border-default);
+  background: transparent;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-panel-title {
+  color: var(--text-primary) !important;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-filter-groups { gap: 5px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-filter-row { gap: 6px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chips-group { gap: 3px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-filter-row-label { font-size: 10px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-status-filter-row .inbox-filter-row-label { display: none; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-status-filter-row .inbox-chips-group { flex-wrap: nowrap; }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chip {
+  min-height: 25px;
+  padding: 3px 6px;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chip:hover {
+  border-color: transparent;
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chip.active,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chip.active:hover {
+  border-color: rgba(255, 255, 255, .08) !important;
+  background: var(--surface-selected) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-chip .chip-count { font-size: 9px; }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-search-input {
+  min-height: 30px;
+  padding: 6px 9px 6px 30px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: none;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conversations-wrap {
+  gap: 1px;
+  padding: 5px;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-row {
+  min-height: 62px;
+  padding: 8px 7px;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-row:hover:not(.active) {
+  border-color: transparent;
+  background: var(--surface-hover);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-row.active {
+  border-color: rgba(255, 255, 255, .06) !important;
+  background: var(--surface-selected) !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-avatar,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-avatar {
+  width: 30px;
+  height: 30px;
+  box-shadow: none;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-name { font-size: 12px; font-weight: 600; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-time,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-meta-line { font-size: 10px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-conv-preview { margin-top: 1px; font-size: 11px; }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-content {
+  grid-template-columns: minmax(0, 1fr) minmax(230px, clamp(230px, 18vw, 270px));
+  grid-template-rows: 48px auto minmax(0, 1fr) auto;
+  background: var(--surface-1);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header {
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-default);
+  background: transparent !important;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header-row1 { gap: 9px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header-left { gap: 8px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-name { font-size: 14px; font-weight: 600; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-phone { font-size: 11px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header-badges { gap: 5px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-channel-badge,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-status { padding: 3px 7px; font-size: 10px; }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-status-strip {
+  margin: 0 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-messages-container {
+  padding: 14px 18px;
+  gap: 10px;
+  background: var(--surface-1) !important;
+  background-image: none !important;
+}
+
+html[data-theme="dark"] body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-msg-row.inbound .inbox-msg-bubble,
+html[data-theme="dark"] body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-msg-row.outbound .inbox-msg-bubble {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-msg-row.inbound .inbox-msg-text,
+html[data-theme="dark"] body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-msg-row.outbound .inbox-msg-text { color: var(--text-primary); }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-placeholder,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-empty-thread {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-empty-icon,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-empty-thread-icon {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 9px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-placeholder h4,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-empty-text {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-placeholder p,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-empty-subtext {
+  max-width: 300px;
+  font-size: 12px;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-reply-container { padding: 8px 12px 10px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-input-wrapper {
+  min-height: 42px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: none;
+}
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-text-input { padding: 9px 10px; font-size: 12px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-send-btn { width: 27px; height: 27px; margin: 6px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-reply-disabled-banner { padding: 8px 10px; font-size: 11px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-btn-claim-inline { min-height: 30px; padding: 5px 9px; border-radius: var(--radius-sm); }
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-panel {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  min-width: 0;
+  padding: 12px 11px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border-default);
+  background: var(--surface-1);
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-title { margin: 2px 0 13px; font-size: 13px; font-weight: 600; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-kicker { margin-bottom: 6px; font-size: 10px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-section + .inbox-context-section { margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border-subtle); }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-fact { padding: 5px 0; border-bottom-color: var(--border-subtle); }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-fact dt,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-fact dd { font-size: 10px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-actions { flex-direction: column; align-items: stretch; gap: 5px; }
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-action-select,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-action-btn,
+body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-action-btn.primary {
+  width: 100%;
+  max-width: none;
+  min-height: 30px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+body .app-shell:has(.inbox-view:not(.view-hidden)) :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid rgba(255, 255, 255, .8);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .08);
+}
+
+.sidebar-nav .nav-item,
+.priority-inbox-link,
+.activity-view-all-btn {
+  text-decoration: none;
+}
+
+@media (max-width: 1024px) {
+  .app-shell { padding: 0; gap: 0; }
+  .app-shell > .sidebar {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    flex: 0 0 auto;
+    width: min(228px, calc(100vw - 56px));
+    height: calc(100dvh - 16px);
+    margin: 0;
+    padding: 0;
+    border-right: 1px solid var(--border-default);
+    background: var(--panel-bg);
+    transform: translateX(calc(-100% - 20px));
+    visibility: hidden;
+    transition: transform .22s ease, visibility .22s ease;
+    z-index: 200;
+  }
+
+  body.nav-open .app-shell > .sidebar { transform: translateX(0); visibility: visible; }
+  .app-shell > .main { width: 100%; border: 0; border-radius: 0; }
+  .main > .topbar { flex-basis: 56px; height: 56px; min-height: 56px; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .main > .topbar { display: flex; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-view:not(.view-hidden) { height: auto; max-height: none; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-grid-layout { grid-template-columns: minmax(270px, 34%) minmax(0, 1fr); }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-content { grid-template-columns: minmax(0, 1fr) 220px; }
+}
+
+@media (max-width: 768px) {
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-grid-layout { display: block; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-col-list,
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-col-detail { width: 100%; border-radius: 0; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-panel {
+    grid-column: 1;
+    grid-row: auto;
+    max-height: 176px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-section:first-child,
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-context-notes { display: none; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header { padding: 8px 10px; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header-row1 { flex-wrap: wrap; }
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-detail-header-left { flex: 1 1 100%; }
+}
+
+@media (max-width: 430px) {
+  .inbox-view .inbox-list-header {
+    padding: 16px 13px 13px;
+  }
+
+  .inbox-view .inbox-chip {
+    padding-inline: 8px;
+    font-size: .69rem;
+  }
+
+  .inbox-view .inbox-status-filter-row .inbox-filter-row-label {
+    display: none;
+  }
+
+  .inbox-view .inbox-conv-row {
+    padding-inline: 10px;
+  }
+}
+
+/* Dashboard workspace language, shared by every operational page. */
+.app-shell { --sidebar-w: 232px; }
+html[data-theme="dark"] body .app-shell > .sidebar {
+  border: 0;
+  border-radius: 0;
+  background: var(--app-bg);
+  box-shadow: none;
+}
+html[data-theme="dark"] body .app-shell > .main {
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--workspace-bg);
+  box-shadow: none;
+}
+.app-shell > .sidebar .sidebar-nav { padding-top: 3px; }
+.app-shell > .sidebar .sidebar-account-wrap { padding-bottom: 1px; }
+.app-shell > .main > .view:not(.inbox-view) {
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-secondary);
+  --ink-muted: var(--text-tertiary);
+  --card-bg: var(--surface-1);
+  --line: var(--border-default);
+  --border: var(--border-default);
+  --dashboard-bg: var(--view-bg);
+  --dashboard-surface: var(--surface-1);
+  --dashboard-surface-raised: var(--surface-2);
+  --dashboard-surface-subtle: var(--surface-1);
+  --dashboard-border: var(--border-default);
+  --dashboard-border-strong: var(--border-strong);
+  --dashboard-text: var(--text-primary);
+  --dashboard-text-muted: var(--text-secondary);
+  --dashboard-text-dim: var(--text-tertiary);
+  color: var(--text-primary);
+  background: var(--view-bg);
+}
+.app-shell > .main > .view:is([data-view-panel="panoramica"], [data-view-panel="prenotazioni"], [data-view-panel="recensioni"], [data-view-panel="team"], [data-view-panel="assistente"], [data-view-panel="conoscenza"], [data-view-panel="configurazione-ai"]) {
+  padding: 0 20px 24px;
+}
+.app-shell > .main > .view :is(.view-header-bar, .kb-header-row, .booking-page-header, .panoramica-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 68px;
+  margin: 0 -20px 18px;
+  padding: 13px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell > .main > .view :is(.view-title, .panoramica-title, .booking-title-row h1) {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -.025em;
+}
+.app-shell > .main > .view :is(.view-intro, .panoramica-subtitle, .booking-summary) {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.app-shell > .main > .view :is(.dash-card, .booking-calendar-card, .booking-table-card, .kb-panel, .chat-window) {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: none;
+}
+.app-shell > .main > .view :is(.dash-card-header, .booking-table-header, .kb-panel-header) {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+}
+.app-shell > .main > .view :is(.dash-card-title, .booking-table-title, .kb-panel-title, .ai-config-group-title) {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.app-shell > .main > .view :is(.dash-card-sub, .booking-table-subtitle, .settings-help, .settings-help-sm) {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.app-shell > .main > .view :is(input:not([type="checkbox"]):not([type="radio"]):not([type="date"]), select, textarea) {
+  min-height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: none;
+}
+.app-shell > .main > .view :is(input, textarea)::placeholder { color: var(--text-tertiary); }
+.app-shell > .main > .view :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid rgba(255, 255, 255, .8);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .08);
+}
+.app-shell > .main > .view :is(.review-analyze, .btn-primary, .btn-review-approve) {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: var(--radius-sm);
+  background: #e8e8e8;
+  color: #141516;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.app-shell > .main > .view :is(.report-refresh, .booking-icon-text-button, .btn-review-copy, .btn-refresh-reviews, .review-analyze-secondary) {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 12px;
+  box-shadow: none;
+}
+.app-shell > .main > .view :is(button, input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
+
+/* Panoramica: compact metrics and continuous operational lists. */
+html[data-theme="dark"] .app-shell .view[data-view-panel="panoramica"] { background: var(--view-bg); }
+.app-shell .view[data-view-panel="panoramica"] .panoramica-header { padding-block: 14px; }
+.app-shell .view[data-view-panel="panoramica"] .panoramica-quote { display: none; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="panoramica"] :is(.kpi-card, .dash-card) {
+  min-height: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: none;
+  transform: none;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="panoramica"] .kpi-row > .kpi-card {
+  background: var(--surface-1) !important;
+  background-image: none !important;
+}
+html[data-theme="dark"] body .app-shell .view[data-view-panel="panoramica"] .kpi-card {
+  padding: 13px 14px;
+  border-radius: var(--radius-md);
+}
+.app-shell .view[data-view-panel="panoramica"] :is(.kpi-card:hover, .dash-card:hover) { border-color: var(--border-strong); box-shadow: none; transform: none; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-card-main { gap: 10px; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-icon-box { width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-secondary); }
+.app-shell .view[data-view-panel="panoramica"] .kpi-icon-box svg { width: 16px; height: 16px; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-label { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-value { color: var(--text-primary); font-size: 24px; line-height: 1.1; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-card-middle { margin-top: 8px; padding: 0; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-trend-badge { padding: 2px 6px; border-radius: var(--radius-xs); background: var(--surface-2); font-size: 10px; }
+.app-shell .view[data-view-panel="panoramica"] .kpi-sparkline-footer { padding-top: 6px; font-size: 10px; }
+.app-shell .view[data-view-panel="panoramica"] .panorama-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: stretch;
+  gap: 12px;
+  min-height: clamp(330px, calc(100dvh - 215px), 560px);
+  margin-bottom: 0;
+}
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-card, .activity-card) { padding: 0 !important; }
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-card, .activity-card) { width: auto; min-width: 0; }
+.app-shell .view[data-view-panel="panoramica"] .dash-card-header {
+  min-height: 48px;
+  margin: 0;
+  padding: 10px 14px;
+}
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-list, .ticket-list) { margin: 0; padding: 0; }
+.app-shell .view[data-view-panel="panoramica"] .priority-list { min-height: 280px; }
+.app-shell .view[data-view-panel="panoramica"] .ticket-list {
+  flex: 1 1 auto;
+  min-height: 280px;
+  max-height: none;
+  padding: 0;
+}
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-item, .ticket-item) {
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-item:hover, .ticket-item:hover) { background: var(--surface-hover); }
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-inbox-link, .activity-view-all-btn) { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="panoramica"] .priority-card { position: relative; }
+.app-shell .view[data-view-panel="panoramica"] .priority-card .dash-card-header { padding-right: 128px; }
+.app-shell .view[data-view-panel="panoramica"] .priority-count-badge { margin-right: 96px; }
+.app-shell .view[data-view-panel="panoramica"] .priority-inbox-link {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 1;
+  width: auto;
+  max-width: 116px;
+  min-height: 30px;
+  margin: 0;
+  padding: 5px 0 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="panoramica"] .priority-inbox-link:hover { background: var(--surface-hover); }
+.app-shell .view[data-view-panel="panoramica"] :is(.priority-card .empty-state, .activity-card .empty-state) {
+  flex: 1 1 auto;
+  min-height: 280px;
+  margin: 0;
+  padding: 24px 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.app-shell .view[data-view-panel="panoramica"] .empty-state-icon {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+.app-shell .view[data-view-panel="panoramica"] .ticket-list:has(.empty-state)::before { display: none; }
+.app-shell .view[data-view-panel="panoramica"] #report-panoramica { display: none !important; }
+.app-shell .view[data-view-panel="panoramica"] .report-panoramica-title { color: var(--text-primary); font-size: 14px; font-weight: 600; }
+.app-shell .view[data-view-panel="panoramica"] :is(.report-empty-hint, .empty-state) { padding: 18px; color: var(--text-tertiary); font-size: 12px; }
+
+@media (max-width: 1024px) {
+  .app-shell .view[data-view-panel="panoramica"] .panorama-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    min-height: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell .view[data-view-panel="panoramica"] .kpi-row { grid-template-columns: minmax(0, 1fr) !important; }
+  .app-shell .view[data-view-panel="panoramica"] .panorama-grid { min-height: 0; }
+  .app-shell .view[data-view-panel="panoramica"] :is(.priority-list, .ticket-list, .priority-card .empty-state, .activity-card .empty-state) { min-height: 200px; }
+  .app-shell .view[data-view-panel="panoramica"] .priority-card .dash-card-header { padding-right: 14px; }
+  .app-shell .view[data-view-panel="panoramica"] .priority-count-badge { margin-right: 0; }
+  .app-shell .view[data-view-panel="panoramica"] .priority-inbox-link {
+    position: static;
+    width: 100%;
+    max-width: none;
+    margin-top: 12px;
+    padding: 10px 14px;
+  }
+}
+
+/* Prenotazioni: one calendar surface, compact toolbar and hairline schedule. */
+.app-shell .view[data-view-panel="prenotazioni"] .booking-page-header { padding-block: 12px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-title-row { gap: 9px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-pending-count {
+  min-height: 23px;
+  padding: 2px 7px;
+  border: 1px solid rgba(219, 168, 85, .2);
+  border-radius: 999px;
+  background: rgba(219, 168, 85, .08);
+  color: #d8b078;
+  font-size: 10px;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="prenotazioni"] .booking-layout { gap: 12px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-calendar-card,
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table-card { padding: 0; overflow: hidden; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-calendar-toolbar {
+  min-height: 48px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+}
+.app-shell .view[data-view-panel="prenotazioni"] :is(.booking-calendar-nav button, .booking-calendar-views button, .booking-icon-text-button) {
+  min-height: 29px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="prenotazioni"] .booking-calendar-views { padding: 2px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--workspace-bg); }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-calendar-views button { border-color: transparent; background: transparent; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-calendar-views button[aria-pressed="true"] {
+  border-color: var(--border-default);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="prenotazioni"] .booking-selected-date-label { color: var(--text-secondary); font-size: 12px; }
+.app-shell .view[data-view-panel="prenotazioni"] #booking-calendar {
+  --fc-border-color: var(--border-subtle);
+  --fc-page-bg-color: var(--surface-1);
+  --fc-neutral-bg-color: var(--surface-1);
+  --fc-today-bg-color: var(--surface-2);
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="prenotazioni"] #booking-calendar :is(.fc-scrollgrid, .fc-col-header-cell, .fc-timegrid-slot-lane, .fc-daygrid-day) { border-color: var(--border-subtle); background: var(--surface-1); }
+.app-shell .view[data-view-panel="prenotazioni"] #booking-calendar :is(.fc-col-header-cell-cushion, .fc-timegrid-slot-label-cushion, .fc-daygrid-day-number) { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-empty-notice { margin: 10px; padding: 11px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: none; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-empty-icon { width: 28px; height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-empty-title { color: var(--text-primary); font-size: 12px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-empty-sub { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table-header { padding: 10px 13px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table-wrap { margin: 0; padding: 0; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table :is(th, td) { padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); background: transparent; font-size: 11px; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table th { color: var(--text-tertiary); font-weight: 500; }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table td { color: var(--text-secondary); }
+.app-shell .view[data-view-panel="prenotazioni"] .booking-table tbody tr:hover { background: var(--surface-hover); }
+.app-shell .booking-modal-panel { border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-1); color: var(--text-primary); box-shadow: 0 18px 60px rgba(0,0,0,.4); }
+.app-shell .booking-modal-header { padding: 13px 15px; border-bottom: 1px solid var(--border-subtle); }
+.app-shell .booking-modal :is(input, select, textarea) { border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-primary); }
+.app-shell .booking-modal :is(.booking-modal-grid > div, .booking-detail-note) { border-color: var(--border-subtle); background: transparent; }
+
+/* Recensioni: dense review list with a restrained analysis panel. */
+.app-shell .view[data-view-panel="recensioni"] .recensioni-layout { grid-template-columns: minmax(0, 1fr) minmax(240px, 25%); gap: 12px; }
+.app-shell .view[data-view-panel="recensioni"] :is(.recensioni-main, .recensioni-sidebar) { gap: 12px; }
+.app-shell .view[data-view-panel="recensioni"] :is(.review-compose-card, .review-history-card, .review-stats-sidebar-card, .trends-card, .channels-card) {
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="recensioni"] .review-compose-card > :not(.dash-card-header),
+.app-shell .view[data-view-panel="recensioni"] .review-draft-panel { margin: 0; padding: 12px 14px; }
+.app-shell .view[data-view-panel="recensioni"] :is(.review-controls-bar, .review-toolbar) { gap: 8px; margin: 0; padding: 12px 14px; }
+.app-shell .view[data-view-panel="recensioni"] .review-draft-panel {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="recensioni"] :is(.review-original-box, .review-response-box) {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="recensioni"] .review-history-card .history-header { margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+.app-shell .view[data-view-panel="recensioni"] .history-header .dash-card-title { color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.app-shell .view[data-view-panel="recensioni"] .history-header .dash-card-sub { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="recensioni"] .review-tabs { gap: 3px; }
+.app-shell .view[data-view-panel="recensioni"] .review-tab {
+  min-height: 27px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.app-shell .view[data-view-panel="recensioni"] .review-tab:hover { border-color: transparent; background: var(--surface-hover); color: var(--text-primary); }
+.app-shell .view[data-view-panel="recensioni"] .review-tab.active {
+  border-color: var(--border-default);
+  background: var(--surface-selected);
+  color: var(--text-primary);
+}
+.app-shell .view[data-view-panel="recensioni"] .review-tab.active .tab-count { color: var(--text-secondary); }
+.app-shell .view[data-view-panel="recensioni"] :is(.review-search-input, .review-filter-source, .review-author-input, .review-stars-select, .review-source-select, .review-textarea, .review-draft-textarea) {
+  min-height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 12px;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="recensioni"] .review-search-input { padding-left: 32px; }
+.app-shell .view[data-view-panel="recensioni"] .search-input-box svg { left: 10px; color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="recensioni"] .review-history-list { gap: 0; }
+.app-shell .view[data-view-panel="recensioni"] .review-history-item,
+.app-shell .view[data-view-panel="recensioni"] .review-history-item.item-urgente,
+.app-shell .view[data-view-panel="recensioni"] .review-history-item.item-approvata {
+  margin: 0;
+  padding: 11px 14px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.app-shell .view[data-view-panel="recensioni"] .review-history-item:hover { border-color: var(--border-subtle); background: var(--surface-hover); box-shadow: none; transform: none; }
+.app-shell .view[data-view-panel="recensioni"] .review-history-item :is(h3, h4) { color: var(--text-primary); font-size: 12px; }
+.app-shell .view[data-view-panel="recensioni"] .review-history-item :is(p, span) { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="recensioni"] .review-overall-rating { padding: 13px; }
+.app-shell .view[data-view-panel="recensioni"] .rating-number-big { color: var(--text-primary); font-size: 27px; }
+.app-shell .view[data-view-panel="recensioni"] .channel-status-item { padding: 10px 12px; border-top: 1px solid var(--border-subtle); background: transparent; }
+.app-shell .view[data-view-panel="recensioni"] .review-analyze-btn {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, .72);
+  border-radius: var(--radius-sm);
+  background: #e8e8e8;
+  color: #141516;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+/* Team: invitation form and member rows share the workspace list language. */
+.app-shell .view[data-view-panel="team"] .team-layout { gap: 12px; }
+.app-shell .view[data-view-panel="team"] :is(#team-add-card, #team-members-card) { padding: 0; border: 1px solid var(--panel-border); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: none; }
+.app-shell .view[data-view-panel="team"] .dash-card-header { justify-content: flex-start; align-items: center; gap: 10px; margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
+.app-shell .view[data-view-panel="team"] .dash-card-header::before { width: 28px; height: 28px; min-width: 28px; border-radius: var(--radius-sm); background-color: var(--surface-2); background-size: 16px; }
+.app-shell .view[data-view-panel="team"] .dash-card-header > div:first-of-type { flex: 1 1 auto; min-width: 0; margin: 0; }
+.app-shell .view[data-view-panel="team"] :is(.dash-card-title, .dash-card-sub) { margin: 0; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.app-shell .view[data-view-panel="team"] .dash-card-sub { margin-top: 3px; color: var(--text-secondary); font-size: 11px; font-weight: 400; }
+.app-shell .view[data-view-panel="team"] .team-add-form { padding: 13px 14px; }
+.app-shell .view[data-view-panel="team"] .team-form-grid { gap: 10px; align-items: end; }
+.app-shell .view[data-view-panel="team"] .field-label { color: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.app-shell .view[data-view-panel="team"] .field-label span { color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="team"] :is(.form-input, .form-select) { height: 32px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.app-shell .view[data-view-panel="team"] .field-hint { margin: 10px 0 12px; color: var(--text-tertiary); font-size: 11px; }
+.app-shell .view[data-view-panel="team"] #team-invitations-list { margin: 7px 0 0; padding: 0; list-style: none; }
+.app-shell .view[data-view-panel="team"] #team-invitations-list > li { padding: 9px 0; border-top: 1px solid var(--border-subtle); background: transparent; }
+.app-shell .view[data-view-panel="team"] .team-table-responsive { margin: 0; padding: 0; overflow-x: auto; }
+.app-shell .view[data-view-panel="team"] .team-table { width: 100%; border-collapse: collapse; background: transparent; }
+.app-shell .view[data-view-panel="team"] .team-table :is(th, td) { padding: 10px 13px; border-bottom: 1px solid var(--border-subtle); background: transparent; font-size: 11px; }
+.app-shell .view[data-view-panel="team"] .team-table th { color: var(--text-tertiary); font-weight: 500; }
+.app-shell .view[data-view-panel="team"] .team-table td { color: var(--text-secondary); }
+.app-shell .view[data-view-panel="team"] .team-table tbody tr:hover { background: var(--surface-hover); }
+.app-shell .view[data-view-panel="team"] .team-member-cell { gap: 9px; }
+.app-shell .view[data-view-panel="team"] .team-avatar-circle { width: 27px; height: 27px; min-width: 27px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-secondary); font-size: 10px; font-weight: 600; }
+.app-shell .view[data-view-panel="team"] .team-role-pill { padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 500; letter-spacing: 0; }
+.app-shell .view[data-view-panel="team"] :is(.team-role-owner, .team-role-staff) { border: 1px solid var(--border-default); background: var(--surface-2); color: var(--text-secondary); }
+.app-shell .view[data-view-panel="team"] .team-role-manager { border: 1px solid rgba(219,168,85,.2); background: rgba(219,168,85,.08); color: #d8b078; }
+.app-shell .view[data-view-panel="team"] :is(.team-action-btn, .team-action-btn.team-change-role) { min-height: 27px; padding: 4px 7px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="team"] :is(.review-stat-pill, .account-stato-pill, .team-role-badge, .team-status-badge) {
+  padding: 3px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 10px;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="team"] :is(.kb-conflict-banner, .team-limit-banner) { padding: 10px 12px; border-radius: var(--radius-sm); box-shadow: none; }
+
+/* Simulatore: a quiet conversation surface with Inbox-sized bubbles and composer. */
+.app-shell .view[data-view-panel="assistente"] .chat-window {
+  display: flex;
+  flex-direction: column;
+  min-height: min(620px, calc(100dvh - 180px));
+  max-width: 920px;
+  overflow: hidden;
+}
+.app-shell .view[data-view-panel="assistente"] .chat-header { min-height: 48px; padding: 8px 13px; border-bottom: 1px solid var(--border-default); background: transparent; }
+.app-shell .view[data-view-panel="assistente"] .chat-avatar { width: 30px; height: 30px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-primary); box-shadow: none; }
+.app-shell .view[data-view-panel="assistente"] .chat-name { color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.app-shell .view[data-view-panel="assistente"] .chat-status { color: var(--text-tertiary); font-size: 11px; }
+.app-shell .view[data-view-panel="assistente"] .chat-body { flex: 1 1 auto; min-height: 0; padding: 16px; background: var(--view-bg); background-image: none; }
+.app-shell .view[data-view-panel="assistente"] .chat-instructions { max-width: 620px; margin: 0 auto 14px; padding: 9px 11px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-secondary); font-size: 11px; box-shadow: none; }
+.app-shell .view[data-view-panel="assistente"] :is(.bubble-in, .bubble-out) { max-width: min(78%, 540px); padding: 9px 11px; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); font-size: 12px; box-shadow: none; }
+.app-shell .view[data-view-panel="assistente"] .chat-suggestions { flex-wrap: wrap; gap: 6px; padding: 9px 12px; overflow-x: visible; border-top: 1px solid var(--border-subtle); background: transparent; }
+.app-shell .view[data-view-panel="assistente"] .suggestion-chip { padding: 5px 8px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-secondary); font-size: 11px; box-shadow: none; }
+.app-shell .view[data-view-panel="assistente"] .chat-input-row { gap: 7px; padding: 9px 12px; border-top: 1px solid var(--border-default); background: transparent; }
+.app-shell .view[data-view-panel="assistente"] .chat-input-row input { min-height: 36px; padding: 7px 10px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); font-size: 12px; box-shadow: none; }
+.app-shell .view[data-view-panel="assistente"] .send-button { width: 32px; height: 32px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-primary); box-shadow: none; }
+
+/* Conoscenza: summary strip, tabs and source rows. */
+.app-shell .view[data-view-panel="conoscenza"] .kb-header-row { display: block; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-bar { gap: 0; margin: 0 0 14px; overflow: hidden; border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-1); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-card,
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-card:hover {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  padding: 11px 13px;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-card:last-child { border-right: 0; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-title { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-value { color: var(--text-primary); font-size: 20px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-summary-meta { color: var(--text-tertiary); font-size: 10px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-tabs { gap: 4px; margin: 0 0 12px; padding: 0 0 8px; border-bottom: 1px solid var(--border-subtle); background: transparent; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-tab-btn { min-height: 30px; padding: 5px 9px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); font-size: 11px; box-shadow: none; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-tab-btn:hover { border-color: transparent; background: var(--surface-hover); color: var(--text-primary); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-tab-btn.active { border-color: var(--border-default); background: var(--surface-selected); color: var(--text-primary); box-shadow: none; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-tab-badge { padding: 1px 5px; border-radius: 999px; background: var(--surface-2); color: var(--text-tertiary); font-size: 10px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-panel { padding: 0; overflow: hidden; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-panel[hidden] { display: none; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-panel > .dash-card { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-panel-status-bar { margin: 0; padding: 9px 13px; border-bottom: 1px solid var(--border-subtle); background: var(--surface-2); color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-panel-header { padding: 11px 13px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-list { gap: 0; margin: 0; padding: 0; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-item-card,
+.app-shell .view[data-view-panel="conoscenza"] .kb-item-card:hover,
+.app-shell .view[data-view-panel="conoscenza"] .kb-item-card.is-inactive {
+  margin: 0;
+  padding: 10px 13px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.app-shell .view[data-view-panel="conoscenza"] .kb-item-card:hover { background: var(--surface-hover); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-item-title { color: var(--text-primary); font-size: 12px; }
+.app-shell .view[data-view-panel="conoscenza"] :is(.kb-item-subtitle, .kb-item-meta) { color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone { margin: 12px 13px; padding: 16px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: none; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone:hover,
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone.dragover { border-color: var(--text-tertiary); background: var(--surface-hover); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone-icon { color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone-title { color: var(--text-primary); font-size: 12px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-dropzone-hint { color: var(--text-tertiary); font-size: 11px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-table-wrap { margin: 0; border: 0; border-radius: 0; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-table :is(th, td) { padding: 9px 12px; border-color: var(--border-subtle); background: transparent; font-size: 11px; }
+.app-shell .view[data-view-panel="conoscenza"] .kb-table th { color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="conoscenza"] .kb-table td { color: var(--text-secondary); }
+
+/* Configurazione AI: grouped setting rows instead of independent large cards. */
+.app-shell .view[data-view-panel="configurazione-ai"] .kb-header-row { display: block; }
+.app-shell .view[data-view-panel="configurazione-ai"] .ai-config-grid { display: block; max-width: 920px; margin: 0 auto; }
+.app-shell .view[data-view-panel="configurazione-ai"] .ai-config-group-title { margin: 18px 0 6px; padding: 0 2px 7px; border-bottom: 1px solid var(--border-subtle); color: var(--text-tertiary); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+html[data-theme="dark"] .app-shell .view[data-view-panel="configurazione-ai"] .ai-config-grid > .settings-card {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-card .dash-card-header { margin: 0; padding: 13px 2px 3px; border: 0; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-card .dash-card-header svg { color: var(--text-tertiary); }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-card .settings-help { margin: 0; padding: 0 2px 5px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-field-group { display: grid; grid-template-columns: minmax(170px, 35%) minmax(0, 1fr); align-items: start; gap: 12px; margin: 0; padding: 9px 2px; border-top: 1px solid var(--border-subtle); }
+.app-shell .view[data-view-panel="configurazione-ai"] .wizard-label { padding-top: 7px; color: var(--text-secondary); font-size: 11px; font-weight: 500; }
+.app-shell .view[data-view-panel="configurazione-ai"] .wizard-input { width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); font-size: 12px; box-shadow: none; }
+.app-shell .view[data-view-panel="configurazione-ai"] textarea.wizard-input { min-height: 60px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-lang-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-lang-checkbox { min-height: 30px; padding: 5px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-secondary); font-size: 11px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-rules-list { padding: 3px 2px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-rule-item { min-height: 34px; padding: 7px 9px; border: 0; border-bottom: 1px solid var(--border-subtle); border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-rule-item:hover { background: var(--surface-hover); }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-rule-add-row { padding: 9px 2px 12px; }
+.app-shell .view[data-view-panel="configurazione-ai"] .settings-actions { max-width: 920px; margin: 14px auto 0; padding: 12px 0; border-top: 1px solid var(--border-subtle); background: transparent; }
+.app-shell .view[data-view-panel="configurazione-ai"] #ai-cfg-save-btn:not(:disabled) { background: #e8e8e8; color: #141516; border-color: rgba(255,255,255,.72); }
+
+@media (max-width: 1024px) {
+  html[data-theme="dark"] body .app-shell > .main { border: 0; border-radius: 0; }
+}
+@media (max-width: 800px) {
+  .app-shell > .main > .view:is([data-view-panel="panoramica"], [data-view-panel="prenotazioni"], [data-view-panel="recensioni"], [data-view-panel="team"], [data-view-panel="assistente"], [data-view-panel="conoscenza"], [data-view-panel="configurazione-ai"]) { padding-inline: 12px; }
+  .app-shell > .main > .view :is(.view-header-bar, .kb-header-row, .booking-page-header, .panoramica-header) { margin-inline: -12px; padding-inline: 12px; }
+  .app-shell .view[data-view-panel="recensioni"] .recensioni-layout { grid-template-columns: minmax(0, 1fr); }
+  .app-shell .view[data-view-panel="conoscenza"] .kb-summary-bar { flex-wrap: wrap; }
+  .app-shell .view[data-view-panel="conoscenza"] .kb-summary-card { flex: 1 1 50%; border-bottom: 1px solid var(--border-subtle); }
+}
+@media (max-width: 600px) {
+  .app-shell > .main > .view :is(.view-header-bar, .booking-page-header, .panoramica-header) { align-items: flex-start; flex-wrap: wrap; }
+  .app-shell .view[data-view-panel="configurazione-ai"] .settings-field-group { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .app-shell .view[data-view-panel="conoscenza"] .kb-summary-card { padding: 9px; }
+}
+
+/* Keep the approved Inbox frame inside the shell's 8px desktop inset. */
+@media (min-width: 1025px) {
+  body .app-shell:has(.inbox-view:not(.view-hidden)) > .main {
+    box-sizing: border-box;
+    height: calc(100dvh - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
+  }
+}
+
+/* At narrower widths all status choices remain visible inside the list column. */
+@media (max-width: 1440px) {
+  body .app-shell:has(.inbox-view:not(.view-hidden)) .inbox-status-filter-row .inbox-chips-group {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
+/* The mobile navigation drawer is out of flow for every route, including Inbox. */
+@media (max-width: 1024px) {
+  body .app-shell > .sidebar,
+  body .app-shell:has(.inbox-view:not(.view-hidden)) > .sidebar {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    flex: 0 0 auto;
+    width: min(228px, calc(100vw - 56px));
+    height: calc(100dvh - 16px);
+    margin: 0;
+    transform: translateX(calc(-100% - 20px));
+    visibility: hidden;
+    z-index: 200;
+  }
+  body.nav-open .app-shell > .sidebar,
+  body.nav-open .app-shell:has(.inbox-view:not(.view-hidden)) > .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  body .app-shell > .main,
+  body .app-shell:has(.inbox-view:not(.view-hidden)) > .main {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* Operational dashboard panels resolve to the same surface as the Inbox. */
+html[data-theme="dark"] .app-shell .view:is(
+  [data-view-panel="panoramica"], [data-view-panel="prenotazioni"], [data-view-panel="recensioni"],
+  [data-view-panel="team"], [data-view-panel="assistente"], [data-view-panel="conoscenza"],
+  [data-view-panel="configurazione-ai"]
+) :is(
+  .kpi-card, #priority-section, .activity-card, .booking-calendar-card, .booking-table-card,
+  .review-compose-card, .review-history-card, .review-stats-sidebar-card, .trends-card, .channels-card,
+  #team-add-card, #team-members-card, .chat-window, .kb-summary-bar, .kb-panel
+) {
+  background: var(--surface-1);
+  border-color: var(--panel-border);
+}
+
+html[data-theme="dark"] .app-shell .view:is(
+  [data-view-panel="panoramica"], [data-view-panel="prenotazioni"], [data-view-panel="recensioni"],
+  [data-view-panel="team"], [data-view-panel="assistente"], [data-view-panel="conoscenza"],
+  [data-view-panel="configurazione-ai"]
+) :is(
+  .view-header-bar, .kb-header-row, .booking-page-header, .panoramica-header,
+  .dash-card-header, .booking-calendar-toolbar, .booking-table-header, .kb-panel-header,
+  .review-history-card .history-header, .settings-actions, .settings-field-group,
+  .team-table th, .team-table td, .booking-table th, .booking-table td,
+  .kb-summary-card, .kb-item-card
+) {
+  border-color: var(--divider-subtle);
+}
+
+/* Decorative inner tiles sit directly on their parent panel. */
+html[data-theme="dark"] .app-shell .view[data-view-panel="panoramica"] :is(
+  .kpi-icon-box, .kpi-trend-badge, .empty-state-icon
+) {
+  border-color: transparent;
+  background: transparent;
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="prenotazioni"] .booking-empty-notice {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="recensioni"] :is(
+  .review-controls-bar, .review-toolbar, .review-draft-panel, .review-original-box,
+  .review-response-box, .review-overall-rating, .sentiment-bars-wrap, .trend-list,
+  .channel-status-list, .review-history-list, .review-history-list > .empty-state
+) {
+  background: transparent;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="recensioni"] :is(
+  .review-draft-panel, .review-original-box, .review-response-box
+) {
+  border-color: var(--divider-subtle);
+  box-shadow: none;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="recensioni"] .review-history-list > .empty-state {
+  padding-inline: 12px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="team"] .dash-card-header::before,
+html[data-theme="dark"] .app-shell .view[data-view-panel="team"] .team-avatar-circle {
+  background-color: transparent;
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="assistente"] :is(.chat-body, .chat-instructions, .chat-avatar) {
+  background: transparent;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="assistente"] .chat-instructions {
+  padding: 0;
+  border: 0;
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] .kb-summary-card {
+  border-color: transparent;
+  border-right: 1px solid var(--divider-subtle);
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] .kb-summary-card:last-child { border-right: 0; }
+html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] #kb-faq-form-card {
+  border: 0;
+  background: transparent;
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] .kb-panel-status-bar {
+  border-color: var(--divider-subtle);
+  background: var(--control-bg);
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] .kb-dropzone {
+  background: var(--control-bg);
+}
+
+html[data-theme="dark"] .app-shell .view[data-view-panel="configurazione-ai"] .ai-config-grid {
+  padding: 0 14px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+html[data-theme="dark"] .app-shell .view[data-view-panel="configurazione-ai"] :is(.wizard-input, .settings-lang-checkbox) {
+  background: var(--control-bg);
+}
+
+@media (max-width: 800px) {
+  html[data-theme="dark"] .app-shell .view[data-view-panel="conoscenza"] .kb-summary-card {
+    border-bottom: 1px solid var(--divider-subtle);
+  }
+}
+
+/* Compact global actions live in the sidebar across desktop and mobile widths. */
+.sidebar-header {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  padding: 8px 10px 0;
+}
+.sidebar-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+}
+.sidebar-brand-name {
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.035em;
+  line-height: 1;
+}
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar-header .global-search {
+  display: flex;
+  position: relative;
+  flex: 0 0 30px;
+  width: 30px;
+  max-width: none;
+  margin: 0;
+}
+.sidebar-header .global-search-toggle,
+.sidebar-header .bell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+  cursor: pointer;
+}
+.sidebar-header .global-search-toggle:hover,
+.sidebar-header .global-search-toggle[aria-expanded="true"],
+.sidebar-header .bell-btn:hover,
+.sidebar-header .bell-btn[aria-expanded="true"] {
+  background: rgba(255, 255, 255, .055);
+  color: var(--text-primary);
+}
+.sidebar-header .global-search-toggle:focus-visible,
+.sidebar-header .bell-btn:focus-visible {
+  outline: 2px solid var(--text-tertiary);
+  outline-offset: 1px;
+}
+.sidebar-header .global-search-icon,
+.sidebar-header .bell-btn svg {
+  position: static;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+.sidebar-header .global-search-toggle .global-search-icon { pointer-events: none; }
+.sidebar-header .bell-badge { border-color: var(--app-bg); box-shadow: none; }
+.sidebar-header .global-search.is-open {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 10px;
+  right: 10px;
+  z-index: 130;
+  width: auto;
+  max-width: none;
+  margin: 0;
+}
+.sidebar-header .global-search.is-open .global-search-toggle {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  z-index: 1;
+}
+.sidebar-header #global-search-input[hidden] { display: none; }
+.sidebar-header #global-search-input {
+  min-height: 36px;
+  height: 36px;
+  padding: 0 11px 0 38px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--control-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 36px;
+  box-shadow: none;
+}
+.sidebar-header #global-search-input:focus {
+  border-color: var(--border-strong);
+  background: var(--control-bg);
+  box-shadow: none;
+}
+.sidebar-header .global-search-results {
+  top: calc(100% + 6px);
+  z-index: 140;
+  max-height: min(380px, calc(100dvh - 112px));
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .38);
+}
+.sidebar-header .notif-panel {
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 140;
+  width: min(208px, calc(100vw - 32px));
+  max-height: min(420px, calc(100dvh - 96px));
+  padding: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .38);
+}
+.sidebar-header .notif-panel-title { margin-bottom: 6px; color: var(--text-tertiary); }
+
+@media (max-width: 1024px) {
+  .sidebar-header .global-search { display: flex; }
+}
