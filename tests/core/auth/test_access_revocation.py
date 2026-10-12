@@ -13,9 +13,11 @@ import uuid
 
 import httpx
 import pytest
+import json
+import jwt
 from fastapi import FastAPI
-from jose import jwk, jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 
 from src.core.auth import dependencies
 from src.core.auth.routes import router as auth_router
@@ -28,7 +30,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 @pytest.fixture
 def signing_key(monkeypatch):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_jwk = jwk.construct(private_key.public_key(), algorithm="RS256").to_dict()
+    public_jwk = json.loads(RSAAlgorithm.to_jwk(private_key.public_key()))
     public_jwk.update({"kid": "phase8-local-rsa", "alg": "RS256", "use": "sig"})
     monkeypatch.setenv("SUPABASE_URL", "https://phase8.example.test")
     monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")

@@ -27,17 +27,28 @@
 No migration, production deployment or Phase 6 work is part of this change.
 Merge is permitted only after the required GitHub gates pass and security review approves.
 
-## Dependency audit review (2026-10-06)
+## Historical JWT dependency review (2026-10-06)
 
 `python-jose==3.5.0` has a residual DER public key/HMAC algorithm-confusion flaw
 ([upstream report](https://github.com/mpdavis/python-jose/issues/414),
 [CVE-2026-85394](https://osv.dev/vulnerability/CVE-2026-85394)). No newer PyPI
-release is available. This is not a library fix or a false-positive finding.
-The sole production entry point, `verify_supabase_jwt`, explicitly permits only
+release was available at that review. The production entry point permitted only
 RS256/ES256 in all decode paths, including expired-token refresh; never HS256.
-Sixteen regression cases construct genuine DER/HS256 forgeries, demonstrate the
-upstream exploit with a mixed allowlist, and require application rejection with
-403 for RSA/EC JWKS, with/without `alg`, fresh/expired tokens and both refresh modes.
-The reviewed audit residual matches only that exact package version and CVE.
-Other versions, new advisory IDs and incomplete reports still fail closed.
-Reassess this residual whenever the dependency or JWT entry points change.
+Sixteen regressions constructed genuine DER/HS256 forgeries and required
+application rejection. The audit exception matched only that exact version and
+advisory. This is historical evidence, not a claim that the library flaw was fixed.
+
+## JWT dependency migration (2026-10-12)
+
+The dedicated migration replaces the runtime dependency with pinned
+`PyJWT[crypto]==2.15.1` and removes the python-jose audit exception. The
+production verifier binds RSA keys to RS256 and P-256 EC keys to ES256, requires
+issuer, audience, expiration and other required claims, and checks signatures
+on normal and refresh paths. Expired refresh ignores only the expiration
+comparison after a second complete signed validation.
+
+The verifier also requires canonical, unpadded base64url JWT segments. PyJWT
+2.15.1 accepts padded encodings for compatibility, while Melpis revocation keys
+off the raw serialized token; rejecting alternate spellings preserves exact
+token denylist behavior. GitHub Dependabot alert #16 remains pending reevaluation
+against the default branch after this PR is merged.

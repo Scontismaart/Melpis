@@ -6,16 +6,8 @@ from pathlib import Path
 
 # Reviewed 2026-09-27. Chroma findings concern its HTTP server, which Melpis
 # does not run. json-repair 0.25.3 predates the affected schema parser, and
-# Melpis supplies no untrusted schema. ecdsa Minerva affects private-key
-# signing; production only verifies Supabase JWTs. Reassess on every change.
+# Melpis supplies no untrusted schema. Reassess on every dependency change.
 ACCEPTED = {
-    # Reviewed 2026-10-06: DER-key/HMAC confusion is mitigated in the sole
-    # production JWT entry point by explicit RS256/ES256-only allowlists,
-    # including expired-token refresh. HS256 is never accepted. The library
-    # flaw remains; no newer PyPI release exists. Reassess on version or
-    # JWT-callsite changes. Proof: test_der_public_key_hmac_forgery_rejected.
-    # https://github.com/mpdavis/python-jose/issues/414
-    ("python-jose", "3.5.0"): {"CVE-2026-85394"},
     ("chromadb", "1.1.1"): {
         "PYSEC-2026-311",
         "PYSEC-2026-3813",
@@ -23,7 +15,6 @@ ACCEPTED = {
         "PYSEC-2026-3815",
     },
     ("json-repair", "0.25.3"): {"GHSA-xf7x-x43h-rpqh"},
-    ("ecdsa", "0.19.2"): {"PYSEC-2026-1325"},
 }
 
 

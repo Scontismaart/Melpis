@@ -1,4 +1,7 @@
 import os
+import base64
+import math
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -63,68 +66,155 @@ async def _get_supabase_jwks() -> list[dict]:
     if JWKS_CACHE["keys"] and now < JWKS_CACHE["expires_at"]:
         return JWKS_CACHE["keys"]
     client = await get_http_client()
-    resp = await client.get(f"{supabase_url}/auth/v1/.well-known/jwks.json")
-    resp.raise_for_status()
-    data = resp.json()
-    JWKS_CACHE["keys"] = data["keys"]
+    try:
+        resp = await client.get(f"{supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json")
+        resp.raise_for_status()
+        data = resp.json()
+        keys = data["keys"]
+        if not isinstance(keys, list) or any(not isinstance(key, dict) for key in keys):
+            raise ValueError("Invalid JWKS")
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(503, "Chiavi di verifica non disponibili") from exc
+    JWKS_CACHE["keys"] = keys
     JWKS_CACHE["expires_at"] = now + 300
-    return JWKS_CACHE["keys"]
+    return keys
 
 
 async def verify_supabase_jwt(token: str, *, allow_expired: bool = False) -> dict:
-    from jose import ExpiredSignatureError, JWTError, jwt
+    import jwt
+    from jwt.exceptions import ExpiredSignatureError, PyJWTError
 
-    jwks = await _get_supabase_jwks()
-    expected_aud = os.getenv("SUPABASE_JWT_AUD", "authenticated")
+    expected_aud = os.getenv("SUPABASE_JWT_AUD", "authenticated").strip()
     supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
-    # Audit 1.4: senza verifica iss, un JWT valido firmato da un progetto
-    # Supabase diverso ma con stessa audience "authenticated" verrebbe
-    # comunque accettato. L'issuer atteso e' sempre "<SUPABASE_URL>/auth/v1".
-    expected_iss = f"{supabase_url}/auth/v1" if supabase_url else None
-    for key in jwks:
-        alg = key.get("alg")
-        if alg and alg not in SUPPORTED_JWT_ALGS:
-            continue
-        algorithms = [alg] if alg else list(SUPPORTED_JWT_ALGS)
-        options = {"verify_aud": True, "verify_iss": bool(expected_iss)}
+    if not supabase_url or not expected_aud:
+        raise HTTPException(500, "Configurazione JWT non valida")
+    expected_iss = f"{supabase_url}/auth/v1"
+
+    def has_canonical_segments(compact: str) -> bool:
+        # PyJWT accepts padded segment encodings. Since token revocation is
+        # keyed by the raw compact JWT, accepting alternate spellings would
+        # let a valid signature evade the denylist's exact-token lookup.
+        if not isinstance(compact, str):
+            return False
+        segments = compact.split(".")
+        if len(segments) != 3 or any(not segment or not re.fullmatch(r"[A-Za-z0-9_-]+", segment)
+                                      for segment in segments):
+            return False
         try:
-            payload = jwt.decode(
-                token,
-                key,
-                algorithms=algorithms,
-                audience=expected_aud,
-                issuer=expected_iss,
-                options=options,
-            )
-            return payload
-        except ExpiredSignatureError:
-            # Solo un token autentico con gli altri claim validi e' una
-            # sessione scaduta da rinnovare. Firma/issuer/audience errati
-            # restano 403, senza cambiare i gate MFA o di tenant.
-            try:
-                jwt.decode(
-                    token,
-                    key,
-                    algorithms=algorithms,
-                    audience=expected_aud,
-                    issuer=expected_iss,
-                    options={**options, "verify_exp": False},
+            for segment in segments:
+                raw = base64.b64decode(
+                    segment + "=" * (-len(segment) % 4), altchars=b"-_", validate=True
                 )
-            except JWTError:
+                if base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii") != segment:
+                    return False
+        except (ValueError, TypeError):
+            return False
+        return True
+
+    def validate_claim_types(payload: dict) -> dict:
+        for claim in ("exp", "iat", "nbf"):
+            if claim not in payload and claim != "nbf":
+                raise ValueError(f"Missing {claim}")
+            if claim not in payload:
                 continue
-            if allow_expired:
-                return jwt.decode(
-                    token,
-                    key,
-                    algorithms=algorithms,
-                    audience=expected_aud,
+            value = payload[claim]
+            if (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                or not _is_finite_numeric_date(value)
+            ):
+                raise ValueError(f"Invalid {claim}")
+        if not isinstance(payload.get("sub"), str) or not payload["sub"].strip():
+            raise ValueError("Invalid sub")
+        return payload
+
+    def _is_finite_numeric_date(value: int | float) -> bool:
+        try:
+            return math.isfinite(value)
+        except (OverflowError, TypeError, ValueError):
+            return False
+
+    if not has_canonical_segments(token):
+        raise HTTPException(403, "Token JWT non valido")
+    try:
+        header = jwt.get_unverified_header(token)
+    except (PyJWTError, TypeError, ValueError):
+        raise HTTPException(403, "Token JWT non valido") from None
+    alg = header.get("alg")
+    if alg not in SUPPORTED_JWT_ALGS:
+        raise HTTPException(403, "Token JWT non valido")
+
+    kid = header.get("kid")
+    if "kid" in header and (not isinstance(kid, str) or not kid):
+        raise HTTPException(403, "Token JWT non valido")
+
+    try:
+        jwks = await _get_supabase_jwks()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, "Chiavi di verifica non disponibili") from exc
+    if not isinstance(jwks, list) or any(not isinstance(key, dict) for key in jwks):
+        raise HTTPException(403, "Token JWT non valido")
+
+    def eligible(jwk: dict) -> bool:
+        kty = jwk.get("kty")
+        if not isinstance(kty, str):
+            return False
+        bound_alg = {"RSA": "RS256", "EC": "ES256"}.get(kty)
+        if bound_alg != alg or (kty == "EC" and jwk.get("crv") != "P-256"):
+            return False
+        if jwk.get("alg") not in (None, bound_alg) or jwk.get("use") not in (None, "sig"):
+            return False
+        key_ops = jwk.get("key_ops")
+        return key_ops is None or (isinstance(key_ops, list) and "verify" in key_ops)
+
+    if kid is not None:
+        matches = [key for key in jwks if key.get("kid") == kid]
+        if len(matches) != 1 or not eligible(matches[0]):
+            raise HTTPException(403, "Token JWT non valido")
+        candidates = matches
+    else:
+        candidates = [key for key in jwks if eligible(key)]
+        if len(candidates) != 1:
+            raise HTTPException(403, "Token JWT non valido")
+
+    try:
+        from jwt import PyJWK
+
+        bound_alg = {"RSA": "RS256", "EC": "ES256"}[candidates[0]["kty"]]
+        signing_key = PyJWK.from_dict(candidates[0], algorithm=bound_alg).key
+        options = {
+            "verify_signature": True,
+            "verify_exp": True,
+            "verify_iat": True,
+            "verify_nbf": True,
+            "verify_iss": True,
+            "verify_aud": True,
+            "require": ["exp", "iat", "iss", "aud", "sub"],
+        }
+        try:
+            return validate_claim_types(jwt.decode(
+                token, signing_key, algorithms=[bound_alg], audience=expected_aud,
+                issuer=expected_iss, options=options,
+            ))
+        except ExpiredSignatureError:
+            # PyJWT valida exp prima di iss/aud. Ripetiamo l'intera verifica
+            # firmata ignorando solo exp, prima di assegnare 401/identita'.
+            try:
+                payload = validate_claim_types(jwt.decode(
+                    token, signing_key, algorithms=[bound_alg], audience=expected_aud,
                     issuer=expected_iss,
                     options={**options, "verify_exp": False},
-                )
-            raise HTTPException(401, "Sessione scaduta: rinnova l'accesso")
-        except JWTError:
-            continue
-    raise HTTPException(403, "Token JWT non valido")
+                ))
+            except PyJWTError:
+                raise HTTPException(403, "Token JWT non valido") from None
+            if allow_expired:
+                return payload
+            raise HTTPException(401, "Sessione scaduta: rinnova l'accesso") from None
+    except HTTPException:
+        raise
+    except (PyJWTError, TypeError, ValueError, OverflowError, KeyError, AttributeError):
+        raise HTTPException(403, "Token JWT non valido") from None
 
 
 async def get_token(
