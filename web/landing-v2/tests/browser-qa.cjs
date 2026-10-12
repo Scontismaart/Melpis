@@ -101,8 +101,11 @@ async function keyboard(page, label) {
         await toggle.click(); await nav.locator('a').first().click();
         check(`${width}: menu link click navigates and closes`, new URL(page.url()).hash === '#mv2-percorso' && await toggle.getAttribute('aria-expanded') === 'false');
         await page.evaluate(() => scrollTo(0, 0)); await toggle.click(); await page.setViewportSize({ width: 1024, height: 900 });
+        // Viewport acknowledgement precedes matchMedia change delivery on some runners.
+        await page.waitForFunction(() => document.querySelector('.mv2-menu-toggle').getAttribute('aria-expanded') === 'false', null, { timeout: 2000 });
         check(`${width}: resize resets open menu`, await toggle.getAttribute('aria-expanded') === 'false' && await nav.isVisible());
         await page.setViewportSize({ width, height: 900 });
+        await nav.waitFor({ state: 'hidden', timeout: 2000 });
         check(`${width}: menu remains closed on return to mobile`, !await nav.isVisible());
       } else check(`${width}: desktop navigation reachable`, await nav.isVisible() && !await toggle.isVisible());
       await page.evaluate(axe.source);

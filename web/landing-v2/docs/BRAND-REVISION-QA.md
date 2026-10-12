@@ -8,6 +8,7 @@
 - 650 file protetti nel worktree byte-identical rispetto alla baseline origin/main; 1036 file tracciati del checkout originale preservati rispetto allo snapshot iniziale, incluse modifiche locali preesistenti.
 - Logo e favicon: copie byte-identiche del simbolo canonico; nessuna immagine generata e nessuna nuova dipendenza.
 - graphify update completato nel worktree; gli artefatti del grafo non fanno parte della PR.
+- Corretto il test di resize: dopo il cambio viewport attende il reset effettivo del menu (timeout 2 secondi), anziché leggere lo stato prima della consegna dell'evento matchMedia. Nessuna modifica al runtime del menu; una mancata chiusura continua a fallire il test.
 - Preview locale: http://127.0.0.1:4175/landing-v2/. Nessuna pubblicazione.
 
 Screenshot e report locali, non pubblicati: `artifacts/brand-review/v2-1440-hero.png`, `v2-390-hero.png`, `v2-1440-full.png`, `v2-390-full.png`, `browser-results-chrome.json`, `browser-results-bundled.json`.
