@@ -14,9 +14,14 @@ FROM node:24-alpine AS dashboard-builder
 WORKDIR /workspace
 COPY dashboard-src/ ./web/dashboard-src/
 COPY scripts/compose-dashboard.mjs ./web/scripts/compose-dashboard.mjs
+COPY dashboard-css/ ./web/dashboard-css/
+COPY scripts/compose-dashboard-css.mjs ./web/scripts/compose-dashboard-css.mjs
 COPY index.html ./web/index.html
+COPY style.css ./web/style.css
 RUN node ./web/scripts/compose-dashboard.mjs --output /tmp/dashboard.html && \
-    cmp --silent /tmp/dashboard.html ./web/index.html
+    cmp --silent /tmp/dashboard.html ./web/index.html && \
+    node ./web/scripts/compose-dashboard-css.mjs --output /tmp/style.css && \
+    cmp --silent /tmp/style.css ./web/style.css
 
 FROM nginx:1.27-alpine AS runtime
 
@@ -43,7 +48,8 @@ COPY i18n-client.js /usr/share/nginx/html/
 COPY login.html login.js register.html register.js auth.js auth.css /usr/share/nginx/html/
 
 # ── Dashboard (sotto /app/) ─────────────────────────────────
-COPY style.css app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
+COPY --from=dashboard-builder /tmp/style.css /usr/share/nginx/html/app/style.css
+COPY app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
 COPY --from=dashboard-builder /tmp/dashboard.html /usr/share/nginx/html/app/index.html
 COPY design-tokens.css /usr/share/nginx/html/app/
 COPY fonts/ /usr/share/nginx/html/app/fonts/

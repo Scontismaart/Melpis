@@ -1,0 +1,1325 @@
+
+/* ============================================================
+   RECENSIONI — MELPIS ONYX B2B (DESIGN TARGET VISUALDASHBOARD3)
+   ============================================================ */
+
+/* Page View Container */
+[data-view-panel="recensioni"] {
+  padding: 24px 32px 48px;
+  background: transparent;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+/* Header bar with stat pills & refresh (matches visualdashboard3 top row) */
+[data-view-panel="recensioni"] .view-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0 0 20px 0;
+  padding: 0;
+  border: none;
+}
+
+[data-view-panel="recensioni"] .view-header-bar > div:first-child {
+  display: none;
+}
+
+[data-view-panel="recensioni"] .review-header-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .review-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  background: #0E1115;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #E2E8F0;
+  letter-spacing: 0.01em;
+}
+
+[data-view-panel="recensioni"] #review-stat-count {
+  color: #E2E8F0;
+}
+
+[data-view-panel="recensioni"] #review-stat-rating,
+[data-view-panel="recensioni"] .review-stat-pill.rating-pill {
+  background: #14130E;
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #F59E0B;
+  font-weight: 600;
+}
+
+[data-view-panel="recensioni"] #review-stat-rating svg {
+  fill: #F59E0B;
+  color: #F59E0B;
+  width: 14px;
+  height: 14px;
+}
+
+:is([data-view-panel="recensioni"], [data-view-panel="team"]) .btn-refresh-reviews {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+:is([data-view-panel="recensioni"], [data-view-panel="team"]) .btn-refresh-reviews:hover {
+  background: var(--chip-bg);
+  border-color: var(--ink-soft);
+  color: var(--ink);
+  transform: rotate(180deg);
+}
+
+/* Layout 2-Column Grid (Main ~74%, Sidebar ~26%) */
+[data-view-panel="recensioni"] .recensioni-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+  gap: 20px;
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1120px) {
+  [data-view-panel="recensioni"] .recensioni-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Colonna Principale */
+[data-view-panel="recensioni"] .recensioni-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Card 1: Analizza nuova recensione */
+[data-view-panel="recensioni"] .review-compose-card {
+  position: relative;
+  background: #0A0C0E;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  padding: 22px 26px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+[data-view-panel="recensioni"] .review-compose-card::before {
+  display: none !important;
+}
+
+[data-view-panel="recensioni"] .compose-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+[data-view-panel="recensioni"] .compose-header-left .dash-card-title {
+  font-family: var(--font-display, "Inter", sans-serif);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.01em;
+}
+
+[data-view-panel="recensioni"] .compose-header-left .dash-card-sub {
+  font-size: 0.82rem;
+  color: #7A8594;
+  line-height: 1.4;
+}
+
+[data-view-panel="recensioni"] .review-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 105px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: #FFFFFF;
+  background: #060709;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+[data-view-panel="recensioni"] .review-textarea::placeholder {
+  color: #525A66;
+}
+
+[data-view-panel="recensioni"] .review-textarea:focus {
+  outline: none;
+  background: #080A0D;
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+[data-view-panel="recensioni"] .review-controls-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 960px) {
+  [data-view-panel="recensioni"] .review-controls-bar {
+    flex-wrap: wrap;
+  }
+}
+
+[data-view-panel="recensioni"] .review-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+[data-view-panel="recensioni"] .review-input-group.author-group {
+  flex: 1 1 0;
+}
+
+[data-view-panel="recensioni"] .review-input-group.stars-group {
+  flex: 1.35 1 0;
+}
+
+[data-view-panel="recensioni"] .review-input-group.source-group {
+  flex: 1.05 1 0;
+}
+
+[data-view-panel="recensioni"] .review-control-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8F9CAE;
+  white-space: nowrap;
+}
+
+[data-view-panel="recensioni"] .review-control-label svg {
+  color: #8F9CAE;
+  flex-shrink: 0;
+}
+
+[data-view-panel="recensioni"] .review-author-input,
+[data-view-panel="recensioni"] .review-stars-select,
+[data-view-panel="recensioni"] .review-source-select {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: #060709;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.83rem;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .review-author-input::placeholder {
+  color: #525A66;
+}
+
+[data-view-panel="recensioni"] .review-stars-select,
+[data-view-panel="recensioni"] .review-source-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238F9CAE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+[data-view-panel="recensioni"] .review-stars-select option,
+[data-view-panel="recensioni"] .review-source-select option {
+  background: #0F1216;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .review-author-input:focus,
+[data-view-panel="recensioni"] .review-stars-select:focus,
+[data-view-panel="recensioni"] .review-source-select:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+/* Primary CTA Button: "Analizza e genera bozza" */
+[data-view-panel="recensioni"] .review-analyze-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: #FFFFFF;
+  color: #0A0C0E;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+[data-view-panel="recensioni"] .review-analyze-btn:hover {
+  background: #F1F5F9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 255, 255, 0.16);
+}
+
+[data-view-panel="recensioni"] .review-analyze-btn:active {
+  transform: scale(0.98);
+}
+
+[data-view-panel="recensioni"] .review-analyze-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Card Bozza & Dettaglio Risposta Attiva */
+[data-view-panel="recensioni"] .review-draft-panel {
+  background: #0A0C0E;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 22px;
+  padding: 22px 26px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+[data-view-panel="recensioni"] .review-draft-panel::before {
+  display: none !important;
+}
+
+[data-view-panel="recensioni"] .draft-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+[data-view-panel="recensioni"] .draft-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+[data-view-panel="recensioni"] .draft-icon-bubble {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #10B981;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+[data-view-panel="recensioni"] .draft-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+[data-view-panel="recensioni"] .draft-card-title {
+  font-family: var(--font-display, "Inter", sans-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .draft-card-sub {
+  font-size: 0.8rem;
+  color: #7A8594;
+  margin-top: 2px;
+}
+
+[data-view-panel="recensioni"] .draft-header-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-view-panel="recensioni"] .btn-close-draft {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0E1115;
+  color: #94A3B8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .btn-close-draft:hover {
+  background: #161B22;
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+[data-view-panel="recensioni"] .review-original-box {
+  background: #060709;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 3px solid #10B981;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+}
+
+[data-view-panel="recensioni"] .original-box-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8F9CAE;
+  margin-bottom: 6px;
+}
+
+[data-view-panel="recensioni"] .original-box-text {
+  font-size: 0.88rem;
+  color: #FFFFFF;
+  line-height: 1.5;
+  margin: 0;
+  font-style: italic;
+}
+
+[data-view-panel="recensioni"] .review-response-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+[data-view-panel="recensioni"] .response-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+[data-view-panel="recensioni"] .response-box-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .response-editable-hint {
+  font-size: 0.75rem;
+  color: #7A8594;
+}
+
+[data-view-panel="recensioni"] .review-draft-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 14px 16px;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #FFFFFF;
+  background: #060709;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+[data-view-panel="recensioni"] .review-draft-textarea:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+[data-view-panel="recensioni"] .review-draft-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .draft-action-feedback {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #10B981;
+}
+
+[data-view-panel="recensioni"] .draft-buttons-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .btn-review-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0E1115;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .btn-review-copy:hover {
+  background: #161B22;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+[data-view-panel="recensioni"] .btn-review-approve {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  border-radius: 999px;
+  border: none;
+  background: #10B981;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(16, 185, 129, 0.35);
+  transition: all 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .btn-review-approve:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+[data-view-panel="recensioni"] .btn-review-approve:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Card 2: Storico Recensioni */
+[data-view-panel="recensioni"] .review-history-card {
+  background: #0A0C0E;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  padding: 22px 26px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+[data-view-panel="recensioni"] .history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 16px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+[data-view-panel="recensioni"] .history-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+[data-view-panel="recensioni"] .history-header .dash-card-title {
+  font-family: var(--font-display, "Inter", sans-serif);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.01em;
+}
+
+[data-view-panel="recensioni"] .history-header .dash-card-sub {
+  font-size: 0.82rem;
+  color: #7A8594;
+}
+
+/* Toolbar Filtri e Ricerca */
+[data-view-panel="recensioni"] .review-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+[data-view-panel="recensioni"] .review-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+[data-view-panel="recensioni"] .review-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0E1116;
+  color: #94A3B8;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .review-tab:hover {
+  background: #141820;
+  color: #FFFFFF;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+[data-view-panel="recensioni"] .review-tab.active {
+  background: #10B981;
+  color: #FFFFFF;
+  border-color: #10B981;
+  font-weight: 600;
+}
+
+[data-view-panel="recensioni"] .review-tab .tab-count {
+  display: inline;
+  font-weight: 600;
+  color: #64748B;
+  margin-left: 2px;
+}
+
+[data-view-panel="recensioni"] .review-tab.active .tab-count {
+  color: #FFFFFF;
+}
+
+/* Search bar & Channel select */
+[data-view-panel="recensioni"] .review-search-wrap {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+[data-view-panel="recensioni"] .search-input-box {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+
+[data-view-panel="recensioni"] .search-input-box svg {
+  position: absolute;
+  left: 14px;
+  color: #64748B;
+  pointer-events: none;
+}
+
+[data-view-panel="recensioni"] .review-search-input {
+  width: 100%;
+  height: 42px;
+  box-sizing: border-box;
+  padding: 0 16px 0 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #060709;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .review-search-input::placeholder {
+  color: #525A66;
+}
+
+[data-view-panel="recensioni"] .review-search-input:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+[data-view-panel="recensioni"] .review-filter-source {
+  height: 42px;
+  padding: 0 36px 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #060709;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.82rem;
+  font-weight: 500;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238F9CAE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+[data-view-panel="recensioni"] .review-filter-source option {
+  background: #0F1216;
+  color: #FFFFFF;
+}
+
+/* Review Items List */
+[data-view-panel="recensioni"] .review-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+[data-view-panel="recensioni"] .review-history-item {
+  background: #080A0D;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  padding: 18px 20px;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+[data-view-panel="recensioni"] .review-history-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+[data-view-panel="recensioni"] .review-history-item.item-approvata {
+  border-left: 3px solid #10B981;
+}
+
+[data-view-panel="recensioni"] .review-history-item.item-urgente {
+  border-left: 3px solid #EF4444;
+  background: rgba(239, 68, 68, 0.04);
+}
+
+[data-view-panel="recensioni"] .history-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+[data-view-panel="recensioni"] .history-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+[data-view-panel="recensioni"] .channel-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #CBD5E1;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-view-panel="recensioni"] .channel-pill.channel-google {
+  background: rgba(66, 133, 244, 0.12);
+  color: #60A5FA;
+  border-color: rgba(66, 133, 244, 0.2);
+}
+
+[data-view-panel="recensioni"] .channel-pill.channel-tripadvisor {
+  background: rgba(0, 170, 108, 0.12);
+  color: #34D399;
+  border-color: rgba(0, 170, 108, 0.2);
+}
+
+[data-view-panel="recensioni"] .channel-pill.channel-manuale {
+  background: rgba(255, 255, 255, 0.06);
+  color: #CBD5E1;
+}
+
+[data-view-panel="recensioni"] .history-stars {
+  color: #F59E0B;
+  font-size: 0.92rem;
+  letter-spacing: 2px;
+}
+
+[data-view-panel="recensioni"] .history-author {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .history-date {
+  font-size: 0.76rem;
+  color: #64748B;
+}
+
+/* Status pills in review row */
+[data-view-panel="recensioni"] .review-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(245, 158, 11, 0.1);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+[data-view-panel="recensioni"] .review-status-badge.status-approvata,
+[data-view-panel="recensioni"] .review-status-badge.status-pubblicata {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+[data-view-panel="recensioni"] .review-status-badge.status-urgente,
+[data-view-panel="recensioni"] .review-status-badge.status-negativa {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+[data-view-panel="recensioni"] .history-item-body {
+  margin-bottom: 12px;
+}
+
+[data-view-panel="recensioni"] .history-review-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #FFFFFF;
+  margin: 0;
+}
+
+/* In visualdashboard3.png, the history item does NOT display the reply box in the list view */
+[data-view-panel="recensioni"] .history-ai-reply-box {
+  display: none;
+}
+
+[data-view-panel="recensioni"] .history-item-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-view-panel="recensioni"] .history-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-view-panel="recensioni"] .review-sentiment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+[data-view-panel="recensioni"] .review-sentiment-badge.sentiment-neutra,
+[data-view-panel="recensioni"] .review-sentiment-badge.sentiment-neutro {
+  background: rgba(255, 255, 255, 0.05);
+  color: #94A3B8;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-view-panel="recensioni"] .review-sentiment-badge.sentiment-negativa,
+[data-view-panel="recensioni"] .review-sentiment-badge.sentiment-negativo {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+[data-view-panel="recensioni"] .review-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.04);
+  color: #94A3B8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-transform: capitalize;
+}
+
+[data-view-panel="recensioni"] .history-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* In visualdashboard3.png, copy button is inside draft panel, history row has only Rivedi bozza */
+[data-view-panel="recensioni"] .history-actions button[data-action="copy"] {
+  display: none;
+}
+
+[data-view-panel="recensioni"] .btn-history-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0E1116;
+  color: #FFFFFF;
+  font-family: var(--font-body, "Inter", sans-serif);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+[data-view-panel="recensioni"] .btn-history-action:hover {
+  background: #161B22;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+[data-view-panel="recensioni"] .btn-history-action.btn-action-primary {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #10B981;
+}
+
+[data-view-panel="recensioni"] .btn-history-action.btn-action-primary:hover {
+  background: #10B981;
+  color: #FFFFFF;
+}
+
+/* ============================================================
+   RIGHT COLUMN: STATS, TRENDS & CHANNELS
+   ============================================================ */
+
+[data-view-panel="recensioni"] .recensioni-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Right Card 1: Sentiment & Valutazione */
+[data-view-panel="recensioni"] .review-stats-sidebar-card {
+  background: #0A0C0E;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  padding: 20px 22px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+[data-view-panel="recensioni"] .review-stats-sidebar-card .dash-card-header,
+[data-view-panel="recensioni"] .trends-card .dash-card-header,
+[data-view-panel="recensioni"] .channels-card .dash-card-header {
+  margin-bottom: 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+[data-view-panel="recensioni"] .review-stats-sidebar-card .dash-card-title,
+[data-view-panel="recensioni"] .trends-card .dash-card-title,
+[data-view-panel="recensioni"] .channels-card .dash-card-title {
+  font-family: var(--font-display, "Inter", sans-serif);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.01em;
+}
+
+[data-view-panel="recensioni"] .review-overall-rating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 4px 0 14px;
+  border-bottom: none;
+  margin-bottom: 8px;
+}
+
+[data-view-panel="recensioni"] .rating-number-big {
+  font-family: var(--font-display, "Inter", sans-serif);
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .rating-stars-visual {
+  color: #F59E0B;
+  font-size: 1.15rem;
+  letter-spacing: 3px;
+  margin: 6px 0 4px;
+}
+
+[data-view-panel="recensioni"] .rating-total-label {
+  font-size: 0.78rem;
+  color: #64748B;
+}
+
+[data-view-panel="recensioni"] .sentiment-bars-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .sentiment-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+[data-view-panel="recensioni"] .sentiment-bar-label-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+[data-view-panel="recensioni"] .sentiment-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+[data-view-panel="recensioni"] .sentiment-dot.pos { background: #10B981; }
+[data-view-panel="recensioni"] .sentiment-dot.neut { background: #64748B; }
+[data-view-panel="recensioni"] .sentiment-dot.neg { background: #EF4444; }
+
+[data-view-panel="recensioni"] .sentiment-bar-name {
+  color: #94A3B8;
+  font-weight: 500;
+  flex: 1;
+}
+
+[data-view-panel="recensioni"] .sentiment-bar-pct {
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .sentiment-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #14181F;
+  overflow: hidden;
+}
+
+[data-view-panel="recensioni"] .sentiment-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s var(--ease-out, ease-out);
+}
+
+[data-view-panel="recensioni"] .sentiment-fill.fill-pos { background: #10B981; }
+[data-view-panel="recensioni"] .sentiment-fill.fill-neut { background: #475569; }
+[data-view-panel="recensioni"] .sentiment-fill.fill-neg { background: #EF4444; }
+
+/* Right Card 2: Top Trends & Temi */
+[data-view-panel="recensioni"] .trends-card {
+  background: #0A0C0E;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  padding: 20px 22px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+[data-view-panel="recensioni"] .trend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+[data-view-panel="recensioni"] .trend-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .trend-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+[data-view-panel="recensioni"] .trend-icon.trend-pos {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10B981;
+}
+
+[data-view-panel="recensioni"] .trend-icon.trend-neg {
+  background: rgba(239, 68, 68, 0.15);
+  color: #EF4444;
+}
+
+[data-view-panel="recensioni"] .trend-icon.trend-topic,
+[data-view-panel="recensioni"] .trend-icon.trend-neutral {
+  background: rgba(255, 255, 255, 0.06);
+  color: #94A3B8;
+}
+
+[data-view-panel="recensioni"] .trend-icon.trend-new {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+}
+
+[data-view-panel="recensioni"] .trend-body {
+  flex: 1;
+  min-width: 0;
+}
+
+[data-view-panel="recensioni"] .trend-label {
+  font-size: 0.82rem;
+  color: #E2E8F0;
+  display: block;
+  margin-bottom: 5px;
+}
+
+[data-view-panel="recensioni"] .trend-bar-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #14181F;
+  overflow: hidden;
+}
+
+[data-view-panel="recensioni"] .trend-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+[data-view-panel="recensioni"] .trend-bar-fill.fill-pos {
+  background: #10B981;
+}
+
+[data-view-panel="recensioni"] .trend-bar-fill.fill-neg {
+  background: #EF4444;
+}
+
+/* Right Card 3: Canali Collegati */
+[data-view-panel="recensioni"] .channels-card {
+  background: #0A0C0E;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 22px;
+  padding: 20px 22px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+[data-view-panel="recensioni"] .channel-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[data-view-panel="recensioni"] .channel-status-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #07090C;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  gap: 12px;
+}
+
+/* In visualdashboard3.png, only the primary active Google Business channel is shown */
+[data-view-panel="recensioni"] .channel-status-item:nth-child(n+2) {
+  display: none;
+}
+
+[data-view-panel="recensioni"] .channel-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+[data-view-panel="recensioni"] .channel-badge-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-view-panel="recensioni"] .channel-badge-icon.google {
+  background: rgba(66, 133, 244, 0.12);
+  color: #4285F4;
+  border-color: rgba(66, 133, 244, 0.25);
+}
+
+[data-view-panel="recensioni"] .channel-badge-icon.tripadvisor {
+  background: rgba(0, 170, 108, 0.12);
+  color: #00AA6C;
+  border-color: rgba(0, 170, 108, 0.25);
+}
+
+[data-view-panel="recensioni"] .channel-name {
+  display: block;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+[data-view-panel="recensioni"] .channel-desc {
+  display: block;
+  font-size: 0.72rem;
+  color: #64748B;
+  margin-top: 1px;
+}
+
+[data-view-panel="recensioni"] .channel-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+[data-view-panel="recensioni"] .channel-badge.ready {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+[data-view-panel="recensioni"] .channel-badge.manual {
+  background: rgba(255, 255, 255, 0.05);
+  color: #94A3B8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ============================================================
+   RESPONSIVE (390×844 and Mobile/Tablet Breakpoints)
+   ============================================================ */
+
+@media (max-width: 768px) {
+  [data-view-panel="recensioni"] {
+    padding: 16px 16px 36px;
+  }
+
+  [data-view-panel="recensioni"] .review-compose-card,
+  [data-view-panel="recensioni"] .review-history-card,
+  [data-view-panel="recensioni"] .review-draft-panel,
+  [data-view-panel="recensioni"] .review-stats-sidebar-card,
+  [data-view-panel="recensioni"] .trends-card,
+  [data-view-panel="recensioni"] .channels-card {
+    padding: 18px 16px;
+    border-radius: 18px;
+  }
+
+  [data-view-panel="recensioni"] .review-controls-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  [data-view-panel="recensioni"] .review-input-group {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  [data-view-panel="recensioni"] .review-analyze-btn {
+    width: 100%;
+  }
+
+  [data-view-panel="recensioni"] .history-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  [data-view-panel="recensioni"] .review-search-wrap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-view-panel="recensioni"] .review-filter-source {
+    width: 100%;
+  }
+
+  [data-view-panel="recensioni"] .history-item-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  [data-view-panel="recensioni"] .history-item-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  [data-view-panel="recensioni"] .history-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

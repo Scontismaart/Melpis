@@ -128,6 +128,7 @@ test("CI active dashboard baseline V2 integrity and provenance remain pinned to 
       `${webPath} still matches the font used by active V2`);
   }
   const styleCss = fs.readFileSync(path.join(__dirname, "..", "..", "web", "style.css"), "utf8");
+  const styleCssBytes = fs.readFileSync(path.join(__dirname, "..", "..", "web", "style.css"));
   const normalizedStyleCss = styleCss.replace(/\r\n/g, "\n");
   const normalizedStyleHash = createHash("sha256").update(normalizedStyleCss).digest("hex");
   assert.equal(normalizedStyleHash, manifest.capture.fonts.style_css_normalized_lf_sha256,
@@ -135,6 +136,13 @@ test("CI active dashboard baseline V2 integrity and provenance remain pinned to 
   assert.notEqual(createHash("sha256").update(normalizedStyleCss + " ").digest("hex"),
     manifest.capture.fonts.style_css_normalized_lf_sha256,
     "CSS content changes remain detectable after EOL normalization");
+  assert.equal(styleCssBytes.length, 364962, "the canonical dashboard stylesheet byte count remains pinned");
+  assert.equal(createHash("sha256").update(styleCssBytes).digest("hex"),
+    "cb1c181a4e617c43998b62ebde1b2c57ca77f56b4c297fe1ccf44a9fb5ae1fa1",
+    "the canonical Git stylesheet bytes remain pinned without EOL normalization");
+  assert.equal(styleCssBytes.includes(13), false, "the canonical dashboard stylesheet uses LF bytes only");
+  assert.equal(styleCssBytes.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])), false,
+    "the canonical dashboard stylesheet has no UTF-8 BOM");
   const entries = manifest.cases.flatMap((captureCase) => Object.entries(captureCase.images)
     .map(([viewport, filename]) => ({ captureCase, viewport, filename })));
   assert.equal(entries.length, 12);
