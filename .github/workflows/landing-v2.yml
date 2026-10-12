@@ -1,0 +1,58 @@
+name: Landing V2 isolated foundations
+
+on:
+  push:
+    branches: ['codex/landing-v2-phase-*']
+    paths: ['web/landing-v2/**', '.github/workflows/landing-v2.yml']
+  pull_request:
+    branches: ['codex/landing-v2']
+    paths: ['web/landing-v2/**', '.github/workflows/landing-v2.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: landing-v2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundations:
+    name: V2 build, isolation and browser QA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web/landing-v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/landing-v2/package-lock.json
+      - name: Verify protected source files and phase scope
+        run: node tools/isolation.mjs
+      - name: Install V2 development tools only
+        run: npm ci --ignore-scripts
+      - name: Audit V2 development tools
+        run: npm audit --audit-level=high
+      - name: Build and check only V2
+        run: |
+          npm run build
+          npm run check
+          npm test
+      - name: Install isolated test browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser and accessibility checks
+        run: npm run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: landing-v2-qa-${{ github.event.pull_request.head.sha || github.sha }}
+          path: web/landing-v2/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
