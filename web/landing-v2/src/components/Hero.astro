@@ -1,19 +1,23 @@
+---
+import ProductShowcase from './ProductShowcase.jsx';
+---
+
 <section class="mv2-hero mv2-container" id="mv2-inizio" aria-labelledby="mv2-hero-title">
-      <div class="mv2-hero-copy">
-        <p class="mv2-eyebrow"><span class="mv2-eyebrow-dot"></span> L’assistente AI per i messaggi della tua attività</p>
-        <h1 id="mv2-hero-title">Dalle domande dei clienti, <em>al prossimo passo.</em></h1>
-        <p class="mv2-lead">Gestisci le richieste sui canali collegati con le informazioni della tua attività. Segui conversazioni e prenotazioni dal pannello, e coinvolgi il team quando serve.</p>
-        <div class="mv2-actions"><a class="mv2-button" href="#mv2-percorso">Scopri il percorso <span aria-hidden="true">↓</span></a><a class="mv2-text-link" href="#mv2-piani">Consulta i piani <span aria-hidden="true">↗</span></a></div>
-        <div class="mv2-proofline"><span class="mv2-proof-icon" aria-hidden="true">✳</span><span>Un flusso chiaro. Il team resta parte del lavoro.</span></div>
+  <div class="mv2-hero-intro">
+    <div class="mv2-hero-heading">
+      <p class="mv2-eyebrow">MESSAGGI, PRENOTAZIONI, TEAM</p>
+      <h1 id="mv2-hero-title">Ogni conversazione.<br /><em>Sotto controllo.</em></h1>
+    </div>
+    <div class="mv2-hero-description">
+      <p class="mv2-lead">Messaggi dai canali collegati, prenotazioni e informazioni della tua attività. L’assistente risponde; il team interviene quando serve.</p>
+      <div class="mv2-actions">
+        <a class="mv2-button" href="#mv2-showcase">Esplora Melpis <span aria-hidden="true">↓</span></a>
+        <a class="mv2-text-link" href="#mv2-piani">Consulta i piani <span aria-hidden="true">↗</span></a>
       </div>
-      <div class="mv2-hero-art" aria-label="Anteprima illustrativa di una conversazione e della sua gestione">
-        <div class="mv2-orbit mv2-orbit-one"></div><div class="mv2-orbit mv2-orbit-two"></div>
-        <div class="mv2-chat-card">
-          <div class="mv2-card-top"><span class="mv2-channel-icon" aria-hidden="true">◉</span><span><strong>Conversazione</strong><small>Esempio illustrativo</small></span><span class="mv2-status"><i></i> In gestione</span></div>
-          <div class="mv2-chat-body"><p class="mv2-bubble mv2-bubble-customer">Avete un tavolo per due stasera?</p><p class="mv2-bubble mv2-bubble-assistant">Controllo le disponibilità per te.</p><div class="mv2-check-row"><span class="mv2-check">✓</span><span>Disponibilità verificata</span><span class="mv2-time">19:30</span></div></div>
-          <div class="mv2-card-bottom"><span class="mv2-avatar">M</span><span>La richiesta è pronta per il team</span><span class="mv2-arrow" aria-hidden="true">↗</span></div>
-        </div>
-        <div class="mv2-note-card"><span class="mv2-note-icon" aria-hidden="true">↗</span><span><strong>Un unico pannello</strong><small>Messaggi e attività</small></span></div>
-        <div class="mv2-art-caption">Esempio sintetico · dati fittizi · non invia messaggi né prenota</div>
-      </div>
-    </section>
+    </div>
+  </div>
+  <div class="mv2-showcase-wrap" id="mv2-showcase">
+    <ProductShowcase client:load />
+    <p class="mv2-showcase-note">Anteprima dimostrativa · dati sintetici</p>
+  </div>
+</section>

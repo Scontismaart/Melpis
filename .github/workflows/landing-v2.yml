@@ -44,6 +44,7 @@ jobs:
         run: |
           npm run build
           npm run check
+          npm run astro:check
           npm test
       - name: Install isolated test browser
         run: npx playwright install --with-deps chromium

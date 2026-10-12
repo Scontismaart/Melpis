@@ -27,6 +27,12 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   const html = await readFile(path.join(root, 'dist/index.html'), 'utf8');
   assert.match(html, /href="#mv2-percorso"/);
   assert.match(html, /id="mv2-piani"/);
+  assert.match(html, /Ogni conversazione\./);
+  assert.match(html, /Sotto controllo\./);
+  assert.match(html, /client="load"/);
+  assert.match(html, /Anteprima dimostrativa · dati sintetici/);
+  for (const label of ['Panoramica','Inbox','Prenotazioni','Recensioni','Knowledge Base','Team']) assert.match(html, new RegExp(`>${label}<`), `SSR product navigation includes ${label}`);
+  assert.match(html, /disabled="" aria-pressed="true"/);
   assert.match(html, /content="noindex, nofollow, noarchive"/);
 
   const proc = spawn(node, ['tools/preview.mjs'], {
@@ -51,6 +57,7 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.match(await home.text(), /Melpis/);
 
   const css = await readFile(path.join(root, 'dist', '_astro', (await (await import('node:fs/promises')).readdir(path.join(root, 'dist', '_astro'))).find(f => f.endsWith('.css'))), 'utf8');
+  assert.doesNotMatch(css, /#10b981|#34d399|16,\s*185,\s*129|52,\s*211,\s*153/i, 'runtime CSS must use the monochrome silver palette');
   const fontPath = css.match(/url\((\/landing-v2\/assets\/fonts\/[^)]+\.woff2)\)/)?.[1];
   assert.ok(fontPath, 'built CSS must reference a self-hosted font');
   const font = await fetch(`${origin}${fontPath}`);
@@ -66,4 +73,9 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.equal((await fetch(`${origin}/`)).status, 404);
   assert.match(await (await fetch(`${origin}/robots.txt`)).text(), /Disallow: \/\s/);
   assert.equal((await fetch(`${origin}/landing-v2/`, { method: 'POST' })).status, 405);
+  const scripts = await (await import('node:fs/promises')).readdir(path.join(root, 'dist', '_astro'));
+  const bundledJs = await Promise.all(scripts.filter(file => file.endsWith('.js')).map(file => readFile(path.join(root, 'dist', '_astro', file), 'utf8')));
+  assert.ok(bundledJs.length > 0);
+  assert.ok(bundledJs.some(source => source.includes('Panoramica') && source.includes('Prenotazioni') && source.includes('Knowledge Base')));
+  assert.ok(bundledJs.some(source => source.includes('gsap')) || (await readFile(path.join(root, 'package.json'),'utf8')).includes('"gsap"'));
 });
