@@ -232,6 +232,10 @@ class TestDataRights:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "deleted"
+        assert data["propagation"] == {"airtable": False, "softr": False}
+        assert data["message"] == (
+            "Organization deletion completed locally; external propagation results are reported per service."
+        )
         async with repo.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT id FROM organizations WHERE id = $1", org_id)
         assert row is None

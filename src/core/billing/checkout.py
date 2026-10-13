@@ -72,7 +72,10 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
     trial_days = frozen["trial_days_remaining"]
     kwargs = dict(customer=customer_id, line_items=[{"price": frozen["price_id"], "quantity": 1}],
                   mode="subscription", success_url=frozen["success_url"], cancel_url=frozen["cancel_url"],
-                  client_reference_id=str(org_id), metadata={"trial_days_remaining": str(trial_days)},
+                  client_reference_id=str(org_id), metadata={
+                      "trial_days_remaining": str(trial_days),
+                      "billing_checkout_intent_id": str(intent["id"]),
+                  },
                   payment_method_collection="required", expires_at=int(intent["expires_at"].timestamp()),
                   idempotency_key=f"checkout:{intent['id']}")
     if trial_days > 0:

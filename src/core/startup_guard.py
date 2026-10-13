@@ -10,10 +10,12 @@ from src.core.cost_policy import FREE_MODELS, is_openrouter_free_model
 
 COMMERCIAL_BOOTSTRAP_PROFILE = "commercial_bootstrap"
 SANDBOX_PROFILE = "sandbox"
-STRIPE_PRICE_ENV_NAMES = (
+STRIPE_MONTHLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER",
     "STRIPE_PRICE_PRO",
     "STRIPE_PRICE_BUSINESS",
+)
+STRIPE_YEARLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER_YEARLY",
     "STRIPE_PRICE_PRO_YEARLY",
     "STRIPE_PRICE_BUSINESS_YEARLY",
@@ -106,8 +108,14 @@ def _assert_stripe_profile(profile: str) -> None:
         _require_safe_value("STRIPE_SECRET_KEY", prefix="sk_live_", min_length=16)
         _require_safe_value("STRIPE_PUBLISHABLE_KEY", prefix="pk_live_", min_length=16)
         _require_safe_value("STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16)
-        for name in STRIPE_PRICE_ENV_NAMES:
+        for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require_safe_value(name, prefix="price_", min_length=12)
+        annual_enabled = os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower()
+        if annual_enabled not in {"true", "false"}:
+            raise RuntimeError("AVVIO BLOCCATO: STRIPE_ANNUAL_PRICING_ENABLED deve essere true o false")
+        if annual_enabled == "true":
+            for name in STRIPE_YEARLY_PRICE_ENV_NAMES:
+                _require_safe_value(name, prefix="price_", min_length=12)
         return
 
     if sandbox_only != "true":
@@ -115,6 +123,11 @@ def _assert_stripe_profile(profile: str) -> None:
     _require_safe_value("STRIPE_SECRET_KEY", prefix="sk_test_", min_length=16)
     _require_safe_value("STRIPE_PUBLISHABLE_KEY", prefix="pk_test_", min_length=16)
     _require_safe_value("STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16)
+    if os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower() != "false":
+        raise RuntimeError("AVVIO BLOCCATO: STRIPE_ANNUAL_PRICING_ENABLED deve essere false in sandbox")
+
+
+STRIPE_PRICE_ENV_NAMES = STRIPE_MONTHLY_PRICE_ENV_NAMES + STRIPE_YEARLY_PRICE_ENV_NAMES
 
 
 def assert_production_safe() -> None:
@@ -144,6 +157,10 @@ def assert_production_safe() -> None:
         raise RuntimeError(
             "AVVIO BLOCCATO: PUBLIC_APP_URL deve usare HTTPS in produzione"
         )
+    redis_url = _require_safe_value("REDIS_URL")
+    redis = urlparse(redis_url)
+    if redis.scheme not in {"redis", "rediss"} or not redis.hostname:
+        raise RuntimeError("AVVIO BLOCCATO: REDIS_URL deve essere un endpoint redis:// o rediss:// valido")
 
     demo = os.getenv("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
     if demo:

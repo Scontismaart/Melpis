@@ -98,6 +98,16 @@ async def test_get_usage_authenticated(async_client, sample_org):
     assert data["percentage"] == 0
 
 
+async def test_public_billing_config_exposes_only_annual_boolean(async_client, monkeypatch):
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
+    response = await async_client.get("/api/billing/public-config")
+    assert response.status_code == 200
+    assert response.json() == {"annual_pricing_enabled": True}
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "invalid")
+    response = await async_client.get("/api/billing/public-config")
+    assert response.json() == {"annual_pricing_enabled": False}
+
+
 async def test_create_portal_session_no_customer(async_client, sample_org):
     resp = await async_client.post("/api/billing/create-portal-session", headers={
         "X-API-Key": API_KEY,

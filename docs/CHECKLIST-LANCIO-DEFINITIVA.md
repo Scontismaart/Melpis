@@ -9,7 +9,7 @@ nel codice.
 - [x] Essenziale: 500 messaggi/mese, €29 mensile.
 - [x] Crescita: 2.000 messaggi/mese, €69 mensile.
 - [x] Scala: 10.000 messaggi/mese, €149 mensile.
-- [ ] Prezzi annuali configurati (€288/€708/€1.548) da confermare come offerta
+- [ ] Approvare l'offerta annuale (€288/€708/€1.548); fino all'approvazione mantenere `STRIPE_ANNUAL_PRICING_ENABLED=false` e non compilare/attivare i Price ID annuali
   commerciale prima di pubblicare equivalenti mensili o promesse di sconto.
 - [x] Nessun cliente/dato reale nel progetto pre-lancio.
 - [x] Budget LLM €0; nessun fallback a pagamento.

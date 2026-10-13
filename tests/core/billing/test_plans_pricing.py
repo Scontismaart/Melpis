@@ -71,8 +71,19 @@ def test_limiti_invariati():
     assert PLANS["business"].has_rag is True
 
 
-def test_resolve_price_id(monkeypatch):
+def test_resolve_price_id_annual_disabled_by_default(monkeypatch):
     from src.core.billing.routes import _resolve_price_id
+    monkeypatch.delenv("STRIPE_ANNUAL_PRICING_ENABLED", raising=False)
+    p = PLANS["pro"]
+    monkeypatch.setattr(p, "stripe_price_id", "price_m")
+    monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
+    assert _resolve_price_id(p, "monthly") == "price_m"
+    assert _resolve_price_id(p, "yearly") == ""
+
+
+def test_resolve_price_id_annual_enabled(monkeypatch):
+    from src.core.billing.routes import _resolve_price_id
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
     p = PLANS["pro"]
     monkeypatch.setattr(p, "stripe_price_id", "price_m")
     monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")

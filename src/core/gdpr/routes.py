@@ -175,7 +175,10 @@ async def gdpr_export(
     org_id = user["organization_id"]
     data = await _export_tenant_data(repo, org_id)
     token = secrets.token_urlsafe(32)
-    await token_store.save_token(token, str(org_id), data)
+    try:
+        await token_store.save_token(token, str(org_id), data)
+    except token_store.TokenStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
     download_url = str(request.base_url) + f"api/gdpr/download/{token}"
 
     await audit_log(repo, organization_id=org_id, action="gdpr.export",
@@ -187,7 +190,10 @@ async def gdpr_export(
 
 @router.get("/download/{token}")
 async def gdpr_download(token: str):
-    meta = await token_store.pop_token(token)
+    try:
+        meta = await token_store.pop_token(token)
+    except token_store.TokenStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
     if meta is None:
         raise HTTPException(status_code=404, detail="Link di export scaduto o non valido")
     data = meta["data"]
@@ -216,7 +222,7 @@ async def gdpr_delete(
     return {
         "status": "deleted",
         "propagation": propagation_results,
-        "message": "All data permanently removed. External services notified.",
+        "message": "Organization deletion completed locally; external propagation results are reported per service.",
     }
 
 

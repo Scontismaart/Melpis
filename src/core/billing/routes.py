@@ -12,6 +12,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
+def _annual_pricing_enabled() -> bool:
+    return os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower() == "true"
+
+
+@router.get("/public-config")
+async def get_public_billing_config():
+    # Deliberately expose only the feature boolean; never publish Price IDs or
+    # Stripe credentials. Missing/invalid values remain disabled.
+    return {"annual_pricing_enabled": _annual_pricing_enabled()}
+
+
 class CheckoutSessionRequest(BaseModel):
     plan: str
     success_url: str
@@ -22,6 +33,8 @@ class CheckoutSessionRequest(BaseModel):
 def _resolve_price_id(plan, interval: str) -> str:
     if interval not in ("monthly", "yearly"):
         raise ValueError(f"interval non valido: {interval}")
+    if interval == "yearly" and not _annual_pricing_enabled():
+        return ""
     return plan.stripe_price_id_yearly if interval == "yearly" else plan.stripe_price_id
 
 
@@ -91,7 +104,9 @@ async def create_checkout_session(
         )
 
     from src.core.billing.checkout import create_durable_checkout, validate_redirect_url
-    base = os.getenv("APP_BASE_URL", "https://app.melpis.it")
+    # PUBLIC_APP_URL is the configured same-origin host, including temporary
+    # deployments. Keep redirects restricted to that single explicit origin.
+    base = os.getenv("PUBLIC_APP_URL", "https://melpis.it").strip().rstrip("/")
     return await create_durable_checkout(repo, org_id, request.headers.get("Idempotency-Key"), {
         "price_id": price_id, "plan": req.plan, "interval": req.interval,
         "success_url": validate_redirect_url(req.success_url, base),
