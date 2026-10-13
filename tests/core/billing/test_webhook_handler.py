@@ -15,7 +15,7 @@ def configured_test_prices(monkeypatch):
     monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "false")
 
 
-async def _seed_checkout_intent(repo, org, event, *, price_id="price_test_starter"):
+async def _seed_checkout_intent(repo, org, event, *, price_id="price_test_starter", session_id=...):
     from uuid import uuid4
 
     intent_id = uuid4()
@@ -23,10 +23,12 @@ async def _seed_checkout_intent(repo, org, event, *, price_id="price_test_starte
     await repo.update_organization_billing(org["id"], {"stripe_customer_id": session["customer"]})
     session.setdefault("metadata", {})["billing_checkout_intent_id"] = str(intent_id)
     payload = {"price_id": price_id, "plan": "starter", "interval": "monthly"}
+    target_session_id = session["id"] if session_id is ... else session_id
     await repo.pool.execute("""
         INSERT INTO billing_checkout_intents(id, organization_id, request_key, payload_hash, payload, session_id, expires_at)
-        VALUES ($1, $2::uuid, 'test-key-123', 'hash', $3::jsonb, $4, NOW() + INTERVAL '1 hour')
-    """, intent_id, str(org["id"]), json.dumps(payload), session["id"])
+        VALUES ($1, $2::uuid, $3, 'hash', $4::jsonb, $5, NOW() + INTERVAL '1 hour')
+    """, intent_id, str(org["id"]), f"test-key-{intent_id}", json.dumps(payload), target_session_id)
+    return intent_id
 
 
 @pytest.fixture
@@ -118,6 +120,132 @@ async def test_checkout_completed_unconfigured_intent_price_cannot_start_trial(r
     result = await handle_stripe_webhook(event, repo, 7)
     billing = await repo.get_organization_billing(sample_org["id"])
     assert result is None
+    assert billing["subscription_status"] == "incomplete"
+    assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_before_session_id_persistence_binds_session_and_starts_trial(
+    repo, sample_org, valid_checkout_event
+):
+    """Simulates the race condition where webhook arrives before API route commits session_id."""
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    event = valid_checkout_event
+    session_id = event["data"]["object"]["id"]
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    intent_id = await _seed_checkout_intent(repo, sample_org, event, session_id=None)
+
+    # Verify session_id is NULL before the webhook arrives
+    stored_session_before = await repo.pool.fetchval(
+        "SELECT session_id FROM billing_checkout_intents WHERE id = $1", intent_id
+    )
+    assert stored_session_before is None
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is not None
+    assert result.get("action") == "subscription_created"
+
+    # Verify session_id is now bound atomically by the webhook handler
+    stored_session_after = await repo.pool.fetchval(
+        "SELECT session_id FROM billing_checkout_intents WHERE id = $1", intent_id
+    )
+    assert stored_session_after == session_id
+
+    # Verify subscription state is activated
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["subscription_status"] == "trialing"
+    assert billing["subscription_id"] == event["data"]["object"]["subscription"]
+
+
+async def test_checkout_completed_with_nonexistent_intent_id_cannot_start_trial(
+    repo, sample_org, valid_checkout_event
+):
+    from uuid import uuid4
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    event = valid_checkout_event
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    event["data"]["object"]["metadata"] = {"billing_checkout_intent_id": str(uuid4())}
+    await repo.update_organization_billing(sample_org["id"], {"stripe_customer_id": event["data"]["object"]["customer"]})
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is None
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["subscription_status"] == "incomplete"
+    assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_with_mismatched_session_id_cannot_start_trial(
+    repo, sample_org, valid_checkout_event
+):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    event = valid_checkout_event
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    await _seed_checkout_intent(repo, sample_org, event, session_id="cs_previously_bound_different_session")
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is None
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["subscription_status"] == "incomplete"
+    assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_with_mismatched_org_id_cannot_start_trial(
+    repo, sample_org, valid_checkout_event
+):
+    from uuid import uuid4
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    other_org_id = uuid4()
+    await repo.pool.execute("INSERT INTO organizations(id, name) VALUES ($1, 'Other Org')", other_org_id)
+    event = valid_checkout_event
+    # Seed intent for other_org_id, but webhook claims sample_org["id"]
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    await _seed_checkout_intent(repo, {"id": other_org_id}, event)
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is None
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["subscription_status"] == "incomplete"
+    assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_with_expired_intent_cannot_start_trial(
+    repo, sample_org, valid_checkout_event
+):
+    from uuid import uuid4
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    event = valid_checkout_event
+    intent_id = uuid4()
+    session = event["data"]["object"]
+    session["client_reference_id"] = str(sample_org["id"])
+    session.setdefault("metadata", {})["billing_checkout_intent_id"] = str(intent_id)
+    await repo.update_organization_billing(sample_org["id"], {"stripe_customer_id": session["customer"]})
+    payload = {"price_id": "price_test_starter", "plan": "starter", "interval": "monthly"}
+    await repo.pool.execute("""
+        INSERT INTO billing_checkout_intents(id, organization_id, request_key, payload_hash, payload, session_id, expires_at)
+        VALUES ($1, $2::uuid, 'expired-key-test', 'hash', $3::jsonb, $4, NOW() - INTERVAL '10 minutes')
+    """, intent_id, str(sample_org["id"]), json.dumps(payload), session["id"])
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is None
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["subscription_status"] == "incomplete"
+    assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_with_mismatched_customer_cannot_start_trial(
+    repo, sample_org, valid_checkout_event
+):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    event = valid_checkout_event
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    await _seed_checkout_intent(repo, sample_org, event)
+    # Tamper customer in event so it doesn't match org's stripe_customer_id
+    event["data"]["object"]["customer"] = "cus_tampered_wrong"
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result is not None
+    assert result.get("action") == "ignored"
+    assert result.get("reason") == "customer_mismatch"
+    billing = await repo.get_organization_billing(sample_org["id"])
     assert billing["subscription_status"] == "incomplete"
     assert billing["subscription_id"] is None
 

@@ -221,17 +221,31 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
         return None
 
     # A signed Checkout event is not sufficient by itself to start a trial:
-    # the exact session must be the one persisted from our durable checkout
-    # intent, and that intent must contain a currently configured Price ID.
+    # the exact session must correspond to our durable checkout intent, and that
+    # intent must contain a currently configured Price ID.
     session_id = data.get("id")
     intent_id = (data.get("metadata") or {}).get("billing_checkout_intent_id")
     intent_row = await conn.fetchrow("""
-        SELECT payload FROM billing_checkout_intents
-        WHERE id = $1::uuid AND organization_id = $2::uuid AND session_id = $3
+        SELECT id, payload, session_id, expires_at FROM billing_checkout_intents
+        WHERE id = $1::uuid AND organization_id = $2::uuid
         FOR UPDATE
-    """, intent_id, org_id, session_id) if _valid_org_uuid(intent_id) and session_id else None
+    """, intent_id, org_id) if _valid_org_uuid(intent_id) and isinstance(session_id, str) and session_id else None
     if not intent_row:
         return None
+
+    # If session_id was already persisted, it must match the incoming session.
+    # If the webhook arrives before the API caller persisted session_id (race condition),
+    # session_id is currently NULL: verify intent validity, bind session_id atomically,
+    # and proceed without dropping the event or granting unverified access.
+    current_intent_session_id = intent_row.get("session_id")
+    if current_intent_session_id is not None and current_intent_session_id != session_id:
+        return None
+
+    now = datetime.now(timezone.utc)
+    expires_at = intent_row.get("expires_at")
+    if expires_at and expires_at <= now:
+        return None
+
     payload = intent_row["payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
@@ -242,6 +256,13 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
         "SELECT stripe_customer_id FROM organizations WHERE id = $1::uuid", org_id
     )):
         return None
+
+    if current_intent_session_id is None:
+        await conn.execute("""
+            UPDATE billing_checkout_intents
+            SET session_id = $3
+            WHERE id = $1::uuid AND organization_id = $2::uuid AND session_id IS NULL
+        """, intent_id, org_id, session_id)
 
     if not await repo.process_stripe_event_in_tx(conn, event_id, org_id):
         return {"action": "duplicate", "status": "skipped", "organization_id": org_id}
