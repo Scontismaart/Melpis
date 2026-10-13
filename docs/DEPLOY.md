@@ -37,8 +37,9 @@ log. Solo Caddy pubblica 80/443.
    nel catalogo non garantisce che un endpoint sia disponibile o che non sia
    temporaneamente rate-limited: esegui un smoke test senza fallback a pagamento.
 4. Collauda i flussi in Stripe Test Mode e Meta sandbox/test number. Per il
-   go-live commerciale configura poi Stripe Live con i sei Price ID e webhook
-   firmato, mantenendo `LLM_COST_POLICY=free_only`. Prima del cutover compila
+   go-live commerciale configura poi Stripe Live con i tre Price ID mensili
+   (oppure sei se l'offerta annuale è approvata) e webhook firmato, mantenendo
+   `LLM_COST_POLICY=free_only`. Prima del cutover compila
    `WHATSAPP_TEST_RECIPIENTS` e, se usato, `INSTAGRAM_TEST_RECIPIENTS` solo con
    destinatari autorizzati.
 5. Copia `.env.production.example` in `.env.production` solo sulla VM, genera
@@ -75,7 +76,8 @@ log. Solo Caddy pubblica 80/443.
 - Solo un destinatario in allowlist riceve il messaggio di prova.
 - STOP persiste il consenso, blocca invii e produce audit event.
 - Stripe Test: checkout, duplicati, eventi fuori ordine, cancellazione e
-  deposito con carta fittizia; Stripe Live: chiavi, sei Price ID e firma webhook
+  deposito con carta fittizia; Stripe Live: chiavi, Price ID configurati (tre
+  mensili o sei se offerta annuale abilitata) e firma webhook
   validati senza un addebito reale di prova.
 - Fallimento escalation visibile in Inbox e intervento umano disponibile.
 - Riavvio durante webhook/retry senza doppio effetto osservabile.
