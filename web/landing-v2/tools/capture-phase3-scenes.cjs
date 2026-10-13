@@ -27,8 +27,9 @@ async function show(page, scenario) {
       const demo=page.locator('.mv2-story-demo');await demo.scrollIntoViewIfNeeded();
       await page.waitForFunction(()=>!document.querySelector('#mv2-story-scenario')?.disabled);
       for(const scenario of ['available','unavailable','team']){
+        if(scenario==='available') await page.locator('#mv2-story-scenario').selectOption(scenario);
         await show(page,scenario);
-        await page.locator('#mv2-percorso').screenshot({path:path.join(out,`phase3-story-${scenario}-${width}-full.png`)});
+        await page.locator('#mv2-percorso').screenshot({path:path.join(out,`phase3-followup-story-${scenario}-${width}-full.png`)});
       }
       await page.close();
     }
@@ -38,7 +39,7 @@ async function show(page, scenario) {
     await page.locator('.mv2-story-demo').scrollIntoViewIfNeeded();await page.waitForFunction(()=>!document.querySelector('#mv2-story-scenario')?.disabled);
     for(const scenario of ['available','unavailable','team']){await show(page,scenario);await pause(600);}
     await context.close();
-    await video.saveAs(path.join(out,'phase3-story-walkthrough.webm'));
+    await video.saveAs(path.join(out,'phase3-followup-story-walkthrough.webm'));
   } finally { await browser.close(); }
   console.log(`Full story captures saved in ${out}`);
 })().catch(error=>{console.error(error);process.exit(1);});

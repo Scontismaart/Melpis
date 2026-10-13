@@ -71,9 +71,9 @@ async function axeRun(page) {
       const accessibility = await axeRun(page);
       check(accessibility.violations.length === 0, `${width}: Axe WCAG A/AA`, accessibility.violations.map(item => ({ id: item.id, impact: item.impact, targets: item.nodes.map(node => node.target) })));
       check((await page.evaluate(() => window.__mv2Csp)).length === 0, `${width}: no CSP violations`, await page.evaluate(() => window.__mv2Csp));
-      if (width === 1440 || width === 768 || width === 390) {
-        await page.screenshot({ path: path.join(out, `phase3-${width}-viewport.png`) });
-        await page.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase3-${width}-hero.png`) });
+      {
+        await page.screenshot({ path: path.join(out, `phase3-followup-${width}-viewport.png`) });
+        await page.locator('.mv2-hero-stage').screenshot({ path: path.join(out, `phase3-followup-${width}-hero-stage.png`) });
       }
       results.viewports.push({ width, height, initial, axeViolations: accessibility.violations.length });
       await context.close();
@@ -87,7 +87,7 @@ async function axeRun(page) {
       await desktop.getByRole('heading', { name: label, exact: true }).waitFor();
       check(await button.getAttribute('aria-pressed') === 'true', `${label}: aria-pressed selected`);
       check(mainFrameCount === 0, `${label}: view switch does not navigate`, desktop.url());
-      if (['Panoramica', 'Inbox', 'Prenotazioni', 'Recensioni', 'Knowledge Base', 'Team'].includes(label)) await desktop.locator('#mv2-inizio').screenshot({ path: path.join(out, `phase3-view-${label.toLowerCase().replaceAll(' ','-')}.png`) });
+      if (['Panoramica', 'Inbox', 'Prenotazioni', 'Recensioni', 'Knowledge Base', 'Team'].includes(label)) await desktop.locator('.mv2-hero-stage').screenshot({ path: path.join(out, `phase3-followup-view-${label.toLowerCase().replaceAll(' ','-')}.png`) });
       results.views.push(label);
     }
     await desktop.getByRole('button', { name: /Inbox/ }).focus(); await desktop.keyboard.press('Enter');
@@ -101,40 +101,47 @@ async function axeRun(page) {
     check(await scenarioSelect.boundingBox().then(box => box.height >= 44), 'Story scenario selector touch target is at least 44px');
     const storyButtons = story.getByRole('button');
     check(await storyButtons.count() === 3, 'Story has only the three necessary manual controls');
+    check(await story.locator('.mv2-story-chapters [aria-current="step"]').count() === 1, 'Story chapter rail marks exactly one current step');
+    await desktop.locator('#mv2-percorso').screenshot({ path: path.join(out, 'phase3-followup-story-available-initial-1440-full.png') });
     await story.getByRole('button', { name: 'Avvia la demo' }).click();
     await story.getByText('Informazioni consultate', { exact: true }).waitFor();
+    check(await story.locator('.mv2-story-chapters [data-complete="true"]').count() === 1, 'Completed story chapter is reflected in the non-interactive rail');
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
     await story.getByText('Disponibilità verificata', { exact: true }).waitFor();
-    check(await story.locator('.mv2-story-result').getByText(/2 posti disponibili/).isVisible(), 'Positive scenario verifies capacity before confirmation');
+    check(await story.locator('.mv2-story-availability').getByText(/2 disponibili/).isVisible(), 'Positive scenario verifies capacity before confirmation');
     check(/Martedì 13 ottobre 2026[\s\S]*19:30[\s\S]*2 disponibili/.test(await story.locator('.mv2-story-availability').innerText()), 'Availability panel exposes day, time and synthetic capacity');
+    check(await story.locator('.mv2-story-response-bubble').getByText(/Vuoi confermare per due/).isVisible(), 'Positive assistant asks for confirmation before customer confirmation');
+    await desktop.locator('#mv2-percorso').screenshot({ path: path.join(out, 'phase3-followup-story-available-intermediate-1440-full.png') });
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
     await story.getByText('Conferma della cliente', { exact: true }).waitFor();
-    check(await story.locator('.mv2-story-customer-confirmation').getByText('«Confermo, grazie.»').isVisible(), 'Positive scenario requires an explicit customer confirmation');
+    check(await story.locator('.mv2-story-confirmation-bubble').getByText('«Confermo, grazie.»').isVisible(), 'Positive scenario requires an explicit customer confirmation');
+    check(await story.locator('.mv2-story-response-bubble').getByText(/Conferma ricevuta/).isVisible(), 'Assistant responds to confirmation in chronological order');
     check(!(await story.locator('.mv2-story-record').count()), 'No booking appears before the application guard passes');
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
-    await story.getByText('Tutto pronto per la prenotazione', { exact: true }).waitFor();
+    await story.getByText('Prenotazione verificata', { exact: true }).waitFor();
     check(!(await story.locator('.mv2-story-record').count()), 'Application validation precedes the illustrative panel record');
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
     check(await story.locator('.mv2-story-record').getByText('Confermata nell’esempio').isVisible(), 'Positive scenario records the illustrative booking only after confirmation');
+    check(!(await story.locator('.mv2-story-availability').count()), 'Final positive state replaces the temporary availability card with the booking row');
     check(/Cliente demo · 2 persone[\s\S]*Martedì 13 ottobre 2026 · 19:30[\s\S]*Conversazione in Inbox/.test(await story.locator('.mv2-story-record').innerText()), 'Illustrative booking row includes customer, date, time and inbox context');
-    await desktop.screenshot({ path: path.join(out, 'phase3-story-positive.png'), fullPage: false });
+    await story.screenshot({ path: path.join(out, 'phase3-followup-story-positive-viewport.png') });
     await scenarioSelect.selectOption('unavailable');
     await story.getByText('Richiesta ricevuta', { exact: true }).waitFor();
     await story.getByRole('button', { name: 'Avvia la demo' }).click();
     await story.getByText('Disponibilità verificata', { exact: true }).waitFor();
-    check(await story.locator('.mv2-story-result').getByText(/non ci sono posti disponibili/).isVisible(), 'Unavailable scenario reports no availability');
+    check(await story.locator('.mv2-story-availability').getByText(/0 disponibili/).isVisible(), 'Unavailable scenario reports zero capacity');
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
     check(await story.getByText(/Prenotazione non creata/).isVisible(), 'Unavailable scenario never creates a booking');
     check(/0 disponibili/.test(await story.locator('.mv2-story-availability').innerText()), 'Unavailable capacity panel shows zero slots');
     check(!(await story.locator('.mv2-story-record').count()), 'Unavailable scenario has no booking row');
-    await desktop.screenshot({ path: path.join(out, 'phase3-story-unavailable.png'), fullPage: false });
+    await story.screenshot({ path: path.join(out, 'phase3-followup-story-unavailable-viewport.png') });
     await scenarioSelect.selectOption('team');
     await story.getByRole('button', { name: 'Avvia la demo' }).click();
     await story.getByText('Informazioni non sufficienti', { exact: true }).waitFor();
     await story.getByRole('button', { name: 'Passaggio successivo' }).click();
     check(await story.locator('.mv2-story-team-record').getByText('Da prendere in carico').isVisible(), 'Missing knowledge routes the conversation to team follow-up');
     check(!(await story.locator('.mv2-story-record').count()), 'Team scenario has no booking row');
-    await desktop.screenshot({ path: path.join(out, 'phase3-story-team.png'), fullPage: false });
+    await story.screenshot({ path: path.join(out, 'phase3-followup-story-team-viewport.png') });
     await story.getByRole('button', { name: 'Indietro' }).click();
     await story.getByRole('button', { name: 'Ricomincia' }).click();
     check(await story.getByText('Passaggio 1 di 3').isVisible(), 'Story resets and can be replayed');
@@ -172,7 +179,15 @@ async function axeRun(page) {
     await reduced.locator('.mv2-story-demo').scrollIntoViewIfNeeded();
     await reduced.waitForFunction(() => !document.querySelector('#mv2-story-scenario')?.disabled);
     await reduced.locator('#mv2-story-scenario').selectOption('available');
-    check(await reduced.locator('.mv2-story-scene').evaluate(el => getComputedStyle(el).animationDuration === '0s'), 'Reduced motion keeps story transitions static');
+    check(await reduced.locator('.mv2-story-chapters li').first().evaluate(el => getComputedStyle(el).transitionDuration === '0s'), 'Reduced motion keeps chapter progress static');
+    await reduced.getByRole('button', { name: 'Avvia la demo' }).click();
+    await wait(350);
+    check(await reduced.locator('.mv2-story-response-bubble').evaluate(el => getComputedStyle(el).transform === 'none' && getComputedStyle(el).opacity === '1'), 'Reduced motion leaves story content static and fully visible');
+    await reduced.emulateMedia({ reducedMotion: 'no-preference' });
+    await reduced.getByRole('button', { name: 'Passaggio successivo' }).click();
+    await reduced.emulateMedia({ reducedMotion: 'reduce' });
+    await wait(350);
+    check(await reduced.locator('.mv2-story-operation-content').evaluate(el => getComputedStyle(el).transform === 'none' && getComputedStyle(el).opacity === '1'), 'Changing reduced motion clears story animation styles');
     check(await reduced.evaluate(() => window.__mv2Csp.length === 0), 'Reduced-motion state has no CSP violation');
     await reduced.close();
   } catch (error) { results.errors.push(String(error.stack || error)); }

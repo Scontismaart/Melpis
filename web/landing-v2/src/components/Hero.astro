@@ -2,22 +2,24 @@
 import ProductShowcase from './ProductShowcase.jsx';
 ---
 
-<section class="mv2-hero mv2-container" id="mv2-inizio" aria-labelledby="mv2-hero-title">
-  <div class="mv2-hero-intro">
-    <div class="mv2-hero-heading">
-      <p class="mv2-eyebrow">MESSAGGI, PRENOTAZIONI, TEAM</p>
-      <h1 id="mv2-hero-title">Ogni conversazione.<br /><em>Sotto controllo.</em></h1>
-    </div>
-    <div class="mv2-hero-description">
-      <p class="mv2-lead">Messaggi dai canali collegati, prenotazioni e informazioni della tua attività. L’assistente risponde; il team interviene quando serve.</p>
-      <div class="mv2-actions">
-        <a class="mv2-button" href="#mv2-showcase">Esplora Melpis <span aria-hidden="true">↓</span></a>
-        <a class="mv2-text-link" href="#mv2-piani">Consulta i piani <span aria-hidden="true">↗</span></a>
+<div class="mv2-hero-stage">
+  <section class="mv2-hero mv2-container" id="mv2-inizio" aria-labelledby="mv2-hero-title">
+    <div class="mv2-hero-intro">
+      <div class="mv2-hero-heading">
+        <p class="mv2-eyebrow">MESSAGGI, PRENOTAZIONI, TEAM</p>
+        <h1 id="mv2-hero-title">Ogni conversazione.<br /><em>Sotto controllo.</em></h1>
+      </div>
+      <div class="mv2-hero-description">
+        <p class="mv2-lead">Messaggi dai canali collegati, prenotazioni e informazioni della tua attività. L’assistente risponde; il team interviene quando serve.</p>
+        <div class="mv2-actions">
+          <a class="mv2-button" href="#mv2-showcase">Esplora Melpis <span aria-hidden="true">↓</span></a>
+          <a class="mv2-text-link" href="#mv2-piani">Consulta i piani <span aria-hidden="true">↗</span></a>
+        </div>
       </div>
     </div>
-  </div>
-  <div class="mv2-showcase-wrap" id="mv2-showcase">
-    <ProductShowcase client:load />
-    <p class="mv2-showcase-note">Anteprima dimostrativa · dati sintetici</p>
-  </div>
-</section>
+    <div class="mv2-showcase-wrap" id="mv2-showcase">
+      <ProductShowcase client:load />
+      <p class="mv2-showcase-note">Anteprima dimostrativa · dati sintetici</p>
+    </div>
+  </section>
+</div>

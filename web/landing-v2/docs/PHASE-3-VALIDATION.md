@@ -46,3 +46,7 @@ Raw per-run data and resource URLs: ignored `artifacts/phase3-review/performance
 `graphify update .` completed after the code changes. The graph tool reported that its optional `tree_sitter_sql` dependency is absent, so 59 SQL files were omitted; generated graph files remain local and are not part of the change.
 
 The browser QA had two narrowly scoped assertion failures during implementation: a duplicated confirmation phrase needed an exact element locator; after the scene copy changed, the zero-capacity assertion was updated to match the explicit “no posti disponibili” state and the structured availability fields. Only browser QA was repeated for those changes; the final rerun passed with no remaining failures. Build/output/browser checks were also repeated after the final structured availability and inbox-row markup/style changes.
+
+### Local raw-artifact provenance — 13 October 2026
+
+A later follow-up measurement reused `artifacts/phase3-review/performance-phase3.json`; that local file now contains the later comparison and does not represent the historical samples underlying this report. The historical medians above remain preserved in this document at commit `36ec6020ea0e3af15b7e32b542c02f2454440ded`. See `POLISH-FOLLOWUP.md` for the later raw files, the command correction and final current-only results. Original historical raw samples were not reconstructed.

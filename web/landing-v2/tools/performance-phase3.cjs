@@ -4,6 +4,11 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const currentRoot = path.resolve(__dirname, '..');
+const allowedArgs = new Set(['--phase3-only']);
+for (const arg of process.argv.slice(2)) {
+  if (!allowedArgs.has(arg)) throw new Error(`Unknown performance option: ${arg}`);
+}
+const phase3Only = process.env.V2_PERF_PHASE3_ONLY === '1' || process.argv.includes('--phase3-only');
 const roots = {
   phase1b: process.env.V2_PHASE1B_ROOT || 'C:/Users/muzzo/.codex/worktrees/landing-v2-phase1b/whatsapp-ai-responder',
   phase2: process.env.V2_PHASE2_ROOT || 'C:/Users/muzzo/.codex/worktrees/landing-v2-phase-2/whatsapp-ai-responder',
@@ -97,9 +102,9 @@ async function runVariant(browser, server, variant) {
         showcaseResponseMs=await measureViewInteractions(page,width);
         afterShowcase=await captureVitals(page);
         afterStory=afterShowcase;
-        if([1440,390].includes(width)&&sample===0){await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));await wait(200);await page.locator('#mv2-inizio').screenshot({path:path.join(out,`phase2-${variant}-hero-${width}.png`)});}
+        if([1440,390].includes(width)&&sample===0){await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));await wait(200);await page.locator(phase3Only?'.mv2-hero-stage':'#mv2-inizio').screenshot({path:path.join(out,phase3Only?`phase3-followup-hero-${width}.png`:`phase2-${variant}-hero-${width}.png`)});}
         if(variant==='phase3'){
-          if(width===768&&sample===0) await page.screenshot({path:path.join(out,'phase3-tablet-768.png')});
+          if(width===768&&sample===0) await page.screenshot({path:path.join(out,phase3Only?'phase3-followup-tablet-768.png':'phase3-tablet-768.png')});
           storyHydrationMs=await visibleHydration(page,'#mv2-story-scenario','.mv2-story-demo');
           await page.waitForLoadState('networkidle'); await wait(750);
           afterStory=await captureVitals(page);
@@ -126,7 +131,7 @@ async function runVariant(browser, server, variant) {
       };
       if([1440,768,390].includes(width)&&sample===0&&variant==='phase3'){
         await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));await wait(200);
-        await page.screenshot({path:path.join(out,`phase3-${width}-final-page.png`)});
+        await page.screenshot({path:path.join(out,phase3Only?`phase3-followup-${width}-final-page.png`:`phase3-${width}-final-page.png`)});
       }
       runs.push(run); await context.close();
     }
@@ -140,11 +145,12 @@ async function runVariant(browser, server, variant) {
 (async()=>{
   await fs.mkdir(out,{recursive:true});let servers=[];let browser;
   try{
-    for(const [name,root] of Object.entries(roots))servers.push([name,await launchPreview(root,name)]);
+    const selectedRoots = phase3Only ? {phase3:roots.phase3} : roots;
+    for(const [name,root] of Object.entries(selectedRoots))servers.push([name,await launchPreview(root,name)]);
     browser=await chromium.launch({headless:true});
-    const results={capturedAt:new Date().toISOString(),engine:browser.version(),conditions:{headless:true,viewportWidths:widths,viewportHeight:900,deviceScaleFactor:1,cpuThrottleRate:4,freshContextPerSample:true,samplesPerWidth:samples,await:'networkidle + document.fonts.ready + 750ms quiet',encoding:'loopback Content-Length / Resource Timing encodedBodySize including inline scripts separately, not gzip or field INP'},phase1b:await runVariant(browser,servers[0][1],'phase1b'),phase2:await runVariant(browser,servers[1][1],'phase2'),phase3:await runVariant(browser,servers[2][1],'phase3')};
-    results.comparison=Object.fromEntries(widths.map(width=>[width,Object.fromEntries(['lcpMs','initialLayoutShiftSum','postInteractionLayoutShiftSum','htmlBytes','cssBytes','initialJsBytesIncludingInline','storyIslandJsBytes','totalInteractionJsBytes','initialRequestCount','afterStoryRequestCount','totalInteractionRequestCount','storyHydrationMs'].map(key=>[key,{phase1b:results.phase1b.widths[width].median[key],phase2:results.phase2.widths[width].median[key],phase3:results.phase3.widths[width].median[key]}]))]));
-    const report=path.join(out,'performance-phase3.json');await fs.writeFile(report,JSON.stringify(results,null,2));
+    const results={capturedAt:new Date().toISOString(),engine:browser.version(),conditions:{headless:true,viewportWidths:widths,viewportHeight:900,deviceScaleFactor:1,cpuThrottleRate:4,freshContextPerSample:true,samplesPerWidth:samples,await:'networkidle + document.fonts.ready + 750ms quiet',encoding:'loopback Content-Length / Resource Timing encodedBodySize including inline scripts separately, not gzip or field INP'},...(phase3Only?{phase3:await runVariant(browser,servers[0][1],'phase3')}:{phase1b:await runVariant(browser,servers[0][1],'phase1b'),phase2:await runVariant(browser,servers[1][1],'phase2'),phase3:await runVariant(browser,servers[2][1],'phase3')})};
+    if(!phase3Only) results.comparison=Object.fromEntries(widths.map(width=>[width,Object.fromEntries(['lcpMs','initialLayoutShiftSum','postInteractionLayoutShiftSum','htmlBytes','cssBytes','initialJsBytesIncludingInline','storyIslandJsBytes','totalInteractionJsBytes','initialRequestCount','afterStoryRequestCount','totalInteractionRequestCount','storyHydrationMs'].map(key=>[key,{phase1b:results.phase1b.widths[width].median[key],phase2:results.phase2.widths[width].median[key],phase3:results.phase3.widths[width].median[key]}]))]));
+    const report=path.join(out,phase3Only?'performance-phase3-followup.json':'performance-phase3.json');await fs.writeFile(report,JSON.stringify(results,null,2));
     console.log(JSON.stringify({engine:results.engine,conditions:results.conditions,comparison:results.comparison,report},null,2));
   }finally{if(browser)await browser.close();for(const [,server] of servers)server.child.kill();}
 })().catch(error=>{console.error(error);process.exit(1);});
