@@ -9,7 +9,7 @@
 # Per l'envsubst serve gettext; l'entrypoint ufficiale nginx esegue gli
 # script in /docker-entrypoint.d/ prima di avviare il daemon.
 
-FROM node:24-alpine AS dashboard-builder
+FROM node:26-alpine AS dashboard-builder
 
 WORKDIR /workspace
 COPY dashboard-src/ ./web/dashboard-src/
