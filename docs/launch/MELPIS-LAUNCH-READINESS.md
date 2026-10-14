@@ -3,7 +3,7 @@
 **Data di consolidamento**: 13 Ottobre 2026  
 **Baseline Repository**: `origin/main` @ `2994fae7ea54094482a40374ea46c08aae8d0407`  
 **PR di Riferimento Missione 1**: [#82](https://github.com/Scontismaart/SaaS/pull/82) (`feat(billing): support monthly-only launch and fail-closed readiness controls`)  
-**Profilo di Lancio**: Commercial Bootstrap a Costi Fissi €0 (`commercial_bootstrap`)  
+**Profilo di Lancio**: Commercial Bootstrap con costi da verificare; eventuali tier gratuiti sono stime condizionali, non garanzie (`commercial_bootstrap`)
 **Politica di Rilascio**: Nessun merge automatico su `main`, nessun deploy non autorizzato, nessun addebito reale, nessun provider Live attivato senza autorizzazione esplicita dell'Owner.
 
 ---
@@ -12,33 +12,35 @@
 
 - **STATO**: PARTIAL
 - **PRIORITÀ**: P0
-- **EVIDENZA**: Codice applicativo consolidato, suite di test passata, PR #82 aperta con CI 100% verde (commit `daf3d96`), runbook operativi redatti in `docs/operations/`.
+- **EVIDENZA**: CI della PR #82 verde sul pre-fix commit `daf3d96`; il nuovo fix webhook è testato localmente 27/27 e richiede CI aggiornata. Runbook in revisione; Google Calendar è un gate obbligatorio ancora bloccato.
 - **AZIONE SUCCESSIVA**: Revisione finale da parte dell'Owner, approvazione delle decisioni commerciali/legali ed esecuzione guidata dei setup manuali nei pannelli web dei provider.
 - **RESPONSABILE**: SOL / OWNER
 
-Melpis V1 è tecnicamente pronto e consolidato per il lancio commerciale. Il codice ha superato tutte le verifiche di isolamento multi-tenant, persistenza durevole dei webhook, fail-closed consent/STOP, gestione degli errori AI a costo zero e crittografia dei backup.
+Melpis V1 non è autorizzato al Go-Live finché non sono superati i gate operativi e di provider elencati qui. WhatsApp e Google Calendar sono entrambi requisiti obbligatori del perimetro V1; Calendar resta disabilitato fino alla certificazione end-to-end reale. Google Reviews è escluso dal perimetro V1. Le verifiche del repository non certificano da sole la disponibilità o l'operatività dei servizi esterni.
 
-Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I rimanenti punti aperti prima del Go-Live commerciale non dipendono da codice mancante, bensì da **gate operativi esterni e azioni manuali dell'Owner**:
+La CI del repository non certifica da sola il Go-Live. I punti aperti comprendono verifiche del codice, certificazioni dei provider e **gate operativi esterni/azioni manuali dell'Owner**:
 1. Approvazione commerciale del lancio **solo-mensile** (senza obbligo di creare listini annuali).
 2. Configurazione manuale dei 3 prodotti mensili su Stripe Dashboard e webhook secret Live.
-3. Configurazione del numero WhatsApp di produzione nel portale Meta for Developers.
-4. Creazione account gratuito Groq con conferma ZDR.
-5. Inserimento record DNS (`melpis.it`) su Cloudflare.
-6. Bootstrap della VM Oracle Cloud Always Free e deploy dei container GHCR con digest immutabile.
+3. Configurazione e test end-to-end reale del numero WhatsApp di produzione.
+4. Certificazione end-to-end reale di Google Calendar (OAuth, callback, lettura/scrittura autorizzata e gestione errori); senza esito PASS non è consentito il Go-Live.
+5. Creazione account Groq e conferma ZDR, subordinata a disponibilità, quote e condizioni correnti.
+6. Inserimento e verifica dei record DNS (`melpis.it`) su Cloudflare.
+7. Verifica di disponibilità e costi della VM, quindi staging e deploy solo dopo i gate e le autorizzazioni previsti.
 
 ---
 
 ## 2. Stato Prodotto V1
 
-- **STATO**: DONE
+- **STATO**: BLOCKED — GO-LIVE GATE (Google Calendar obbligatorio)
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - Piani definiti in `src/core/billing/plans.py`: Essenziale (500 msg/mese, €29), Crescita (2.000 msg/mese, €69), Scala (10.000 msg/mese, €149).
+  - Google Calendar è una capability core obbligatoria e disponibile in tutti e tre i piani; i prezzi e gli altri limiti restano invariati.
   - Limiti di messaggi e quote rigorosamente tracciati e protetti da sospensione automatica.
   - Dashboard modulare funzionante senza inline styles (`tests/frontend/security.test.cjs` 393 PASS).
   - Landing V1 allineata, con selettore annuale nascosto `[hidden]` fail-closed quando annuale disabilitato.
   - **Landing V2 sospesa** come richiesto: nessun branch o file toccato in `web/landing-v2/`.
-- **AZIONE SUCCESSIVA**: Mantenere congelato il perimetro delle feature V1 fino al termine della prima coorte di clienti paganti.
+- **AZIONE SUCCESSIVA**: Mantenere i piani mensili e il perimetro commerciale documentato; nessun Go-Live finché WhatsApp e Google Calendar non superano i rispettivi test reali e gli altri gate obbligatori.
 - **RESPONSABILE**: SOL
 
 ---
@@ -55,7 +57,7 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 
 ## 4. PR e Fix da Integrare
 
-- **STATO**: DONE (PR aperte pronte per review)
+- **STATO**: BLOCKED — correzioni Step 0 in corso; PR aperte, non autorizzate al merge
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - **PR #82**: `feat(billing): support monthly-only launch and fail-closed readiness controls`
@@ -63,9 +65,11 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
     - Risolve la race condition nel webhook `checkout.session.completed` quando arriva prima del commit del `session_id`.
     - Supporta `STRIPE_ANNUAL_PRICING_ENABLED=false` richiedendo solo 3 Price ID mensili anziché 6.
     - GDPR token store fail-closed con Redis in produzione.
-    - CI GitHub Actions: 5/5 check verdi, 12m4s di test suite superati.
-  - **PR Documentale / Readiness** (questa missione):
+    - CI GitHub sul commit esaminato: verde; dopo il fix al webhook è necessaria una nuova CI sull'head aggiornato.
+    - La consegna tardiva di un evento Stripe valido era scartata in base all'ora di ricezione; correzione e regressione locale aggiunte, `tests/core/billing/test_webhook_handler.py` 27/27 PASS. CI sul nuovo head ancora da eseguire.
+  - **PR Documentale / Readiness #83**:
     - Runbook operativi: `docs/operations/email-resend-setup-runbook.md`, `docs/operations/provider-activation-matrix.md`, `docs/operations/incident-response-runbook.md`, `docs/launch/MELPIS-LAUNCH-READINESS.md`.
+    - Le correzioni di Step 0 devono passare la CI sull'head aggiornato prima di ogni autorizzazione al merge.
 - **AZIONE SUCCESSIVA**: L'Owner esamina e approva il merge delle PR quando desidera procedere al rilascio.
 - **RESPONSABILE**: OWNER
 
@@ -76,13 +80,13 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 - **STATO**: PARTIAL
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
-  - Progetto di Produzione: identificato in codice come `qfxwqfavnuufdfpkhxtj` (`Selecta SaaS`).
-  - Progetto di Staging: attualmente **INACTIVE** (stato noto, non riattivato autonomamente).
+  - `qfxwqfavnuufdfpkhxtj` (`Selecta SaaS`) è soltanto un progetto candidato, **non verificato** come database Melpis di produzione.
+  - Il progetto Supabase di staging corretto non è ancora identificato/verificato.
   - Migrazioni 001–054 censite nel repository; script di verifica `verify_supabase_restore_fidelity.py` attivo.
   - TLS `verify-full` obbligatorio con certificato di root `BACKUP_PGSSLROOTCERT`.
 - **AZIONE SUCCESSIVA**:
-  - Verificare da console Supabase che il progetto di produzione sia attivo e con `pgvector` abilitato.
-  - Prima dell'avvio live, eseguire un dump di sicurezza e verificare se le migrazioni 055–056 (`055_simulation_requests.sql`, `056_google_reviews_cursor.sql`) sono state applicate al DB di produzione.
+  - In Step 1 identificare e confermare esplicitamente i progetti Supabase di staging e produzione, distinguendoli; non eseguire migrazioni, restore o altre operazioni sul progetto candidato prima della conferma del target.
+  - Solo dopo l'identificazione, verificare stato e `pgvector`, poi pianificare dump e verifica migrazioni sul database corretto.
 - **RESPONSABILE**: OWNER / LUNA
 
 ---
@@ -177,7 +181,7 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
   - 175 test WhatsApp passati con successo (`tests/whatsapp/`).
 - **AZIONE SUCCESSIVA**:
   - Registrare il numero di telefono aziendale sull'App Meta WhatsApp Cloud.
-  - Configurare l'URL webhook `https://melpis.it/webhooks/whatsapp` e il verify token nel portale sviluppatori Meta.
+  - Prima di configurare provider, verificare hostname pubblico scelto, DNS, TLS e routing reverse-proxy. Path applicativo WhatsApp: `/webhooks/whatsapp`; non copiare o configurare URL provider finché l'host pubblico definitivo non è stato verificato.
   - Eseguire smoke test scambiando un messaggio dal numero di test presente in allowlist.
 - **RESPONSABILE**: OWNER / LUNA
 
@@ -198,17 +202,17 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 
 ---
 
-## 13. Google Calendar / Reviews
+## 13. Google Calendar obbligatorio / Google Reviews escluso
 
-- **STATO**: PARTIAL / BLOCKED
-- **PRIORITÀ**: P1
+- **STATO**: BLOCKED — GO-LIVE GATE V1
+- **PRIORITÀ**: P0
 - **EVIDENZA**:
-  - Entrambi i flag disattivati al lancio (`GOOGLE_CALENDAR_ENABLED=false`, `GOOGLE_BUSINESS_ENABLED=false`) e verificati da startup guard.
-  - Google Calendar è pronto nel codice con OAuth e sync, ma in attesa di certificazione applicazione Google.
-  - Google Reviews è **BLOCCATO ESTERNAMENTE** da quota API 0 (`RATE_LIMIT_EXCEEDED`) di Google Business Profile.
+  - Google Calendar è requisito obbligatorio V1, ma `GOOGLE_CALENDAR_ENABLED=false` finché OAuth, callback, autorizzazioni, sincronizzazione e gestione degli errori non superano QA end-to-end reale e review security.
+  - Nessun Go-Live V1 è consentito senza un test reale Google Calendar con esito PASS. La disponibilità delle API/quote e ogni eventuale verifica Google restano da accertare.
+  - Google Reviews non è requisito V1 e resta escluso/bloccato; la quota Google Business Profile è 0 (`RATE_LIMIT_EXCEEDED`). Non venderlo né abilitarlo come operativo.
 - **AZIONE SUCCESSIVA**:
-  - Mantenere entrambi i flag impostati su `false` al momento del lancio commerciale.
-  - Non pubblicizzare la funzionalità Reviews come operativa nella documentazione commerciale.
+  - Mantenere Calendar fail-closed/disabilitato fino al superamento dei gate; abilitarlo soltanto nell'ambiente verificato dopo il test reale e l'approvazione prevista.
+  - Mantenere Google Reviews fuori da offerta e materiali commerciali V1.
 - **RESPONSABILE**: SOL / OWNER / GOOGLE
 
 ---
@@ -243,14 +247,15 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 
 ## 16. Sicurezza
 
-- **STATO**: DONE
+- **STATO**: PARTIAL — gate pre-lancio ancora aperti
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - Tenant isolation applicativa forzata su ogni query (`src/core/db/scoping.py`).
   - Nessun segreto hardcoded; audit dipendenze pulito.
   - Cookie HttpOnly, Secure, SameSite, CSRF protection su BFF.
   - MFA obbligatoria (`aal2`) per operazioni privilegiate (billing, export GDPR, eliminazione organizzazione).
-  - Scanner tenant e guard dog eseguiti in CI: **PASS**.
+  - Scanner tenant e guard dog eseguiti in CI sulla baseline: **PASS**; nessuna nuova certificazione implicata da questo stato.
+  - Il payload dell'export GDPR viene serializzato in chiaro a livello applicativo nel token store persistente Valkey/AOF. La cifratura/isolamento del volume a riposo non è stata verificata: confermare protezioni o cifrare il payload prima di conservare export reali.
 - **AZIONE SUCCESSIVA**: Generare una nuova chiave Fernet casuale a 32-byte in `.env.production` (`ENCRYPTION_KEY`) sulla VM.
 - **RESPONSABILE**: OWNER / LUNA
 
@@ -258,14 +263,14 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 
 ## 17. GDPR e Documenti Legali
 
-- **STATO**: DONE (Codice e renderer pronti; approvazione testi legale da completare)
+- **STATO**: PARTIAL — protezione export a riposo e approvazione testi da completare
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - Export dati GDPR e cancellazione organizzazione atomici con audit trail.
-  - Token store per download GDPR reso fail-closed con Redis in produzione (PR #82).
+  - Token store per download GDPR reso fail-closed con Redis in produzione (PR #82); il payload JSON resta in chiaro a livello applicativo e la protezione a riposo del volume non è verificata.
   - Script `scripts/write_legal_runtime_env.py` isola i soli parametri legali pubblici per il web container read-only.
   - 33 test GDPR passati (`tests/core/gdpr/`).
-- **AZIONE SUCCESSIVA**: L'Owner verifica che i dati aziendali (P.IVA, ragione sociale, PEC, indirizzo) nei file legali corrispondano ai dati reali e imposta i flag `LEGAL_*_REVIEW_APPROVED=true`.
+- **AZIONE SUCCESSIVA**: Verificare/cifrare il payload export a riposo; l'Owner verifica che i dati aziendali (P.IVA, ragione sociale, PEC, indirizzo) nei file legali corrispondano ai dati reali e imposta i flag `LEGAL_*_REVIEW_APPROVED=true`.
 - **RESPONSABILE**: OWNER
 
 ---
@@ -284,18 +289,14 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 
 ## 19. Costi Previsti e Rischi
 
-- **STATO**: DONE
+- **STATO**: PARTIAL — preventivo da verificare
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
-  - **Oracle Cloud Always Free**: €0/mese (VM A1 fino a 4 OCPU / 24 GB, oppure 2 OCPU / 12 GB, con disco boot 50-100 GB).
-  - **Supabase Free Tier**: €0/mese (fino a 500 MB database, 50.000 MAU).
-  - **Groq Free Tier**: €0/mese (limiti di rate limit gestiti da guardrail, nessun addebito).
-  - **Cloudflare DNS + R2**: €0/mese (R2 include 10 GB/mese e 10M operazioni classe B gratuite).
-  - **Resend Free Tier**: €0/mese (fino a 3.000 email/mese, 100/giorno).
-  - **Sentry Developer Free**: €0/mese (fino a 5.000 eventi di errore/mese).
-  - **Stripe**: zero costi fissi (trattiene solo % sul transato incassato).
+  - I prezzi/tier gratuiti elencati qui sono stime indicative e condizionali a disponibilità, idoneità, quote, uso, termini e prezzi correnti del provider; non costituiscono garanzia di costo €0 né di continuità.
+  - Oracle Cloud, Supabase, Groq, Cloudflare/R2, Resend e Sentry possono applicare limiti, cambiare condizioni o richiedere capacità non disponibile nel tier gratuito. Verificare costi ed eventuali overage prima dell'adozione.
+  - Stripe può applicare commissioni variabili sul transato; verificare il tariffario applicabile. Budget mensile totale non ancora certificato.
 - **Rischi Operativi Identificati**:
-  - *Rischio Sleep Supabase Free*: i progetti gratuiti Supabase vengono sospesi dopo 7 giorni di inattività. Poiché Melpis esegue API e heartbeat continui, il traffico mantiene il DB attivo; tuttavia, è fondamentale monitorare lo stato del progetto.
+  - *Rischio Sleep Supabase Free*: condizioni e sospensione per inattività dipendono dalle policy correnti del provider; verificarle sul progetto effettivamente selezionato, senza assumere che traffico/heartbeat garantiscano l'assenza di sospensione.
   - *Rischio Rate Limit Groq Free*: se più tenant generano traffico simultaneo, Groq Free può restituire 429. Il sistema gestisce il caso fail-closed instradando verso operatore umano senza inventare risposte.
 - **RESPONSABILE**: SOL / OWNER
 
@@ -313,13 +314,15 @@ Non sono presenti bug bloccanti P0 applicativi irrisolti nel repository. I riman
 ## 21. Cose che DEVE fare il Proprietario (Azioni Manuali)
 
 Le seguenti operazioni richiedono credenziali, carte o accessi proprietari che gli agenti non possiedono e non devono manipolare:
-1. **Oracle Cloud**: Creare la VM Ubuntu 24.04 Always Free e recuperare l'IP pubblico.
-2. **Cloudflare**: Configurare i record DNS per il dominio `melpis.it` e creare il bucket R2 per i backup.
-3. **Stripe**: Creare i 3 prodotti mensili (€29, €69, €149) in modalità Live e recuperare i Price ID e la webhook secret.
-4. **Meta WhatsApp**: Configurare l'app su Meta Developer Portal, associare il numero aziendale e generare il System User Token.
-5. **Groq**: Creare l'account gratuito e generare la API key `gsk_...`.
-6. **Resend**: Aggiungere il dominio `melpis.it`, configurare i record DKIM/SPF su Cloudflare e generare l'API key SMTP.
-7. **Compilazione `.env.production` sulla VM**: Inserire i valori segreti reali sulla VM, senza commetterli su Git.
+1. **Google Calendar**: completare la certificazione end-to-end reale e di sicurezza; gate obbligatorio prima del Go-Live V1.
+2. **Oracle Cloud**: verificare disponibilità e costi, poi eventualmente creare la VM Ubuntu 24.04 e recuperare l'IP pubblico.
+3. **Cloudflare**: verificare prima dominio, DNS e costi; poi configurare i record e il bucket R2.
+4. **Stripe**: Creare i 3 prodotti mensili (€29, €69, €149) in modalità Live e recuperare i Price ID e la webhook secret solo dopo l'autorizzazione di rilascio.
+5. **Meta WhatsApp**: completare configurazione e test reale autorizzato.
+6. **Groq**: verificare disponibilità/condizioni e poi creare l'account e la API key `gsk_...`.
+7. **Resend**: verificare quote/prezzi, poi aggiungere il dominio `melpis.it`, configurare DKIM/SPF e SMTP.
+8. Configurare gli URL webhook dei provider soltanto dopo aver verificato hostname pubblico, DNS, TLS e routing. Path applicativi: Stripe `/api/billing/webhook`; WhatsApp `/webhooks/whatsapp`. L'hostname resta da selezionare/verificare: non copiare ora URL completi nei pannelli.
+9. **Compilazione `.env.production` sulla VM**: inserire i valori segreti reali sulla VM, senza commetterli su Git, soltanto dopo i gate e le autorizzazioni previsti.
 
 ---
 
@@ -364,12 +367,13 @@ Le seguenti operazioni richiedono credenziali, carte o accessi proprietari che g
 
 | Condizione | Stato Attuale | Criterio per GO |
 |---|---|---|
-| **Codice Melpis V1 & Test** | **GO** | 64 test billing PASS, 175 test WhatsApp PASS, 393 test frontend PASS, CI PR #82 verde. |
-| **Profilo Solo-Mensile** | **GO** | Supportato nel codice e configurabile senza inventare listini annuali. |
-| **Race Condition Webhook Stripe** | **GO** | Risolta atomicamente con binding post-sessione e lock `FOR UPDATE`. |
+| **Codice Melpis V1 & Test** | **NO-GO** | PR #82/#83 ancora aperte; fix webhook locale 27/27 PASS ma CI sul nuovo head da eseguire; Calendar non è certificato e ha gap fail-open/sync. |
+| **Profilo Solo-Mensile** | **PARTIAL** | Supportato nel codice; prodotti/checkout/rinnovo e gestione eventi devono superare i gate Stripe Test prima del Live. |
+| **Webhook Stripe** | **PARTIAL** | Race del binding sessione risolta; fix di consegna tardiva testato localmente, CI aggiornata ancora pendente. |
+| **Google Calendar obbligatorio V1** | **NO-GO** | Flag disabilitato in produzione; fail-open FreeBusy e stato sync non affidabile da correggere e certificare con E2E reale. |
 | **Configurazione Account Esterni** | **NO-GO (Attesa Owner)** | In attesa che l'Owner compili credenziali e dashboard dei provider. |
 | **Infrastruttura VM & DNS** | **NO-GO (Attesa Owner)** | In attesa di creazione istanza Oracle e puntamento DNS Cloudflare. |
 | **Decisioni Legali / Fiscali** | **NO-GO (Attesa Owner)** | In attesa di approvazione dei testi legali e ragione sociale. |
 
 **Verdetto Finale**:  
-L'applicazione è **READY TO DEPLOY** a livello di ingegneria del software. Il semaforo per il Go-Live pubblico passerà da **NO-GO** a **GO** non appena l'Owner avrà completato i passaggi di configurazione account descritti nella Sezione 21.
+V1 è **NO-GO / NON READY TO DEPLOY**. Le PR non sono mergiate e i gate su Stripe, Google Calendar, database corretto, costi e infrastruttura restano aperti. Nessun setup provider, merge o deploy è autorizzato da questo documento.

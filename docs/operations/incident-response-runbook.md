@@ -16,7 +16,7 @@ Tutti gli scenari distinguono tra **rilevamento proattivo** e **procedura di mit
 | **Worker Retry** | Docker container health & DLQ backlog | Messaggi in DLQ > 10 in 1 ora | Sentry Alert (`dead_letter_queue_threshold`) | Analisi cause errori outbound (Meta token o rate limit) |
 | **AI Provider** | Rifiuti Groq/OpenRouter (429, 503) | Percentuale errori AI > 10% in 15 minuti | Sentry SDK (`AIProviderError`) | Attivazione messaggio di cortesia / escalation forzata |
 | **Webhook Meta** | Latenza ACK HTTP & error rate su `/webhooks/whatsapp` | Risposta > 2500ms o status 5xx | Sentry Alert + Meta App Dashboard Webhook Alerts | Verifica rate limit e saturazione connessioni DB |
-| **Webhook Stripe** | Fallimento signature o 5xx su `/webhooks/stripe` | Status 5xx o dropped webhook events | Sentry Alert + Stripe Dashboard Webhook Failures | Verifica secret `whsec_...` e integrità database |
+| **Webhook Stripe** | Fallimento signature o 5xx su `/api/billing/webhook` (hostname pubblico da verificare prima della configurazione provider) | Status 5xx o dropped webhook events | Sentry Alert + Stripe Dashboard Webhook Failures | Verifica secret `whsec_...` e integrità database |
 | **Backup Giornaliero** | Cron output `/usr/local/sbin/melpis-backup` | Nessun backup riuscito in R2 da > 26 ore | Sentry capture in `drill.py` + Syslog/Cron failure email | Esecuzione manuale `scripts/backup_supabase_r2.sh` |
 | **Spazio Disco VM** | Utiilizzo filesystem root `/` | Spazio occupato > 85% | VM Agent / Cron disk-check script | Purge log Docker (`truncate`) e vecchi dump locali |
 | **Valkey Memory** | Memoria utilizzata da Valkey | Raggiunto 90% di 96 MB (86 MB) | Sentry / Log warning | Verifica anomalie rate limiting / flush chiavi scadute |
@@ -101,7 +101,7 @@ Tutti gli scenari distinguono tra **rilevamento proattivo** e **procedura di mit
 ---
 
 ### Scenario 5: Stripe Webhook Failure
-1. **Rilevamento**: Alert via email da Stripe Dashboard ("Webhook endpoint https://melpis.it/webhooks/stripe failing").
+1. **Rilevamento**: alert via email da Stripe Dashboard relativo all'endpoint configurato. Il path applicativo è `/api/billing/webhook`; l'hostname pubblico va verificato con DNS, TLS e routing reverse-proxy prima di registrare o usare l'URL completo. Non configurare URL provider copiandolo da questo runbook.
 2. **Diagnosi**:
    - Controllare lo stato degli eventi nella Dashboard Stripe (**Developers → Webhooks → Tentativi di recapito falliti**).
    - Ispezionare la risposta HTTP registrata da Stripe (es. 400, 500, timeout).
