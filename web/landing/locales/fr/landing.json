@@ -1,6 +1,6 @@
 {
   "page_title": "Melpis · Assistant Virtuel WhatsApp IA pour Entreprises | Essai 7 jours",
-  "meta_description": "Activez votre assistant virtuel WhatsApp IA : réponses clients 24/7, réservations instantanées sur Google Calendar et gestion des avis. Essai gratuit 7 jours.",
+  "meta_description": "Activez votre assistant virtuel WhatsApp IA : réponses clients 24/7, réservations sur Google Calendar et relais humain. Essai gratuit 7 jours.",
   "hero": {
     "badge": "Infrastructure officielle Meta Cloud API",
     "title_part1": "L'assistant WhatsApp IA qui",
@@ -37,8 +37,8 @@
       "desc": "Dès qu'un échange demande une attention particulière, vos collaborateurs peuvent intervenir directement depuis l'interface web."
     },
     "f4": {
-      "title": "Collecte d'avis et réputation client",
-      "desc": "Recueillez les impressions de vos clients et invitez les personnes ravies à déposer un avis 5 étoiles sur Google Maps."
+      "title": "Relais rapide vers votre équipe",
+      "desc": "Lorsqu'un échange nécessite une attention personnelle, votre équipe peut reprendre la conversation depuis la boîte partagée."
     }
   },
   "how_it_works": {
