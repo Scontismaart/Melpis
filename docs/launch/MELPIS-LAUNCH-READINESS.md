@@ -16,7 +16,7 @@
 - **AZIONE SUCCESSIVA**: Revisione finale da parte dell'Owner, approvazione delle decisioni commerciali/legali ed esecuzione guidata dei setup manuali nei pannelli web dei provider.
 - **RESPONSABILE**: SOL / OWNER
 
-Melpis V1 non è autorizzato al Go-Live finché non sono superati i gate operativi e di provider elencati qui. WhatsApp e Google Calendar sono entrambi requisiti obbligatori del perimetro V1; Calendar resta disabilitato fino alla certificazione end-to-end reale. Google Reviews è escluso dal perimetro V1. Le verifiche del repository non certificano da sole la disponibilità o l'operatività dei servizi esterni.
+Melpis V1 non è autorizzato al Go-Live finché non sono superati i gate operativi e di provider elencati qui. WhatsApp e Google Calendar sono entrambi requisiti obbligatori del perimetro V1; Calendar resta disabilitato fino alla certificazione end-to-end reale. La connessione e sincronizzazione con Google Business Profile/Google Reviews è esclusa al Day 1; le bozze AI per recensioni inserite manualmente restano disponibili nei piani Crescita e Scala. Le verifiche del repository non certificano da sole la disponibilità o l'operatività dei servizi esterni.
 
 La CI del repository non certifica da sola il Go-Live. I punti aperti comprendono verifiche del codice, certificazioni dei provider e **gate operativi esterni/azioni manuali dell'Owner**:
 1. Approvazione commerciale del lancio **solo-mensile** (senza obbligo di creare listini annuali).
@@ -36,7 +36,7 @@ La CI del repository non certifica da sola il Go-Live. I punti aperti comprendon
 - **EVIDENZA**:
   - Piani definiti in `src/core/billing/plans.py`: Essenziale (500 msg/mese, €29), Crescita (2.000 msg/mese, €69), Scala (10.000 msg/mese, €149).
   - Google Calendar è incluso in tutti e tre i piani V1 (Essenziale €29, Crescita €69, Scala €149 al mese). Il copy prezzi viene allineato; l'accesso per piano non deve limitarlo. L'integrazione resta disabilitata in produzione fino alla certificazione end-to-end.
-  - I piani V1 non includono l'integrazione Google Reviews; l'entitlement è disattivato in tutti e tre i piani. Il copy promozionale delle recensioni è stato rimosso dal materiale landing aggiornato.
+  - L'integrazione con Google Business Profile/Google Reviews non è offerta al Day 1: quota API Google pari a zero. Le bozze AI per recensioni fornite manualmente restano incluse in Crescita e Scala; non implicano sincronizzazione o pubblicazione automatica su Google.
   - Limiti di messaggi e quote rigorosamente tracciati e protetti da sospensione automatica.
   - Dashboard modulare funzionante senza inline styles (`tests/frontend/security.test.cjs` 393 PASS).
   - Landing V1 allineata, con selettore annuale nascosto `[hidden]` fail-closed quando annuale disabilitato.
@@ -203,7 +203,7 @@ La CI del repository non certifica da sola il Go-Live. I punti aperti comprendon
 
 ---
 
-## 13. Google Calendar obbligatorio / Google Reviews escluso
+## 13. Google Calendar obbligatorio / Google Reviews provider non attivo al Day 1
 
 - **STATO**: BLOCKED — GO-LIVE GATE V1
 - **PRIORITÀ**: P0
@@ -211,10 +211,10 @@ La CI del repository non certifica da sola il Go-Live. I punti aperti comprendon
   - Google Calendar è requisito obbligatorio V1, ma `GOOGLE_CALENDAR_ENABLED=false` finché OAuth, callback, autorizzazioni, sincronizzazione e gestione degli errori non superano QA end-to-end reale e review security.
   - Decisione commerciale dell'Owner: Calendar incluso in tutti e tre i piani mensili (€29/69/149); nessun entitlement per piano deve escludere Essenziale. L'inclusione commerciale non equivale a certificazione operativa.
   - Nessun Go-Live V1 è consentito senza un test reale Google Calendar con esito PASS. La disponibilità delle API/quote e ogni eventuale verifica Google restano da accertare.
-  - Google Reviews non è requisito V1 e resta escluso/bloccato; la quota Google Business Profile è 0 (`RATE_LIMIT_EXCEEDED`). Non venderlo né abilitarlo come operativo.
+  - La connessione/sincronizzazione Google Reviews non è requisito V1 e resta esclusa/bloccata; la quota Google Business Profile è 0 (`RATE_LIMIT_EXCEEDED`). Le funzioni manuali di bozze AI non devono essere presentate come integrazione Google.
 - **AZIONE SUCCESSIVA**:
   - Mantenere Calendar fail-closed/disabilitato fino al superamento dei gate; abilitarlo soltanto nell'ambiente verificato dopo il test reale e l'approvazione prevista.
-  - Mantenere Google Reviews fuori da offerta e materiali commerciali V1.
+  - Mantenere l'integrazione Google Business Profile fuori dall'offerta e dai materiali commerciali V1; descrivere soltanto le bozze AI manuali incluse nei piani Crescita e Scala.
 - **RESPONSABILE**: SOL / OWNER / GOOGLE
 
 ---
