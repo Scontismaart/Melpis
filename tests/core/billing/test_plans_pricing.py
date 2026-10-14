@@ -67,7 +67,9 @@ def test_limiti_invariati():
     assert PLANS["pro"].users_limit == 3
     assert PLANS["business"].messages_limit == 10000
     assert PLANS["business"].users_limit is None
-    assert PLANS["pro"].has_reviews is True
+    assert PLANS["starter"].has_reviews is False
+    assert PLANS["pro"].has_reviews is False
+    assert PLANS["business"].has_reviews is False
     assert PLANS["business"].has_rag is True
 
 
