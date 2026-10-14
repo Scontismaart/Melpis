@@ -213,6 +213,8 @@ async def test_checkout_completed_with_expired_intent_cannot_start_trial(
     from uuid import uuid4
     from src.core.billing.webhook_handler import handle_stripe_webhook
     event = valid_checkout_event
+    # The Stripe event itself was created after the intent expiry.
+    event["created"] = int((datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp())
     intent_id = uuid4()
     session = event["data"]["object"]
     session["client_reference_id"] = str(sample_org["id"])
@@ -229,6 +231,32 @@ async def test_checkout_completed_with_expired_intent_cannot_start_trial(
     billing = await repo.get_organization_billing(sample_org["id"])
     assert billing["subscription_status"] == "incomplete"
     assert billing["subscription_id"] is None
+
+
+async def test_checkout_completed_delivered_after_intent_expiry_still_starts_trial(
+    repo, sample_org, valid_checkout_event
+):
+    """A valid completion created before expiry may arrive after webhook retries."""
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    event = valid_checkout_event
+    event["created"] = int((datetime.now(timezone.utc) - timedelta(minutes=2)).timestamp())
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    intent_id = await _seed_checkout_intent(repo, sample_org, event)
+    expired_at = datetime.fromtimestamp(event["created"], timezone.utc) + timedelta(seconds=30)
+    assert expired_at < datetime.now(timezone.utc)
+    await repo.pool.execute(
+        "UPDATE billing_checkout_intents SET expires_at = $2 WHERE id = $1::uuid",
+        intent_id,
+        expired_at,
+    )
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(sample_org["id"])
+
+    assert result["action"] == "subscription_created"
+    assert billing["subscription_status"] == "trialing"
+    assert billing["subscription_id"] == event["data"]["object"]["subscription"]
 
 
 async def test_checkout_completed_with_mismatched_customer_cannot_start_trial(

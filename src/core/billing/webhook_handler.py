@@ -72,7 +72,9 @@ async def handle_stripe_webhook(event: dict, repo, trial_days: int) -> dict | No
             if gate.get("ignored"):
                 return {"action": "ignored", "reason": gate["ignored"], "organization_id": gate["id"]}
             if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-                result = await _handle_checkout_completed(conn, repo, data_obj, event_id, trial_days)
+                result = await _handle_checkout_completed(
+                    conn, repo, data_obj, event_id, trial_days, created
+                )
             elif event_type == "invoice.paid":
                 result = await _handle_invoice_paid(conn, repo, data_obj, event_id)
             elif event_type == "invoice.payment_failed":
@@ -171,7 +173,7 @@ async def _lock_event_scope(conn, event, data):
     return org
 
 
-async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
+async def _handle_checkout_completed(conn, repo, data, event_id, trial_days, event_created=None):
     mode = data.get("mode")
 
     if mode == "payment":
@@ -241,10 +243,20 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
     if current_intent_session_id is not None and current_intent_session_id != session_id:
         return None
 
-    now = datetime.now(timezone.utc)
     expires_at = intent_row.get("expires_at")
-    if expires_at and expires_at <= now:
-        return None
+    if expires_at:
+        # Stripe can redeliver a valid completion after our checkout intent has
+        # expired. Validate the signed event's creation time, not delivery time:
+        # only a completion created before expiry may consume the intent.
+        if (not isinstance(event_created, int) or isinstance(event_created, bool)
+                or event_created <= 0):
+            return None
+        try:
+            event_created_at = datetime.fromtimestamp(event_created, timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+        if event_created_at >= expires_at:
+            return None
 
     payload = intent_row["payload"]
     if isinstance(payload, str):
