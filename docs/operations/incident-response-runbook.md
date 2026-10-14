@@ -52,7 +52,7 @@ Tutti gli scenari distinguono tra **rilevamento proattivo** e **procedura di mit
 1. **Rilevamento**: Sentry segnala `CannotConnectNowError` o `ConnectionDoesNotExistError` a raffica; `/api/health/ready` restituisce 503.
 2. **Diagnosi**:
    - Verificare stato della piattaforma su `status.supabase.com`.
-   - Accedere alla dashboard Supabase del progetto `qfxwqfavnuufdfpkhxtj`.
+   - Accedere alla dashboard del progetto Supabase verificato per l'ambiente interessato. Il progetto `Selecta SaaS` è soltanto un candidato e non è stato verificato come database Melpis: non eseguire operazioni su di esso presumendo che sia produzione.
    - Verificare se il pooler (pgBouncer / Supavisor) ha esaurito i client consentiti.
 3. **Azioni di Recupero**:
    - Se Supabase è in manutenzione o degradato: monitorare lo status page fino a risoluzione.

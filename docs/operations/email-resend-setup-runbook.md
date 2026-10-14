@@ -33,7 +33,7 @@ Melpis impiega due sistemi email distinti con scopi, configurazioni e credenzial
 ```
 
 ### Canale A: Supabase Auth SMTP
-- **Dove si configura**: Dashboard Supabase → Progetto di produzione (`qfxwqfavnuufdfpkhxtj`) → **Authentication** → **Email Settings** → **SMTP Settings**.
+- **Dove si configura**: Dashboard Supabase → progetto verificato come target Auth dell'ambiente interessato → **Authentication** → **Email Settings** → **SMTP Settings**. Il progetto di produzione Melpis non è ancora identificato: non usare `Selecta SaaS` come target senza verifica e approvazione esplicita.
 - **Flussi gestiti**:
   - `confirm_email`: invio token monouso e link di attivazione account.
   - `reset_password`: invio link monouso per reimpostazione credenziali `/auth/v1/recover`.
@@ -42,9 +42,9 @@ Melpis impiega due sistemi email distinti con scopi, configurazioni e credenzial
   - PKCE obbligatorio: il link hosted reindirizza al BFF Melpis con codice crittografico monouso.
   - Anti-enumerazione: Supabase restituisce 200 anche se l'email non esiste nel DB.
   - Rate limiting applicativo: integrato in `src/core/auth/register.py` e `src/core/auth/routes.py`.
-  - Callback URLs separati per ambiente:
-    - **Staging**: `https://staging-app.melpis.it/api/auth/confirm`
-    - **Produzione**: `https://melpis.it/api/auth/confirm`
+  - Callback URL separati per ambiente, da sostituire con host verificati solo dopo DNS, TLS e reverse-proxy QA; i segnaposto non vanno incollati nei pannelli provider:
+    - **Staging**: `https://<host-staging-verificato>/api/auth/confirm`
+    - **Produzione**: `https://<host-produzione-verificato>/api/auth/confirm`
 
 ### Canale B: Melpis Application SMTP
 - **Dove si configura**: file `.env.production` sulla VM (variabili `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`).

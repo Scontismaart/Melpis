@@ -22,8 +22,8 @@ Per evitare affermazioni non dimostrate, ogni controllo è classificato secondo 
 |---|---|---|---|---|---|---|---|---|
 | **Stripe Billing** | **SÌ** (fix PR #82 incluso) | **SÌ** (64 PASS in `tests/core/billing/`) | **SÌ** (Postgres + Valkey concurrency) | **NO** (fail-closed, solo Test autorizzato) | `sk_live_...`, `pk_live_...`, `whsec_...`, Price ID Live | 1. Creare 3 prodotti mensili su Stripe Dashboard.<br>2. Configurare webhook endpoint Live con secret firmato.<br>3. Configurare Customer Portal su Dashboard Stripe. | OWNER | Webhook firmato funzionante, 3 Price ID mensili verificati in `.env.production`, nessun addebito reale di test. |
 | **Meta WhatsApp Cloud API** | **SÌ** | **SÌ** (175 PASS in `tests/whatsapp/`) | **SÌ** (inbox durabile, dedup, worker, outbox) | **NO** (fail-closed sandbox) | `WHATSAPP_API_TOKEN` Live, Phone Number ID Live, WABA ID | 1. Completare verifica aziendale su Meta Business Manager.<br>2. Associare numero telefonico di produzione.<br>3. Verificare webhook su Meta Developer Portal. | OWNER | Webhook registrato con verify token, callback HTTP 200 rapido, messaggio di test ricevuto solo su numero allowlist. |
-| **AI Provider (Groq / OpenRouter)** | **SÌ** | **SÌ** (65 PASS in `tests/unit/test_cost_policy.py`, guardrails) | **SÌ** (ZDR check, allowlist, fallback a costo €0) | **NO** (chiavi API non inserite) | `GROQ_API_KEY` (oppure `OPENROUTER_API_KEY`) | 1. Creare account Groq gratuito.<br>2. Verificare che non sia associata carta di credito.<br>3. Impostare `GROQ_FREE_ACCOUNT_CONFIRMED=true` e `GROQ_ZDR_CONFIRMED=true`. | OWNER | `release_preflight.py` valida la chiave, zero fallback a pagamento, risposte sicure con guardrail attivi. |
-| **Google Calendar** | **SÌ** (OAuth e sync) | **SÌ** (`tests/unit/test_google_integration_flags.py`) | **SÌ** (mock OAuth, conflict handling) | **NO** (volutamente disabilitato) | Google OAuth Client ID / Secret di produzione | Lasciare `GOOGLE_CALENDAR_ENABLED=false` al lancio pre-certificazione. | OWNER | Attivazione post-lancio solo dopo approvazione esplicita e verifica quote Google Console. |
+| **AI Provider (Groq / OpenRouter)** | **SÌ** | **SÌ** (65 PASS in `tests/unit/test_cost_policy.py`, guardrails) | **SÌ** (policy `free_only`; quote e disponibilità esterne non garantite) | **NO** (chiavi API non inserite) | `GROQ_API_KEY` (oppure `OPENROUTER_API_KEY`) | Verificare condizioni, quota, ZDR e costi dell'account prima di qualsiasi attivazione. | OWNER | Fallback a pagamento disabilitato; non si garantiscono quote o costo effettivo pari a zero. |
+| **Google Calendar** | **MOCK / PARZIALE** (E2E non certificato) | **SÌ** (`tests/unit/test_google_integration_flags.py`) | **MOCK**, non provider E2E | **NO — GO-LIVE BLOCKED** | Google OAuth Client ID / Secret dell'ambiente verificato | Calendar è obbligatorio in tutti e tre i piani; il flag resta OFF finché non passano E2E e fix dei gate applicativi. | OWNER | E2E reale pre-lancio per OAuth, lettura/scrittura, idempotenza, conflitti, retry, revoca e recovery; solo allora abilitare con gate revisionati. |
 | **Google Reviews (GBP)** | **PARZIALE** | **SÌ** (`tests/core/reviews/`) | **SÌ** (client API mock) | **BLOCCATO ESTERNAMENTE** | Google Business Profile API Access | **BLOCCANTE ESTERNO**: Google ha assegnato quota 0 (`RATE_LIMIT_EXCEEDED`). Lasciare `GOOGLE_BUSINESS_ENABLED=false`. | GOOGLE / OWNER | Richiesta aumento quota approvata da Google. Non pubblicizzare Reviews come operativo. |
 
 ---
@@ -73,10 +73,11 @@ Per evitare affermazioni non dimostrate, ogni controllo è classificato secondo 
 
 ### 3.4 Google Calendar & Google Reviews
 - **Stato al Lancio Commerciale**:
-  - Entrambi i flag sono impostati a `false`:
+  - Al momento entrambi i flag sono impostati a `false`:
     ```ini
     GOOGLE_CALENDAR_ENABLED=false
     GOOGLE_BUSINESS_ENABLED=false
     ```
-  - Lo `startup_guard.py` e lo script `release_preflight.py` bloccano l'avvio in produzione se uno di questi flag è impostato a `true` senza autorizzazione.
-  - **Google Reviews è un bloccante esterno**: l'API Google Business Profile ha quota 0 su console Google. Non deve essere promossa o commercializzata come attiva al Day 1.
+  - Lo `startup_guard.py` e lo script `release_preflight.py` attualmente bloccano l'avvio con `GOOGLE_CALENDAR_ENABLED=true`; questa protezione impedisce oggi il lancio con Calendar operativo e va aggiornata in modo fail-closed solo dopo QA reale e review di sicurezza.
+  - Google Calendar deve essere operativo prima del lancio, non abilitato dopo il lancio. L'inclusione nei tre piani non costituisce certificazione tecnica.
+  - L'integrazione Google Business Profile/Google Reviews è bloccata da quota API pari a 0. Le bozze AI su recensioni fornite manualmente sono distinte da sincronizzazione o pubblicazione tramite Google.
