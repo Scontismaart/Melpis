@@ -10,9 +10,9 @@
 
 ## 1. Executive Summary
 
-- **STATO**: PARTIAL
+- **STATO**: PARTIAL — scope commerciale V1 definito; gate tecnici/operativi aperti
 - **PRIORITÀ**: P0
-- **EVIDENZA**: CI della PR #82 verde sul pre-fix commit `daf3d96`; il nuovo fix webhook è testato localmente 27/27 e richiede CI aggiornata. Runbook in revisione; Google Calendar è un gate obbligatorio ancora bloccato.
+- **EVIDENZA**: il perimetro commerciale V1 include WhatsApp e Google Calendar in tutti e tre i piani. Il fix webhook Stripe è testato localmente e la CI va verificata sul nuovo head; Google Calendar resta un gate obbligatorio ancora bloccato.
 - **AZIONE SUCCESSIVA**: Revisione finale da parte dell'Owner, approvazione delle decisioni commerciali/legali ed esecuzione guidata dei setup manuali nei pannelli web dei provider.
 - **RESPONSABILE**: SOL / OWNER
 
@@ -35,7 +35,8 @@ La CI del repository non certifica da sola il Go-Live. I punti aperti comprendon
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - Piani definiti in `src/core/billing/plans.py`: Essenziale (500 msg/mese, €29), Crescita (2.000 msg/mese, €69), Scala (10.000 msg/mese, €149).
-  - Google Calendar è una capability core obbligatoria e disponibile in tutti e tre i piani; i prezzi e gli altri limiti restano invariati.
+  - Google Calendar è incluso in tutti e tre i piani V1 (Essenziale €29, Crescita €69, Scala €149 al mese). Il copy prezzi viene allineato; l'accesso per piano non deve limitarlo. L'integrazione resta disabilitata in produzione fino alla certificazione end-to-end.
+  - I piani V1 non includono l'integrazione Google Reviews; l'entitlement è disattivato in tutti e tre i piani. Il copy promozionale delle recensioni è stato rimosso dal materiale landing aggiornato.
   - Limiti di messaggi e quote rigorosamente tracciati e protetti da sospensione automatica.
   - Dashboard modulare funzionante senza inline styles (`tests/frontend/security.test.cjs` 393 PASS).
   - Landing V1 allineata, con selettore annuale nascosto `[hidden]` fail-closed quando annuale disabilitato.
@@ -208,6 +209,7 @@ La CI del repository non certifica da sola il Go-Live. I punti aperti comprendon
 - **PRIORITÀ**: P0
 - **EVIDENZA**:
   - Google Calendar è requisito obbligatorio V1, ma `GOOGLE_CALENDAR_ENABLED=false` finché OAuth, callback, autorizzazioni, sincronizzazione e gestione degli errori non superano QA end-to-end reale e review security.
+  - Decisione commerciale dell'Owner: Calendar incluso in tutti e tre i piani mensili (€29/69/149); nessun entitlement per piano deve escludere Essenziale. L'inclusione commerciale non equivale a certificazione operativa.
   - Nessun Go-Live V1 è consentito senza un test reale Google Calendar con esito PASS. La disponibilità delle API/quote e ogni eventuale verifica Google restano da accertare.
   - Google Reviews non è requisito V1 e resta escluso/bloccato; la quota Google Business Profile è 0 (`RATE_LIMIT_EXCEEDED`). Non venderlo né abilitarlo come operativo.
 - **AZIONE SUCCESSIVA**:
@@ -370,7 +372,7 @@ Le seguenti operazioni richiedono credenziali, carte o accessi proprietari che g
 | **Codice Melpis V1 & Test** | **NO-GO** | PR #82/#83 ancora aperte; fix webhook locale 27/27 PASS ma CI sul nuovo head da eseguire; Calendar non è certificato e ha gap fail-open/sync. |
 | **Profilo Solo-Mensile** | **PARTIAL** | Supportato nel codice; prodotti/checkout/rinnovo e gestione eventi devono superare i gate Stripe Test prima del Live. |
 | **Webhook Stripe** | **PARTIAL** | Race del binding sessione risolta; fix di consegna tardiva testato localmente, CI aggiornata ancora pendente. |
-| **Google Calendar obbligatorio V1** | **NO-GO** | Flag disabilitato in produzione; fail-open FreeBusy e stato sync non affidabile da correggere e certificare con E2E reale. |
+| **Google Calendar obbligatorio V1** | **NO-GO** | Incluso in tutti e tre i piani; flag disabilitato in produzione, fail-open FreeBusy e stato sync non affidabile da correggere e certificare con E2E reale. |
 | **Configurazione Account Esterni** | **NO-GO (Attesa Owner)** | In attesa che l'Owner compili credenziali e dashboard dei provider. |
 | **Infrastruttura VM & DNS** | **NO-GO (Attesa Owner)** | In attesa di creazione istanza Oracle e puntamento DNS Cloudflare. |
 | **Decisioni Legali / Fiscali** | **NO-GO (Attesa Owner)** | In attesa di approvazione dei testi legali e ragione sociale. |
