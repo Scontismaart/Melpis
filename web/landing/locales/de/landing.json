@@ -1,6 +1,6 @@
 {
   "page_title": "Melpis · KI-WhatsApp-Assistent für Unternehmen | 7 Tage Testphase",
-  "meta_description": "Aktivieren Sie den KI-WhatsApp-Assistenten für Ihren Betrieb: 24/7-Kundenantworten, Termine in Google Calendar und Übergabe an Ihr Team. 7 Tage kostenlos.",
+  "meta_description": "Aktivieren Sie Ihren KI-WhatsApp-Assistenten: 24/7-Antworten, Google Calendar und KI-Entwürfe für Bewertungsantworten. 7 Tage kostenlos testen.",
   "hero": {
     "badge": "Offizielle Meta Cloud API Infrastruktur",
     "title_part1": "Der KI-WhatsApp-Assistent, der",
@@ -37,8 +37,8 @@
       "desc": "Sobald eine Anfrage persönliche Aufmerksamkeit erfordert, kann Ihr Team direkt über die Web-Oberfläche die Unterhaltung übernehmen."
     },
     "f4": {
-      "title": "Schnelle Übergabe an Ihr Team",
-      "desc": "Wenn ein Gespräch persönliche Betreuung erfordert, kann Ihr Team es direkt im gemeinsamen Posteingang übernehmen."
+      "title": "KI-Entwürfe für Bewertungsantworten",
+      "desc": "Fügen Sie eine Bewertung ein: Ihr Team kann den Antwortentwurf prüfen und manuell veröffentlichen."
     }
   },
   "how_it_works": {

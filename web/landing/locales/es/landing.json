@@ -37,8 +37,8 @@
       "desc": "Si una conversación requiere atención personal, tu equipo puede intervenir al instante desde el panel web."
     },
     "f4": {
-      "title": "Derivación rápida a tu equipo",
-      "desc": "Cuando una conversación requiere atención personal, tu equipo puede hacerse cargo desde la bandeja compartida."
+      "title": "Borradores con IA para responder reseñas",
+      "desc": "Pega una reseña para generar un borrador que tu equipo puede revisar y publicar manualmente."
     }
   },
   "how_it_works": {

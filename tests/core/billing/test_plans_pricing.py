@@ -46,6 +46,14 @@ def test_prezzi_mensili_coerenti_tra_api_dashboard_e_locali():
                 "pro": pricing["plans"]["growth"]["price_monthly"],
                 "business": pricing["plans"]["scale"]["price_monthly"],
             } == expected
+            essential_features = pricing["plans"]["essential"]["features"]
+            growth_features = pricing["plans"]["growth"]["features"]
+            assert any("Google Calendar" in feature for feature in essential_features)
+            assert any(
+                marker in feature
+                for feature in growth_features
+                for marker in ("AI review", "Bozze AI", "Borradores con IA", "Brouillons IA", "KI-Entwürfe")
+            )
 
     from src.core.billing.routes import CheckoutSessionRequest
 
@@ -68,8 +76,8 @@ def test_limiti_invariati():
     assert PLANS["business"].messages_limit == 10000
     assert PLANS["business"].users_limit is None
     assert PLANS["starter"].has_reviews is False
-    assert PLANS["pro"].has_reviews is False
-    assert PLANS["business"].has_reviews is False
+    assert PLANS["pro"].has_reviews is True
+    assert PLANS["business"].has_reviews is True
     assert PLANS["business"].has_rag is True
 
 

@@ -1,6 +1,6 @@
 {
   "page_title": "Melpis · Assistente WhatsApp AI per la tua attività | Prova 7 giorni",
-  "meta_description": "Attiva l'assistente WhatsApp AI per la tua attività: risposte 24/7 ai clienti, prenotazioni su Google Calendar e passaggio allo staff. Prova gratis di 7 giorni.",
+  "meta_description": "Attiva l'assistente WhatsApp AI per la tua attività: risposte 24/7, prenotazioni su Google Calendar e bozze AI per rispondere alle recensioni. Prova gratis 7 giorni.",
   "hero": {
     "badge": "Infrastruttura ufficiale Meta Cloud API",
     "title_part1": "Il tuo assistente WhatsApp AI che",
@@ -37,8 +37,8 @@
       "desc": "Se una conversazione necessita di attenzione personale, il tuo team può subentrare istantaneamente dalla dashboard web."
     },
     "f4": {
-      "title": "Passaggio rapido al tuo staff",
-      "desc": "Quando serve attenzione personale, il tuo team può intervenire dalla Inbox e proseguire la conversazione."
+      "title": "Bozze AI per rispondere alle recensioni",
+      "desc": "Incolla una recensione: Melpis prepara una bozza che il tuo team può verificare e pubblicare manualmente."
     }
   },
   "how_it_works": {
