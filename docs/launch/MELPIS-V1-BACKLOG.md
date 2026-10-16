@@ -2,6 +2,46 @@
 
 Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 2994fae7. Sol mantiene architettura, sicurezza, interfacce e review. Luna sviluppa task circoscritti con test. Nessun merge/deploy implicito.
 
+## Stato operativo verificato — 16 ottobre 2026
+
+18 task ufficiali: **4 in lavorazione, 8 bloccati, 6 da fare, 0 completati**. Un frammento sviluppato non completa il task: servono accettazione, CI verde e merge; per le integrazioni anche E2E. Nessun nuovo lavoro di questa sessione è integrato in main, certificato sullo staging remoto o approvato per produzione.
+
+| Task / issue | Owner | Stato | PR / dipendenze | Prova e blocco | Prossima azione |
+|---|---|---|---|---|---|
+| A00 / #85 | Sol | In lavorazione | #106 su #82 | snapshot preservato; preview gate 20 test verdi e review sicurezza | attendere CI/review #106 e recuperare successivi |
+| A01 / #86 | Luna, review Sol | Bloccato | #103; indipendente | sviluppato, 19 test; CI rossa MCP | risolvere dipendenza compatibile, CI, merge |
+| A02 / #87 | Sol | In lavorazione | #82 | review rileva prezzo sconosciuto su tenant già active e più line item | aggiungere regressioni e correzioni fail-closed |
+| A03 / #88 | Sol | In lavorazione | A00/A01 | gate preview sviluppato; accounting altri ingressi incompleto | tracciare ogni tentativo provider |
+| A04 / #89 | Sol | Bloccato | A02/A03 | ledger esistente da riusare; nessuna quota atomica finale certificata | progettare riserva/completamento idempotenti |
+| A05 / #90 | Sol | Da fare | A00 | capacità/idempotenza presenti, autorizzazione da completare | policy deterministica auto/manuale |
+| A06 / #91 | Sol | Da fare | A00 | candidato #82 non certifica privacy completa | recupero sicuro export/delete/retention |
+| B01 / #92 | Sol | Bloccato | A05/C01 | Calendar non certificato | completare policy poi test provider |
+| B02 / #93 | Sol, Luna su test | Da fare | A03/A04 | PDF/RAG presente; capacità per piano non approvata | benchmark RAM/storage e limiti |
+| B03 / #94 | Luna, review Sol | Da fare | A01/A03 | wizard 7 passi presente | verificare persistenza, disclosure, errori |
+| B04 / #95 | Sol, Luna su UI | Bloccato | A02/A04/B02 | prezzi confermati; metrica/entitlement incompleti | allineare API, dashboard e copy |
+| C01 / #96 | Sol + fondatore | In lavorazione | A04/A06 per schema finale | staging attivo; 29 test +15 assert offline; migrazioni non applicate | approvazione batch e backup reale |
+| C02 / #97 | Sol + fondatore | Bloccato | C01 | #83 runbook; host/email/restore reale non certificati | identificare risorse e preventivo |
+| C03 / #98 | Sol + fondatore | Bloccato | B01/B03/C02 | E2E Meta/Google mancante | callback e account autorizzati |
+| C04 / #99 | Sol + fondatore | Bloccato | A02/A04/C02 | Stripe Test E2E mancante | catalogo mensile e scenari provider |
+| C05 / #100 | Sol + fondatore | Da fare | A06/B03 | policy AI e testi da approvare | inventario provider e costo rappresentativo |
+| D01 / #101 | Sol, Luna su QA | Bloccato | tutti i gate A/B/C | release integrata non pronta | chiudere P0 e certificare commit combinato |
+| D02 / #102 | Fondatore + Sol | Da fare | D01 | non avviato, subordinato al go/no-go | preparare coorte 3–5 attività |
+
+### TASK 0 — dipendenze CI
+
+Frammento strumenti pubblicato nella [PR105](https://github.com/Scontismaart/Melpis/pull/105), commit `6ddb2de`.
+
+Luna ha isolato `pip-audit==2.10.1` dall'ambiente applicativo; 8 test di policy/pin passati e ambiente tool coerente. L'audit continua a scansionare i requisiti runtime con policy invariata. **MCP 1.28.1 / CVE-2026-59951 resta bloccante**: CrewAI stable controllato richiede ancora `mcp~=1.28.1`, incompatibile con il fix 1.30.0. Nessuna eccezione, nessun fork esterno adottato. #103/#104 restano rosse; non ripetere CI immutata come prova di risoluzione.
+
+### Certificazioni distinte
+
+- Sviluppato localmente: limiter preview (#103), gate billing preview A00 (#106), isolamento tool audit, piano C01. Accounting completo e quota atomica restano aperti.
+- Integrato in main: nessuno dei nuovi frammenti; #82/#83/#103/#104 aperte.
+- Staging: stato e schema letti; collaudo su PostgreSQL 17 isolato con dati sintetici. **Nessuna certificazione E2E remota**, nessun backup dati staging ancora eseguito.
+- Produzione: nessun nuovo rilascio o modifica autorizzata.
+
+[Batch C01, hash, impatto accessi e backup/rollback](MELPIS-V1-STAGING-PLAN.md). Il backfill 059 riguarda 27 subject storici: 7 senza membership restano negati. Approvazione del fondatore prima delle scritture; nessuna copia locale di dati reali implicita.
+
 ## Dipendenze
 
 A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è indipendente e non duplica il lavoro locale. A03 accounting e A04 quota atomica precedono certificazione funzionale; A05/A06 chiudono booking/privacy. Calendar/PDF obbligatori in B. Le preparazioni esterne C vanno aperte subito, mentre le certificazioni attendono i task indicati.
@@ -14,7 +54,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Revisione diff e segreti; suite per ciascun frammento; CI sul nuovo commit.
 - Accettazione: Ogni frammento è attribuito, verificato e pubblicato in una piccola PR; nessuna modifica locale viene persa o dichiarata coperta dalla vecchia CI.
 - Rischi: Diff ampio e interdipendente; possibili cambi di policy non approvati.
-- Stato/prove: Snapshot locale conservato; recupero e pubblicazione ancora da fare.
+- Stato/prove: Snapshot locale conservato; primo frammento gate preview sviluppato e verificato (20 test), [PR106](https://github.com/Scontismaart/Melpis/pull/106), commit `60c7a23`, stacked su #82. QA indipendente: 20 test route e 8 sospensione. Resto del diff non recuperato.
 
 ## [V1-A01](https://github.com/Scontismaart/Melpis/issues/86) — Limitare la preview onboarding prima di retrieval e provider
 
@@ -34,7 +74,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Prezzi sconosciuti/mancanti, tutti i line item, checkout intent, duplicati, eventi fuori ordine e tre piani mensili.
 - Accettazione: Solo catalogo approvato concede entitlement; annuale non proposto nel lancio; tutti i test sul commit revisionato. Merge separato autorizzato dal fondatore.
 - Rischi: PR82 aperta; CI verde vale solo per a3d40ca, non per diff locale.
-- Stato/prove: Candidato esistente su GitHub, non integrato.
+- Stato/prove: Candidato esistente su GitHub, non integrato. Review: prezzo sconosciuto non restringe entitlement di tenant già active; resolver accetta un prezzo configurato fra più line item; profilo V1 deve vietare annuale anche al preflight. Correzioni e regressioni richieste prima del merge.
 
 ## [V1-A03](https://github.com/Scontismaart/Melpis/issues/88) — Certificare gate AI e accounting dei tentativi effettivi
 
@@ -52,7 +92,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Dipendenze: V1-A02, V1-A03.
 - Componenti: billing_repo.py; message_repo.py; inbound/service.py; migrazione additiva se necessaria; dashboard consumi.
 - Test: Concorrenza all'ultima risposta; replay stesso operation_id; crash; fallimento generazione; rinnovo e upgrade; accesso manuale a quota zero.
-- Accettazione: Una risposta finale valida e persistita conta una volta; riserva prima del provider; fallimenti non consumano quota prodotto; dashboard e operazioni manuali restano accessibili; rinnovo/upgrade sbloccano senza reset impropri.
+- Accettazione: Una risposta finale valida e persistita conta una volta; riserva prima del provider; fallimenti verificati prima della persistenza rilasciano la riserva; consegna fallita dopo persistenza conta una volta; dashboard e operazioni manuali restano accessibili; rinnovo/upgrade sbloccano senza reset impropri.
 - Rischi: Claim inbound esistente e snapshot runner non provano lo stesso contratto su tutti i percorsi.
 - Stato/prove: Da progettare sul ledger esistente senza creare un secondo contatore divergente.
 
@@ -124,7 +164,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Project ID/regione/ruolo; migrazioni da zero/upgrade/replay; due tenant reali; revoca membership; signup beta limitato.
 - Accettazione: Progetti identificati senza ambiguità; schema esatto della release; autorizzazione applicativa con service-role verificata; nessuna modifica distruttiva senza approvazione.
 - Rischi: Nomi Selecta/Selectaa non identificano con certezza gli ambienti; non interrogare/modificare live alla cieca.
-- Stato/prove: metadati remoti letti: Production ACTIVE_HEALTHY, Staging INACTIVE (eu-central-1); tabella/funzione di059 assenti in Production, outbound_dedup RLS attiva, vector0.8.2. Nessuna modifica remota; certificazione schema/isolamento ancora necessaria.
+- Stato/prove: Staging riattivato ACTIVE_HEALTHY; confronto catalogo reale completato. 058 revoca ACL client ancora presenti, 059 e UNIQUE phone mancanti; 29 test e 15 controlli sintetici verdi su PG17. [Piano batch](MELPIS-V1-STAGING-PLAN.md) pronto; nessuna scrittura remota, backup reale e approvazione ancora necessari.
 
 ## [V1-C02](https://github.com/Scontismaart/Melpis/issues/97) — Preparare host, HTTPS, email, backup e monitoraggio entro budget approvato
 
