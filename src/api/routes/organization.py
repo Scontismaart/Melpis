@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.api.dependencies import get_repo, require_ruolo
 from src.api.routes.common import audit_event, get_billing_snapshot, record_ai_usage
+from src.core.billing.suspension import AIGenerationBlocked, assert_ai_generation_allowed
 from src.core.onboarding import (
     ProfileCacheInvalidationError,
     generate_preview,
@@ -170,6 +171,12 @@ async def onboarding_preview(
         )
     repo = get_repo(request)
     billing = await get_billing_snapshot(repo, org_id)
+    if not isinstance(billing, dict) or not billing or billing.get("ai_accounting_blocked"):
+        raise HTTPException(status_code=503, detail="Impossibile verificare la disponibilità AI")
+    try:
+        assert_ai_generation_allowed(billing)
+    except AIGenerationBlocked as exc:
+        raise HTTPException(status_code=403, detail="Risposte AI non disponibili per questo piano o quota") from exc
     output = await generate_preview(org_id, richiesta, repo, billing=billing)
     await record_ai_usage(
         repo,

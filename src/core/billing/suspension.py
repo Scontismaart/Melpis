@@ -13,6 +13,28 @@ separatamente dal webhook e dal job trial.
 from datetime import datetime, timezone
 
 
+class AIGenerationBlocked(RuntimeError):
+    """The verified tenant state does not authorize a new AI generation."""
+
+
+def assert_ai_generation_allowed(billing: dict | None) -> None:
+    """Fail closed for AI only; manual access keeps its existing policy."""
+    if not isinstance(billing, dict) or not billing:
+        raise AIGenerationBlocked("billing state unavailable")
+    if billing.get("ai_accounting_blocked"):
+        raise AIGenerationBlocked("AI accounting unavailable")
+    status = billing.get("subscription_status")
+    if status not in {"active", "trialing"} or is_org_suspended(status, billing.get("trial_end")):
+        raise AIGenerationBlocked("subscription is not active")
+    limit = billing.get("messages_limit")
+    used = billing.get("messages_used_this_period")
+    if (not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+            or not isinstance(used, int) or isinstance(used, bool) or used < 0):
+        raise AIGenerationBlocked("AI quota unavailable")
+    if used >= limit:
+        raise AIGenerationBlocked("AI quota exhausted")
+
+
 def is_org_suspended(subscription_status: str | None, trial_end=None) -> bool:
     """True se l'org non puo' usare il pipeline conversazionale.
 
