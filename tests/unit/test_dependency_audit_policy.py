@@ -39,3 +39,90 @@ def test_incomplete_audit_still_fails_closed(tmp_path):
     report = tmp_path / "audit.json"
     report.write_text(json.dumps({"dependencies": []}), encoding="utf-8")
     assert AUDIT["main"](str(report)) == 2
+
+
+@pytest.mark.parametrize("entry", [
+    {"name": "torch", "skip_reason": "Dependency not found on PyPI"},
+    {"name": "torch", "version": "2.14.0+cpu", "vulns": [], "skip_reason": ""},
+    {"name": "package", "version": "1.0"},
+    {"name": "package", "vulns": []},
+    {"name": "", "version": "1.0", "vulns": []},
+    {"name": "package", "version": 1, "vulns": []},
+    {"name": "package", "version": "1.0", "vulns": None},
+    {"name": "package", "version": "1.0", "vulns": [{}]},
+    {"name": "package", "version": "1.0", "vulns": [{"id": ""}]},
+    {"name": "package", "version": "1.0", "vulns": [None]},
+    None,
+])
+def test_skipped_or_malformed_dependency_fails_closed(tmp_path, entry, capsys):
+    dependencies = [{"name": f"clean-package-{n}", "version": "1.0", "vulns": []}
+                    for n in range(50)]
+    dependencies.append(entry)
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 2
+    assert "Audited" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("contents", ["null", "[]", "7", "{broken", "{}",
+                                      '{"dependencies":{}}'])
+def test_invalid_report_fails_closed(tmp_path, contents):
+    report = tmp_path / "audit.json"
+    report.write_text(contents, encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 2
+
+
+def test_complete_clean_report_passes(tmp_path):
+    dependencies = [{"name": f"clean-package-{n}", "version": "1.0", "vulns": []}
+                    for n in range(50)]
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 0
+
+
+def test_duplicate_dependency_cannot_inflate_audit_coverage(tmp_path):
+    dependencies = [{"name": "package", "version": "1.0", "vulns": []}] * 50
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 2
+
+
+@pytest.mark.parametrize("alias", ["PACKAGE_name", "package.name", "package---name", "package__._name"])
+def test_pep503_aliases_are_duplicate_dependencies(tmp_path, alias):
+    dependencies = [{"name": f"clean-package-{n}", "version": "1.0", "vulns": []}
+                    for n in range(50)]
+    dependencies.extend({"name": name, "version": "1.0", "vulns": []}
+                        for name in ("package-name", alias))
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 2
+
+
+def test_pep503_alias_preserves_exact_reviewed_package_policy(tmp_path):
+    dependencies = [{"name": f"clean-package-{n}", "version": "1.0", "vulns": []}
+                    for n in range(50)]
+    dependencies.append({"name": "JSON__REPAIR", "version": "0.25.3",
+                         "vulns": [{"id": "GHSA-xf7x-x43h-rpqh"}]})
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 0
+
+
+@pytest.mark.parametrize("field", ["name", "version", "id"])
+@pytest.mark.parametrize("control", ["\n", "\r", "\t", "\x00", "\x1b", "\x85", "\u202e"])
+def test_control_characters_fail_before_printing_report_details(tmp_path, capsys, field, control):
+    dependencies = [{"name": f"clean-package-{n}", "version": "1.0", "vulns": []}
+                    for n in range(50)]
+    entry = {"name": "package", "version": "1.0", "vulns": [{"id": "GHSA-unreviewed"}]}
+    marker = f"private-marker{control}payload"
+    if field == "id":
+        entry["vulns"][0]["id"] = marker
+    else:
+        entry[field] = marker
+    dependencies.append(entry)
+    report = tmp_path / "audit.json"
+    report.write_text(json.dumps({"dependencies": dependencies}), encoding="utf-8")
+    assert AUDIT["main"](str(report)) == 2
+    captured = capsys.readouterr()
+    assert "private-marker" not in captured.out + captured.err
+    assert "Audited" not in captured.out
