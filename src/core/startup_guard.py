@@ -111,11 +111,10 @@ def _assert_stripe_profile(profile: str) -> None:
         for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require_safe_value(name, prefix="price_", min_length=12)
         annual_enabled = os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower()
-        if annual_enabled not in {"true", "false"}:
-            raise RuntimeError("AVVIO BLOCCATO: STRIPE_ANNUAL_PRICING_ENABLED deve essere true o false")
-        if annual_enabled == "true":
-            for name in STRIPE_YEARLY_PRICE_ENV_NAMES:
-                _require_safe_value(name, prefix="price_", min_length=12)
+        if annual_enabled != "false":
+            raise RuntimeError(
+                "AVVIO BLOCCATO: STRIPE_ANNUAL_PRICING_ENABLED deve essere false in commercial_bootstrap"
+            )
         return
 
     if sandbox_only != "true":
