@@ -4,7 +4,7 @@ Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 29
 
 ## Stato operativo verificato — 16 ottobre 2026
 
-18 task ufficiali: **4 in lavorazione, 8 bloccati, 6 da fare, 0 completati**. Un frammento sviluppato non completa il task: servono accettazione, CI verde e merge; per le integrazioni anche E2E. Nessun nuovo lavoro di questa sessione è integrato in main, certificato sullo staging remoto o approvato per produzione.
+18 task ufficiali: **4 in lavorazione, 8 bloccati, 6 da fare, 0 completati**. Un frammento sviluppato non completa il task: servono accettazione, CI verde e merge; per le integrazioni anche E2E. Il batch schema 058/059/UNIQUE è applicato su Staging con approvazione e backup/restore reali verificati. Nessun nuovo frammento codice è integrato in main; E2E remoto e approvazione produzione restano aperti.
 
 | Task / issue | Owner | Stato | PR / dipendenze | Prova e blocco | Prossima azione |
 |---|---|---|---|---|---|
@@ -19,7 +19,7 @@ Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 29
 | B02 / #93 | Sol, Luna su test | Da fare | A03/A04 | PDF/RAG presente; capacità per piano non approvata | benchmark RAM/storage e limiti |
 | B03 / #94 | Luna, review Sol | Da fare | B01/B02 | wizard 7 passi presente | verificare persistenza, disclosure, errori |
 | B04 / #95 | Sol, Luna su UI | Bloccato | A02/A04/B02 | prezzi confermati; metrica/entitlement incompleti | allineare API, dashboard e copy |
-| C01 / #96 | Sol + fondatore | In lavorazione | A04/A05/A06 per schema finale | staging attivo; 29 test +15 assert offline; migrazioni non applicate | approvazione batch e backup reale |
+| C01 / #96 | Sol + fondatore | In lavorazione | A04/A05/A06 per schema finale | 058/059/UNIQUE applicate; backup/restore80tabelle PASS; 42RLS | certificare applicazione/provider e schema finale |
 | C02 / #97 | Sol + fondatore | Bloccato | C01 | #83 runbook; host/email/restore reale non certificati | identificare risorse e preventivo |
 | C03 / #98 | Sol + fondatore | Bloccato | B01/B03/C02 | E2E Meta/Google mancante | callback e account autorizzati |
 | C04 / #99 | Sol + fondatore | Bloccato | A02/A04/C02 | Stripe Test E2E mancante | catalogo mensile e scenari provider |
@@ -31,16 +31,16 @@ Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 29
 
 Frammento strumenti pubblicato nella [PR105](https://github.com/Scontismaart/Melpis/pull/105), head `60ac85a`: audit isolato e CI estesa alle PR verso `codex/**`, senza pubblicazione da PR. #106 include questi due commit di dipendenza e ha CI avviata sul proprio head `d5a82ec`.
 
-Luna ha isolato `pip-audit==2.10.1` dall'ambiente applicativo; 8 test di policy/pin passati e ambiente tool coerente. L'audit continua a scansionare i requisiti runtime con policy invariata. **MCP 1.28.1 / CVE-2026-59951 resta bloccante**: CrewAI stable controllato richiede ancora `mcp~=1.28.1`, incompatibile con il fix 1.30.0. Nessuna eccezione, nessun fork esterno adottato. #103 ha CI rossa; la nuova CI #104 e quella #105 vanno lette sul rispettivo commit, con lo stesso blocco MCP atteso; non ripetere CI immutata come prova di risoluzione.
+Luna ha isolato `pip-audit==2.10.1` dall'ambiente applicativo; 8 test di policy/pin passati e ambiente tool coerente. L'audit continua a scansionare i requisiti runtime con policy invariata. **MCP 1.28.1 / CVE-2026-59951 resta bloccante**: CrewAI stable controllato richiede ancora `mcp~=1.28.1`, incompatibile con il fix 1.30.0. Nessuna eccezione, nessun fork esterno adottato. ultime CI verificate #103 f6e88da, #104 6d81417, #105 60ac85a, #106 d5a82ec, #107 c220d6a tutte fallite sul medesimo MCP; #105–107 non mostrano piu conflitti tomli; non ripetere CI immutata come prova di risoluzione.
 
 ### Certificazioni distinte
 
 - Sviluppato localmente: limiter preview (#103), gate billing preview A00 (#106), isolamento tool audit (#105), guard mensile startup/preflight (#107, 107 test), piano C01. Accounting completo e quota atomica restano aperti.
 - Integrato in main: nessuno dei nuovi frammenti; #82/#83/#103/#104/#105/#106/#107 aperte.
-- Staging: stato e schema letti; collaudo su PostgreSQL 17 isolato con dati sintetici. **Nessuna certificazione E2E remota**, nessun backup dati staging ancora eseguito.
+- Staging: batch approvato applicato, backup cifrato reale e restore PG17.6 isolato verificati su 80 tabelle, catalogo/ACL/trigger e dati. Solo ledger migrazioni varia fra le tabelle preesistenti. **Nessuna certificazione E2E applicativa/provider remota**. Backup e chiavi DPAPI conservati fino a conferma umana per eliminazione.
 - Produzione: nessun nuovo rilascio o modifica autorizzata.
 
-[Batch C01, hash, impatto accessi e backup/rollback](MELPIS-V1-STAGING-PLAN.md). Il backfill 059 riguarda 27 subject storici: 7 senza membership restano negati. Approvazione del fondatore prima delle scritture; nessuna copia locale di dati reali implicita.
+[Batch C01, hash, impatto accessi e backup/rollback](MELPIS-V1-STAGING-PLAN.md). Il backfill 059 riguarda 27 subject storici: 7 senza membership restano negati. Approvazione del batch e del restore locale ricevute; BitLocker, sicurezza PC, spazio, ACL e TLS verificati. Container temporaneo rimosso; backup cifrato conservato.
 
 ## Dipendenze
 
@@ -164,7 +164,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Project ID/regione/ruolo; migrazioni da zero/upgrade/replay; due tenant reali; revoca membership; signup beta limitato.
 - Accettazione: Progetti identificati senza ambiguità; schema esatto della release; autorizzazione applicativa con service-role verificata; nessuna modifica distruttiva senza approvazione.
 - Rischi: history non prova lo schema; 059 cambia accesso per sette subject storici senza membership; backup reale, lock UNIQUE e approvazione batch sono gate obbligatori.
-- Stato/prove: Staging riattivato ACTIVE_HEALTHY; confronto catalogo reale completato. 058 revoca ACL client ancora presenti, 059 e UNIQUE phone mancanti; 29 test e 15 controlli sintetici verdi su PG17. [Piano batch](MELPIS-V1-STAGING-PLAN.md) pronto; nessuna scrittura remota, backup reale e approvazione ancora necessari.
+- Stato/prove: Staging ACTIVE_HEALTHY. Batch 058/059/UNIQUE applicato dopo approvazione, backup cifrato reale e restore verificato (80 tabelle, catalogo e dati); replay sul clone reale e cinque assert RLS/vecchi claim passati. Postflight 42/42 tabelle public RLS, 27 lifecycle, dati precedenti invariati salvo ledger migrazioni. [Piano ed evidenze](MELPIS-V1-STAGING-PLAN.md). C01 resta aperto per schema finale, autorizzazione applicativa e prove E2E.
 
 ## [V1-C02](https://github.com/Scontismaart/Melpis/issues/97) — Preparare host, HTTPS, email, backup e monitoraggio entro budget approvato
 
@@ -243,7 +243,7 @@ Finestra operativa dalla verifica, non promessa. Percorso critico: capienza/recl
 2. A02: regressioni per tenant gia active + prezzo sconosciuto e piu line item; definire una restrizione solo sull'abbonamento correttamente associato, senza alterare accesso manuale o quota storica.
 3. A03: recuperare metriche reali dei tentativi provider e propagazione fail-closed su tutti gli ingressi AI, senza bypass demo.
 4. A04: separare riserva atomica e completamento al salvataggio della risposta nel ledger esistente; test concorrenti/crash/replay prima dell'integrazione.
-5. C01: dopo approvazione esatta e backup/restore reale verificati, applicare solo il batch Staging documentato; poi controlli con account sintetici autorizzati. Preparare host/account C02 in parallelo senza attivare spesa.
+5. C01/C02: batch schema corrente applicato e verificato; conservare backup per rollback. Preparare host/account e release applicativa Staging per E2E con account autorizzati; nuove migrazioni A04/A05/A06 richiedono diff/review propri. Nessuna spesa o produzione implicita.
 
 ## Integrazione
 

@@ -1,10 +1,107 @@
 # C01 — Piano verificabile di allineamento Staging
 
-Stato: **preparato e collaudato offline; nessuna migrazione remota eseguita**.
+Stato: **backup reale cifrato e restore verificati; batch 058/059/UNIQUE
+applicato con successo esclusivamente a Staging. C01 resta in lavorazione per
+lo schema della release finale e la certificazione applicativa**.
 Evidenza raccolta il 16 ottobre 2026. Target esclusivo: Melpis Staging,
 project ref `ucncxwnhcdrqonknkvau`, riattivato e verificato ACTIVE_HEALTHY.
-Production è fuori perimetro. Prima dell'esecuzione serve approvazione umana
-del batch esatto, del backup e degli effetti sull'accesso descritti qui.
+Production è fuori perimetro. Il fondatore ha approvato il batch esatto
+058/059/UNIQUE descritto qui, subordinandolo a backup e restore reali riusciti.
+L'approvazione del batch è acquisita e non va richiesta nuovamente a parità di
+scope e hash. Il consenso distinto alla copia locale è ora acquisito per dump
+cifrato e restore temporaneo su questo PC, alle condizioni riportate sotto.
+
+## Aggiornamento operativo — backup, restore e batch completati
+
+Nel ciclo successivo Sol ha verificato nell'interfaccia che Staging è sul piano
+**Free e non dispone di backup del provider**. Non risultano host né bucket R2
+configurati per il backup. Il fondatore ha successivamente autorizzato un dump
+cifrato e restore temporaneo su PC, subordinati a PC/disco protetti, spazio
+adeguato e assenza di segreti o dati personali nei log. Il backup cifrato va
+conservato almeno fino alla verifica delle migrazioni e non può essere eliminato
+senza conferma umana distinta. Se una condizione non è verificata, fermarsi.
+
+Controlli locali di Sol: circa 353 GB liberi, database Staging circa 15 MB,
+Defender con protezione in tempo reale attiva e firewall attivo su tutti i
+profili. Il fondatore ha confermato **BitLocker C: cifrato al 100%, XTS-AES 128,
+Protection On con TPM**. La conferma risolve il precedente controllo bloccato
+da AccessDenied; i comandi non avevano provato lo stato del disco.
+
+La directory artefatti storica concede lettura a `CodexSandboxUsers` e non va
+usata per dati reali o chiavi. Le directory dedicate backup e chiavi sono state
+create e verificate con ereditarietà disabilitata e sole tre ACE: proprietario,
+SYSTEM e amministratori; nessun accesso `CodexSandboxUsers`.
+Chiave e dump non devono comparire in Git, PR, chat o output dei processi.
+
+TLS verso Staging verificato con CA pubblica Supabase, fingerprint SHA-256
+`700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7` e
+`verify-full` (hostname e certificato verificati). Il vecchio `sslmode=require`
+nel DSN viene sovrascritto nel client senza cambiare il file ambiente.
+
+Il wrapper privato di Sol `c01_real_restore.py` verifica immagine per digest,
+log Docker disabilitati, rete assente, nessuna porta host e PGDATA realmente
+su tmpfs (`statfs`), con psql silenzioso. Il confronto previsto include schema,
+ACL, privilegi predefiniti, viste, sequenze, trigger e definizioni auth/public,
+oltre ai dati. Query di catalogo e fingerprint righe hanno superato prima il
+test sintetico e poi il restore reale. Backup reale `20261016T185355Z`, SHA-256
+dell'archivio prima della cifratura:
+`bead16565924045ae0d2411256ec46fc77cac0104f5a5094ae8d6b9620f453f8`.
+Archivio e manifest `-verified` sono cifrati; le chiavi sono protette da DPAPI
+utente e conservate separatamente nelle directory con sole tre ACE verificate.
+Nessun dato personale o segreto è inserito in questo documento.
+
+**Restore reale PASS:** catalogo e impronte di tutte le 80 tabelle confrontate.
+Il ripristino su clone isolato include correzioni ripetibili da manifest per
+owner di due viste `pg_stat` e otto grant USAGE di schema. Sono correzioni di
+fedeltà del clone, non cambiamenti al database sorgente. La normalizzazione
+del confronto riguarda soltanto ordine delle tuple ACL e rango ordinale;
+tipi completi e collation delle colonne sono stati verificati. Nessun campo
+semantico mancante viene coperto dal solo conteggio righe.
+
+Sol ha quindi applicato il batch approvato a Staging, con esito positivo:
+
+| Registrazione migrazione | Operazione |
+|---|---|
+| `20261016190107` | 058, RLS e revoca ACL `outbound_dedup` |
+| `20261016190116` | 059, lifecycle, backfill e gate autorizzativo |
+| `20261016190124` | UNIQUE dedicata `whatsapp_accounts.phone_number_id` |
+
+Postflight: **42/42 tabelle public con RLS attivo**, 27 lifecycle e 27 subject
+provisioned; invariati 27 auth user, 27 profili, 24 organizzazioni e 20 membership,
+con sette subject senza membership. ACL outbound anon/authenticated negate;
+EXECUTE del helper consentito ad authenticated e negato ad anon; UNIQUE esatta
+e trigger auth/membership presenti. Le tre FK CASCADE preesistenti sono conservate.
+
+Confronto dei dati LIVE su tutte le 80 tabelle preesistenti: l'unica variazione
+è `supabase_migrations.schema_migrations`, con tre registrazioni aggiunte;
+nessun'altra variazione di dati rilevata. La nuova tabella lifecycle è verificata
+separatamente con i conteggi sopra. Sul clone reale dopo le migrazioni, cinque
+assert sintetici sono PASS: accesso membro, separazione tenant A/B, revoca con
+claim di JWT precedente, profilo revocato nascosto e account disabilitato.
+I test del clone sono transazionali con rollback; nessuna riga sintetica è
+stata inserita nel database remoto per eseguirli.
+
+Il container restore temporaneo è stato rimosso da Sol dopo le verifiche; i dati del clone erano su tmpfs. Una copia della procedura di recupero, del manifest di esecuzione e del certificato pubblico è conservata nella directory privata del backup, senza credenziali sorgente.
+**Backup cifrato e chiavi restano conservati: nessuna cancellazione automatica,
+serve conferma umana esplicita prima dell'eliminazione**, anche dopo postflight. Questo backup locale dipende dal profilo Windows per DPAPI e non sostituisce il backup off-site ancora previsto in C02.
+
+Limiti: schema Staging allineato al batch corrente, non certificazione E2E
+dell'applicazione o dei provider remoti. C01 resta in lavorazione per lo schema
+della release finale. Nessun accesso Production, merge o deploy è parte di
+questo batch. Il warning Advisor 0029 sul helper SECURITY DEFINER è stato
+revisionato e accettato da Sol/Security come intenzionale: helper booleano
+basato soltanto su `auth.uid()`, senza argomenti arbitrari né side effect,
+`search_path` vuoto ed EXECUTE concesso soltanto ad authenticated. Il warning
+password preesistente resta separato e non è risolto da questa accettazione.
+
+Preflight prima del batch, eseguito da Sol in sola lettura: 27 auth user, 20 subject
+con membership (join tramite `user_profiles`) e 7 senza; 24 organizzazioni e
+20 membership; zero gruppi duplicati non-NULL di `phone_number_id`.
+Prima dell'applicazione `auth_access_lifecycle` era assente e `anon` conservava
+INSERT su `outbound_dedup`. Questi sono dati storici di preflight, sostituiti
+per lo stato corrente dal postflight sopra. Le precondizioni locali di protezione
+disco, spazio, sicurezza e ACL e la condizione backup/restore reale sono state
+soddisfatte prima di applicare il batch.
 
 ## Baseline ed evidenza
 
@@ -24,7 +121,7 @@ Baseline documentale verificata con `git rev-parse HEAD`:
 `f7745cfae2c09500c799488e296c78b00df71748`.
 Manifest SHA-256 di ogni input in `offline-schema-report.json` privato.
 
-| Oggetti public | Staging | Ricostruzione repo fino a 059 |
+| Oggetti public | Staging prima del batch | Ricostruzione repo fino a 059 |
 |---|---:|---:|
 | Tabelle | 41 | 42 |
 | Colonne | 424 | 427 |
@@ -37,7 +134,10 @@ Tutte le 41 tabelle Staging hanno RLS attivo. Questi conteggi escludono
 trigger `auth`, indici e funzioni appartenenti a extension; tali oggetti sono
 controllati separatamente nel preflight.
 
-## Diff esatto e decisioni
+## Diff storico prima del batch e decisioni
+
+L'elenco seguente descrive i delta rilevati prima dell'applicazione, non gli
+oggetti ancora mancanti dopo il postflight.
 
 1. Manca `auth_access_lifecycle` con colonne `auth_user_id uuid NOT NULL`,
    `provisioned_at timestamptz NULL`, `disabled_at timestamptz NULL`, PK e FK
@@ -74,18 +174,19 @@ Nessuna altra differenza di tabella/colonna/policy/trigger public è emersa
 dal confronto delle definizioni catturate. Questo non certifica ruoli,
 configurazione Auth, grant di ogni oggetto o prestazioni del servizio remoto.
 
-## Batch proposto e identità immutabile
+## Batch approvato e applicato — identità immutabile
 
 | Ordine | File esatto | SHA-256 dei byte collaudati |
 |---|---|---|
 | 1 | `src/core/db/migrations/058_outbound_dedup_rls.sql` | `bc1c2304da567389e4bf1e9a80ea4e8bd06799803efd672c5579d6a83785a715` |
 | 2 | `src/core/db/migrations/059_auth_access_lifecycle.sql` | `49f2e6e1f7898d3c120d29cb70a426f8a8985a7a8bb27242e741e28cc3398610` |
-| 3, separatamente approvato | artefatto privato `c01_unique_phone_delta.sql` | `21d5a4484e208d192a30c2e71a965c8855f5addfa81696b3a6cbfaa58e0b9ed3` |
+| 3, delta dedicato incluso nell'approvazione condizionata | artefatto privato `c01_unique_phone_delta.sql` | `21d5a4484e208d192a30c2e71a965c8855f5addfa81696b3a6cbfaa58e0b9ed3` |
 
 058/059 esistenti non sono stati modificati. Gli hash si riferiscono ai byte
 locali collaudati: se un checkout cambia terminatori di riga, fermarsi e
-riconciliare gli hash prima di approvare. Il terzo file è una proposta privata
-non pubblicato come migrazione e non va applicato implicitamente.
+riconciliare gli hash con l'approvazione ricevuta. Il terzo file è un artefatto
+privato non pubblicato come migrazione; la sua approvazione è condizionata allo
+stesso backup/restore reale e non permette un'applicazione anticipata.
 
 La correzione proposta è un blocco DO che aggiunge la UNIQUE nominata soltanto
 se il constraint omonimo non esiste. Preflight obbligatorio: se un constraint
@@ -144,17 +245,23 @@ storici. Nessun processo deve fare backfill ripetuti manuali con UPDATE.
 3. Raccogliere snapshot schema completo incluse ACL, policy, trigger auth,
    funzioni e indici. Verificare disponibilità reale di backup del provider;
    non presumere PITR o restore disponibile su quel piano.
-4. Prima di ogni scrittura ottenere backup dati cifrato di auth+public e
-   dipendenze necessarie, in destinazione privata fuori host; niente dump o
+4. Condizione soddisfatta per questo batch, da ripetere prima di nuovi batch:
+   prima di ogni scrittura ottenere backup dati cifrato di auth+public e
+   dipendenze necessarie, sul PC autorizzato in directory privata dedicata;
+   verificare prima cifratura/protezione disco e ACL ristrette; niente dump o
    chiavi in Git/PR/chat. Usare un canale database diretto autorizzato, accesso
    minimo e strumenti compatibili con la versione remota. Chiave separata dal
-   backup, accesso limitato, retention privata concordata (proposta: 7 giorni
-   dopo accettazione, salvo policy vigente), cancellazione verificata.
-5. Verificare restore in ambiente isolato autorizzato prima del batch. Dati
-   reali Staging non possono essere copiati su locale senza autorizzazione
-   distinta; il drill sintetico sotto non sostituisce il backup Staging.
-6. Approvazione esplicita: 058, effetti 059 sui sette subject, delta UNIQUE
-   separato, rischio lock, backup/restore e piano incidenti. Poi eseguire il
+   backup, accesso limitato. Conservare il backup cifrato fino a migrazioni
+   verificate e poi fino a conferma umana esplicita della cancellazione;
+   nessuna eliminazione automatica per scadenza o cleanup. Niente PII o segreti
+   nei log, e STOP se una condizione non è verificata.
+5. Verificare restore temporaneo in ambiente locale isolato prima del batch,
+   entro il consenso ricevuto e dopo i controlli sopra. Il drill sintetico
+   sotto non sostituisce il backup Staging né il restore dei dati reali.
+6. Registrare l'approvazione condizionata già ricevuta per 058/059 e delta UNIQUE
+   dedicato; verificare che scope, hash, effetti sui sette subject e piano
+   incidenti corrispondano al presente piano. Soddisfare prima la condizione
+   backup/restore reali e la destinazione privata approvata, poi eseguire il
    batch concordato con transazioni esplicite, ON_ERROR_STOP e timeout finiti;
    registrare file/hash e risultato, senza rieseguire tutto lo storico.
 
