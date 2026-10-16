@@ -210,13 +210,10 @@ def validate(config):
             config, errors, "STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16
         )
         annual_enabled = str(config.get("STRIPE_ANNUAL_PRICING_ENABLED") or "").strip().lower()
-        if annual_enabled not in {"true", "false"}:
-            errors.append("STRIPE_ANNUAL_PRICING_ENABLED: must be explicitly true or false")
+        if annual_enabled != "false":
+            errors.append("STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap")
         for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require(config, errors, name, prefix="price_", min_length=12)
-        if annual_enabled == "true":
-            for name in STRIPE_YEARLY_PRICE_ENV_NAMES:
-                _require(config, errors, name, prefix="price_", min_length=12)
     elif profile == SANDBOX_PROFILE:
         if config.get("SANDBOX_ONLY") != "true":
             errors.append("SANDBOX_ONLY: must be true for sandbox")

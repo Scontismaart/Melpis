@@ -262,18 +262,16 @@ def test_commercial_bootstrap_requires_monthly_live_prices(name):
     assert f"{name}: missing or placeholder" in validate(config)
 
 
-@pytest.mark.parametrize("name", _MODULE.STRIPE_YEARLY_PRICE_ENV_NAMES)
-def test_commercial_bootstrap_requires_yearly_prices_only_when_enabled(name):
+def test_commercial_bootstrap_rejects_annual_pricing_in_v1_profile():
     config = commercial_config()
     config["STRIPE_ANNUAL_PRICING_ENABLED"] = "true"
-    config.pop(name, None)
-    assert f"{name}: missing or placeholder" in validate(config)
+    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap" in validate(config)
 
 
 def test_commercial_bootstrap_requires_explicit_annual_flag():
     config = commercial_config()
     config.pop("STRIPE_ANNUAL_PRICING_ENABLED")
-    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be explicitly true or false" in validate(config)
+    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap" in validate(config)
 
 
 def test_preflight_requires_redis_for_production():

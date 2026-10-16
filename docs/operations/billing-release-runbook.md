@@ -2,13 +2,13 @@
 
 ## Profilo mensile-only
 
-L'offerta annuale (€288 Starter, €708 Pro, €1.548 Business) è in attesa di approvazione. Il profilo production `commercial_bootstrap` richiede i tre Price ID mensili e `STRIPE_ANNUAL_PRICING_ENABLED=false`; i Price ID annuali non sono richiesti finché il flag resta disattivato. Il pricing V1 nasconde il selettore annuale quando l'endpoint same-origin `/api/billing/public-config` non conferma esplicitamente `true`. Un errore di rete mantiene il pricing mensile.
+Il profilo production V1 `commercial_bootstrap` offre solo i piani mensili e richiede `STRIPE_ANNUAL_PRICING_ENABLED=false`; i Price ID annuali non sono richiesti. Il pricing V1 nasconde il selettore annuale quando l'endpoint same-origin `/api/billing/public-config` non conferma esplicitamente `true`. Un errore di rete mantiene il pricing mensile. Impostare il flag a `true` da solo non abilita l'annuale: lo startup guard e il preflight bloccano questa configurazione nel profilo V1.
 
 Il checkout `yearly` risponde con errore di configurazione quando il flag non è esattamente `true`. Il preflight e lo startup applicano la stessa regola fail-closed.
 
-## Approvazione dell'annuale
+## Eventuale offerta annuale futura
 
-Dopo l'approvazione commerciale, configurare tutti e tre i Price ID Stripe `price_...` verificati per Starter, Pro e Business, impostare `STRIPE_ANNUAL_PRICING_ENABLED=true`, quindi eseguire preflight e startup guard prima del rilascio. Non riutilizzare ID di prodotto (`prod_...`) al posto dei Price ID. In caso di rollback, disattivare prima il flag; i checkout annuali vengono negati e l'interfaccia torna mensile-only.
+Un'eventuale offerta annuale richiede una modifica futura ed esplicita del profilo, una nuova revisione di sicurezza e test aggiornati. Non basta impostare `STRIPE_ANNUAL_PRICING_ENABLED=true`. Fino a quella modifica, lasciare il flag a `false`; il catalogo e il checkout V1 restano mensili.
 
 ## Webhook e checkout
 

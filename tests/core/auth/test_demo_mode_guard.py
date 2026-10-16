@@ -171,12 +171,10 @@ def test_commercial_bootstrap_rejects_missing_live_price(monkeypatch, name):
         assert_production_safe()
 
 
-@pytest.mark.parametrize("name", ("STRIPE_PRICE_STARTER_YEARLY", "STRIPE_PRICE_PRO_YEARLY", "STRIPE_PRICE_BUSINESS_YEARLY"))
-def test_commercial_bootstrap_requires_yearly_prices_only_when_enabled(monkeypatch, name):
+def test_commercial_bootstrap_rejects_annual_pricing_in_v1_profile(monkeypatch):
     _configure_commercial(monkeypatch)
     monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
-    monkeypatch.delenv(name)
-    with pytest.raises(RuntimeError, match=name):
+    with pytest.raises(RuntimeError, match="STRIPE_ANNUAL_PRICING_ENABLED.*false"):
         assert_production_safe()
 
 
