@@ -10,7 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY scripts/reviewed_runtime.py scripts/reviewed_runtime.py
+RUN python scripts/reviewed_runtime.py install --user
+COPY scripts/check_dependency_audit.py scripts/check_dependency_audit.py
+RUN python -m venv /tmp/pip-audit && \
+    /tmp/pip-audit/bin/python -m pip install --no-cache-dir pip-audit==2.10.1 && \
+    python scripts/reviewed_runtime.py audit --audit-python /tmp/pip-audit/bin/python \
+        --report .runtime/reviewed-dependencies/runtime-audit.json
 
 # -- Stage 2: runtime -------------------------------------------------
 FROM python:3.12-slim-bookworm AS runtime
@@ -43,6 +49,8 @@ ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1
 
 COPY --chown=appuser:appuser . .
+COPY --from=builder /build/.runtime/reviewed-dependencies/manifest.json /app/runtime-provenance.json
+COPY --from=builder /build/.runtime/reviewed-dependencies/runtime-audit.json /app/runtime-dependency-audit.json
 
 # data/ resta scrivibile a runtime (chroma) ma non porta segreti
 # nell'immagine: in docker-compose viene montata come volume esterno,
@@ -51,6 +59,9 @@ RUN mkdir -p data/chroma /home/appuser/.local/share && \
     chown -R appuser:appuser /app /home/appuser/.local
 
 USER appuser
+
+RUN python scripts/reviewed_runtime.py verify --manifest /app/runtime-provenance.json \
+    --audit-report /app/runtime-dependency-audit.json
 
 EXPOSE 8000
 

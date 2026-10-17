@@ -2,6 +2,8 @@ alembic==1.18.5
 APScheduler==3.11.3
 asyncpg==0.31.0
 crewai[litellm]==1.15.4
+# Exact security-fixed SDK; install through scripts/reviewed_runtime.py.
+mcp==1.30.0
 cryptography==50.0.1
 fastapi==0.139.2
 google-api-python-client==2.198.0

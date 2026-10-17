@@ -47,6 +47,10 @@ scratch/
 docs/
 tests/
 scripts/
+!scripts/
+scripts/*
+!scripts/reviewed_runtime.py
+!scripts/check_dependency_audit.py
 apply_deposit_filter.py
 build_all_docs.py
 build_decision_maker_campaign.py

@@ -19,6 +19,14 @@ Il database è **Supabase Postgres** con estensione **pgvector**. Il profilo di 
 
 Prerequisiti: **Python 3.12**, **Docker Desktop** (per PostgreSQL locale) e **Node.js** (lint e test frontend).
 
+Prima di configurare i provider, creare e attivare un ambiente virtuale Python
+3.12 e installare con `python scripts/reviewed_runtime.py install`.
+Il comando genera una derivata interna della wheel ufficiale CrewAI 1.15.4,
+verifica gli hash e preserva l'extra LiteLLM, usando MCP 1.30.0. Non usare
+direttamente `pip install -r requirements.txt`: il vincolo MCP upstream non
+ammette il fix. La derivata non è una release o approvazione di compatibilità
+di CrewAI. [Provenienza, audit e aggiornamento](docs/REVIEWED-RUNTIME.md).
+
 1. Copiare `.env.example` in `.env` e compilare le variabili richieste. In particolare:
    - `ENCRYPTION_KEY`: generare una chiave Fernet con `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
    - `META_APP_SECRET` e `META_VERIFY_TOKEN`: obbligatorie per il webhook WhatsApp; senza di esse l'app parte comunque ma il webhook non viene montato e Meta non può raggiungerti.
