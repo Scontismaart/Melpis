@@ -1,3 +1,4 @@
+import json
 import uuid
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,28 @@ def valid_checkout_event():
             }
         },
     }
+
+
+async def _seed_checkout_intent(repo, organization_id, event, trial_end_unix=None):
+    intent_id = uuid.uuid4()
+    session = event["data"]["object"]
+    session_id = session["id"]
+    session["metadata"] = {
+        "checkout_intent_id": str(intent_id),
+        "trial_end_unix": "none" if trial_end_unix is None else str(trial_end_unix),
+    }
+    payload = {
+        "checkout_intent_id": str(intent_id),
+        "trial_end_unix": trial_end_unix,
+    }
+    async with repo.pool.acquire() as conn:
+        await conn.execute("""
+            INSERT INTO billing_checkout_intents(
+                id, organization_id, request_key, payload_hash, payload,
+                session_id, session_url, expires_at
+            ) VALUES ($1, $2, $3, 'test', $4::jsonb, $5, $6, NOW() + interval '4 days')
+        """, intent_id, organization_id, f"test-checkout-{intent_id}",
+            json.dumps(payload), session_id, f"https://checkout.example.test/{session_id}")
 
 
 @pytest.fixture
@@ -55,6 +78,7 @@ async def test_handle_checkout_completed_sets_trialing(repo, sample_org, valid_c
     from src.core.billing.webhook_handler import handle_stripe_webhook
     event = valid_checkout_event
     event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    await _seed_checkout_intent(repo, sample_org["id"], event)
     result = await handle_stripe_webhook(event, repo, 7)
     billing = await repo.get_organization_billing(sample_org["id"])
     assert billing["subscription_status"] == "trialing"
@@ -66,6 +90,7 @@ async def test_handle_checkout_completed_sets_trial_period(repo, sample_org, val
     from src.core.billing.webhook_handler import handle_stripe_webhook
     event = valid_checkout_event
     event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    await _seed_checkout_intent(repo, sample_org["id"], event)
     await handle_stripe_webhook(event, repo, 7)
     billing = await repo.get_organization_billing(sample_org["id"])
     assert billing["trial_start"] is not None
@@ -85,7 +110,9 @@ async def test_checkout_webhook_keeps_original_23_hour_trial_deadline(repo, samp
         )
     event = valid_checkout_event
     event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
-    event["data"]["object"]["metadata"] = {"trial_end_unix": str(int(original_deadline.timestamp()))}
+    await _seed_checkout_intent(
+        repo, sample_org["id"], event, int(original_deadline.timestamp())
+    )
 
     await handle_stripe_webhook(event, repo, 7)
 
@@ -250,6 +277,7 @@ async def test_reactivation_resets_notification_then_resuspend(repo, sample_org)
             }
         },
     }
+    await _seed_checkout_intent(repo, sample_org["id"], checkout)
     await handle_stripe_webhook(checkout, repo, 7)
     invoice_paid = {
         "id": "evt_invoice_reactivate_100",

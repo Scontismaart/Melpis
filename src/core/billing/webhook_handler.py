@@ -68,6 +68,8 @@ async def handle_stripe_webhook(event: dict, repo, trial_days: int) -> dict | No
                 return {"action": "ignored", "reason": gate["ignored"], "organization_id": gate["id"]}
             if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
                 result = await _handle_checkout_completed(conn, repo, data_obj, event_id, trial_days)
+            elif event_type == "checkout.session.expired":
+                result = await _handle_checkout_expired(conn, repo, data_obj, event_id)
             elif event_type == "invoice.paid":
                 result = await _handle_invoice_paid(conn, repo, data_obj, event_id)
             elif event_type == "invoice.payment_failed":
@@ -109,14 +111,16 @@ async def _lock_event_scope(conn, event, data):
     may only move access toward a more restrictive state; they never reset quota.
     """
     kind = event.get("type", "")
-    if kind not in {"checkout.session.completed", "checkout.session.async_payment_succeeded",
+    if kind not in {"checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.expired",
                     "invoice.paid", "invoice.payment_failed", "customer.subscription.updated",
                     "customer.subscription.deleted", "subscription.deleted"}:
         return None
     if kind.startswith("checkout.session."):
         if data.get("mode") == "payment":
             org_id = (data.get("metadata") or {}).get("organization_id")
-        elif data.get("mode") == "subscription" and data.get("subscription"):
+        elif data.get("mode") == "subscription" and (
+            data.get("subscription") or kind == "checkout.session.expired"
+        ):
             org_id = data.get("client_reference_id")
         else:
             return None
@@ -129,6 +133,10 @@ async def _lock_event_scope(conn, event, data):
         return None
     org = dict(row)
     if data.get("mode") == "payment":
+        return org
+    if kind == "checkout.session.expired":
+        if data.get("customer") and data.get("customer") != org.get("stripe_customer_id"):
+            return {**org, "ignored": "customer_mismatch"}
         return org
     incoming_sub = data.get("subscription") if kind.startswith(("checkout.", "invoice.")) else data.get("id")
     if not incoming_sub:
@@ -163,9 +171,64 @@ async def _lock_event_scope(conn, event, data):
         data.pop("items", None)
         data.pop("current_period_start", None)
         data.pop("current_period_end", None)
-    if not current_sub:
+    if not current_sub and not kind.startswith("checkout.session."):
         await conn.execute("UPDATE organizations SET subscription_id = $2 WHERE id = $1", org["id"], incoming_sub)
     return org
+
+
+async def _checkout_intent_for_session(conn, org_id, data):
+    """Resolve a signed Checkout event to the durable intent that created it."""
+    session_id = data.get("id")
+    metadata = data.get("metadata") or {}
+    if not isinstance(session_id, str) or not session_id or not isinstance(metadata, dict):
+        return None
+
+    intent_id = metadata.get("checkout_intent_id")
+    if intent_id:
+        if not _valid_org_uuid(str(org_id)) or not _valid_org_uuid(intent_id):
+            return None
+        intent = await conn.fetchrow("""
+            SELECT id, organization_id, session_id, payload
+            FROM billing_checkout_intents
+            WHERE id = $1::uuid AND organization_id = $2::uuid
+            FOR UPDATE
+        """, intent_id, str(org_id))
+    else:
+        # Pre-binding sessions are accepted only when their provider ID was
+        # already persisted against this organization.
+        intent = await conn.fetchrow("""
+            SELECT id, organization_id, session_id, payload
+            FROM billing_checkout_intents
+            WHERE organization_id = $1::uuid AND session_id = $2
+            ORDER BY created_at DESC LIMIT 1 FOR UPDATE
+        """, str(org_id), session_id)
+    if not intent:
+        return None
+
+    frozen = intent["payload"]
+    if isinstance(frozen, str):
+        try:
+            frozen = json.loads(frozen)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(frozen, dict):
+        return None
+    if intent["session_id"] and intent["session_id"] != session_id:
+        return None
+    if ("stripe_customer_id" in frozen
+            and frozen["stripe_customer_id"] != data.get("customer")):
+        return None
+    if intent_id and frozen.get("checkout_intent_id") != intent_id:
+        return None
+
+    if "trial_end_unix" in frozen:
+        expected_trial_end = frozen.get("trial_end_unix")
+        expected_metadata = "none" if expected_trial_end is None else str(int(expected_trial_end))
+        if metadata.get("trial_end_unix") != expected_metadata:
+            return None
+    elif intent_id or "trial_end_unix" in metadata:
+        return None
+    return {**dict(intent), "payload": frozen}
 
 
 async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
@@ -216,6 +279,12 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
 
     if not org_id or not subscription_id or mode != "subscription":
         return None
+    if not _valid_org_uuid(org_id):
+        return None
+    intent = await _checkout_intent_for_session(conn, org_id, data)
+    if not intent:
+        logger.warning("stripe_checkout_intent_mismatch organization_id=%s event_id=%s", org_id, event_id)
+        return None
 
     if not await repo.process_stripe_event_in_tx(conn, event_id, org_id):
         return {"action": "duplicate", "status": "skipped", "organization_id": org_id}
@@ -261,14 +330,41 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
             suspension_notified_at = NULL
         WHERE id = $5
     """, customer_id, subscription_id, now, nuovo_trial_end, org_id)
+    await conn.execute("""
+        UPDATE billing_checkout_intents
+        SET session_id = COALESCE(session_id, $2), expires_at = NOW(),
+            payload = jsonb_set(payload, '{_resolved}', 'true'::jsonb, true)
+        WHERE id = $1::uuid AND organization_id = $3::uuid
+          AND (session_id IS NULL OR session_id = $2)
+    """, intent["id"], data["id"], str(org_id))
     return {"action": "subscription_created", "status": "trialing", "organization_id": org_id}
+
+
+async def _handle_checkout_expired(conn, repo, data, event_id):
+    org_id = data.get("client_reference_id")
+    if data.get("mode") != "subscription" or not _valid_org_uuid(org_id):
+        return None
+    intent = await _checkout_intent_for_session(conn, org_id, data)
+    if not intent:
+        logger.warning("stripe_checkout_expired_intent_mismatch organization_id=%s event_id=%s", org_id, event_id)
+        return None
+    if not await repo.process_stripe_event_in_tx(conn, event_id, org_id):
+        return {"action": "duplicate", "status": "skipped", "organization_id": org_id}
+    await conn.execute("""
+        UPDATE billing_checkout_intents
+        SET session_id = COALESCE(session_id, $2), expires_at = NOW(),
+            payload = jsonb_set(payload, '{_resolved}', 'true'::jsonb, true)
+        WHERE id = $1::uuid AND organization_id = $3::uuid
+          AND (session_id IS NULL OR session_id = $2)
+    """, intent["id"], data["id"], str(org_id))
+    return {"action": "checkout_expired", "organization_id": org_id}
 
 
 async def _lookup_org_by_customer(customer_id: str, repo, conn) -> dict | None:
     if not customer_id:
         return None
     row = await conn.fetchrow(
-        "SELECT id, stripe_customer_id, subscription_status, plan, "
+        "SELECT id, stripe_customer_id, subscription_id, subscription_status, trial_end, plan, "
         "current_period_start, messages_used_this_period "
         "FROM organizations WHERE stripe_customer_id = $1",
         customer_id,
@@ -359,12 +455,32 @@ async def _handle_subscription_updated(conn, repo, data, event_id):
     if status not in canonical:
         status = "incomplete"  # Unknown upstream state is never entitlement.
     trial_end = data.get("trial_end")
+    trial_end_to_store = None
+    if status == "trialing":
+        canonical_trial_end = org.get("trial_end")
+        if isinstance(canonical_trial_end, datetime) and canonical_trial_end.tzinfo is None:
+            canonical_trial_end = canonical_trial_end.replace(tzinfo=timezone.utc)
+        if not isinstance(canonical_trial_end, datetime):
+            # A provider event alone cannot create an application trial.
+            status = "incomplete"
+        else:
+            provider_trial_end = None
+            if isinstance(trial_end, int) and not isinstance(trial_end, bool) and trial_end > 0:
+                try:
+                    provider_trial_end = datetime.fromtimestamp(trial_end, tz=timezone.utc)
+                except (OverflowError, OSError, ValueError):
+                    provider_trial_end = None
+            trial_end_to_store = (
+                min(provider_trial_end, canonical_trial_end)
+                if provider_trial_end is not None
+                else canonical_trial_end
+            )
     await conn.execute("""
         UPDATE organizations SET subscription_status = $1,
             trial_end = CASE WHEN $1 = 'trialing' THEN $3 ELSE trial_end END,
             suspension_notified_at = CASE WHEN $1 IN ('active','trialing') THEN NULL ELSE suspension_notified_at END
         WHERE id = $2
-    """, status, org["id"], datetime.fromtimestamp(trial_end, tz=timezone.utc) if trial_end else None)
+    """, status, org["id"], trial_end_to_store)
 
     period_start = data.get("current_period_start")
     period_end = data.get("current_period_end")
