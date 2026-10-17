@@ -44,11 +44,25 @@ def _get_client_config():
 def _make_flow():
     if not google_calendar_enabled():
         raise RuntimeError("Google Calendar disabled")
-    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "").strip()
-    if not is_valid_calendar_redirect_uri(redirect_uri):
+    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+    non_production_environments = {"development", "local", "test", "staging"}
+    configured_environments = [
+        os.environ[name].strip().lower()
+        for name in ("APP_ENV", "ENVIRONMENT")
+        if name in os.environ
+    ]
+    allow_loopback_http = bool(configured_environments) and all(
+        environment in non_production_environments
+        for environment in configured_environments
+    )
+    if not is_valid_calendar_redirect_uri(
+        redirect_uri,
+        allow_loopback_http=allow_loopback_http,
+    ):
         raise ValueError(
             "GOOGLE_REDIRECT_URI non valido: atteso percorso "
-            f"'{CALENDAR_OAUTH_CALLBACK_PATH}', HTTPS e host valido senza query o fragment"
+            f"'{CALENDAR_OAUTH_CALLBACK_PATH}', HTTPS su host pubblici oppure "
+            "HTTP esclusivamente su localhost:4187 fuori da Production"
         )
     return Flow.from_client_config(
         _get_client_config(),
