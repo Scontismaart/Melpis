@@ -161,22 +161,9 @@ def assert_production_safe() -> None:
     _assert_free_groq_profile()
     _assert_stripe_profile(profile)
 
-    if os.getenv("GOOGLE_BUSINESS_ENABLED", "false").strip().lower() != "false":
-        raise RuntimeError("AVVIO BLOCCATO: GOOGLE_BUSINESS_ENABLED deve restare false al lancio")
-
-    calendar_enabled = os.getenv("GOOGLE_CALENDAR_ENABLED", "false").strip().lower()
-    if calendar_enabled not in {"true", "false"}:
-        raise RuntimeError("AVVIO BLOCCATO: GOOGLE_CALENDAR_ENABLED deve essere true o false")
-    if calendar_enabled == "true":
-        _require_safe_value("GOOGLE_CLIENT_ID", min_length=1)
-        _require_safe_value("GOOGLE_CLIENT_SECRET", min_length=1)
-        redirect_uri = _require_safe_value("GOOGLE_REDIRECT_URI", prefix="https://", min_length=10)
-        from src.core.calendar.redirect_uri import is_valid_calendar_redirect_uri
-        if not is_valid_calendar_redirect_uri(redirect_uri):
-            raise RuntimeError(
-                "AVVIO BLOCCATO: GOOGLE_REDIRECT_URI deve essere un URL https valido con percorso "
-                "/api/calendar/oauth2callback, host valido e senza query/fragment"
-            )
+    for name in ("GOOGLE_CALENDAR_ENABLED", "GOOGLE_BUSINESS_ENABLED"):
+        if os.getenv(name, "false").strip().lower() != "false":
+            raise RuntimeError(f"AVVIO BLOCCATO: {name} deve restare false al lancio")
 
     key = os.getenv("ENCRYPTION_KEY", "").strip()
     if not key:
