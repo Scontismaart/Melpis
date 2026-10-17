@@ -27,7 +27,23 @@ def test_production_example_declares_safe_commercial_defaults():
     assert config["GROQ_ZDR_CONFIRMED"] == "false"
     assert config["GOOGLE_CALENDAR_ENABLED"] == "false"
     assert config["GOOGLE_BUSINESS_ENABLED"] == "false"
+    assert config["STRIPE_ANNUAL_PRICING_ENABLED"] == "false"
+    assert config["STRIPE_PRICE_STARTER_YEARLY"] in (None, "")
+    assert config["STRIPE_PRICE_PRO_YEARLY"] in (None, "")
+    assert config["STRIPE_PRICE_BUSINESS_YEARLY"] in (None, "")
     assert validate(config)
+
+
+def test_pricing_v1_annual_selector_is_hidden_until_explicit_public_config():
+    html = Path("web/landing/index.html").read_text(encoding="utf-8")
+    script = Path("web/landing/app.js").read_text(encoding="utf-8")
+    css = Path("web/landing/style.css").read_text(encoding="utf-8")
+    assert '<div class="billing-toggle-wrap" hidden>' in html
+    assert ".billing-toggle-wrap[hidden]" in css
+    assert "fetch('/api/billing/public-config'" in script
+    assert "config.annual_pricing_enabled === true" in script
+    assert "billingToggle.hidden = false" in script
+    assert "billingToggle.hidden = true" in script
 
 
 def test_general_example_is_an_explicit_disabled_sandbox():
@@ -53,6 +69,7 @@ def common_config():
         "SUPABASE_ANON_KEY": "anon-unit-safe-value",
         "ENCRYPTION_KEY": Fernet.generate_key().decode(),
         "PUBLIC_APP_URL": "https://melpis.it",
+        "REDIS_URL": "redis://valkey:6379/0",
         "CORS_ORIGINS": "https://melpis.it,https://app.melpis.it",
         "META_APP_SECRET": "meta-unit-safe-value",
         "META_VERIFY_TOKEN": "verify-unit-safe-value",
@@ -90,12 +107,13 @@ def commercial_config():
         {
             "LAUNCH_PROFILE": "commercial_bootstrap",
             "SANDBOX_ONLY": "false",
+            "STRIPE_ANNUAL_PRICING_ENABLED": "false",
             "STRIPE_SECRET_KEY": "sk_live_unit_safe_value",
             "STRIPE_PUBLISHABLE_KEY": "pk_live_unit_safe_value",
         }
     )
     config.update(
-        {name: f"price_live_{name.lower()}" for name in STRIPE_PRICE_ENV_NAMES}
+        {name: f"price_live_{name.lower()}" for name in _MODULE.STRIPE_MONTHLY_PRICE_ENV_NAMES}
     )
     return config
 
@@ -106,6 +124,7 @@ def sandbox_config():
         {
             "LAUNCH_PROFILE": "sandbox",
             "SANDBOX_ONLY": "true",
+            "STRIPE_ANNUAL_PRICING_ENABLED": "false",
             "STRIPE_SECRET_KEY": "sk_test_unit_safe_value",
             "STRIPE_PUBLISHABLE_KEY": "pk_test_unit_safe_value",
             "WHATSAPP_TEST_RECIPIENTS": "39000000000",
@@ -236,11 +255,31 @@ def test_sandbox_blocks_live_stripe_credentials():
     assert any("STRIPE_SECRET_KEY" in finding for finding in validate(config))
 
 
-@pytest.mark.parametrize("name", STRIPE_PRICE_ENV_NAMES)
-def test_commercial_bootstrap_requires_all_six_live_prices(name):
+@pytest.mark.parametrize("name", _MODULE.STRIPE_MONTHLY_PRICE_ENV_NAMES)
+def test_commercial_bootstrap_requires_monthly_live_prices(name):
     config = commercial_config()
     del config[name]
     assert f"{name}: missing or placeholder" in validate(config)
+
+
+@pytest.mark.parametrize("name", _MODULE.STRIPE_YEARLY_PRICE_ENV_NAMES)
+def test_commercial_bootstrap_requires_yearly_prices_only_when_enabled(name):
+    config = commercial_config()
+    config["STRIPE_ANNUAL_PRICING_ENABLED"] = "true"
+    config.pop(name, None)
+    assert f"{name}: missing or placeholder" in validate(config)
+
+
+def test_commercial_bootstrap_requires_explicit_annual_flag():
+    config = commercial_config()
+    config.pop("STRIPE_ANNUAL_PRICING_ENABLED")
+    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be explicitly true or false" in validate(config)
+
+
+def test_preflight_requires_redis_for_production():
+    config = commercial_config()
+    config.pop("REDIS_URL")
+    assert any(finding.startswith("REDIS_URL:") for finding in validate(config))
 
 
 @pytest.mark.parametrize("name", ("GROQ_FREE_ACCOUNT_CONFIRMED", "GROQ_ZDR_CONFIRMED"))

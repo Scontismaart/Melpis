@@ -8,6 +8,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import dotenv_values
 
@@ -17,14 +18,17 @@ from src.core.release_config import network_config_errors
 
 COMMERCIAL_BOOTSTRAP_PROFILE = "commercial_bootstrap"
 SANDBOX_PROFILE = "sandbox"
-STRIPE_PRICE_ENV_NAMES = (
+STRIPE_MONTHLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER",
     "STRIPE_PRICE_PRO",
     "STRIPE_PRICE_BUSINESS",
+)
+STRIPE_YEARLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER_YEARLY",
     "STRIPE_PRICE_PRO_YEARLY",
     "STRIPE_PRICE_BUSINESS_YEARLY",
 )
+STRIPE_PRICE_ENV_NAMES = STRIPE_MONTHLY_PRICE_ENV_NAMES + STRIPE_YEARLY_PRICE_ENV_NAMES
 MODEL_ENV_NAMES = (
     "AI_MODEL", "AI_MODEL_CHEAP", "AI_MODEL_PREMIUM", "AI_MODEL_FALLBACKS", "AI_MODEL_INTENT",
     "OPENROUTER_MODEL",
@@ -134,11 +138,15 @@ def validate(config):
         "SUPABASE_ANON_KEY",
         "ENCRYPTION_KEY",
         "PUBLIC_APP_URL",
+        "REDIS_URL",
         "META_APP_SECRET",
         "META_VERIFY_TOKEN",
     )
     for name in required:
         _require(config, errors, name)
+    redis = urlparse(str(config.get("REDIS_URL") or "").strip())
+    if redis.scheme not in {"redis", "rediss"} or not redis.hostname:
+        errors.append("REDIS_URL: valid redis:// or rediss:// endpoint required")
     provider = str(config.get("AI_PROVIDER") or "groq").strip().lower()
     if provider == "groq":
         _require(config, errors, "GROQ_API_KEY", prefix="gsk_", min_length=16)
@@ -201,8 +209,14 @@ def validate(config):
         _require(
             config, errors, "STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16
         )
-        for name in STRIPE_PRICE_ENV_NAMES:
+        annual_enabled = str(config.get("STRIPE_ANNUAL_PRICING_ENABLED") or "").strip().lower()
+        if annual_enabled not in {"true", "false"}:
+            errors.append("STRIPE_ANNUAL_PRICING_ENABLED: must be explicitly true or false")
+        for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require(config, errors, name, prefix="price_", min_length=12)
+        if annual_enabled == "true":
+            for name in STRIPE_YEARLY_PRICE_ENV_NAMES:
+                _require(config, errors, name, prefix="price_", min_length=12)
     elif profile == SANDBOX_PROFILE:
         if config.get("SANDBOX_ONLY") != "true":
             errors.append("SANDBOX_ONLY: must be true for sandbox")
@@ -214,6 +228,8 @@ def validate(config):
             config, errors, "STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16
         )
         _require(config, errors, "WHATSAPP_TEST_RECIPIENTS")
+        if str(config.get("STRIPE_ANNUAL_PRICING_ENABLED") or "").strip().lower() != "false":
+            errors.append("STRIPE_ANNUAL_PRICING_ENABLED: must be false in sandbox")
     else:
         errors.append("LAUNCH_PROFILE: must be commercial_bootstrap or sandbox")
 

@@ -11,6 +11,7 @@ from src.core.startup_guard import STRIPE_PRICE_ENV_NAMES, assert_production_saf
 def sandbox_production_baseline(monkeypatch):
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "true")
     monkeypatch.setenv("PUBLIC_APP_URL", "https://app.example.test")
+    monkeypatch.setenv("REDIS_URL", "redis://valkey:6379/0")
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db/x?sslmode=require")
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-unit-safe-value")
@@ -19,6 +20,7 @@ def sandbox_production_baseline(monkeypatch):
     monkeypatch.delenv("CSRF_TRUSTED_ORIGINS", raising=False)
     monkeypatch.setenv("LAUNCH_PROFILE", "sandbox")
     monkeypatch.setenv("SANDBOX_ONLY", "true")
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "false")
     monkeypatch.setenv("LLM_COST_POLICY", "free_only")
     monkeypatch.setenv("GROQ_FREE_ACCOUNT_CONFIRMED", "true")
     monkeypatch.setenv("GROQ_ZDR_CONFIRMED", "true")
@@ -45,6 +47,7 @@ def _configure_commercial(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_unit_safe_value")
     monkeypatch.setenv("STRIPE_PUBLISHABLE_KEY", "pk_live_unit_safe_value")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_live_unit_safe_value")
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "false")
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
     for name in STRIPE_PRICE_ENV_NAMES:
         monkeypatch.setenv(name, f"price_live_{name.lower()}")
@@ -131,6 +134,13 @@ def test_commercial_bootstrap_accepts_stripe_live_and_free_groq(monkeypatch):
     assert_production_safe()
 
 
+def test_production_startup_requires_redis_url(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.delenv("REDIS_URL")
+    with pytest.raises(RuntimeError, match="REDIS_URL"):
+        assert_production_safe()
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     (
@@ -153,9 +163,18 @@ def test_sandbox_rejects_live_stripe_credentials(monkeypatch):
         assert_production_safe()
 
 
-@pytest.mark.parametrize("name", STRIPE_PRICE_ENV_NAMES)
+@pytest.mark.parametrize("name", ("STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO", "STRIPE_PRICE_BUSINESS"))
 def test_commercial_bootstrap_rejects_missing_live_price(monkeypatch, name):
     _configure_commercial(monkeypatch)
+    monkeypatch.delenv(name)
+    with pytest.raises(RuntimeError, match=name):
+        assert_production_safe()
+
+
+@pytest.mark.parametrize("name", ("STRIPE_PRICE_STARTER_YEARLY", "STRIPE_PRICE_PRO_YEARLY", "STRIPE_PRICE_BUSINESS_YEARLY"))
+def test_commercial_bootstrap_requires_yearly_prices_only_when_enabled(monkeypatch, name):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
     monkeypatch.delenv(name)
     with pytest.raises(RuntimeError, match=name):
         assert_production_safe()

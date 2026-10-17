@@ -50,6 +50,50 @@ async def test_fallback_memory_senza_redis(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_production_requires_shared_redis(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "")
+    monkeypatch.setattr(token_store, "_is_production", lambda: True)
+
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await token_store.save_token("prod-token", "org-3", {})
+
+    assert "prod-token" not in token_store._memory
+
+
+@pytest.mark.asyncio
+async def test_production_redis_write_failure_does_not_fall_back_to_memory(monkeypatch):
+    class FailingRedis:
+        async def set(self, *_args, **_kwargs):
+            raise OSError("unavailable")
+
+    _use(FailingRedis(), monkeypatch)
+    monkeypatch.setattr(token_store, "_is_production", lambda: True)
+
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await token_store.save_token("prod-token", "org-3", {})
+
+    assert "prod-token" not in token_store._memory
+
+
+@pytest.mark.asyncio
+async def test_production_redis_read_failure_does_not_use_memory_fallback(monkeypatch):
+    class FailingRedis:
+        async def getdel(self, _key):
+            raise OSError("unavailable")
+
+    token_store._memory["prod-token"] = {
+        "org_id": "org-3", "data": {}, "expires": 9999999999,
+    }
+    _use(FailingRedis(), monkeypatch)
+    monkeypatch.setattr(token_store, "_is_production", lambda: True)
+
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await token_store.pop_token("prod-token")
+
+    assert "prod-token" in token_store._memory
+
+
+@pytest.mark.asyncio
 async def test_token_scaduto(monkeypatch):
     monkeypatch.setenv("REDIS_URL", "")
     await token_store.save_token("t3", "org-3", {})

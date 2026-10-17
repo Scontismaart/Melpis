@@ -153,6 +153,23 @@ def test_checkout_redirect_is_restricted_to_configured_origin():
     assert exc.value.status_code == 400
 
 
+def test_canonical_melpis_checkout_redirect_is_accepted():
+    # Production Caddy redirects app.melpis.it to the canonical root origin.
+    assert validate_redirect_url(
+        "https://melpis.it/app/billing/success?session=1", "https://melpis.it"
+    ) == "https://melpis.it/app/billing/success?session=1"
+
+
+def test_yearly_checkout_is_fail_closed_when_offer_is_disabled(monkeypatch):
+    from src.core.billing.plans import PLANS
+    from src.core.billing.routes import _resolve_price_id
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "false")
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id_yearly", "price_test_yearly")
+    assert _resolve_price_id(PLANS["starter"], "yearly") == ""
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
+    assert _resolve_price_id(PLANS["starter"], "yearly") == "price_test_yearly"
+
+
 def test_live_stripe_requires_explicit_commercial_profile(monkeypatch):
     monkeypatch.setenv("LLM_COST_POLICY", "free_only")
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_forbidden")

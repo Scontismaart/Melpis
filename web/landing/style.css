@@ -4780,6 +4780,9 @@ html.js .stagger-text, html.js .stagger-mockup {
     margin-bottom: 50px;
     border: 1px solid rgba(255, 255, 255, 0.12);
 }
+.billing-toggle-wrap[hidden] {
+    display: none;
+}
 .toggle-btn {
     font-size: 0.88rem;
     font-weight: 500;

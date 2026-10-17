@@ -37,8 +37,8 @@
       "desc": "Si una conversación requiere atención personal, tu equipo puede intervenir al instante desde el panel web."
     },
     "f4": {
-      "title": "Gestión de reseñas y satisfacción de clientes",
-      "desc": "Recoge opiniones sinceras e invita a los clientes satisfechos a dejar una reseña de 5 estrellas en Google Maps."
+      "title": "Borradores con IA para responder reseñas",
+      "desc": "Pega una reseña para generar un borrador que tu equipo puede revisar y publicar manualmente."
     }
   },
   "how_it_works": {

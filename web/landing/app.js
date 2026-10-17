@@ -751,8 +751,26 @@
 
     var btnMonthlyEl = document.getElementById('btnMonthly');
     var btnAnnualEl = document.getElementById('btnAnnual');
+    var billingToggle = document.querySelector('.billing-toggle-wrap');
     if (btnMonthlyEl) btnMonthlyEl.addEventListener('click', function () { setBilling('monthly'); });
     if (btnAnnualEl) btnAnnualEl.addEventListener('click', function () { setBilling('annual'); });
+    if (billingToggle && btnAnnualEl) {
+        // Annual prices stay hidden unless the same-origin API explicitly
+        // enables the offer. Network or parsing failures remain monthly-only.
+        fetch('/api/billing/public-config', { credentials: 'same-origin' })
+            .then(function (response) {
+                if (!response.ok) throw new Error('Billing config unavailable');
+                return response.json();
+            })
+            .then(function (config) {
+                if (config && config.annual_pricing_enabled === true) {
+                    billingToggle.hidden = false;
+                }
+            })
+            .catch(function () {
+                billingToggle.hidden = true;
+            });
+    }
 
     /* ---------- Signup Modal / Quick Start ---------- */
     var modal = document.getElementById('signupModal');

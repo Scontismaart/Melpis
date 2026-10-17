@@ -1,5 +1,6 @@
 import logging
 import json
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -16,33 +17,37 @@ def _valid_org_uuid(value) -> bool:
         return False
     return True
 
+def _configured_price_to_plan() -> dict[str, str]:
+    from src.core.billing.plans import PLANS
+    mapping = {}
+    annual_enabled = os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower() == "true"
+    for slug, plan in PLANS.items():
+        if plan.stripe_price_id:
+            mapping[plan.stripe_price_id] = slug
+        if annual_enabled and plan.stripe_price_id_yearly:
+            mapping[plan.stripe_price_id_yearly] = slug
+    return mapping
+
+
 PRICE_TO_PLAN: dict[str, str] = {}
 PRODUCT_TO_PLAN: dict[str, str] = {}
 
 
-def _init_plan_maps():
-    from src.core.billing.plans import PLANS
-    for slug, plan in PLANS.items():
-        if plan.stripe_price_id:
-            PRICE_TO_PLAN[plan.stripe_price_id] = slug
-        if plan.stripe_price_id_yearly:
-            PRICE_TO_PLAN[plan.stripe_price_id_yearly] = slug
-        PRODUCT_TO_PLAN[f"prod_{slug}"] = slug
+def _init_plan_maps() -> dict[str, str]:
+    PRICE_TO_PLAN.clear()
+    PRICE_TO_PLAN.update(_configured_price_to_plan())
+    return PRICE_TO_PLAN
 
 
 def _resolve_plan_from_subscription(subscription_data: dict) -> str | None:
-    if not PRICE_TO_PLAN and not PRODUCT_TO_PLAN:
-        _init_plan_maps()
+    price_to_plan = _configured_price_to_plan()
     for item in subscription_data.get("items", {}).get("data", []):
         price = item.get("price") or {}
         if not isinstance(price, dict):
             continue
         price_id = price.get("id", "")
-        if price_id in PRICE_TO_PLAN:
-            return PRICE_TO_PLAN[price_id]
-        product_id = price.get("product") or (item.get("plan") or {}).get("product", "")
-        if product_id in PRODUCT_TO_PLAN:
-            return PRODUCT_TO_PLAN[product_id]
+        if isinstance(price_id, str) and price_id in price_to_plan:
+            return price_to_plan[price_id]
     return None
 
 
@@ -67,7 +72,9 @@ async def handle_stripe_webhook(event: dict, repo, trial_days: int) -> dict | No
             if gate.get("ignored"):
                 return {"action": "ignored", "reason": gate["ignored"], "organization_id": gate["id"]}
             if event_type in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-                result = await _handle_checkout_completed(conn, repo, data_obj, event_id, trial_days)
+                result = await _handle_checkout_completed(
+                    conn, repo, data_obj, event_id, trial_days, created
+                )
             elif event_type == "invoice.paid":
                 result = await _handle_invoice_paid(conn, repo, data_obj, event_id)
             elif event_type == "invoice.payment_failed":
@@ -163,12 +170,10 @@ async def _lock_event_scope(conn, event, data):
         data.pop("items", None)
         data.pop("current_period_start", None)
         data.pop("current_period_end", None)
-    if not current_sub:
-        await conn.execute("UPDATE organizations SET subscription_id = $2 WHERE id = $1", org["id"], incoming_sub)
     return org
 
 
-async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
+async def _handle_checkout_completed(conn, repo, data, event_id, trial_days, event_created=None):
     mode = data.get("mode")
 
     if mode == "payment":
@@ -217,15 +222,66 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
     if not org_id or not subscription_id or mode != "subscription":
         return None
 
+    # A signed Checkout event is not sufficient by itself to start a trial:
+    # the exact session must correspond to our durable checkout intent, and that
+    # intent must contain a currently configured Price ID.
+    session_id = data.get("id")
+    intent_id = (data.get("metadata") or {}).get("billing_checkout_intent_id")
+    intent_row = await conn.fetchrow("""
+        SELECT id, payload, session_id, expires_at FROM billing_checkout_intents
+        WHERE id = $1::uuid AND organization_id = $2::uuid
+        FOR UPDATE
+    """, intent_id, org_id) if _valid_org_uuid(intent_id) and isinstance(session_id, str) and session_id else None
+    if not intent_row:
+        return None
+
+    # If session_id was already persisted, it must match the incoming session.
+    # If the webhook arrives before the API caller persisted session_id (race condition),
+    # session_id is currently NULL: verify intent validity, bind session_id atomically,
+    # and proceed without dropping the event or granting unverified access.
+    current_intent_session_id = intent_row.get("session_id")
+    if current_intent_session_id is not None and current_intent_session_id != session_id:
+        return None
+
+    expires_at = intent_row.get("expires_at")
+    if expires_at:
+        # Stripe can redeliver a valid completion after our checkout intent has
+        # expired. Validate the signed event's creation time, not delivery time:
+        # only a completion created before expiry may consume the intent.
+        if (not isinstance(event_created, int) or isinstance(event_created, bool)
+                or event_created <= 0):
+            return None
+        try:
+            event_created_at = datetime.fromtimestamp(event_created, timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+        if event_created_at >= expires_at:
+            return None
+
+    payload = intent_row["payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    expected_price_id = payload.get("price_id") if isinstance(payload, dict) else None
+    if not expected_price_id or expected_price_id not in _configured_price_to_plan():
+        return None
+    if data.get("customer") != (await conn.fetchval(
+        "SELECT stripe_customer_id FROM organizations WHERE id = $1::uuid", org_id
+    )):
+        return None
+
+    if current_intent_session_id is None:
+        await conn.execute("""
+            UPDATE billing_checkout_intents
+            SET session_id = $3
+            WHERE id = $1::uuid AND organization_id = $2::uuid AND session_id IS NULL
+        """, intent_id, org_id, session_id)
+
     if not await repo.process_stripe_event_in_tx(conn, event_id, org_id):
         return {"action": "duplicate", "status": "skipped", "organization_id": org_id}
 
     now = datetime.now(timezone.utc)
     # Il trial NON si rinnova al checkout: si eredita quello del signup.
-    # Fonte primaria: metadata["trial_days_remaining"] scritto da
-    # create-checkout-session. Fallback (sessioni create prima del deploy,
-    # checkout da Stripe Dashboard): i giorni residui della trial_end
-    # corrente dell'org letta dal DB — MAI il trial pieno di default.
+    # Le sessioni senza intent durevole sono ignorate sopra, senza fallback.
     from src.core.billing.suspension import giorni_trial_rimanenti
     riga_org = await conn.fetchrow("SELECT trial_end FROM organizations WHERE id = $1", org_id)
     trial_days_residui = giorni_trial_rimanenti(riga_org["trial_end"] if riga_org else None, now=now)
@@ -272,10 +328,14 @@ async def _handle_invoice_paid(conn, repo, data, event_id):
     period_end = datetime.fromtimestamp(data.get("period_end", 0), tz=timezone.utc)
 
     plan_slug = _resolve_plan_from_subscription({"items": data.get("lines") or {}})
+    if not plan_slug:
+        # Paid invoice without an allowlisted configured Price ID is audited
+        # below but cannot activate access, change plan, or reset quota.
+        return {"action": "invoice_ignored_unconfigured_price", "organization_id": org["id"]}
 
     await conn.execute(
-        "UPDATE organizations SET subscription_status = 'active', suspension_notified_at = NULL WHERE id = $1",
-        org["id"],
+        "UPDATE organizations SET subscription_id = COALESCE(subscription_id, $2), subscription_status = 'active', suspension_notified_at = NULL WHERE id = $1",
+        org["id"], data.get("subscription"),
     )
     if period_end > period_start and (org.get("current_period_start") is None or period_start > org["current_period_start"]):
         await conn.execute("""
@@ -339,6 +399,10 @@ async def _handle_subscription_updated(conn, repo, data, event_id):
     status = data.get("status")
     if status not in canonical:
         status = "incomplete"  # Unknown upstream state is never entitlement.
+    # An unknown/unconfigured Price ID can never grant access or reset quota.
+    # Restrictive lifecycle statuses are still applied immediately.
+    if not plan_slug and status in {"active", "trialing"}:
+        return {"action": "subscription_ignored_unconfigured_price", "organization_id": org["id"]}
     trial_end = data.get("trial_end")
     await conn.execute("""
         UPDATE organizations SET subscription_status = $1,
@@ -349,7 +413,7 @@ async def _handle_subscription_updated(conn, repo, data, event_id):
 
     period_start = data.get("current_period_start")
     period_end = data.get("current_period_end")
-    if period_start and period_end:
+    if plan_slug and period_start and period_end:
         new_start = datetime.fromtimestamp(period_start, tz=timezone.utc)
         if period_end > period_start and (org.get("current_period_start") is None or new_start > org["current_period_start"]):
             await conn.execute("""

@@ -1,6 +1,6 @@
 {
   "page_title": "Melpis · WhatsApp AI Assistant for Business | 7-Day Free Trial",
-  "meta_description": "Activate your WhatsApp AI assistant for business: 24/7 instant client replies, Google Calendar bookings, and review management. Try free for 7 days.",
+  "meta_description": "Activate your WhatsApp AI assistant: 24/7 replies, Google Calendar bookings, and AI drafts for review replies. Try free for 7 days.",
   "hero": {
     "badge": "Official Meta Cloud API Infrastructure",
     "title_part1": "The AI WhatsApp assistant that",
@@ -37,8 +37,8 @@
       "desc": "Whenever a conversation requires personal attention, your team can seamlessly take over directly from the web dashboard."
     },
     "f4": {
-      "title": "Review collection & customer satisfaction",
-      "desc": "Gather genuine feedback and prompt delighted customers to leave 5-star reviews on your Google Business profile."
+      "title": "AI drafts for review replies",
+      "desc": "Paste a review to get a reply draft your team can check and publish manually."
     }
   },
   "how_it_works": {

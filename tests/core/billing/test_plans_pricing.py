@@ -46,6 +46,14 @@ def test_prezzi_mensili_coerenti_tra_api_dashboard_e_locali():
                 "pro": pricing["plans"]["growth"]["price_monthly"],
                 "business": pricing["plans"]["scale"]["price_monthly"],
             } == expected
+            essential_features = pricing["plans"]["essential"]["features"]
+            growth_features = pricing["plans"]["growth"]["features"]
+            assert any("Google Calendar" in feature for feature in essential_features)
+            assert any(
+                marker in feature
+                for feature in growth_features
+                for marker in ("AI review", "Bozze AI", "Borradores con IA", "Brouillons IA", "KI-Entwürfe")
+            )
 
     from src.core.billing.routes import CheckoutSessionRequest
 
@@ -67,12 +75,25 @@ def test_limiti_invariati():
     assert PLANS["pro"].users_limit == 3
     assert PLANS["business"].messages_limit == 10000
     assert PLANS["business"].users_limit is None
+    assert PLANS["starter"].has_reviews is False
     assert PLANS["pro"].has_reviews is True
+    assert PLANS["business"].has_reviews is True
     assert PLANS["business"].has_rag is True
 
 
-def test_resolve_price_id(monkeypatch):
+def test_resolve_price_id_annual_disabled_by_default(monkeypatch):
     from src.core.billing.routes import _resolve_price_id
+    monkeypatch.delenv("STRIPE_ANNUAL_PRICING_ENABLED", raising=False)
+    p = PLANS["pro"]
+    monkeypatch.setattr(p, "stripe_price_id", "price_m")
+    monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
+    assert _resolve_price_id(p, "monthly") == "price_m"
+    assert _resolve_price_id(p, "yearly") == ""
+
+
+def test_resolve_price_id_annual_enabled(monkeypatch):
+    from src.core.billing.routes import _resolve_price_id
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
     p = PLANS["pro"]
     monkeypatch.setattr(p, "stripe_price_id", "price_m")
     monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
