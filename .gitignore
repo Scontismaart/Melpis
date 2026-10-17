@@ -5,6 +5,7 @@ data/
 .env.production
 .env.staging
 .env.*.local
+.runtime/reviewed-dependencies/
 Supabase-credentials.txt
 __pycache__/
 *.pyc
