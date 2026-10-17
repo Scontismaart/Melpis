@@ -15,7 +15,6 @@ Uso:
     python scripts/audit_route_contracts.py verify docs/route_contracts_baseline.json
 """
 
-import inspect
 import json
 import os
 import sys
@@ -79,6 +78,16 @@ def extract_route_contracts() -> dict:
             call_name = getattr(call, "__name__", "")
             if call_name in ("get_organization_context", "get_current_org_id"):
                 has_org_context = True
+
+        # Some high-risk routes must resolve authorization against a
+        # resource-bound tenant inside the handler (for example a one-time
+        # export token) rather than invoking the general JIT org resolver.
+        explicit_roles = getattr(route.endpoint, "__api_required_roles__", None)
+        if explicit_roles:
+            required_roles = sorted(explicit_roles)
+        has_org_context = has_org_context or bool(
+            getattr(route.endpoint, "__api_org_context__", False)
+        )
 
 
         key = f"{route.path}::{','.join(sorted(route.methods))}"

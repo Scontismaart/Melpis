@@ -1,15 +1,17 @@
-"""Temporary GDPR export store: encrypted payloads and one-time token hashes.
+"""Encrypted, identity-bound, one-time storage for GDPR exports.
 
-Redis/Valkey is shared in production and uses a 15-minute TTL; local test/dev
+Redis/Valkey is shared in production and uses a 15-minute TTL. Local test/dev
 may use encrypted process memory. Production fails closed if Redis or the
 application encryption key is unavailable.
 """
 import asyncio
 import hashlib
 import json
-import os
 import logging
+import os
 import time
+from dataclasses import dataclass, field
+
 from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
@@ -20,9 +22,31 @@ _memory: dict[str, str] = {}
 _redis = None
 DOWNLOAD_COOKIE = "gdpr_export_token"
 
+_COMPARE_AND_DELETE = """
+local value = redis.call('GET', KEYS[1])
+if value and value == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
 
 class TokenStoreUnavailable(RuntimeError):
     """GDPR export storage or encryption is unavailable."""
+
+
+@dataclass(frozen=True)
+class ExportToken:
+    """Decrypted authorization context plus the ciphertext used for CAS consume."""
+
+    org_id: str
+    auth_user_id: str
+    session_id: str
+    user_id: str
+    role: str
+    data: dict
+    expires: float
+    payload: str = field(repr=False)
 
 
 def _fernet() -> Fernet:
@@ -45,11 +69,16 @@ def _decode_payload(payload: str | bytes) -> dict:
         if not isinstance(encoded, bytes):
             raise TypeError("Invalid GDPR export payload")
         document = json.loads(_fernet().decrypt(encoded))
+        expires = document.get("expires") if isinstance(document, dict) else None
         if (
             not isinstance(document, dict)
-            or not isinstance(document.get("org_id"), str)
+            or not all(isinstance(document.get(key), str) and document[key] for key in (
+                "org_id", "auth_user_id", "session_id", "user_id", "role",
+            ))
+            or document.get("role") != "owner"
             or not isinstance(document.get("data"), dict)
-            or not isinstance(document.get("expires"), (int, float))
+            or isinstance(expires, bool)
+            or not isinstance(expires, (int, float))
         ):
             raise ValueError("Invalid GDPR export payload")
         return document
@@ -88,68 +117,124 @@ async def _get_redis():
 
     try:
         from redis.asyncio import Redis
+
         _redis = Redis.from_url(url, decode_responses=True)
         return _redis
     except Exception as exc:
-        if _is_production():
-            raise TokenStoreUnavailable("Redis client could not be initialized") from exc
-        return None
+        logger.warning("token_store: Redis client initialization failed")
+        raise TokenStoreUnavailable("Redis export-token store is unavailable") from exc
 
 
-async def save_token(token: str, org_id: str, data: dict) -> None:
+async def save_token(
+    token: str,
+    org_id: str,
+    data: dict,
+    *,
+    auth_user_id: str,
+    session_id: str,
+    user_id: str,
+) -> None:
+    if not all((org_id, auth_user_id, session_id, user_id)):
+        raise TokenStoreUnavailable("GDPR export requires a bound owner session")
     try:
         serialized = json.dumps(
-            {"org_id": org_id, "data": data, "expires": time.time() + TOKEN_TTL_SECONDS}
+            {
+                "org_id": org_id,
+                "auth_user_id": auth_user_id,
+                "session_id": session_id,
+                "user_id": user_id,
+                "role": "owner",
+                "data": data,
+                "expires": time.time() + TOKEN_TTL_SECONDS,
+            }
         ).encode("utf-8")
         payload = _fernet().encrypt(serialized).decode("ascii")
+    except TokenStoreUnavailable:
+        raise
     except (TypeError, ValueError) as exc:
         raise TokenStoreUnavailable("GDPR export could not be encrypted") from exc
-    r = await _get_redis()
-    if r is not None:
-        try:
-            await r.set(_storage_key(token), payload, ex=TOKEN_TTL_SECONDS)
-            return
-        except Exception as e:
-            logger.warning("token_store: redis set failed")
-            if _is_production():
-                raise TokenStoreUnavailable("Redis export-token write failed") from e
-    _memory[_storage_key(token)] = payload
 
-
-async def pop_token(token: str) -> dict | None:
-    """Consuma il token (one-time). None se assente o scaduto."""
     key = _storage_key(token)
     r = await _get_redis()
     if r is not None:
         try:
-            # Decrypt before consuming so a missing or rotated key does not
-            # destroy an otherwise recoverable, short-lived export.
-            raw = await r.get(key)
-            if raw is None:
-                return None
-            doc = _decode_payload(raw)
-            if doc["expires"] < time.time():
-                await r.getdel(key)
-                return None
-            # The final GETDEL arbitrates concurrent downloads: only the
-            # request that consumes the stored value receives the payload.
-            if await r.getdel(key) != raw:
-                return None
-            return doc
-        except TokenStoreUnavailable:
-            raise
-        except Exception as e:
-            logger.warning("token_store: redis getdel failed")
-            if _is_production():
-                raise TokenStoreUnavailable("Redis export-token read failed") from e
-    entry = _memory.get(key)
-    if entry is None:
+            await r.set(key, payload, ex=TOKEN_TTL_SECONDS)
+            return
+        except Exception as exc:
+            logger.warning("token_store: Redis write failed")
+            raise TokenStoreUnavailable("Redis export-token write failed") from exc
+    _memory[key] = payload
+
+
+async def read_token(token: str) -> ExportToken | None:
+    """Read and decrypt without consuming; authorization must happen next."""
+    key = _storage_key(token)
+    r = await _get_redis()
+    if r is not None:
+        try:
+            payload = await r.get(key)
+        except Exception as exc:
+            logger.warning("token_store: Redis read failed")
+            raise TokenStoreUnavailable("Redis export-token read failed") from exc
+    else:
+        payload = _memory.get(key)
+
+    if payload is None:
         return None
-    doc = _decode_payload(entry)
-    if doc["expires"] < time.time():
-        _memory.pop(key, None)
+    document = _decode_payload(payload)
+    if document["expires"] < time.time():
         return None
-    if _memory.get(key) != entry:
+    return ExportToken(
+        org_id=document["org_id"],
+        auth_user_id=document["auth_user_id"],
+        session_id=document["session_id"],
+        user_id=document["user_id"],
+        role=document["role"],
+        data=document["data"],
+        expires=document["expires"],
+        payload=payload.decode("ascii") if isinstance(payload, bytes) else payload,
+    )
+
+
+async def consume_token(token: str, expected: ExportToken) -> dict | None:
+    """Compare-and-delete atomically; only the winner receives the export."""
+    if expected.expires < time.time():
         return None
-    _memory.pop(key, None)
-    return doc
+    key = _storage_key(token)
+    r = await _get_redis()
+    if r is not None:
+        try:
+            consumed = await r.eval(_COMPARE_AND_DELETE, 1, key, expected.payload)
+        except Exception as exc:
+            # A lost Redis reply after the script executed has an inherently
+            # ambiguous outcome. The caller fails closed and can request a new
+            # export; no data is returned unless this request receives success.
+            logger.warning("token_store: Redis atomic consume failed")
+            raise TokenStoreUnavailable("Redis export-token consume failed") from exc
+        return expected.data if int(consumed or 0) == 1 else None
+
+    # There is no await between the check and deletion, so this section is
+    # atomic among coroutines using the process-local fallback.
+    if _memory.get(key) != expected.payload:
+        return None
+    del _memory[key]
+    return expected.data
+
+
+async def pop_token(token: str) -> dict | None:
+    """Compatibility helper for one-time consumption after a prior read."""
+    pending = await read_token(token)
+    if pending is None:
+        return None
+    data = await consume_token(token, pending)
+    if data is None:
+        return None
+    return {
+        "org_id": pending.org_id,
+        "auth_user_id": pending.auth_user_id,
+        "session_id": pending.session_id,
+        "user_id": pending.user_id,
+        "role": pending.role,
+        "data": data,
+        "expires": pending.expires,
+    }

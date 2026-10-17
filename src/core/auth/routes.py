@@ -11,8 +11,8 @@ import os
 import re
 import secrets
 import time
-from uuid import UUID
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -22,7 +22,12 @@ from src.core.auth import bff, throttle
 from src.core.auth.audit import audit_log
 from src.core.auth.csrf import clear_csrf_token, issue_csrf_token
 from src.core.auth.denylist import is_token_revoked, revoke_token
-from src.core.auth.dependencies import get_current_user, get_organization_context, get_repo, require_ruolo
+from src.core.auth.dependencies import (
+    get_current_user,
+    get_repo,
+    require_ruolo,
+)
+from src.core.gdpr import token_store
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -354,6 +359,13 @@ async def logout(request: Request, response: Response):
     if rt:
         await revoke_token(rt)
     _clear_session_cookies(response)
+    response.delete_cookie(
+        token_store.DOWNLOAD_COOKIE,
+        path="/api/gdpr/download",
+        secure=bff.cookie_secure(),
+        httponly=True,
+        samesite="strict",
+    )
     return {"ok": True}
 
 

@@ -2,9 +2,9 @@ import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 import pytest_asyncio
-import httpx
 from fastapi import Depends, HTTPException
 
 pytestmark = pytest.mark.usefixtures("reset_db")
@@ -16,6 +16,8 @@ API_KEY = "test-gdpr-api-key-12345"
 def set_env():
     os.environ["DATABASE_URL"] = ""
     os.environ["API_KEY_SERVICE"] = API_KEY
+    # The test client uses plain HTTP; production/default behavior stays Secure.
+    os.environ["AUTH_COOKIE_SECURE"] = "false"
     # Export payloads must use the same encryption contract as non-test runs.
     from cryptography.fernet import Fernet
     os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
@@ -29,7 +31,11 @@ def set_env():
 @pytest.fixture
 async def async_client(repo, org_id):
     from src.api.main import app
-    from src.core.auth.dependencies import get_current_user, get_organization_context, get_token
+    from src.core.auth.dependencies import (
+        get_current_user,
+        get_organization_context,
+        get_token,
+    )
 
     async def fixed_test_identity(token=Depends(get_token)):
         if token is None:
@@ -38,12 +44,18 @@ async def async_client(repo, org_id):
             raise HTTPException(403, "Invalid test session")
         return {
             "source": "jwt", "aal": "aal2", "organization_id": str(org_id),
-            "ruolo": "owner", "auth_user_id": "gdpr-test-owner", "user_id": None,
+            "ruolo": "owner", "auth_user_id": "gdpr-test-owner",
+            "session_id": "gdpr-test-session", "user_id": "gdpr-test-profile",
         }
 
     app.dependency_overrides[get_current_user] = fixed_test_identity
     app.dependency_overrides[get_organization_context] = fixed_test_identity
     app.state.repo = repo
+    repo.get_memberships_by_auth = AsyncMock(return_value=[{
+        "organization_id": str(org_id),
+        "ruolo": "owner",
+        "user_id": "gdpr-test-profile",
+    }])
     app.state.pool = MagicMock()
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -193,7 +205,7 @@ class TestDataRights:
         resp = await async_client.get("/api/gdpr/export", headers=_headers(org_id))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["download_url"].endswith("/api/gdpr/download")
+        assert data["download_url"] == "/api/gdpr/download"
         assert "expires_in_minutes" in data
         assert data["expires_in_minutes"] == 15
         assert resp.cookies.get("gdpr_export_token")
@@ -210,13 +222,14 @@ class TestDataRights:
         self, async_client, org_id, monkeypatch
     ):
         from unittest.mock import AsyncMock
+
         from src.core.gdpr import token_store
 
         class FakeRedis:
             async def set(self, *_args, **_kwargs):
                 return True
 
-        monkeypatch.setattr(token_store, "_is_production", lambda: True)
+        monkeypatch.setenv("AUTH_COOKIE_SECURE", "true")
         monkeypatch.setattr(
             token_store, "_get_redis", AsyncMock(return_value=FakeRedis())
         )
@@ -235,7 +248,7 @@ class TestDataRights:
         assert resp.status_code == 200
         download_url = resp.json()["download_url"]
 
-        download_resp = await async_client.get(download_url)
+        download_resp = await async_client.get(download_url, headers=_headers(org_id))
         assert download_resp.status_code == 200
         data = download_resp.json()
         assert data["organization_id"] == str(org_id)
@@ -244,7 +257,7 @@ class TestDataRights:
         assert download_resp.headers["referrer-policy"] == "no-referrer"
 
         # The download token is consumed once and the browser cookie is cleared.
-        assert (await async_client.get(download_url)).status_code == 404
+        assert (await async_client.get(download_url, headers=_headers(org_id))).status_code == 404
 
     async def test_download_expired_token_returns_404(self, async_client, org_id, monkeypatch):
         monkeypatch.setenv("REDIS_URL", "")
@@ -252,7 +265,7 @@ class TestDataRights:
         monkeypatch.setattr(token_store, "_redis", None)
         async_client.cookies.set(token_store.DOWNLOAD_COOKIE, "expired_test_token")
         monkeypatch.setattr(token_store, "pop_token", AsyncMock(return_value=None))
-        resp = await async_client.get("/api/gdpr/download")
+        resp = await async_client.get("/api/gdpr/download", headers=_headers())
         assert resp.status_code == 404
 
     async def test_download_rejects_corrupt_ciphertext_without_leaking_details(
@@ -265,7 +278,7 @@ class TestDataRights:
         token_store._memory[token_store._storage_key("tampered-token")] = "corrupt-ciphertext"
         async_client.cookies.set(token_store.DOWNLOAD_COOKIE, "tampered-token")
 
-        resp = await async_client.get("/api/gdpr/download")
+        resp = await async_client.get("/api/gdpr/download", headers=_headers())
 
         assert resp.status_code == 503
         assert resp.json() == {"detail": "Export temporaneamente non disponibile"}
@@ -273,7 +286,7 @@ class TestDataRights:
         assert token_store._storage_key("tampered-token") in token_store._memory
 
     async def test_download_nonexistent_token_returns_404(self, async_client):
-        resp = await async_client.get("/api/gdpr/download")
+        resp = await async_client.get("/api/gdpr/download", headers=_headers())
         assert resp.status_code == 404
 
     async def test_delete_no_auth(self, async_client):
