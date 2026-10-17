@@ -39,14 +39,49 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
                     raise HTTPException(409, "Idempotency key already used for a different checkout")
                 if existing["expires_at"] <= datetime.now(timezone.utc):
                     raise HTTPException(409, "Checkout expired; create a new request key")
+                intent = dict(existing)
+                frozen = intent["payload"]
+                if isinstance(frozen, str):
+                    frozen = json.loads(frozen)
+                if "trial_end_unix" not in frozen:
+                    raise HTTPException(
+                        409,
+                        "Checkout intent predates exact trial snapshot; wait for the legacy session to expire",
+                    )
                 if existing["session_url"]:
                     return {"url": existing["session_url"]}
-                intent = dict(existing)
             else:
-                intent = {"id": uuid.uuid4(), "expires_at": datetime.now(timezone.utc) + timedelta(hours=1)}
-                from src.core.billing.suspension import giorni_trial_rimanenti
+                now = datetime.now(timezone.utc)
+                legacy_session = await conn.fetchrow("""
+                    SELECT id, expires_at FROM billing_checkout_intents
+                    WHERE organization_id = $1::uuid
+                      AND expires_at > $2
+                      AND NOT (payload ? 'trial_end_unix')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                """, str(org_id), now)
+                if legacy_session:
+                    raise HTTPException(
+                        409,
+                        "A legacy checkout intent is still valid or its result is uncertain; wait for it to expire before starting a new checkout",
+                    )
+                expires_at = now + timedelta(hours=1)
+                from src.core.billing.suspension import trial_end_unix_timestamp
                 frozen = dict(payload)
-                frozen["trial_days_remaining"] = giorni_trial_rimanenti(org["trial_end"])
+                trial_end_unix = None
+                if org.get("subscription_status") == "trialing":
+                    trial_end_unix = trial_end_unix_timestamp(org.get("trial_end"), now=now)
+                if trial_end_unix is not None:
+                    exact_trial_end = datetime.fromtimestamp(trial_end_unix, tz=timezone.utc)
+                    if exact_trial_end - now < timedelta(minutes=30):
+                        raise HTTPException(
+                            409,
+                            "The remaining trial is too short for a safe Stripe Checkout session; retry after it ends",
+                        )
+                    expires_at = min(expires_at, exact_trial_end)
+                frozen["trial_end_unix"] = trial_end_unix
+                intent = {"id": uuid.uuid4(), "expires_at": expires_at}
                 intent["payload"] = frozen
                 await conn.execute("""
                     INSERT INTO billing_checkout_intents(id, organization_id, request_key, payload_hash, payload, expires_at)
@@ -69,16 +104,28 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
     frozen = intent["payload"]
     if isinstance(frozen, str):
         frozen = json.loads(frozen)
-    trial_days = frozen["trial_days_remaining"]
+    trial_end_unix = frozen.get("trial_end_unix")
+    if trial_end_unix is not None:
+        try:
+            trial_end_unix = int(trial_end_unix)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise HTTPException(409, "Checkout intent has an invalid trial snapshot") from exc
+        if trial_end_unix <= 0:
+            raise HTTPException(409, "Checkout intent has an invalid trial snapshot")
+    # The explicit sentinel prevents a stale future DB deadline from being
+    # reused when a paid or expired organization starts a new checkout.
+    session_metadata = {"trial_end_unix": "none"}
+    if trial_end_unix is not None:
+        session_metadata["trial_end_unix"] = str(trial_end_unix)
     kwargs = dict(customer=customer_id, line_items=[{"price": frozen["price_id"], "quantity": 1}],
                   mode="subscription", success_url=frozen["success_url"], cancel_url=frozen["cancel_url"],
-                  client_reference_id=str(org_id), metadata={"trial_days_remaining": str(trial_days)},
-                  payment_method_collection="if_required" if trial_days > 0 else "required",
+                  client_reference_id=str(org_id), metadata=session_metadata,
+                  payment_method_collection="if_required" if trial_end_unix is not None else "required",
                   expires_at=int(intent["expires_at"].timestamp()),
                   idempotency_key=f"checkout:{intent['id']}")
-    if trial_days > 0:
+    if trial_end_unix is not None:
         kwargs["subscription_data"] = {
-            "trial_period_days": trial_days,
+            "trial_end": trial_end_unix,
             "trial_settings": {"end_behavior": {"missing_payment_method": "cancel"}},
         }
     session = await stripe_call(stripe.checkout.Session.create, **kwargs)

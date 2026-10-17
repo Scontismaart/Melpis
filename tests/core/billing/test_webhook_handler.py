@@ -1,6 +1,6 @@
 import uuid
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("reset_db")]
 
@@ -70,6 +70,27 @@ async def test_handle_checkout_completed_sets_trial_period(repo, sample_org, val
     billing = await repo.get_organization_billing(sample_org["id"])
     assert billing["trial_start"] is not None
     assert billing["trial_end"] is not None
+
+
+async def test_checkout_webhook_keeps_original_23_hour_trial_deadline(repo, sample_org, valid_checkout_event):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    original_deadline = datetime.now(timezone.utc) + timedelta(hours=23)
+    expected_deadline = datetime.fromtimestamp(int(original_deadline.timestamp()), tz=timezone.utc)
+    async with repo.pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE organizations SET subscription_status = 'trialing', trial_end = $1 WHERE id = $2",
+            original_deadline,
+            sample_org["id"],
+        )
+    event = valid_checkout_event
+    event["data"]["object"]["client_reference_id"] = str(sample_org["id"])
+    event["data"]["object"]["metadata"] = {"trial_end_unix": str(int(original_deadline.timestamp()))}
+
+    await handle_stripe_webhook(event, repo, 7)
+
+    billing = await repo.get_organization_billing(sample_org["id"])
+    assert billing["trial_end"] == expected_deadline
 
 
 async def test_handle_invoice_paid_resets_usage(repo, sample_org, valid_invoice_paid_event):

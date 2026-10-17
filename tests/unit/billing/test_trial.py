@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from src.core.billing.suspension import giorni_trial_rimanenti
+from src.core.billing.suspension import giorni_trial_rimanenti, trial_end_unix_timestamp
 
 
 def test_trial_futuro_ritorna_giorni_interi():
@@ -27,3 +27,10 @@ def test_trial_naive_accettato():
     now = datetime(2026, 9, 1, tzinfo=timezone.utc)
     naive = datetime(2026, 9, 4)  # naive UTC
     assert giorni_trial_rimanenti(naive, now=now) == 3
+
+
+def test_trial_deadline_timestamp_preserves_fractional_days_without_extension():
+    now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+    deadline = now + timedelta(hours=23, microseconds=900_000)
+    assert trial_end_unix_timestamp(deadline, now=now) == int(deadline.timestamp())
+    assert trial_end_unix_timestamp(now - timedelta(seconds=1), now=now) is None

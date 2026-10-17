@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+import json
 import uuid
 
 import pytest
@@ -168,6 +169,7 @@ async def test_checkout_replay_reuses_persisted_session_without_network():
                 "id": uuid.uuid4(),
                 "payload_hash": digest,
                 "expires_at": datetime.now(timezone.utc) + timedelta(minutes=30),
+                "payload": json.dumps({**payload, "trial_end_unix": None}),
                 "session_url": "https://checkout.stripe.test/session",
             }
 
@@ -180,10 +182,105 @@ async def test_checkout_replay_reuses_persisted_session_without_network():
     stripe_call.assert_not_awaited()
 
 
-@pytest.mark.parametrize(("trial_days", "collection"), [(7, "if_required"), (0, "required")])
 @pytest.mark.asyncio
-async def test_checkout_only_requires_payment_method_without_trial(monkeypatch, trial_days, collection):
+async def test_checkout_does_not_reuse_legacy_session_without_exact_trial_snapshot():
     org_id = uuid.uuid4()
+    payload = {
+        "price_id": "price_test",
+        "plan": "starter",
+        "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+    import hashlib
+    import json
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    class Conn:
+        def transaction(self):
+            return _AsyncContext()
+
+        async def fetchrow(self, query, *args):
+            if "FROM organizations" in query:
+                return {"id": org_id, "stripe_customer_id": "cus_test", "trial_end": None}
+            return {
+                "id": uuid.uuid4(),
+                "payload_hash": digest,
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=30),
+                "payload": json.dumps({**payload, "trial_days_remaining": 0}),
+                "session_url": "https://checkout.stripe.test/legacy-session",
+            }
+
+    stripe_call = AsyncMock()
+    with pytest.raises(HTTPException, match="predates exact trial snapshot") as exc:
+        await create_durable_checkout(
+            type("Repo", (), {"pool": _Pool(Conn())})(), org_id, "checkout-legacy-001",
+            payload, object(), stripe_call,
+        )
+    assert exc.value.status_code == 409
+    stripe_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_session_url", [None, "https://checkout.stripe.test/legacy-session"])
+async def test_checkout_blocks_new_intent_while_legacy_result_may_still_be_active(legacy_session_url):
+    org_id = uuid.uuid4()
+    payload = {
+        "price_id": "price_test",
+        "plan": "starter",
+        "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+
+    class Conn:
+        def __init__(self):
+            self.legacy_intent_query = None
+
+        def transaction(self):
+            return _AsyncContext()
+
+        async def fetchrow(self, query, *args):
+            if "FROM organizations" in query:
+                return {"id": org_id, "stripe_customer_id": "cus_test", "trial_end": None}
+            if "AND NOT (payload ? 'trial_end_unix')" in query:
+                self.legacy_intent_query = query
+                if "session_url IS NOT NULL" in query:
+                    return None
+                return {
+                    "id": uuid.uuid4(),
+                    "expires_at": datetime.now(timezone.utc) + timedelta(minutes=20),
+                    "session_url": legacy_session_url,
+                }
+            return None
+
+    stripe_call = AsyncMock()
+    conn = Conn()
+    with pytest.raises(HTTPException, match="legacy checkout intent is still valid or its result is uncertain") as exc:
+        await create_durable_checkout(
+            type("Repo", (), {"pool": _Pool(conn)})(), org_id, "checkout-new-key-001",
+            payload, object(), stripe_call,
+        )
+    assert exc.value.status_code == 409
+    assert "session_url IS NOT NULL" not in conn.legacy_intent_query
+    stripe_call.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("trial_label", "trial_offset", "status", "has_trial"),
+    [
+        ("23h_remaining", timedelta(hours=23), "trialing", True),
+        ("expired", timedelta(hours=-1), "trialing", False),
+        ("full_7_day_trial", timedelta(days=7), "trialing", True),
+        ("paid_org_stale_trial_end", timedelta(days=7), "active", False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_checkout_preserves_exact_trial_deadline_and_payment_collection(
+    trial_label, trial_offset, status, has_trial,
+):
+    org_id = uuid.uuid4()
+    original_trial_end = datetime.now(timezone.utc) + trial_offset
 
     class Conn:
         def __init__(self):
@@ -194,13 +291,14 @@ async def test_checkout_only_requires_payment_method_without_trial(monkeypatch, 
 
         async def fetchrow(self, query, *args):
             if "FROM organizations" in query:
-                return {"id": org_id, "stripe_customer_id": "cus_test", "trial_end": None}
+                return {
+                    "id": org_id,
+                    "stripe_customer_id": "cus_test",
+                    "trial_end": original_trial_end,
+                    "subscription_status": status,
+                }
             return None
 
-    monkeypatch.setattr(
-        "src.core.billing.suspension.giorni_trial_rimanenti",
-        lambda *_args, **_kwargs: trial_days,
-    )
     stripe_call = AsyncMock(return_value=SimpleNamespace(id="cs_test", url="https://checkout.test/cs"))
     payload = {
         "price_id": "price_test_monthly",
@@ -214,19 +312,227 @@ async def test_checkout_only_requires_payment_method_without_trial(monkeypatch, 
     result = await create_durable_checkout(
         type("Repo", (), {"pool": _Pool(Conn())})(),
         org_id,
-        "checkout-trial-001",
+        f"checkout-{trial_label}",
         payload,
         stripe,
         stripe_call,
     )
 
     assert result["url"] == "https://checkout.test/cs"
-    assert stripe_call.await_args.kwargs["payment_method_collection"] == collection
-    assert ("subscription_data" in stripe_call.await_args.kwargs) is (trial_days > 0)
-    if trial_days > 0:
+    kwargs = stripe_call.await_args.kwargs
+    assert kwargs["payment_method_collection"] == ("if_required" if has_trial else "required")
+    assert ("subscription_data" in kwargs) is has_trial
+    if has_trial:
+        expected_trial_end = int(original_trial_end.timestamp())
+        assert kwargs["subscription_data"]["trial_end"] == expected_trial_end
+        assert kwargs["expires_at"] <= expected_trial_end
+        assert kwargs["metadata"]["trial_end_unix"] == str(expected_trial_end)
         assert stripe_call.await_args.kwargs["subscription_data"]["trial_settings"] == {
             "end_behavior": {"missing_payment_method": "cancel"}
         }
+    else:
+        assert kwargs["metadata"]["trial_end_unix"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_checkout_does_not_create_session_when_trial_deadline_is_inside_stripe_minimum():
+    org_id = uuid.uuid4()
+    class Conn:
+        def transaction(self):
+            return _AsyncContext()
+
+        async def fetchrow(self, query, *args):
+            if "FROM organizations" in query:
+                return {
+                    "id": org_id,
+                    "stripe_customer_id": "cus_test",
+                    "trial_end": datetime.now(timezone.utc) + timedelta(minutes=20),
+                    "subscription_status": "trialing",
+                }
+            return None
+
+    stripe_call = AsyncMock()
+    payload = {
+        "price_id": "price_test_monthly",
+        "plan": "starter",
+        "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+    with pytest.raises(HTTPException) as exc:
+        await create_durable_checkout(
+            type("Repo", (), {"pool": _Pool(Conn())})(),
+            org_id,
+            "checkout-too-short-001",
+            payload,
+            object(),
+            stripe_call,
+        )
+    assert exc.value.status_code == 409
+    stripe_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_checkout_metadata", [True, False])
+async def test_checkout_webhook_preserves_absolute_trial_deadline(include_checkout_metadata):
+    org_id = uuid.uuid4()
+    original_trial_end = datetime.now(timezone.utc) + timedelta(hours=23)
+    expected_trial_end = (
+        datetime.fromtimestamp(int(original_trial_end.timestamp()), tz=timezone.utc)
+        if include_checkout_metadata
+        else original_trial_end
+    )
+
+    class Conn:
+        def __init__(self):
+            self.execute = AsyncMock()
+            self.fetchrow = AsyncMock(return_value={"trial_end": original_trial_end})
+
+    conn = Conn()
+    repo = SimpleNamespace(process_stripe_event_in_tx=AsyncMock(return_value=True))
+    metadata = (
+        {"trial_end_unix": str(int(original_trial_end.timestamp()))}
+        if include_checkout_metadata
+        else {}
+    )
+    result = await _handle_checkout_completed(
+        conn,
+        repo,
+        {
+            "mode": "subscription",
+            "client_reference_id": str(org_id),
+            "subscription": "sub_test",
+            "customer": "cus_test",
+            "metadata": metadata,
+        },
+        "evt_exact_trial_end",
+        0,
+    )
+
+    assert result["action"] == "subscription_created"
+    assert conn.execute.await_args.args[4] == expected_trial_end
+    assert conn.fetchrow.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_checkout_webhook_clamps_future_metadata_to_original_trial_deadline():
+    org_id = uuid.uuid4()
+    original_trial_end = datetime.now(timezone.utc) + timedelta(hours=23)
+
+    class Conn:
+        def __init__(self):
+            self.execute = AsyncMock()
+            self.fetchrow = AsyncMock(return_value={"trial_end": original_trial_end})
+
+    conn = Conn()
+    repo = SimpleNamespace(process_stripe_event_in_tx=AsyncMock(return_value=True))
+    await _handle_checkout_completed(
+        conn,
+        repo,
+        {
+            "mode": "subscription",
+            "client_reference_id": str(org_id),
+            "subscription": "sub_test",
+            "customer": "cus_test",
+            "metadata": {"trial_end_unix": str(int((original_trial_end + timedelta(days=30)).timestamp()))},
+        },
+        "evt_future_trial_metadata",
+        0,
+    )
+
+    expected_deadline = datetime.fromtimestamp(int(original_trial_end.timestamp()), tz=timezone.utc)
+    assert conn.execute.await_args.args[4] == expected_deadline
+    conn.fetchrow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_checkout_webhook_explicit_no_trial_marker_does_not_reuse_stale_db_deadline():
+    org_id = uuid.uuid4()
+    stale_trial_end = datetime.now(timezone.utc) + timedelta(days=30)
+
+    class Conn:
+        def __init__(self):
+            self.execute = AsyncMock()
+            self.fetchrow = AsyncMock(return_value={"trial_end": stale_trial_end})
+
+    conn = Conn()
+    repo = SimpleNamespace(process_stripe_event_in_tx=AsyncMock(return_value=True))
+    before = datetime.now(timezone.utc)
+    await _handle_checkout_completed(
+        conn,
+        repo,
+        {
+            "mode": "subscription",
+            "client_reference_id": str(org_id),
+            "subscription": "sub_test",
+            "customer": "cus_test",
+            "metadata": {"trial_end_unix": "none"},
+        },
+        "evt_no_trial_marker",
+        0,
+    )
+    after = datetime.now(timezone.utc)
+
+    assert before <= conn.execute.await_args.args[4] <= after
+    conn.fetchrow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_checkout_retry_reuses_frozen_trial_deadline_after_organization_changes():
+    org_id = uuid.uuid4()
+    created_at = datetime.now(timezone.utc)
+    original_trial_end = created_at + timedelta(hours=23)
+
+    class Conn:
+        def __init__(self):
+            self.trial_end = original_trial_end
+            self.intent = None
+
+        def transaction(self):
+            return _AsyncContext()
+
+        async def fetchrow(self, query, *args):
+            if "FROM organizations" in query:
+                return {
+                    "id": org_id,
+                    "stripe_customer_id": "cus_test",
+                    "trial_end": self.trial_end,
+                    "subscription_status": "trialing",
+                }
+            return self.intent
+
+        async def execute(self, query, *args):
+            if "INSERT INTO billing_checkout_intents" in query:
+                self.intent = {
+                    "id": args[0],
+                    "payload_hash": args[3],
+                    "payload": json.loads(args[4]),
+                    "expires_at": args[5],
+                    "session_url": None,
+                }
+            elif "UPDATE billing_checkout_intents" in query and self.intent:
+                self.intent["session_url"] = args[3]
+
+    conn = Conn()
+    repo = SimpleNamespace(pool=_Pool(conn))
+    payload = {
+        "price_id": "price_test_monthly",
+        "plan": "starter",
+        "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+    stripe = SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=object())))
+    first_attempt = AsyncMock(side_effect=RuntimeError("simulated network failure"))
+    with pytest.raises(RuntimeError, match="simulated network failure"):
+        await create_durable_checkout(repo, org_id, "checkout-retry-trial-001", payload, stripe, first_attempt)
+
+    conn.trial_end = created_at + timedelta(days=7)
+    retry = AsyncMock(return_value=SimpleNamespace(id="cs_retry", url="https://checkout.test/retry"))
+    result = await create_durable_checkout(repo, org_id, "checkout-retry-trial-001", payload, stripe, retry)
+
+    assert result["url"] == "https://checkout.test/retry"
+    assert retry.await_args.kwargs["subscription_data"]["trial_end"] == int(original_trial_end.timestamp())
 
 
 def test_checkout_redirect_is_restricted_to_configured_origin():
