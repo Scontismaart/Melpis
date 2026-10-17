@@ -48,8 +48,17 @@ not assumed. Cross-origin use must also be allowed by the API's credentialed
 CORS origin list.
 
 The response uses a relative API path and does not derive the URL from
-`Host`, `X-Forwarded-Host`, or `X-Forwarded-Proto`. This avoids generating an
-internal `http://` URL behind the TLS-terminating Nginx proxy. Nginx forwards
-the original scheme, but Uvicorn proxy-header processing is disabled in the
-current compose configuration, so callers must not rely on `request.url_for`
-for this link.
+`Host`, `X-Forwarded-Host`, or `X-Forwarded-Proto`. The production Compose
+configuration routes `/api/*` through Caddy to the API and starts Uvicorn with
+proxy-header processing disabled. Caddy forwards the request path and method,
+including CORS `OPTIONS` preflight requests. The relative download path avoids
+depending on forwarded host or scheme headers, so callers must not rely on
+`request.url_for` for this link.
+
+For cross-origin browser calls, the API must list the exact frontend origin in
+`CORS_ORIGINS` or set it as `PUBLIC_APP_URL`; wildcard origins are incompatible
+with credentialed cookies. The API's preflight response allows `GET`, the
+`Authorization` header and `X-Organization-Id`, and returns
+`Access-Control-Allow-Credentials: true`. `SameSite=Strict` still requires the
+frontend and API to be same-site; a genuinely cross-site cookie flow is not
+supported. In production, the same-origin Caddy route is the supported path.

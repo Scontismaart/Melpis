@@ -8,7 +8,9 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from src.api.cors import configure_cors
 from src.core.auth import bff, dependencies
 from src.core.auth import routes as auth_routes
 from src.core.gdpr import routes, token_store
@@ -356,3 +358,61 @@ async def test_two_concurrent_downloads_return_data_to_one_request(gdpr_app):
     assert sorted((first.status_code, second.status_code)) == [200, 404]
     winner = first if first.status_code == 200 else second
     assert winner.json() == {"organization": "tenant-owned"}
+
+
+def test_gdpr_download_cors_preflight_allows_credentials_and_tenant_header():
+    app = FastAPI()
+
+    @app.get("/api/gdpr/download")
+    async def download_contract():
+        return {"ok": True}
+
+    configure_cors(
+        app,
+        origins_csv="https://dashboard.example.test",
+        public_app_url="",
+    )
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/gdpr/download",
+            headers={
+                "Origin": "https://dashboard.example.test",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,x-organization-id",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://dashboard.example.test"
+    assert response.headers["access-control-allow-credentials"] == "true"
+    allowed_headers = response.headers["access-control-allow-headers"].lower()
+    assert "authorization" in allowed_headers
+    assert "x-organization-id" in allowed_headers
+
+
+def test_gdpr_download_cors_preflight_rejects_unlisted_origin():
+    app = FastAPI()
+
+    @app.get("/api/gdpr/download")
+    async def download_contract():
+        return {"ok": True}
+
+    configure_cors(
+        app,
+        origins_csv="https://dashboard.example.test",
+        public_app_url="",
+    )
+
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/gdpr/download",
+            headers={
+                "Origin": "https://attacker.example.test",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,x-organization-id",
+            },
+        )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers

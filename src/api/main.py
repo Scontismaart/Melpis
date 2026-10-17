@@ -20,9 +20,9 @@ configure_logging(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException, File, UploadFile, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import JSONResponse
+from src.api.cors import configure_cors
 
 from src.core.notifications.email_service import start_worker, stop_worker as stop_email_worker
 from src.core.crew_runner import genera_risposta
@@ -398,24 +398,7 @@ app.include_router(simulator_router)
 from src.api.routes.team import router as team_router
 app.include_router(team_router)
 
-cors_str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
-allow_origins = [o.strip() for o in cors_str.split(",") if o.strip()]
-public_url = (os.getenv("PUBLIC_APP_URL") or "").strip().rstrip("/")
-if public_url and public_url not in allow_origins:
-    allow_origins.append(public_url)
-if not allow_origins:
-    raise RuntimeError(
-        "CORS_ORIGINS e' impostata ma vuota dopo il parsing. "
-        "Imposta una lista di origini valide separate da virgola, "
-        "o rimuovi la variabile per usare il default locale."
-    )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allow_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "X-Organization-Id", "X-API-Key", "X-CSRF-Token", "Content-Type"],
-)
+configure_cors(app)
 
 # ── Rate limiting ──────────────────────────────────────────────
 RATE_LIMIT_LIMIT = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
