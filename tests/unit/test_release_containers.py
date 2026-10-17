@@ -82,7 +82,9 @@ def test_ci_does_not_duplicate_branch_push_and_pull_request_runs() -> None:
     workflow = _read(".github/workflows/ci.yml")
     trigger = workflow.split("permissions:", 1)[0]
 
-    assert "pull_request:\n    branches: [main]" in trigger
+    assert re.search(
+        r"pull_request:\n(?:    #[^\n]*\n)*    branches: \[main, 'codex/\*\*'\]", trigger
+    )
     assert "push:\n    branches: [main]" in trigger
     assert 'branches: ["**"]' not in trigger
 
