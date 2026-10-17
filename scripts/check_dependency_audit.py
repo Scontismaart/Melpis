@@ -1,6 +1,7 @@
 """Fail CI on new Python advisories while documenting narrow exceptions."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -18,17 +19,51 @@ ACCEPTED = {
 }
 
 
+def _safe_text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.isprintable()
+
+
+def _canonical_name(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 def main(path: str) -> int:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    dependencies = data.get("dependencies")
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        print("Invalid pip-audit report", file=sys.stderr)
+        return 2
+    dependencies = data.get("dependencies") if isinstance(data, dict) else None
     if not isinstance(dependencies, list) or len(dependencies) < 50:
         print("Incomplete pip-audit report", file=sys.stderr)
         return 2
 
+    # A skipped package is unverified, even if the remaining graph is clean.
+    # Validate the whole report before printing any successful audit summary.
+    seen = set()
+    for dependency in dependencies:
+        if (
+            not isinstance(dependency, dict)
+            or "skip_reason" in dependency
+            or any(not _safe_text(dependency.get(key))
+                   for key in ("name", "version"))
+            or not isinstance(dependency.get("vulns"), list)
+            or any(not isinstance(vulnerability, dict)
+                   or not _safe_text(vulnerability.get("id"))
+                   for vulnerability in dependency["vulns"])
+        ):
+            print("Incomplete or invalid dependency audit coverage", file=sys.stderr)
+            return 2
+        identity = (_canonical_name(dependency["name"]), dependency["version"])
+        if identity in seen:
+            print("Duplicate dependency in audit report", file=sys.stderr)
+            return 2
+        seen.add(identity)
+
     unknown = []
     accepted = []
     for dependency in dependencies:
-        name = str(dependency.get("name", "")).lower().replace("_", "-")
+        name = _canonical_name(dependency["name"])
         version = str(dependency.get("version", ""))
         allowed = ACCEPTED.get((name, version), set())
         for vulnerability in dependency.get("vulns", []):
