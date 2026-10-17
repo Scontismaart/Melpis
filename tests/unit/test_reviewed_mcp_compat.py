@@ -4,6 +4,7 @@ import inspect
 import asyncio
 import os
 import socket
+import site
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -110,6 +111,30 @@ def test_crewai_kickoff_uses_only_the_synthetic_llm():
     assert 'synthetic-success' in str(result)
 
 
+def test_loopback_child_keeps_installed_library_paths_without_provider_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv('GROQ_API_KEY', 'synthetic-not-a-real-key')
+    monkeypatch.setenv('PYTHONPATH', 'untrusted-parent-path')
+    monkeypatch.setattr(site, 'getsitepackages', lambda: ['public-runtime-site'])
+    monkeypatch.setattr(site, 'getusersitepackages', lambda: 'public-user-site')
+    environment = _loopback_environment(tmp_path)
+    assert environment['HOME'] == str(tmp_path)
+    assert environment['PYTHONPATH'] == os.pathsep.join(['public-runtime-site', 'public-user-site'])
+    assert 'GROQ_API_KEY' not in environment
+    assert 'untrusted-parent-path' not in environment.values()
+
+
+def _loopback_environment(home):
+    allowed = ('PATH', 'SystemRoot', 'WINDIR', 'LANG', 'LC_ALL')
+    environment = {name: os.environ[name] for name in allowed if name in os.environ}
+    environment.update(HOME=str(home), USERPROFILE=str(home),
+                       CREWAI_TELEMETRY_ENABLED='false', OTEL_SDK_DISABLED='true')
+    # Changing HOME isolates server state but also changes Python's user site.
+    # Forward only interpreter-derived public library locations, never parent
+    # PYTHONPATH or credentials. Docker installs runtime packages with --user.
+    environment['PYTHONPATH'] = os.pathsep.join(site.getsitepackages() + [site.getusersitepackages()])
+    return environment
+
+
 @pytest.mark.parametrize('protocol', ['streamable-http', 'sse'])
 async def test_real_loopback_http_and_sse_handshake_tools_and_errors(tmp_path, protocol):
     """Actual MCP wire protocols; bind loopback only and never call a provider."""
@@ -133,10 +158,7 @@ def failure()->str:
 server.run(transport=sys.argv[1])
 ''', encoding='utf-8')
     # Fresh cwd has no .env. Do not forward credentials or provider environment.
-    allowed = ('PATH', 'SystemRoot', 'WINDIR', 'LANG', 'LC_ALL')
-    environment = {name: os.environ[name] for name in allowed if name in os.environ}
-    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
-                       CREWAI_TELEMETRY_ENABLED='false', OTEL_SDK_DISABLED='true')
+    environment = _loopback_environment(tmp_path)
     process = subprocess.Popen([sys.executable, str(server), protocol, str(port)],
                                cwd=tmp_path, env=environment,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -166,7 +188,8 @@ server.run(transport=sys.argv[1])
 
         await asyncio.wait_for(exercise_protocol(), timeout=20)
     finally:
-        process.terminate()
+        if process.poll() is None:
+            process.terminate()
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
