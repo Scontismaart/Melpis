@@ -1,5 +1,6 @@
 """Exercise GDPR export authorization with the real authentication chain."""
 import asyncio
+import importlib.util
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -7,13 +8,20 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.cors import configure_cors
 from src.core.auth import bff, dependencies
 from src.core.auth import routes as auth_routes
 from src.core.gdpr import routes, token_store
+
+_audit_path = Path(__file__).resolve().parents[3] / "scripts" / "audit_route_contracts.py"
+_audit_spec = importlib.util.spec_from_file_location("audit_route_contracts", _audit_path)
+_audit_module = importlib.util.module_from_spec(_audit_spec)
+_audit_spec.loader.exec_module(_audit_module)
+extract_route_contracts = _audit_module.extract_route_contracts
+verify_baseline = _audit_module.verify_baseline
 
 
 class SimulatedRedis:
@@ -173,8 +181,47 @@ async def test_download_api_contract_has_owner_tenant_guard_and_no_bearer_path(g
     contract = baseline["/api/gdpr/download::GET"]
     assert contract["required_roles"] == ["owner"]
     assert contract["has_org_context"] is True
-    assert routes.gdpr_download.__api_required_roles__ == ("owner",)
-    assert routes.gdpr_download.__api_org_context__ is True
+    runtime_contract = extract_route_contracts(app)["/api/gdpr/download::GET"]
+    assert runtime_contract["required_roles"] == ["owner"]
+    assert runtime_contract["has_org_context"] is True
+
+
+def test_route_audit_rejects_handler_metadata_without_runtime_guards(tmp_path, capsys):
+    app = FastAPI()
+
+    async def no_op_guard():
+        return None
+
+    no_op_guard.__api_required_roles__ = ("owner",)
+    no_op_guard.__api_org_context__ = True
+
+    async def unprotected_download(_guard=Depends(no_op_guard)):
+        return {"ok": True}
+
+    unprotected_download.__api_required_roles__ = ("owner",)
+    unprotected_download.__api_org_context__ = True
+    app.add_api_route("/api/gdpr/download", unprotected_download, methods=["GET"])
+
+    baseline = {
+        "/api/gdpr/download::GET": {
+            "path": "/api/gdpr/download",
+            "methods": ["GET"],
+            "endpoint_name": "unprotected_download",
+            "required_roles": ["owner"],
+            "has_org_context": True,
+            "response_model": None,
+            "is_llm_route": False,
+        }
+    }
+    baseline_file = tmp_path / "route-baseline.json"
+    baseline_file.write_text(json.dumps(baseline), encoding="utf-8")
+
+    assert extract_route_contracts(app)["/api/gdpr/download::GET"]["required_roles"] is None
+    assert extract_route_contracts(app)["/api/gdpr/download::GET"]["has_org_context"] is False
+    assert verify_baseline(str(baseline_file), app=app) == 1
+    audit_output = capsys.readouterr().err
+    assert "AUTH DRIFT su /api/gdpr/download::GET" in audit_output
+    assert "ORG CONTEXT DRIFT su /api/gdpr/download::GET" in audit_output
 
 
 async def test_download_requires_authenticated_user_and_preserves_token(client):

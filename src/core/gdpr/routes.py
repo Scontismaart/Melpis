@@ -220,26 +220,22 @@ async def gdpr_export(
     return response
 
 
-@router.get("/download")
-async def gdpr_download(
+async def require_gdpr_download_authorization(
     request: Request,
     user: dict = Depends(get_current_user),
     _mfa: dict = Depends(require_mfa()),
-):
+) -> tuple[str, token_store.ExportToken] | None:
+    """Authorize the token-bound owner, session and organization before consume."""
     token = request.cookies.get(token_store.DOWNLOAD_COOKIE, "")
     try:
         pending = await token_store.read_token(token) if token else None
     except token_store.TokenStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
     if pending is None:
-        response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
-        _clear_download_cookie(response)
-        _set_download_response_headers(response)
-        return response
+        return None
 
-    # Never use get_organization_context here: its normal login flow can
-    # auto-provision a tenant. A download must match the already-authorized
-    # owner, MFA session, and tenant that created this export.
+    # Never use get_organization_context here: its login flow can auto-provision
+    # a tenant. This check binds the export to its authenticated owner session.
     auth_user_id = user.get("auth_user_id")
     session_id = user.get("session_id")
     if (
@@ -277,6 +273,23 @@ async def gdpr_download(
     ):
         raise HTTPException(status_code=403, detail="Membership owner non valida per questo export")
 
+    return token, pending
+
+
+@router.get("/download")
+async def gdpr_download(
+    request: Request,
+    authorization: tuple[str, token_store.ExportToken] | None = Depends(
+        require_gdpr_download_authorization
+    ),
+):
+    if authorization is None:
+        response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
+        _clear_download_cookie(response)
+        _set_download_response_headers(response)
+        return response
+
+    token, pending = authorization
     try:
         data = await token_store.consume_token(token, pending)
     except token_store.TokenStoreUnavailable as exc:
@@ -288,13 +301,6 @@ async def gdpr_download(
     _clear_download_cookie(response)
     _set_download_response_headers(response)
     return response
-
-
-# The route-contract audit reads these explicit guards because the owner and
-# organization checks are intentionally performed against the token's bound
-# tenant inside the handler (without the JIT-provisioning org dependency).
-gdpr_download.__api_required_roles__ = ("owner",)
-gdpr_download.__api_org_context__ = True
 
 
 def _clear_download_cookie(response: JSONResponse) -> None:
