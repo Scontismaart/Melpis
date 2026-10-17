@@ -32,6 +32,42 @@ class _Pool:
 
 
 @pytest.mark.asyncio
+async def test_commercial_bootstrap_rejects_yearly_checkout_before_stripe(monkeypatch):
+    from src.core.billing.plans import PLANS
+    from src.core.billing.routes import CheckoutSessionRequest, create_checkout_session
+
+    monkeypatch.setenv("LAUNCH_PROFILE", "commercial_bootstrap")
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id_yearly", "price_test_yearly")
+
+    def stripe_must_not_be_initialized():
+        raise AssertionError("yearly commercial-bootstrap checkout reached Stripe")
+
+    monkeypatch.setattr("src.core.billing.routes._get_stripe", stripe_must_not_be_initialized)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(repo=object())),
+        headers={},
+    )
+    checkout_request = CheckoutSessionRequest(
+        plan="starter",
+        interval="yearly",
+        success_url="https://app.melpis.it/success",
+        cancel_url="https://app.melpis.it/cancel",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await create_checkout_session(
+            checkout_request,
+            request,
+            {"organization_id": str(uuid.uuid4())},
+            None,
+        )
+
+    assert exc.value.status_code == 503
+    assert "Stripe price ID (yearly) non configurato" in exc.value.detail
+
+
+@pytest.mark.asyncio
 async def test_stripe_dedup_matches_composite_primary_key():
     conn = AsyncMock()
     conn.fetchval.return_value = "evt_1"

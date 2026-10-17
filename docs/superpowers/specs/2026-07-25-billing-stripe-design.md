@@ -122,7 +122,7 @@ Funzione check_plan_limits(organization_id):
 
 ### `POST /api/billing/create-checkout-session`
 
-Crea Stripe Checkout Session con `trial_period_days=7`, `payment_method_collection=required`, `mode=subscription`, line_items con price_id del piano scelto. `client_reference_id = organization_id`. `success_url` e `cancel_url` a dashboard.
+Crea Stripe Checkout Session in modalità `subscription`, con `line_items` basate sul `price_id` mensile e `client_reference_id = organization_id`. Quando restano almeno 24 ore intere di trial, usa `payment_method_collection=if_required` e imposta `subscription_data.trial_settings.end_behavior.missing_payment_method=cancel`: il cliente può iniziare il trial senza carta; se non aggiunge un metodo valido entro la fine, Stripe annulla l'abbonamento e dovrà avviare un nuovo checkout per continuare. Con zero giorni interi di trial, richiedi il metodo di pagamento (`payment_method_collection=required`). L'intervallo annuale resta disabilitato nel profilo `commercial_bootstrap`. `success_url` e `cancel_url` devono restare sul dominio dashboard configurato.
 
 **Auth:** `require_ruolo("owner")`
 
