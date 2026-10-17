@@ -247,11 +247,11 @@ Finestra operativa dalla verifica, non promessa. Percorso critico: capienza/recl
 
 ## Prossime cinque azioni
 
-1. TASK0: risolvere MCP con dipendenza compatibile revisionata; nessuna eccezione o fork non approvato. Rileggere CI sui nuovi head di #104/#105/#106 e frammento mensile.
-2. A02: regressioni per tenant gia active + prezzo sconosciuto e piu line item; definire una restrizione solo sull'abbonamento correttamente associato, senza alterare accesso manuale o quota storica.
-3. A03: recuperare metriche reali dei tentativi provider e propagazione fail-closed su tutti gli ingressi AI, senza bypass demo.
-4. A04: separare riserva atomica e completamento al salvataggio della risposta nel ledger esistente; test concorrenti/crash/replay prima dell'integrazione.
-5. C01/C02: batch schema corrente applicato e verificato; conservare backup per rollback. Preparare host/account e release applicativa Staging per E2E con account autorizzati; nuove migrazioni A04/A05/A06 richiedono diff/review propri. Nessuna spesa o produzione implicita.
+1. TASK0: richiedere autorizzazione separata per #105 c832869 verso main, includendo pubblicazione GHCR senza deploy servizi. Dopo integrazione autorizzata, riallineare le PR dipendenti e rieseguire CI sugli head risultanti.
+2. A03/B02: completare review/CI #111; sviluppare il trasporto Q&A con metriche originali, limiti della risposta prima del buffering, gate di accesso e guardrail, senza attivarlo prima delle prove richieste.
+3. A02/A04: certificare riconciliazione billing e protocollo durevole dei tentativi; poi riserva atomica sul ledger esistente, con prove concorrenti/crash/replay e nessun secondo contatore.
+4. A05/A06: recuperare autorizzazione deterministica booking e privacy; predisporre Google Calendar dopo i rispettivi gate, con test su account autorizzati.
+5. C01/C02: conservare backup e chiavi per rollback; definire host/account e release applicativa Staging per E2E. Nuove migrazioni richiedono diff/review e autorizzazione propri. Nessuna spesa, modifica Production o deploy implicito.
 
 ## Integrazione
 
