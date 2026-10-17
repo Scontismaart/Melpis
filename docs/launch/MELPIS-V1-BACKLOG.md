@@ -1,8 +1,8 @@
 # Melpis V1 — backlog e roadmap quattro settimane
 
-Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 2994fae7. Sol mantiene architettura, sicurezza, interfacce e review. Luna sviluppa task circoscritti con test. Nessun merge/deploy implicito.
+Data: 17 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 2994fae7; fetch del 17 ottobre conferma main locale e origin/main senza divergenze. Sol mantiene architettura, sicurezza, interfacce e review. Luna sviluppa task circoscritti con test. Nessun merge/deploy implicito.
 
-## Stato operativo verificato — 16 ottobre 2026
+## Stato operativo verificato — 17 ottobre 2026
 
 18 task ufficiali: **4 in lavorazione, 8 bloccati, 6 da fare, 0 completati**. Un frammento sviluppato non completa il task: servono accettazione, CI verde e merge; per le integrazioni anche E2E. Il batch schema 058/059/UNIQUE è applicato su Staging con approvazione e backup/restore reali verificati. Nessun nuovo frammento codice è integrato in main; E2E remoto e approvazione produzione restano aperti.
 
@@ -10,8 +10,8 @@ Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 29
 |---|---|---|---|---|---|
 | A00 / #85 | Sol | In lavorazione | #106 su #82 | snapshot preservato; preview gate 20+8 test e review sicurezza; CI stacked attivata | attendere CI/review #106 e recuperare successivi |
 | A01 / #86 | Luna, review Sol | Bloccato | #103; indipendente | sviluppato, 19 test; CI rossa MCP | risolvere dipendenza compatibile, CI, merge |
-| A02 / #87 | Sol; Luna su guard | In lavorazione | #82/#107 | guard mensile 107 test; prezzo sconosciuto su tenant active e più line item ancora aperti | aggiungere regressioni e correzioni fail-closed |
-| A03 / #88 | Sol | In lavorazione | A00/A01 | gate preview sviluppato; accounting altri ingressi incompleto | tracciare ogni tentativo provider |
+| A02 / #87 | Sol; Luna su guard | In lavorazione | #82/#107/#108 | guard mensile 107 test; validazione eventi Stripe 60 test indipendenti | CI, review e riconciliazione eventi concorrenti prima di merge |
+| A03 / #88 | Sol | In lavorazione | #109 su #106; A00/A01 | accounting preview 37 test e QA indipendente; altri ingressi da certificare | CI e verifica integrata limiter, poi altri ingressi |
 | A04 / #89 | Sol | Bloccato | A02/A03 | ledger esistente da riusare; nessuna quota atomica finale certificata | progettare riserva/completamento idempotenti |
 | A05 / #90 | Sol | Da fare | A00 | capacità/idempotenza presenti, autorizzazione da completare | policy deterministica auto/manuale |
 | A06 / #91 | Sol | Da fare | A00 | candidato #82 non certifica privacy completa | recupero sicuro export/delete/retention |
@@ -29,14 +29,16 @@ Data: 16 ottobre 2026. [Specifica corrente](MELPIS-V1-SPEC.md). Baseline main 29
 
 ### TASK 0 — dipendenze CI
 
-Frammento strumenti pubblicato nella [PR105](https://github.com/Scontismaart/Melpis/pull/105), head `60ac85a`: audit isolato e CI estesa alle PR verso `codex/**`, senza pubblicazione da PR. #106 include questi due commit di dipendenza e ha CI avviata sul proprio head `d5a82ec`.
+Frammento strumenti pubblicato nella [PR105](https://github.com/Scontismaart/Melpis/pull/105), head `c6b3bd7`: audit isolato e CI estesa alle PR verso `codex/**`, senza pubblicazione da PR. Il controllo ora respinge report invalidi, pacchetti saltati, campi mancanti e duplicati; normalizza i nomi PEP503 e valida i caratteri prima di produrre output. QA indipendente: 53 test policy/pin passati; insieme ai controlli container/trigger, 62 test passati. Ruff e diff check passati. #106 include i due precedenti commit CI e ha head `d5a82ec`.
 
 Luna ha isolato `pip-audit==2.10.1` dall'ambiente applicativo; 8 test di policy/pin passati e ambiente tool coerente. L'audit continua a scansionare i requisiti runtime con policy invariata. **MCP 1.28.1 / CVE-2026-59951 resta bloccante**: CrewAI stable controllato richiede ancora `mcp~=1.28.1`, incompatibile con il fix 1.30.0. Nessuna eccezione, nessun fork esterno adottato. ultime CI verificate #103 f6e88da, #104 6d81417, #105 60ac85a, #106 d5a82ec, #107 c220d6a tutte fallite sul medesimo MCP; #105–107 non mostrano piu conflitti tomli; non ripetere CI immutata come prova di risoluzione.
 
+Studio isolato completato: una wheel interna derivata dalla distribuzione ufficiale CrewAI 1.15.4 modifica soltanto il vincolo MCP e RECORD; 526 file invariati. Resolver, installazione, pip check e sei controlli offline passati. Secondo audit OSV rigoroso: 204 dipendenze, zero pacchetti saltati, sole eccezioni preesistenti; il primo audit PyPI con Torch saltato viene correttamente respinto dalla nuova policy. Candidato ancora non adottato: preparazione PR con builder riproducibile, provenienza e verifica inventario; prima del merge servono CI applicativa e build native. HTTP/SSE di laboratorio simulati, non E2E reale. Le nuove CI di #104 `a80bad0` e #108 `6a8d8c7` sono fallite allo step audit dipendenze.
+
 ### Certificazioni distinte
 
-- Sviluppato localmente: limiter preview (#103), gate billing preview A00 (#106), isolamento tool audit (#105), guard mensile startup/preflight (#107, 107 test), piano C01. Accounting completo e quota atomica restano aperti.
-- Integrato in main: nessuno dei nuovi frammenti; #82/#83/#103/#104/#105/#106/#107 aperte.
+- Sviluppato localmente: limiter preview (#103), gate billing preview A00 (#106), isolamento tool audit (#105), guard mensile startup/preflight (#107, 107 test), validazione eventi Stripe (#108, 60 test indipendenti), accounting preview (#109, 37 test anche in QA indipendente), piano C01. Accounting completo e quota atomica restano aperti.
+- Integrato in main: nessuno dei nuovi frammenti; #82/#83/#103/#104/#105/#106/#107/#108/#109 aperte.
 - Staging: batch approvato applicato, backup cifrato reale e restore PG17.6 isolato verificati su 80 tabelle, catalogo/ACL/trigger e dati. Solo ledger migrazioni varia fra le tabelle preesistenti. **Nessuna certificazione E2E applicativa/provider remota**. Backup e chiavi DPAPI conservati fino a conferma umana per eliminazione.
 - Produzione: nessun nuovo rilascio o modifica autorizzata.
 
@@ -74,7 +76,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Prezzi sconosciuti/mancanti, tutti i line item, checkout intent, duplicati, eventi fuori ordine e tre piani mensili.
 - Accettazione: Solo catalogo approvato concede entitlement; annuale non proposto nel lancio; tutti i test sul commit revisionato. Merge separato autorizzato dal fondatore.
 - Rischi: PR82 aperta; CI verde vale solo per a3d40ca, non per diff locale.
-- Stato/prove: Candidato esistente su GitHub, non integrato. Review: prezzo sconosciuto non restringe entitlement di tenant già active; resolver accetta un prezzo configurato fra più line item; profilo V1 deve vietare annuale anche al preflight. Guard mensile startup/preflight in [PR107](https://github.com/Scontismaart/Melpis/pull/107), sorgente `8db4ad3`, head con dipendenze CI `c220d6a`, approvato dalla review sicurezza; 107 test passati anche in QA indipendente. Correzioni webhook e regressioni richieste prima del merge.
+- Stato/prove: Candidato esistente su GitHub, non integrato. Guard mensile startup/preflight in [PR107](https://github.com/Scontismaart/Melpis/pull/107), sorgente `8db4ad3`, head con dipendenze CI `c220d6a`, approvato dalla review sicurezza; 107 test passati anche in QA indipendente. [PR108](https://github.com/Scontismaart/Melpis/pull/108), head `6a8d8c7`, aggiunge validazione completa di prezzo, singolo line item e quantità, binding customer/subscription, cause fattura e restrizione dello stato per snapshot autorevoli non validi. QA indipendente: 60 test passati, Ruff e diff check passati. Nessun contatore quota modificato da questa correzione. Eventi validi concorrenti nello stesso secondo possono richiedere snapshot successivo/riconciliazione; Stripe Test E2E e quota atomica rimangono aperti. CI e merge ancora necessari.
 
 ## [V1-A03](https://github.com/Scontismaart/Melpis/issues/88) — Certificare gate AI e accounting dei tentativi effettivi
 
@@ -84,7 +86,7 @@ A00 recupera il diff locale; A02 integra la candidata PR82 dopo review. A01 è i
 - Test: Billing assente/errore, trial scaduto, quota zero, accounting indisponibile; modello effettivo, token e latenza per ogni tentativo.
 - Accettazione: Nessuna chiamata senza tenant e stato verificato; ogni tentativo anche fallito è attribuito; metriche derivano dal provider; accounting irrisolto blocca nuove generazioni.
 - Rischi: La preview attuale ricostruisce il modello invece di propagare le metriche effettive.
-- Stato/prove: Gate condiviso già locale; accounting preview ancora incompleto.
+- Stato/prove: [PR109](https://github.com/Scontismaart/Melpis/pull/109), head `e36fa7a`, stacked su #106: propaga metriche effettive e registra i tentativi in finally anche su errore; rimuove il precedente evento stimato al solo successo. 37 test passati, ripetuti in QA indipendente; review sicurezza approvata, Ruff/diff check passati. Le prove DB coprono tentativi multipli, costo effettivo, errore dopo tentativo, metriche incomplete con blocco persistente e successiva negazione, zero eventi prima del provider, isolamento tenant e contatore commerciale invariato. Non certifica A04, retry interni SDK o crash prima della persistenza; CI e verifica integrata con #103 ancora necessarie. Altri ingressi AI da certificare separatamente.
 
 ## [V1-A04](https://github.com/Scontismaart/Melpis/issues/89) — Applicare quota risposte AI atomica e idempotente
 
