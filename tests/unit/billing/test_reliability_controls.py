@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 import uuid
 
@@ -141,6 +142,55 @@ async def test_checkout_replay_reuses_persisted_session_without_network():
     )
     assert result == {"url": "https://checkout.stripe.test/session"}
     stripe_call.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("trial_days", "collection"), [(7, "if_required"), (0, "required")])
+@pytest.mark.asyncio
+async def test_checkout_only_requires_payment_method_without_trial(monkeypatch, trial_days, collection):
+    org_id = uuid.uuid4()
+
+    class Conn:
+        def __init__(self):
+            self.execute = AsyncMock()
+
+        def transaction(self):
+            return _AsyncContext()
+
+        async def fetchrow(self, query, *args):
+            if "FROM organizations" in query:
+                return {"id": org_id, "stripe_customer_id": "cus_test", "trial_end": None}
+            return None
+
+    monkeypatch.setattr(
+        "src.core.billing.suspension.giorni_trial_rimanenti",
+        lambda *_args, **_kwargs: trial_days,
+    )
+    stripe_call = AsyncMock(return_value=SimpleNamespace(id="cs_test", url="https://checkout.test/cs"))
+    payload = {
+        "price_id": "price_test_monthly",
+        "plan": "starter",
+        "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+    stripe = SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=object())))
+
+    result = await create_durable_checkout(
+        type("Repo", (), {"pool": _Pool(Conn())})(),
+        org_id,
+        "checkout-trial-001",
+        payload,
+        stripe,
+        stripe_call,
+    )
+
+    assert result["url"] == "https://checkout.test/cs"
+    assert stripe_call.await_args.kwargs["payment_method_collection"] == collection
+    assert ("subscription_data" in stripe_call.await_args.kwargs) is (trial_days > 0)
+    if trial_days > 0:
+        assert stripe_call.await_args.kwargs["subscription_data"]["trial_settings"] == {
+            "end_behavior": {"missing_payment_method": "cancel"}
+        }
 
 
 def test_checkout_redirect_is_restricted_to_configured_origin():

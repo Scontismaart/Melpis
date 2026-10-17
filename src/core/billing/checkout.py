@@ -73,10 +73,14 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
     kwargs = dict(customer=customer_id, line_items=[{"price": frozen["price_id"], "quantity": 1}],
                   mode="subscription", success_url=frozen["success_url"], cancel_url=frozen["cancel_url"],
                   client_reference_id=str(org_id), metadata={"trial_days_remaining": str(trial_days)},
-                  payment_method_collection="required", expires_at=int(intent["expires_at"].timestamp()),
+                  payment_method_collection="if_required" if trial_days > 0 else "required",
+                  expires_at=int(intent["expires_at"].timestamp()),
                   idempotency_key=f"checkout:{intent['id']}")
     if trial_days > 0:
-        kwargs["subscription_data"] = {"trial_period_days": trial_days}
+        kwargs["subscription_data"] = {
+            "trial_period_days": trial_days,
+            "trial_settings": {"end_behavior": {"missing_payment_method": "cancel"}},
+        }
     session = await stripe_call(stripe.checkout.Session.create, **kwargs)
     async with repo.pool.acquire() as conn:
         async with conn.transaction():

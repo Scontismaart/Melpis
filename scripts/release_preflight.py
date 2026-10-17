@@ -17,14 +17,17 @@ from src.core.release_config import network_config_errors
 
 COMMERCIAL_BOOTSTRAP_PROFILE = "commercial_bootstrap"
 SANDBOX_PROFILE = "sandbox"
-STRIPE_PRICE_ENV_NAMES = (
+STRIPE_MONTHLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER",
     "STRIPE_PRICE_PRO",
     "STRIPE_PRICE_BUSINESS",
+)
+STRIPE_YEARLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER_YEARLY",
     "STRIPE_PRICE_PRO_YEARLY",
     "STRIPE_PRICE_BUSINESS_YEARLY",
 )
+STRIPE_PRICE_ENV_NAMES = STRIPE_MONTHLY_PRICE_ENV_NAMES + STRIPE_YEARLY_PRICE_ENV_NAMES
 MODEL_ENV_NAMES = (
     "AI_MODEL", "AI_MODEL_CHEAP", "AI_MODEL_PREMIUM", "AI_MODEL_FALLBACKS", "AI_MODEL_INTENT",
     "OPENROUTER_MODEL",
@@ -201,8 +204,11 @@ def validate(config):
         _require(
             config, errors, "STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16
         )
-        for name in STRIPE_PRICE_ENV_NAMES:
+        for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require(config, errors, name, prefix="price_", min_length=12)
+        annual_enabled = str(config.get("STRIPE_ANNUAL_PRICING_ENABLED") or "").strip().lower()
+        if annual_enabled != "false":
+            errors.append("STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap")
     elif profile == SANDBOX_PROFILE:
         if config.get("SANDBOX_ONLY") != "true":
             errors.append("SANDBOX_ONLY: must be true for sandbox")

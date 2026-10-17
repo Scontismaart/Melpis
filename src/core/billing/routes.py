@@ -4,12 +4,17 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from src.core.auth.dependencies import require_ruolo, require_mfa
-from src.core.auth.audit import audit_log
 from src.core.billing.plans import PLANS, TRIAL_MESSAGES_LIMIT
 from src.core.billing.webhook_handler import handle_stripe_webhook
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
+
+
+def _annual_pricing_enabled() -> bool:
+    if os.getenv("LAUNCH_PROFILE", "").strip().lower() == "commercial_bootstrap":
+        return False
+    return os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower() == "true"
 
 
 class CheckoutSessionRequest(BaseModel):
@@ -22,6 +27,8 @@ class CheckoutSessionRequest(BaseModel):
 def _resolve_price_id(plan, interval: str) -> str:
     if interval not in ("monthly", "yearly"):
         raise ValueError(f"interval non valido: {interval}")
+    if interval == "yearly" and not _annual_pricing_enabled():
+        return ""
     return plan.stripe_price_id_yearly if interval == "yearly" else plan.stripe_price_id
 
 
@@ -77,8 +84,6 @@ async def create_checkout_session(
         raise HTTPException(status_code=400, detail=f"Invalid plan: {req.plan}")
 
     org_id = user["organization_id"]
-    org = await repo.get_organization_billing(org_id)
-
     plan = PLANS[req.plan]
     try:
         price_id = _resolve_price_id(plan, req.interval)

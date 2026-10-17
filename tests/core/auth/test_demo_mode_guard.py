@@ -4,7 +4,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from src.core.auth import dependencies
-from src.core.startup_guard import STRIPE_PRICE_ENV_NAMES, assert_production_safe
+from src.core.startup_guard import STRIPE_MONTHLY_PRICE_ENV_NAMES, STRIPE_PRICE_ENV_NAMES, assert_production_safe
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +45,7 @@ def _configure_commercial(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_live_unit_safe_value")
     monkeypatch.setenv("STRIPE_PUBLISHABLE_KEY", "pk_live_unit_safe_value")
     monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_live_unit_safe_value")
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "false")
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
     for name in STRIPE_PRICE_ENV_NAMES:
         monkeypatch.setenv(name, f"price_live_{name.lower()}")
@@ -153,11 +154,25 @@ def test_sandbox_rejects_live_stripe_credentials(monkeypatch):
         assert_production_safe()
 
 
-@pytest.mark.parametrize("name", STRIPE_PRICE_ENV_NAMES)
+@pytest.mark.parametrize("name", STRIPE_MONTHLY_PRICE_ENV_NAMES)
 def test_commercial_bootstrap_rejects_missing_live_price(monkeypatch, name):
     _configure_commercial(monkeypatch)
     monkeypatch.delenv(name)
     with pytest.raises(RuntimeError, match=name):
+        assert_production_safe()
+
+
+def test_commercial_bootstrap_rejects_annual_pricing(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
+    with pytest.raises(RuntimeError, match="STRIPE_ANNUAL_PRICING_ENABLED.*false"):
+        assert_production_safe()
+
+
+def test_commercial_bootstrap_requires_explicit_annual_pricing_off(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.delenv("STRIPE_ANNUAL_PRICING_ENABLED")
+    with pytest.raises(RuntimeError, match="STRIPE_ANNUAL_PRICING_ENABLED.*false"):
         assert_production_safe()
 
 

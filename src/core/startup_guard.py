@@ -10,14 +10,17 @@ from src.core.cost_policy import FREE_MODELS, is_openrouter_free_model
 
 COMMERCIAL_BOOTSTRAP_PROFILE = "commercial_bootstrap"
 SANDBOX_PROFILE = "sandbox"
-STRIPE_PRICE_ENV_NAMES = (
+STRIPE_MONTHLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER",
     "STRIPE_PRICE_PRO",
     "STRIPE_PRICE_BUSINESS",
+)
+STRIPE_YEARLY_PRICE_ENV_NAMES = (
     "STRIPE_PRICE_STARTER_YEARLY",
     "STRIPE_PRICE_PRO_YEARLY",
     "STRIPE_PRICE_BUSINESS_YEARLY",
 )
+STRIPE_PRICE_ENV_NAMES = STRIPE_MONTHLY_PRICE_ENV_NAMES + STRIPE_YEARLY_PRICE_ENV_NAMES
 MODEL_ENV_NAMES = (
     "AI_MODEL",
     "AI_MODEL_CHEAP",
@@ -106,8 +109,13 @@ def _assert_stripe_profile(profile: str) -> None:
         _require_safe_value("STRIPE_SECRET_KEY", prefix="sk_live_", min_length=16)
         _require_safe_value("STRIPE_PUBLISHABLE_KEY", prefix="pk_live_", min_length=16)
         _require_safe_value("STRIPE_WEBHOOK_SECRET", prefix="whsec_", min_length=16)
-        for name in STRIPE_PRICE_ENV_NAMES:
+        for name in STRIPE_MONTHLY_PRICE_ENV_NAMES:
             _require_safe_value(name, prefix="price_", min_length=12)
+        annual_enabled = os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower()
+        if annual_enabled != "false":
+            raise RuntimeError(
+                "AVVIO BLOCCATO: STRIPE_ANNUAL_PRICING_ENABLED deve essere false in commercial_bootstrap"
+            )
         return
 
     if sandbox_only != "true":
