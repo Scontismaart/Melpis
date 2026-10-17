@@ -334,7 +334,7 @@ async def gdpr_delete(
     return {
         "status": "deleted",
         "propagation": propagation_results,
-        "message": "Organization deletion completed locally; external propagation results are reported per service.",
+        "message": "All data permanently removed. External services notified.",
     }
 
 

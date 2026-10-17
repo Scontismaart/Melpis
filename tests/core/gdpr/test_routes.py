@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock
@@ -5,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException
 
 pytestmark = pytest.mark.usefixtures("reset_db")
@@ -262,11 +264,25 @@ class TestDataRights:
     async def test_download_expired_token_returns_404(self, async_client, org_id, monkeypatch):
         monkeypatch.setenv("REDIS_URL", "")
         from src.core.gdpr import token_store
+
         monkeypatch.setattr(token_store, "_redis", None)
+        payload = {
+            "org_id": str(org_id),
+            "auth_user_id": "gdpr-test-owner",
+            "session_id": "gdpr-test-session",
+            "user_id": "gdpr-test-profile",
+            "role": "owner",
+            "data": {"test": True},
+            "expires": 0,
+        }
+        token = "expired_test_token"
+        token_store._memory[token_store._storage_key(token)] = Fernet(
+            os.environ["ENCRYPTION_KEY"].encode("ascii")
+        ).encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
         async_client.cookies.set(token_store.DOWNLOAD_COOKIE, "expired_test_token")
-        monkeypatch.setattr(token_store, "pop_token", AsyncMock(return_value=None))
         resp = await async_client.get("/api/gdpr/download", headers=_headers())
         assert resp.status_code == 404
+        assert token_store._storage_key(token) in token_store._memory
 
     async def test_download_rejects_corrupt_ciphertext_without_leaking_details(
         self, async_client, monkeypatch
