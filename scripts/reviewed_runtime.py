@@ -264,7 +264,10 @@ def main():
                 command.append('--user')
             subprocess.run(command, check=True)
             subprocess.run([sys.executable, '-m', 'pip', 'check'], check=True)
-            verify_runtime(manifest)
+            # A newly created --user site is absent from this process's startup
+            # sys.path. Verify the actual post-install interpreter, not caches.
+            subprocess.run([sys.executable, str(Path(__file__).resolve()),
+                            'verify', '--manifest', str(manifest)], check=True)
     elif args.action == 'verify':
         if args.audit_report:
             verify_final_runtime(manifest, args.audit_report)

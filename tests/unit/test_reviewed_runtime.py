@@ -219,3 +219,18 @@ def test_incomplete_fresh_report_is_preserved_as_failed_evidence(tmp_path, monke
     with pytest.raises(ValueError):
         module.audit_runtime(Path('tool'), report, Path('manifest'))
     assert json.loads(report.read_text()) == {'dependencies': []}
+
+
+def test_install_verifies_new_user_site_in_a_fresh_interpreter(monkeypatch):
+    module = load_builder()
+    monkeypatch.setattr(module.sys, 'argv', ['reviewed_runtime.py', 'install', '--user'])
+    monkeypatch.setattr(module, 'prepare', lambda *args: Path('generated-requirements.txt'))
+    monkeypatch.setattr(module, 'verify_runtime', lambda *args: pytest.fail('Parent cannot see newly created user site'))
+    commands = []
+    monkeypatch.setattr(module.subprocess, 'run', lambda command, **kwargs: commands.append(command))
+    module.main()
+    assert len(commands) == 3
+    assert commands[0][:4] == [module.sys.executable, '-m', 'pip', 'install']
+    assert commands[1] == [module.sys.executable, '-m', 'pip', 'check']
+    assert commands[2][0] == module.sys.executable
+    assert commands[2][2:4] == ['verify', '--manifest']
