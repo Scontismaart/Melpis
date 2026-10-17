@@ -20,7 +20,8 @@ Il database è **Supabase Postgres** con estensione **pgvector**. Il profilo di 
 Prerequisiti: **Python 3.12**, **Docker Desktop** (per PostgreSQL locale) e **Node.js** (lint e test frontend).
 
 Prima di configurare i provider, creare e attivare un ambiente virtuale Python
-3.12 e installare con `python scripts/reviewed_runtime.py install`.
+3.12, eseguire esplicitamente `python scripts/bootstrap_reviewed_pip.py`, poi
+installare con `python scripts/reviewed_runtime.py install`.
 Il comando genera una derivata interna della wheel ufficiale CrewAI 1.15.4,
 verifica gli hash e preserva l'extra LiteLLM, usando MCP 1.30.0. Non usare
 direttamente `pip install -r requirements.txt`: il vincolo MCP upstream non

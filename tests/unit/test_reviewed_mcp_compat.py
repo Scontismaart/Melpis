@@ -1,6 +1,10 @@
 """Offline MCP compatibility; no application secrets or real LLM/provider calls."""
 import importlib.metadata
 import inspect
+import asyncio
+import os
+import socket
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -104,3 +108,67 @@ def test_crewai_kickoff_uses_only_the_synthetic_llm():
     result = Crew(agents=[agent], tasks=[task], process=Process.sequential,
                   verbose=False, memory=False).kickoff()
     assert 'synthetic-success' in str(result)
+
+
+@pytest.mark.parametrize('protocol', ['streamable-http', 'sse'])
+async def test_real_loopback_http_and_sse_handshake_tools_and_errors(tmp_path, protocol):
+    """Actual MCP wire protocols; bind loopback only and never call a provider."""
+    from crewai.mcp.client import MCPClient
+    from crewai.mcp.transports.http import HTTPTransport
+    from crewai.mcp.transports.sse import SSETransport
+
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+    server = tmp_path / 'loopback_server.py'
+    server.write_text('''import sys
+from mcp.server.fastmcp import FastMCP
+server=FastMCP("Synthetic loopback compatibility",host="127.0.0.1",port=int(sys.argv[2]),log_level="ERROR")
+@server.tool()
+def echo(value:str)->str:
+    return "synthetic:"+value
+@server.tool()
+def failure()->str:
+    raise ValueError("synthetic failure")
+server.run(transport=sys.argv[1])
+''', encoding='utf-8')
+    # Fresh cwd has no .env. Do not forward credentials or provider environment.
+    allowed = ('PATH', 'SystemRoot', 'WINDIR', 'LANG', 'LC_ALL')
+    environment = {name: os.environ[name] for name in allowed if name in os.environ}
+    environment.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+                       CREWAI_TELEMETRY_ENABLED='false', OTEL_SDK_DISABLED='true')
+    process = subprocess.Popen([sys.executable, str(server), protocol, str(port)],
+                               cwd=tmp_path, env=environment,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = asyncio.get_running_loop().time() + 10
+        while True:
+            assert process.poll() is None, 'Synthetic loopback server exited before readiness'
+            try:
+                reader, writer = await asyncio.open_connection('127.0.0.1', port)
+                writer.close()
+                await writer.wait_closed()
+                break
+            except OSError:
+                if asyncio.get_running_loop().time() > deadline:
+                    pytest.fail('Synthetic loopback server readiness timed out')
+                await asyncio.sleep(0.05)
+
+        async def exercise_protocol():
+            transport = (HTTPTransport(f'http://127.0.0.1:{port}/mcp')
+                         if protocol == 'streamable-http'
+                         else SSETransport(f'http://127.0.0.1:{port}/sse'))
+            async with MCPClient(transport, connect_timeout=5, execution_timeout=5,
+                                 discovery_timeout=5, max_retries=1) as client:
+                assert any(tool.get('name') == 'echo' for tool in await client.list_tools())
+                assert 'synthetic:wire' in str(await client.call_tool('echo', {'value': 'wire'}))
+                assert 'synthetic failure' in str(await client.call_tool('failure', {}))
+
+        await asyncio.wait_for(exercise_protocol(), timeout=20)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)

@@ -107,7 +107,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'scripts/reviewed_runtime.py', 'scripts/check_dependency_audit.py') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'scripts/reviewed_runtime.py', 'scripts/check_dependency_audit.py', 'scripts/bootstrap_reviewed_pip.py') }}
+
+      - name: Bootstrap reviewed pip in disposable CI runner
+        run: python scripts/bootstrap_reviewed_pip.py --isolated-build
 
       - name: Install dependencies
         run: python scripts/reviewed_runtime.py install

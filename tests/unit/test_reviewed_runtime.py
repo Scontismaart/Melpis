@@ -156,7 +156,7 @@ def test_each_docker_build_audits_its_actual_runtime_before_copy():
 def test_cache_and_generated_artifacts_follow_reviewed_inputs():
     for filename in ('.github/workflows/ci.yml', '.github/workflows/migrations.yml'):
         workflow = (ROOT / filename).read_text(encoding='utf-8')
-        assert "hashFiles('requirements.txt', 'scripts/reviewed_runtime.py', 'scripts/check_dependency_audit.py')" in workflow
+        assert "hashFiles('requirements.txt', 'scripts/reviewed_runtime.py', 'scripts/check_dependency_audit.py', 'scripts/bootstrap_reviewed_pip.py')" in workflow
     assert '.runtime/reviewed-dependencies/' in (ROOT / '.gitignore').read_text()
 
 

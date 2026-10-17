@@ -11,8 +11,19 @@ Non implica approvazione o firma upstream sul nuovo abbinamento.
 Usare un ambiente virtuale Python 3.12 pulito, poi:
 
 ```text
+python scripts/bootstrap_reviewed_pip.py
 python scripts/reviewed_runtime.py install
 ```
+
+Il bootstrap esplicito porta pip a 26.2.1: il pip 25.0.1 nell'immagine base
+locale ha advisory OSV e rimane incluso nell'inventario, non escluso dall'audit.
+Il helper verifica prima il digest della wheel ufficiale, poi installa solo il
+file locale con `--upgrade --no-index`, senza dipendenze aggiuntive, e verifica
+la versione in un processo Python nuovo. Usa una directory temporanea propria.
+Su host rifiuta Python globale: attivare un virtualenv. `--isolated-build` è
+riservato ai runner CI usa-e-getta e agli stage Docker; non usarlo sul PC globale.
+La chiamata non avviene implicitamente dal runtime installer. Anche il virtualenv
+separato del tool audit riceve il bootstrap, prima di installare pip-audit.
 
 CI, workflow migrazioni e build Docker usano lo stesso comando. Docker passa
 `--user` nel builder e verifica nuovamente i file copiati nel runtime non-root.
@@ -30,6 +41,11 @@ verificata con SHA-256:
 | CrewAI 1.15.4 ufficiale | `bb7210ccbac3c75c231966fb5dd8d77797945c5ddb220ca3b54b50bf0a31a711` |
 | Derivata interna canonica | `74baca11ee420f0cde6c76c421092a78174c963b4fa646830df33be52d053455` |
 | Manifest di provenienza | `11537e7bd6d0f3dd12cf26beb6e39db7503ff1f44e61a261c60cc8e0b4645def` |
+| pip 26.2.1 ufficiale | `71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e` |
+
+Fonti primarie: [CrewAI 1.15.4 su PyPI](https://pypi.org/pypi/crewai/1.15.4/json),
+[pip 26.2.1 su PyPI](https://pypi.org/pypi/pip/26.2.1/json) e
+[wheel ufficiale pip](https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl).
 
 Cambiano soltanto il vincolo in METADATA e RECORD rigenerato. I restanti 526
 file, inclusi codice, versione e licenza MIT, restano identici byte per byte.
@@ -53,6 +69,11 @@ ancora attivo, eseguire:
 python scripts/reviewed_runtime.py audit --audit-python /percorso/tool-venv/bin/python
 ```
 
+Prima di installare pip-audit nel tool-venv usare il suo interprete con
+`scripts/bootstrap_reviewed_pip.py`, senza il flag globale. CI e Docker lo fanno
+esplicitamente. Il cache mount BuildKit contiene soltanto download pubblici e
+non è copiato nell'immagine finale.
+
 Il wrapper usa OSV (`https://api.osv.dev/v1/query`), `--strict` e tutti i percorsi
 site-packages del runtime. Confronta identità e versioni esatte del report con
 l'inventario installato prima e dopo l'audit. Nessun pacchetto omesso, aggiunto,
@@ -72,7 +93,11 @@ la verifica finale controlla gli stessi payload e confronta anche l'intero
 inventario del runtime non-root con il report realmente generato dal builder,
 riapplicando la policy. Pacchetti aggiunti o omessi fra gli stage bloccano la build. Servono
 ancora risultati sul commit candidato e su entrambe le architetture amd64/arm64;
-non dedurli dal solo laboratorio. Nessun E2E Meta/Google/Stripe è certificato.
+non dedurli dal solo laboratorio. I test includono stdio reale e casi reali HTTP
+streamable/SSE su server FastMCP locale, porta dinamica su 127.0.0.1, senza
+provider o segreti, con timeout e cleanup del subprocess. Aggiungere i casi non
+equivale a dichiararli già passati sull'immagine finale. Nessun E2E
+Meta/Google/Stripe è certificato.
 
 ## Aggiornamento o rimozione della derivata
 

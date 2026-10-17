@@ -9,11 +9,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+COPY scripts/bootstrap_reviewed_pip.py scripts/bootstrap_reviewed_pip.py
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python scripts/bootstrap_reviewed_pip.py --isolated-build
+
 COPY requirements.txt .
 COPY scripts/reviewed_runtime.py scripts/reviewed_runtime.py
-RUN python scripts/reviewed_runtime.py install --user
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python scripts/reviewed_runtime.py install --user
 COPY scripts/check_dependency_audit.py scripts/check_dependency_audit.py
 RUN python -m venv /tmp/pip-audit && \
+    /tmp/pip-audit/bin/python scripts/bootstrap_reviewed_pip.py && \
     /tmp/pip-audit/bin/python -m pip install --no-cache-dir pip-audit==2.10.1 && \
     python scripts/reviewed_runtime.py audit --audit-python /tmp/pip-audit/bin/python \
         --report .runtime/reviewed-dependencies/runtime-audit.json
@@ -26,6 +32,10 @@ RUN groupadd -g 1000 appuser && \
     useradd -u 1000 -g appuser -m -s /usr/sbin/nologin appuser
 
 WORKDIR /app
+
+COPY scripts/bootstrap_reviewed_pip.py scripts/bootstrap_reviewed_pip.py
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python scripts/bootstrap_reviewed_pip.py --isolated-build
 
 # Solo librerie runtime (niente compiler nello stage finale)
 RUN apt-get update && apt-get install -y --no-install-recommends \
