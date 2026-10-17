@@ -237,3 +237,14 @@ async def test_calendar_scheduler_stops_before_pool_or_tenant_scan(
     await scheduler._calendar_sync_job(pool)
     pool.fetch.assert_not_awaited()
     pool.execute.assert_not_awaited()
+
+
+def test_make_flow_rejects_inconsistent_calendar_redirect_uri(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://melpis.it/api/calendar/callback")
+
+    with pytest.raises(
+        ValueError,
+        match="atteso percorso '/api/calendar/oauth2callback'",
+    ):
+        calendar_routes._make_flow()

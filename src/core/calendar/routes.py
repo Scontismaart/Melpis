@@ -16,6 +16,10 @@ from src.core.auth.oauth_state import (
     oauth_pkce_verifier, oauth_start_owner, validate_oauth_callback_context,
 )
 from src.core.google_feature_flags import google_calendar_enabled
+from src.core.calendar.redirect_uri import (
+    CALENDAR_OAUTH_CALLBACK_PATH,
+    is_valid_calendar_redirect_uri,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,12 @@ def _get_client_config():
 def _make_flow():
     if not google_calendar_enabled():
         raise RuntimeError("Google Calendar disabled")
-    redirect_uri = os.environ["GOOGLE_REDIRECT_URI"]
+    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "").strip()
+    if not is_valid_calendar_redirect_uri(redirect_uri):
+        raise ValueError(
+            "GOOGLE_REDIRECT_URI non valido: atteso percorso "
+            f"'{CALENDAR_OAUTH_CALLBACK_PATH}', HTTPS e host valido senza query o fragment"
+        )
     return Flow.from_client_config(
         _get_client_config(),
         scopes=SCOPES,

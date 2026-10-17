@@ -205,9 +205,62 @@ def test_commercial_bootstrap_rejects_short_placeholder_key(monkeypatch):
         assert_production_safe()
 
 
-@pytest.mark.parametrize("name", ("GOOGLE_CALENDAR_ENABLED", "GOOGLE_BUSINESS_ENABLED"))
-def test_launch_profiles_keep_google_integrations_disabled(monkeypatch, name):
+def test_google_business_enabled_fails_always(monkeypatch):
     _configure_commercial(monkeypatch)
-    monkeypatch.setenv(name, "true")
-    with pytest.raises(RuntimeError, match=name):
+    monkeypatch.setenv("GOOGLE_BUSINESS_ENABLED", "true")
+    with pytest.raises(RuntimeError, match="GOOGLE_BUSINESS_ENABLED deve restare false"):
+        assert_production_safe()
+
+
+def test_google_calendar_disabled_passes_as_safe_default(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "false")
+    monkeypatch.setenv("GOOGLE_BUSINESS_ENABLED", "false")
+    assert_production_safe()
+
+
+def test_google_calendar_enabled_with_valid_credentials_passes(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_BUSINESS_ENABLED", "false")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "google-client-id-123.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://melpis.it/api/calendar/oauth2callback")
+    assert_production_safe()
+
+
+@pytest.mark.parametrize(
+    ("env_override", "expected_match"),
+    [
+        ({"GOOGLE_CLIENT_ID": ""}, "GOOGLE_CLIENT_ID mancante o placeholder"),
+        ({"GOOGLE_CLIENT_ID": "<your-client-id>"}, "GOOGLE_CLIENT_ID mancante o placeholder"),
+        ({"GOOGLE_CLIENT_SECRET": ""}, "GOOGLE_CLIENT_SECRET mancante o placeholder"),
+        ({"GOOGLE_CLIENT_SECRET": "placeholder_secret"}, "GOOGLE_CLIENT_SECRET mancante o placeholder"),
+        ({"GOOGLE_REDIRECT_URI": ""}, "GOOGLE_REDIRECT_URI mancante o placeholder"),
+        ({"GOOGLE_REDIRECT_URI": "http://insecure.test/api/calendar/oauth2callback"}, "GOOGLE_REDIRECT_URI deve iniziare con https://"),
+        ({"GOOGLE_REDIRECT_URI": "https://melpis.it/api/calendar/callback"}, "GOOGLE_REDIRECT_URI deve essere un URL https valido con percorso /api/calendar/oauth2callback"),
+        ({"GOOGLE_REDIRECT_URI": "https://other.domain.test/wrong/path"}, "GOOGLE_REDIRECT_URI deve essere un URL https valido con percorso /api/calendar/oauth2callback"),
+    ],
+)
+def test_google_calendar_enabled_with_missing_or_placeholder_credentials_fails(
+    monkeypatch, env_override, expected_match
+):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_BUSINESS_ENABLED", "false")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "google-client-id-123.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://melpis.it/api/calendar/oauth2callback")
+    for key, value in env_override.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(RuntimeError, match=expected_match):
+        assert_production_safe()
+
+
+@pytest.mark.parametrize("flag_value", ["", "maybe", "1", "yes", "0"])
+def test_google_calendar_enabled_invalid_flag_fails(monkeypatch, flag_value):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", flag_value)
+    monkeypatch.setenv("GOOGLE_BUSINESS_ENABLED", "false")
+    with pytest.raises(RuntimeError, match="GOOGLE_CALENDAR_ENABLED deve essere true o false"):
         assert_production_safe()
