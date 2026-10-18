@@ -12,7 +12,9 @@ def _assert_regular_usage_type(event_type) -> None:
     # Protocol records must only be written by the dedicated trusted path.
     # In particular the generic outbox drain must not turn an arbitrary queued
     # ID/payload into an authorization record in usage_events.
-    if isinstance(event_type, str) and event_type in {"system.quota_trust_epoch", "legacy_quota_admission"}:
+    if isinstance(event_type, str) and event_type in {
+        "system.quota_trust_epoch", "legacy_quota_admission", "system.quota_reservation",
+    }:
         raise ValueError("Reserved quota protocol event type")
 
 
