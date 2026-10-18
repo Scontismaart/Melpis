@@ -281,6 +281,7 @@ async def test_record_ai_attempts_accounts_known_groq_model_without_block(monkey
     assert org_id == "org-2"
     assert write_batch.await_args.kwargs == {"block_ai": False}
     metadata = records[0]["metadata"]
+    assert metadata["model"] == "groq/llama-3.1-8b-instant"
     assert metadata["accounting_status"] == "recorded"
     assert metadata["task_type"] == "simulatore"
     assert metadata["estimated_cost_eur"] == 0.0
