@@ -237,3 +237,65 @@ async def test_calendar_scheduler_stops_before_pool_or_tenant_scan(
     await scheduler._calendar_sync_job(pool)
     pool.fetch.assert_not_awaited()
     pool.execute.assert_not_awaited()
+
+
+def test_make_flow_rejects_inconsistent_calendar_redirect_uri(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "https://melpis.it/api/calendar/callback")
+
+    with pytest.raises(
+        ValueError,
+        match="atteso percorso '/api/calendar/oauth2callback'",
+    ):
+        calendar_routes._make_flow()
+
+
+def test_make_flow_accepts_staging_localhost_oauth_callback(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:4187/api/calendar/oauth2callback")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id.test")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "client-secret.test")
+    from_client_config = MagicMock(return_value=object())
+    monkeypatch.setattr(calendar_routes.Flow, "from_client_config", from_client_config)
+    monkeypatch.setattr(calendar_routes, "google_calendar_enabled", lambda: True)
+
+    calendar_routes._make_flow()
+
+    assert from_client_config.call_args.kwargs["redirect_uri"] == (
+        "http://localhost:4187/api/calendar/oauth2callback"
+    )
+
+
+def test_make_flow_rejects_loopback_http_in_production(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:4187/api/calendar/oauth2callback")
+    monkeypatch.setattr(calendar_routes, "google_calendar_enabled", lambda: True)
+
+    with pytest.raises(ValueError, match="HTTP esclusivamente su localhost:4187 fuori da Production"):
+        calendar_routes._make_flow()
+
+
+def test_make_flow_rejects_loopback_http_without_explicit_environment(monkeypatch):
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:4187/api/calendar/oauth2callback")
+    monkeypatch.setattr(calendar_routes, "google_calendar_enabled", lambda: True)
+
+    with pytest.raises(ValueError, match="HTTP esclusivamente su localhost:4187 fuori da Production"):
+        calendar_routes._make_flow()
+
+
+def test_make_flow_rejects_conflicting_environment_values(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_REDIRECT_URI", "http://localhost:4187/api/calendar/oauth2callback")
+    monkeypatch.setattr(calendar_routes, "google_calendar_enabled", lambda: True)
+
+    with pytest.raises(ValueError, match="HTTP esclusivamente su localhost:4187 fuori da Production"):
+        calendar_routes._make_flow()
