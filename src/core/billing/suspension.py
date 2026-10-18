@@ -56,3 +56,24 @@ def giorni_trial_rimanenti(trial_end, now=None) -> int:
     if residuo <= 0:
         return 0
     return int(residuo // 86400)
+
+
+def trial_end_unix_timestamp(trial_end, now=None) -> int | None:
+    """Return the original UTC trial deadline as a Unix timestamp, if active.
+
+    Flooring to seconds can end a trial fractionally early, never later. The
+    checkout must not replace this deadline with a rounded number of days.
+    """
+    if not isinstance(trial_end, datetime):
+        return None
+    now = now or datetime.now(timezone.utc)
+    if not isinstance(now, datetime):
+        return None
+    if trial_end.tzinfo is None:
+        trial_end = trial_end.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if trial_end <= now:
+        return None
+    timestamp = int(trial_end.timestamp())
+    return timestamp if timestamp > int(now.timestamp()) else None

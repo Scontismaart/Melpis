@@ -357,7 +357,24 @@
             const currentAfterRequest = current(token);
             const data = await response.json().catch(() => ({}));
             if (!currentAfterRequest || !current(token)) return null;
-            if (!response.ok) { if (response.status === 403) return null; throw new Error("checkout non disponibile"); }
+            if (!response.ok) {
+              if (response.status === 403) return null;
+              if (response.status === 409 && data.detail?.code === "trial_active_checkout_deferred") {
+                const deadline = new Date(data.detail.trial_end);
+                const formatted = Number.isNaN(deadline.getTime())
+                  ? "la scadenza della prova gratuita"
+                  : (root.MelpisI18n?.formatDate?.(deadline) || deadline.toLocaleDateString(localeCorrente()));
+                accountStatus(`La prova gratuita resta attiva fino a ${formatted}. Non è richiesta una carta; potrai avviare l’abbonamento dopo la scadenza.`);
+                const status = document.getElementById("account-status");
+                if (status) status.style.color = "var(--green-deep)";
+                return null;
+              }
+              if (response.status === 409 && typeof data.detail === "string" && data.detail.includes("subscription already exists")) {
+                accountStatus("Per modificare un abbonamento esistente, usa il portale di fatturazione.");
+                return null;
+              }
+              throw new Error("checkout non disponibile");
+            }
             if (data.url) redirect(data.url);
             return data;
           } catch {

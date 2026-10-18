@@ -71,13 +71,27 @@ def test_limiti_invariati():
     assert PLANS["business"].has_rag is True
 
 
-def test_resolve_price_id(monkeypatch):
+def test_resolve_price_id_monthly_is_always_available(monkeypatch):
     from src.core.billing.routes import _resolve_price_id
     p = PLANS["pro"]
     monkeypatch.setattr(p, "stripe_price_id", "price_m")
     monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
+    monkeypatch.delenv("STRIPE_ANNUAL_PRICING_ENABLED", raising=False)
+    monkeypatch.delenv("LAUNCH_PROFILE", raising=False)
     assert _resolve_price_id(p, "monthly") == "price_m"
+    assert _resolve_price_id(p, "yearly") == ""
+
+
+def test_resolve_price_id_yearly_requires_explicit_non_v1_opt_in(monkeypatch):
+    from src.core.billing.routes import _resolve_price_id
+    p = PLANS["pro"]
+    monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
+    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
+    monkeypatch.delenv("LAUNCH_PROFILE", raising=False)
     assert _resolve_price_id(p, "yearly") == "price_y"
+
+    monkeypatch.setenv("LAUNCH_PROFILE", "commercial_bootstrap")
+    assert _resolve_price_id(p, "yearly") == ""
 
 
 def test_resolve_price_id_intervallo_invalido():

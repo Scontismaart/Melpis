@@ -90,6 +90,7 @@ def commercial_config():
         {
             "LAUNCH_PROFILE": "commercial_bootstrap",
             "SANDBOX_ONLY": "false",
+            "STRIPE_ANNUAL_PRICING_ENABLED": "false",
             "STRIPE_SECRET_KEY": "sk_live_unit_safe_value",
             "STRIPE_PUBLISHABLE_KEY": "pk_live_unit_safe_value",
         }
@@ -236,11 +237,23 @@ def test_sandbox_blocks_live_stripe_credentials():
     assert any("STRIPE_SECRET_KEY" in finding for finding in validate(config))
 
 
-@pytest.mark.parametrize("name", STRIPE_PRICE_ENV_NAMES)
-def test_commercial_bootstrap_requires_all_six_live_prices(name):
+@pytest.mark.parametrize("name", _MODULE.STRIPE_MONTHLY_PRICE_ENV_NAMES)
+def test_commercial_bootstrap_requires_monthly_live_prices(name):
     config = commercial_config()
     del config[name]
     assert f"{name}: missing or placeholder" in validate(config)
+
+
+def test_commercial_bootstrap_rejects_annual_pricing():
+    config = commercial_config()
+    config["STRIPE_ANNUAL_PRICING_ENABLED"] = "true"
+    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap" in validate(config)
+
+
+def test_commercial_bootstrap_requires_explicit_annual_pricing_off():
+    config = commercial_config()
+    config.pop("STRIPE_ANNUAL_PRICING_ENABLED")
+    assert "STRIPE_ANNUAL_PRICING_ENABLED: must be false for commercial_bootstrap" in validate(config)
 
 
 @pytest.mark.parametrize("name", ("GROQ_FREE_ACCOUNT_CONFIRMED", "GROQ_ZDR_CONFIRMED"))

@@ -210,6 +210,35 @@ test("billing redirects only after a current successful response; staff and 403 
   staff.dom.window.close();
 });
 
+test("billing keeps an active application trial card-free when Stripe checkout is deferred", async () => {
+  const redirects = [];
+  let checkoutCalls = 0;
+  const settings = createSettings("owner", async (url) => {
+    if (url.endsWith("/api/billing/subscription")) {
+      return response({ plan: "starter", subscription_status: "trialing", trial_end: "2026-10-08T12:00:00Z" });
+    }
+    if (url.endsWith("/api/billing/create-checkout-session")) {
+      checkoutCalls += 1;
+      return response({ detail: {
+        code: "trial_active_checkout_deferred",
+        trial_end: "2026-10-08T12:00:00Z",
+      } }, 409);
+    }
+    return response({});
+  }, redirects);
+  settings.module.onEnter("piano");
+  await new Promise((resolve) => setImmediate(resolve));
+  const planButton = [...settings.dom.window.document.querySelectorAll("#account-plans button")]
+    .find((button) => button.textContent.includes("Crescita"));
+  planButton.click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(checkoutCalls, 1);
+  assert.deepEqual(redirects, []);
+  assert.match(settings.dom.window.document.getElementById("account-status").textContent, /Non è richiesta una carta/);
+  settings.dom.window.close();
+});
+
 test("billing portal 403 and stale checkout JSON never redirect", async () => {
   const staleBody = deferred();
   const redirects = [];

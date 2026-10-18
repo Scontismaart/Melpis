@@ -1,4 +1,6 @@
 from datetime import date, time
+import json
+import uuid
 import pytest
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("reset_db")]
@@ -87,7 +89,19 @@ async def test_webhook_payment_mode_fail_closed_malformed_org(repo, sample_org):
 
 
 async def test_webhook_subscription_mode_unaffected(repo, sample_org):
-    """Subscription mode logic is not touched."""
+    """Subscription events require and honor the durable checkout binding."""
+    intent_id = uuid.uuid4()
+    frozen_intent = {
+        "checkout_intent_id": str(intent_id),
+        "trial_end_unix": None,
+        "stripe_customer_id": "cus_test_123",
+    }
+    await repo.pool.execute("""
+        INSERT INTO billing_checkout_intents(
+            id, organization_id, request_key, payload_hash, payload, expires_at
+        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW() + interval '1 hour')
+    """, intent_id, sample_org["id"], f"test-checkout-{intent_id}", "a" * 64,
+        json.dumps(frozen_intent))
     event = {
         "id": "evt_subscription_001",
         "created": 100,
@@ -95,7 +109,10 @@ async def test_webhook_subscription_mode_unaffected(repo, sample_org):
         "data": {
             "object": {
                 "mode": "subscription",
-                "metadata": {},
+                "metadata": {
+                    "checkout_intent_id": str(intent_id),
+                    "trial_end_unix": "none",
+                },
                 "id": "cs_test_sub_123",
                 "client_reference_id": str(sample_org["id"]),
                 "subscription": "sub_test_123",
