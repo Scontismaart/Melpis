@@ -11,7 +11,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.api.dependencies import get_repo, require_ruolo
-from src.api.routes.common import audit_event, get_billing_snapshot, record_ai_usage
+from src.api.routes.common import (
+    audit_event,
+    enforce_org_rate_limit,
+    get_billing_snapshot,
+    record_ai_usage,
+)
 from src.core.onboarding import (
     ProfileCacheInvalidationError,
     generate_preview,
@@ -168,6 +173,7 @@ async def onboarding_preview(
             status_code=401,
             detail="Nessuna organizzazione collegata: inserisci API key e Organization ID.",
         )
+    await enforce_org_rate_limit(org_id, "onboarding_preview", 10, 60)
     repo = get_repo(request)
     billing = await get_billing_snapshot(repo, org_id)
     output = await generate_preview(org_id, richiesta, repo, billing=billing)

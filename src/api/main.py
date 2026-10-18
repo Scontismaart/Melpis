@@ -422,7 +422,13 @@ RATE_LIMIT_LIMIT = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 LLM_GLOBAL_RATE_LIMIT = int(os.getenv("LLM_GLOBAL_RATE_LIMIT", "200"))
 LLM_GLOBAL_RATE_WINDOW = int(os.getenv("LLM_GLOBAL_RATE_WINDOW_SECONDS", "60"))
-LLM_ROUTES = {"/api/messaggio", "/api/recensione", "/api/documenti/chiedi", "/api/reviews/google/sync"}
+LLM_ROUTES = {
+    "/api/messaggio",
+    "/api/recensione",
+    "/api/documenti/chiedi",
+    "/api/reviews/google/sync",
+    "/api/onboarding/preview",
+}
 
 
 async def _rate_limit_check(key: str, limit: int | None = None,
