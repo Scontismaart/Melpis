@@ -150,6 +150,7 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
             str(sample_org["id"]),
             PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
             repo,
+            billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
         )
     assert "tartufo nero" in captured["contesto"]
 
@@ -160,6 +161,28 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
             str(other_org["id"]),
             PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
             repo,
+            billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
         )
     # l'org B non ha documenti: contesto vuoto, nessun leak dal tenant A
     assert captured["contesto"] == ""
+
+
+@pytest.mark.asyncio
+async def test_generate_preview_forwards_usage_sink(repo, sample_org):
+    usage_sink = {"attempts": []}
+
+    async def fake_risposta(*args, usage_sink=None, **kwargs):
+        assert usage_sink is not None
+        usage_sink["attempts"].append({"model": "test-model"})
+        return RispostaOutput(risposta="ok", richiede_umano=False, motivo="", categoria="info")
+
+    with patch("src.core.onboarding.genera_risposta_async", side_effect=fake_risposta):
+        await onboarding.generate_preview(
+            str(sample_org["id"]),
+            PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
+            repo,
+            usage_sink=usage_sink,
+            billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
+        )
+
+    assert usage_sink["attempts"] == [{"model": "test-model"}]

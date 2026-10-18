@@ -15,8 +15,9 @@ from src.api.routes.common import (
     audit_event,
     enforce_org_rate_limit,
     get_billing_snapshot,
-    record_ai_usage,
 )
+from src.core.billing.suspension import AIGenerationBlocked, assert_ai_generation_allowed
+from src.core.ai_safety import record_ai_attempts
 from src.core.onboarding import (
     ProfileCacheInvalidationError,
     generate_preview,
@@ -176,13 +177,19 @@ async def onboarding_preview(
     await enforce_org_rate_limit(org_id, "onboarding_preview", 10, 60)
     repo = get_repo(request)
     billing = await get_billing_snapshot(repo, org_id)
-    output = await generate_preview(org_id, richiesta, repo, billing=billing)
-    await record_ai_usage(
-        repo,
-        org_id,
-        "onboarding_preview",
-        richiesta.messaggio,
-        billing,
-        {"verticale": richiesta.profilo.verticale},
-    )
+    if not isinstance(billing, dict) or not billing or billing.get("ai_accounting_blocked"):
+        raise HTTPException(status_code=503, detail="Impossibile verificare la disponibilità AI")
+    try:
+        assert_ai_generation_allowed(billing)
+    except AIGenerationBlocked as exc:
+        raise HTTPException(status_code=403, detail="Risposte AI non disponibili per questo piano o quota") from exc
+    usage = {"attempts": []}
+    try:
+        output = await generate_preview(
+            org_id, richiesta, repo, billing=billing, usage_sink=usage
+        )
+    finally:
+        await record_ai_attempts(
+            repo, org_id, usage, None, None, task_type="onboarding_preview"
+        )
     return output
