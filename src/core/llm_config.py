@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from crewai import LLM
 from src.core.ai_providers import provider_for_model
-from src.core.cost_policy import DEFAULT_FREE_MODEL, assert_model_allowed, assert_openrouter_catalog_free, free_only
+from src.core.cost_policy import DEFAULT_FREE_MODEL, assert_model_allowed, free_only
+from src.core.llm_client_policy import resolve_llm_client_policy
 from src.core.llm_routing import (
     LLMRoute,
     LLMRouteRequest,
@@ -74,29 +75,13 @@ def crea_llm(
     if selected_model is None and route_request is not None:
         selected_model = route_llm(route_request).model
     selected_model = selected_model or configured_model()
-    assert_model_allowed(selected_model)
-
-    provider = provider_for_model(selected_model, os.getenv("AI_PROVIDER", "").strip().lower())
-    if free_only() and (provider.name not in {"groq", "openrouter"} or os.getenv("AI_BASE_URL", "").strip()):
-        raise RuntimeError("Budget EUR 0: provider o endpoint non autorizzato")
-    key_env = provider.key_env
-    if provider.name == "openai_compatible" or (os.getenv("AI_PROVIDER") and not free_only()):
-        key_env = "AI_API_KEY" if os.getenv("AI_API_KEY", "").strip() else provider.key_env
-    api_key = os.getenv(key_env, "").strip()
-    if not api_key:
-        raise RuntimeError(
-            f"{key_env} non trovata. Copia .env.example in .env e inserisci "
-            f"la chiave API per il provider '{provider.name}'."
-        )
-
-    if free_only() and provider.name == "openrouter":
-        assert_openrouter_catalog_free(selected_model, api_key)
+    policy = resolve_llm_client_policy(selected_model)
 
     if max_tokens is None:
         max_tokens = int(os.getenv("LLM_MAX_TOKENS", "250"))
 
     llm_params: dict[str, object] = {
-        **provider.client_params(selected_model, api_key, os.getenv("AI_BASE_URL", "").strip() or None),
+        **policy.client_params(),
         "temperature": temperature,
         "max_tokens": max(1, min(max_tokens, 1000)),
         # CrewAI's LLM timeout is passed to LiteLLM/provider HTTP clients.

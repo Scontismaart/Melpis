@@ -130,7 +130,7 @@ def test_free_openrouter_checks_catalog_before_client(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-offline-key")
     monkeypatch.delenv("AI_BASE_URL", raising=False)
     checked = []
-    monkeypatch.setattr("src.core.llm_config.assert_openrouter_catalog_free", lambda model, key: checked.append(model))
+    monkeypatch.setattr("src.core.llm_client_policy.assert_openrouter_catalog_free", lambda model, key: checked.append(model))
     llm = crea_llm(model="openrouter/vendor/model:free")
     assert checked == ["openrouter/vendor/model:free"]
     assert llm.model == "vendor/model:free"
@@ -144,6 +144,34 @@ def test_free_openrouter_catalog_failure_prevents_client(monkeypatch):
     monkeypatch.delenv("AI_BASE_URL", raising=False)
     def reject(model, key):
         raise RuntimeError("catalog unavailable")
-    monkeypatch.setattr("src.core.llm_config.assert_openrouter_catalog_free", reject)
+    monkeypatch.setattr("src.core.llm_client_policy.assert_openrouter_catalog_free", reject)
     with pytest.raises(RuntimeError, match="catalog unavailable"):
         crea_llm(model="openrouter/vendor/model:free")
+
+
+@pytest.mark.parametrize(
+    ("requested_tokens", "requested_timeout", "expected_tokens", "expected_timeout"),
+    [(0, 0.01, 1, 0.1), (5000, 999, 1000, LLM_TIMEOUT_SECONDS)],
+)
+def test_crea_llm_preserves_token_and_timeout_bounds(
+    monkeypatch, requested_tokens, requested_timeout, expected_tokens, expected_timeout
+):
+    monkeypatch.setenv("LLM_COST_POLICY", "standard")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "offline-test-key")
+    captured = {}
+
+    def capture_llm(**kwargs):
+        captured.update(kwargs)
+        return captured
+
+    monkeypatch.setattr("src.core.llm_config.LLM", capture_llm)
+
+    result = crea_llm(
+        model="vendor/model",
+        max_tokens=requested_tokens,
+        timeout=requested_timeout,
+    )
+
+    assert result["max_tokens"] == expected_tokens
+    assert captured["timeout"] == expected_timeout
+    assert captured["num_retries"] == 1
