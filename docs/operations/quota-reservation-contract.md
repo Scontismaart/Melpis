@@ -86,6 +86,10 @@ The adapter work must be reviewed and tested together before enabling any path:
   outcome must not disappear from accounting or trigger an automatic retry.
 - Coordinate preview and Q&A idempotency with existing clients and API contracts.
   Do not invent a random server key on retries or silently change client behavior.
+- Extend the typed final-response envelope for `RispostaDocumento` before Q&A
+  activation, preserving the authorized sources on replay. The current final
+  validator accepts `RispostaOutput`; a channel identifier alone does not prove
+  that the existing Q&A API contract is supported.
 - Reconcile existing simulator rows keyed by the old raw request ID. A completed
   historical response may be replayed after authorization; an old pending/failed
   charge must not be adopted or charged again. No historical row becomes proof
