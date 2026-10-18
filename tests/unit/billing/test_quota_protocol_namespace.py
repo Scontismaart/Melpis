@@ -59,7 +59,9 @@ class _UsageConn(_DrainConn):
         self.inserted.append((query, args))
 
 
-@pytest.mark.parametrize("event_type", ["system.quota_trust_epoch", "legacy_quota_admission"])
+@pytest.mark.parametrize("event_type", [
+    "system.quota_trust_epoch", "legacy_quota_admission", "system.quota_reservation",
+])
 @pytest.mark.parametrize("ingress", ["record_usage", "record_usage_batch", "enqueue_governance", "drain_governance"])
 @pytest.mark.asyncio
 async def test_reserved_quota_protocol_events_are_rejected_before_usage_insert(event_type, ingress):

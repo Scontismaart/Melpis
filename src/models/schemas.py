@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 # Lingue supportate dal bot (task 14): lista chiusa, vocabolario massimo.
 # IT e' sempre inclusa ed e' la lingua di default; il Titolare restringe la
@@ -80,6 +80,10 @@ class ImpostazioniDisponibilitaInput(BaseModel):
 
 
 class RispostaOutput(BaseModel):
+    # Server-only provenance: never accepted from JSON or exposed in the schema.
+    # A sanitized escalation must not become a billable AI reply on revalidation.
+    _guardrail_blocked: bool = PrivateAttr(default=False)
+
     risposta: str
     richiede_umano: bool
     motivo: str

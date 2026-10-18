@@ -186,9 +186,11 @@ def applica_guardrail(risposta: RispostaOutput, esito: EsitoValidazione) -> Risp
         return risposta
     if esito.azione == "trim":
         return risposta.model_copy(update={"risposta": esito.testo})
-    return risposta.model_copy(update={
+    guarded = risposta.model_copy(update={
         "risposta": FALLBACK_STAFF_TEXT,
         "richiede_umano": True,
         "motivo": f"guardrail_{esito.motivo}",
         "prenotazione": None,
     })
+    guarded._guardrail_blocked = True
+    return guarded
