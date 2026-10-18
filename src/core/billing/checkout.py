@@ -241,7 +241,7 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
     kwargs = dict(customer=customer_id, line_items=[{"price": frozen["price_id"], "quantity": 1}],
                   mode="subscription", success_url=frozen["success_url"], cancel_url=frozen["cancel_url"],
                   client_reference_id=str(org_id), metadata=session_metadata,
-                  payment_method_collection="if_required" if trial_end_unix is not None else "required",
+                  payment_method_collection="if_required" if trial_end_unix is not None else "always",
                   expires_at=int(frozen["checkout_session_expires_at_unix"]),
                   idempotency_key=f"checkout:{intent['id']}")
     if trial_end_unix is not None:

@@ -170,8 +170,8 @@ async def test_stripe_subscription_cancellation_webhook_and_ai_blocking(real_db_
     # 1. Inserisce tenant con abbonamento attivo
     async with real_db_pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO organizations (id, name, stripe_customer_id, subscription_status)
-               VALUES ($1, 'Ristorante Da Mario', $2, 'active')""",
+            """INSERT INTO organizations (id, name, stripe_customer_id, subscription_status, subscription_id)
+               VALUES ($1, 'Ristorante Da Mario', $2, 'active', 'sub_test_canc_123')""",
             org_id, cust_id
         )
 
@@ -180,7 +180,7 @@ async def test_stripe_subscription_cancellation_webhook_and_ai_blocking(real_db_
     stripe_event = {
         "id": event_id,
         "object": "event",
-        "api_version": "2023-10-16",
+        "api_version": "2024-06-20",
         "created": int(time.time()),
         "type": "customer.subscription.deleted",
         "data": {

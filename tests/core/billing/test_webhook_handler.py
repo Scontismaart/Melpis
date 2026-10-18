@@ -6,6 +6,18 @@ from datetime import datetime, timedelta, timezone
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("reset_db")]
 
 
+@pytest.fixture(autouse=True)
+def _mapped_monthly_plan_price(monkeypatch):
+    from src.core.billing import webhook_handler
+    from src.core.billing.plans import PLANS
+
+    test_price = "price_test_monthly"
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id", test_price)
+    monkeypatch.setitem(webhook_handler.PRICE_TO_PLAN, test_price, "starter")
+    for slug in PLANS:
+        monkeypatch.setitem(webhook_handler.PRODUCT_TO_PLAN, f"prod_{slug}", slug)
+
+
 @pytest.fixture
 def valid_checkout_event():
     return {
@@ -36,6 +48,10 @@ async def _seed_checkout_intent(repo, organization_id, event, trial_end_unix=Non
     payload = {
         "checkout_intent_id": str(intent_id),
         "trial_end_unix": trial_end_unix,
+        "stripe_customer_id": session["customer"],
+        "plan": "starter",
+        "interval": "monthly",
+        "price_id": "price_test_monthly",
     }
     async with repo.pool.acquire() as conn:
         await conn.execute("""
@@ -45,10 +61,13 @@ async def _seed_checkout_intent(repo, organization_id, event, trial_end_unix=Non
             ) VALUES ($1, $2, $3, 'test', $4::jsonb, $5, $6, NOW() + interval '4 days')
         """, intent_id, organization_id, f"test-checkout-{intent_id}",
             json.dumps(payload), session_id, f"https://checkout.example.test/{session_id}")
+    return intent_id
 
 
 @pytest.fixture
 def valid_invoice_paid_event():
+    service_start = int(datetime.now(timezone.utc).timestamp())
+    service_end = service_start + 2592000
     return {
         "id": "evt_invoice_001",
         "created": 100,
@@ -59,13 +78,24 @@ def valid_invoice_paid_event():
                 "customer": "cus_test001",
                 "subscription": "sub_test001",
                 "status": "paid",
-                "period_start": datetime.now(timezone.utc).timestamp(),
-                "period_end": datetime.now(timezone.utc).timestamp() + 2592000,
+                "amount_paid": 2900,
+                "currency": "eur",
+                "period_start": service_start - 2592000,
+                "period_end": service_start,
                 "lines": {
                     "data": [
                         {
-                            "price": {"id": ""},
-                            "plan": {"product": "prod_starter"},
+                            "type": "subscription",
+                            "amount": 2900,
+                            "currency": "eur",
+                            "subscription": "sub_test001",
+                            "proration": False,
+                            "quantity": 1,
+                            "price": {
+                                "id": "price_test_monthly",
+                                "recurring": {"interval": "month", "interval_count": 1},
+                            },
+                            "period": {"start": service_start, "end": service_end},
                         }
                     ]
                 },
@@ -124,6 +154,7 @@ async def test_handle_invoice_paid_resets_usage(repo, sample_org, valid_invoice_
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
     })
     await repo.increment_message_usage(sample_org["id"])
     await repo.increment_message_usage(sample_org["id"])
@@ -139,6 +170,7 @@ async def test_invoice_paid_converts_exhausted_trial_to_paid_quota(repo, sample_
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "subscription_status": "trialing",
         "messages_limit": 150,
         "messages_used_this_period": 150,
@@ -161,6 +193,7 @@ async def test_handle_invoice_paid_sets_period(repo, sample_org, valid_invoice_p
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
     })
     event = valid_invoice_paid_event
     event["data"]["object"]["customer"] = "cus_test001"
@@ -174,6 +207,7 @@ async def test_handle_subscription_updated_changes_plan(repo, sample_org):
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "plan": "starter",
         "messages_limit": 500,
     })
@@ -204,6 +238,7 @@ async def test_handle_subscription_deleted_sets_canceled(repo, sample_org):
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "subscription_status": "active",
     })
     event = {
@@ -230,6 +265,7 @@ async def test_handle_subscription_deleted_no_second_notice(repo, sample_org):
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "subscription_status": "active",
     })
     event = {
@@ -252,6 +288,7 @@ async def test_reactivation_resets_notification_then_resuspend(repo, sample_org)
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "subscription_status": "active",
     })
     sub_del = {
@@ -277,7 +314,7 @@ async def test_reactivation_resets_notification_then_resuspend(repo, sample_org)
             }
         },
     }
-    await _seed_checkout_intent(repo, sample_org["id"], checkout)
+    reactivated_intent = await _seed_checkout_intent(repo, sample_org["id"], checkout)
     await handle_stripe_webhook(checkout, repo, 7)
     invoice_paid = {
         "id": "evt_invoice_reactivate_100",
@@ -285,12 +322,30 @@ async def test_reactivation_resets_notification_then_resuspend(repo, sample_org)
         "type": "invoice.paid",
         "data": {"object": {
             "id": "in_reactivate_100",
+            "subscription_details": {"metadata": {"checkout_intent_id": str(reactivated_intent)}},
             "customer": "cus_test001",
             "subscription": "sub_test002",
             "status": "paid",
-            "period_start": datetime.now(timezone.utc).timestamp(),
-            "period_end": datetime.now(timezone.utc).timestamp() + 2592000,
-            "lines": {"data": []},
+            "amount_paid": 2900,
+            "currency": "eur",
+            "period_start": int(datetime.now(timezone.utc).timestamp()) - 2592000,
+            "period_end": int(datetime.now(timezone.utc).timestamp()),
+            "lines": {"data": [{
+                "type": "subscription",
+                "amount": 2900,
+                "currency": "eur",
+                "subscription": "sub_test002",
+                "proration": False,
+                "quantity": 1,
+                "price": {
+                    "id": "price_test_monthly",
+                    "recurring": {"interval": "month", "interval_count": 1},
+                },
+                "period": {
+                    "start": int(datetime.now(timezone.utc).timestamp()),
+                    "end": int(datetime.now(timezone.utc).timestamp()) + 2592000,
+                },
+            }]},
         }},
     }
     await handle_stripe_webhook(invoice_paid, repo, 7)
@@ -312,6 +367,7 @@ async def test_handle_invoice_payment_failed_sets_past_due(repo, sample_org):
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
+        "subscription_id": "sub_test001",
         "subscription_status": "active",
     })
     event = {
@@ -349,6 +405,7 @@ async def test_subscription_updated_same_period_does_not_reset_usage(repo, sampl
 
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test_guard",
+        "subscription_id": "sub_guard_001",
         "plan": "starter",
         "messages_limit": 500,
         "current_period_start": fixed_start,
@@ -394,6 +451,7 @@ async def test_webhook_dedup_uses_real_event_id_not_object_id(repo, sample_org):
 
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test_dedup",
+        "subscription_id": "sub_x",
         "subscription_status": "active",
     })
 
@@ -429,6 +487,7 @@ async def test_stripe_atomic_rollback_on_failure(repo, sample_org):
 
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_atomic",
+        "subscription_id": "sub_atomic",
         "subscription_status": "active",
     })
 

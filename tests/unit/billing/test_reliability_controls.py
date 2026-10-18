@@ -352,7 +352,7 @@ async def test_checkout_preserves_exact_trial_deadline_and_payment_collection(
 
     assert result["url"] == "https://checkout.test/cs"
     kwargs = stripe_call.await_args.kwargs
-    assert kwargs["payment_method_collection"] == ("if_required" if has_trial else "required")
+    assert kwargs["payment_method_collection"] == ("if_required" if has_trial else "always")
     assert ("trial_end" in kwargs["subscription_data"]) is has_trial
     intent_payload = json.loads(conn.execute.await_args_list[0].args[5])
     assert intent_payload["trial_end_unix"] == (
@@ -651,11 +651,14 @@ async def test_checkout_webhook_binds_to_intent_even_when_session_id_persistence
         },
     }, "evt_webhook_before_session_save", 7)
 
-    resolve_query, intent_id_arg, session_id_arg, org_id_arg = conn.execute.await_args_list[1].args
+    resolve_query, intent_id_arg, session_id_arg, org_id_arg, subscription_id_arg = (
+        conn.execute.await_args_list[1].args
+    )
     assert "session_id = COALESCE(session_id, $2)" in resolve_query
     assert intent_id_arg == intent_id
     assert session_id_arg == session_id
     assert org_id_arg == str(org_id)
+    assert subscription_id_arg == "sub_race"
     assert "_resolved" in resolve_query
 
 
@@ -1181,7 +1184,7 @@ async def test_paid_deposit_adopts_session_after_send_then_mark_crash():
 
 
 @pytest.mark.asyncio
-async def test_async_checkout_tie_cannot_relax_existing_state():
+async def test_async_checkout_tie_scope_does_not_mutate_entitlement():
     org_id = uuid.uuid4()
 
     class Conn:
@@ -1197,7 +1200,8 @@ async def test_async_checkout_tie_cannot_relax_existing_state():
 
         execute = AsyncMock()
 
-    gate = await _lock_event_scope(Conn(), {
+    conn = Conn()
+    gate = await _lock_event_scope(conn, {
         "id": "evt_async",
         "created": 100,
         "type": "checkout.session.async_payment_succeeded",
@@ -1207,4 +1211,6 @@ async def test_async_checkout_tie_cannot_relax_existing_state():
         "customer": "cus_test",
         "subscription": "sub_test",
     })
-    assert gate["ignored"] == "ambiguous_event_order"
+    assert gate["subscription_id"] == "sub_test"
+    assert "ignored" not in gate
+    conn.execute.assert_not_awaited()
