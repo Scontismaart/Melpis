@@ -10,16 +10,20 @@ Repository corrente: `Scontismaart/Melpis`. Worktree di recupero preservato: `C:
 
 Evidenze lette: inventario storico `docs/launch/MELPIS-STEP0-DIFF-SECURITY-REVIEW.md`, diff locale per hunk, file/diff remoti delle PR indicate, titoli delle issue #85–#102, backlog esistente. La sovrapposizione di percorso non prova equivalenza del codice o copertura dei test.
 
-## Stato corrente delle integrazioni — 18 ottobre 2026
+## Stato corrente delle integrazioni — snapshot 18 ottobre 2026
+
+`main` remoto ora punta a `ca2459ab16b05268c06d7f4a547b7fd271682f97`, dopo l'integrazione della PR #112. La CI full post-merge è in corso; nessun risultato o pubblicazione GHCR è ancora attribuito a questo nuovo commit. Il precedente main `d56929a205656c797ce397bafda814839dab18a6` ha superato [CI39137587518](https://github.com/Scontismaart/Melpis/actions/runs/39137587518): 2.987 passati, 33 saltati, 58 warning, quattro immagini e due manifest multiarch immutabili API/web verificati. Nessun deploy o scrittura database.
 
 - #103: integrata in `main` al commit `a25930ecd8ace14e4bf5ffa1492f56824e807793`, CI post-merge verde; issue #86 chiusa dopo verifica circoscritta. Il limiter non recupera il gate billing locale della stessa route.
 - #116: integrata in `main` `2d26baf02204c81bb68b77cb06468b2b7907f922`; CI39113224120 verde, 2.752 passati/33 live esclusi. Solo test, A03 resta aperta. Non recupera gli hunk locali di autorizzazione del runner.
 - #113: integrata in `main` `0e1c60b13ed8b78d4dcdfaab7fe54f9d3326b020`; CI39114444996 verde. Redirect OAuth e test non certificano Calendar o Google Cloud Production.
 - #114: integrata in `main` `d526001fbcafdf275387531384eea9ef9194d791`; CI39115843721 verde completa e GHCR riuscita. Route/store GDPR, autorizzazione runtime e consumo atomico non certificano delete/retention né l'intera baseline globale delle route.
 - #115: integrata in `main` `b82ca786364ebbcd17daaeebbed173ced09b3ff3`; CI39117170849 verde, 2.896 passati/33 live esclusi, quattro immagini e due manifest immutabili verificati con tag `sha-b82ca786364ebbcd17daaeebbed173ced09b3ff3`. Primo ciclo di cinque PR concluso, nessun deploy. Candidato `de4c3f`: CI39115288952 verde, 2.861 passati/33 live esclusi e 172 test billing locali; i vecchi head 74f0652 sono storici.
-- #109: integrata successivamente in `main` `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef`, ora main corrente; CI39134693561 post-merge in corso. Candidato `d6a9d114c1046f74e2bee2a9a77d7245b86f2a61`: CI39116119080 verde, 2.854 passati/33 live esclusi e 93 test locali. A03 resta aperta per metriche raw/tutti gli ingressi.
+- #109: integrata in `main` `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef`; [CI39134693561](https://github.com/Scontismaart/Melpis/actions/runs/39134693561) verde, 2.933 passati/33 saltati. Candidato `d6a9d114c1046f74e2bee2a9a77d7245b86f2a61`: CI39116119080 verde, 2.854 passati/33 live esclusi e 93 test locali. A03 resta aperta per metriche raw/tutti gli ingressi.
+- #108: integrata in `main` `d56929a205656c797ce397bafda814839dab18a6`; [CI39137587518](https://github.com/Scontismaart/Melpis/actions/runs/39137587518) verde, 2.987 passati/33 saltati/58 warning; quattro immagini e due manifest immutabili API/web pubblicati e verificati. Digest API `sha256:706e533ebd981215493d34d978f3e57cc80a8a9ef271af03131cb63bf29e0e55`; web `sha256:c31807b555956f30e57a844fd8ab59e3ac41613d1cfd284c57e1ef8ca50ebca4`. Nessun deploy o scrittura database. A02 resta aperta per trial, limite 150, public checkout e riconciliazione webhook; A04 e quota atomica restano aperte.
+- #112: integrata successivamente nel main corrente `ca2459ab16b05268c06d7f4a547b7fd271682f97`; trasporto isolato su due file, 48 test mirati locali passati. CI full post-merge pending; nessuna attivazione runtime Q&A, B02 non certificata.
 
-Le tabelle di attribuzione sotto conservano la fotografia delle fonti all'inventario: gli SHA stacked non sono gli stati correnti delle PR. Prevale lo stato corrente sopra. Consolidamento A02 nella #108 esistente in lavorazione locale, non ancora pubblicato: validatore snapshot subscription senza nuove quote/upgrade/periodi, trial minimo e nessun rilassamento degli stati restrittivi. Nessun esito di test/CI remota attribuito al lavoro ancora locale. Nessuna certificazione runtime completa discende da questo inventario; backup conservati, nessun deploy o modifica Production.
+Le tabelle di attribuzione sotto conservano la fotografia delle fonti all'inventario: gli SHA stacked non sono gli stati correnti delle PR. Prevale lo stato corrente sopra. Il consolidamento A02 #108 è integrato e ha CI post-merge verde sul commit `d56929a`; i gate di prodotto (trial, limite 150, public checkout, riconciliazione webhook) e A04 restano aperti. #112 è integrata sul successivo `ca2459a`, ma la CI full post-merge è pending. Nessuna certificazione runtime completa discende da queste CI; backup conservati, nessun deploy o modifica Production.
 
 ## Mappa completa dei 49 file modificati e dei due nuovi file
 
@@ -85,10 +89,10 @@ Ogni riga assegna un responsabile operativo già presente nel backlog. “Recupe
 |---|---|---|
 | #106 | `d5a82ecffb67ca46e9fad5b2e54be90ef3a3d3b7` | Gate preview e helper billing; stacked su #82, non ancora integrazione main. Non cambia la legacy policy is_org_suspended per past_due. |
 | #107 | `c220d6a2b6f42fa1b7f47fef7a093b5ad783059a` | Guard/preflight/runbook mensili; #115 recupera parte runtime su main. Conservare il contenuto documentale non duplicato. |
-| #108 | `6a8d8c730ca863df4d6d841be962326361d22df5` | Validazione eventi, catalogo e binding; confrontare con nuova #115 prima di qualsiasi riallineamento. Nessun merge automatico dello stack #82. |
+| #108 | `226392f783422023c84e7d808ac798050098b3b2` | Head finale integrato in `d56929a`: validazione eventi, catalogo e binding. A02 resta aperta per i gate operativi; nessun merge automatico dello stack #82. |
 | #109 | `e36fa7a46ef286288b7316b75826c7a172a0ee88` | Accounting preview su #106. Riutilizzare sink/propagazione testati; metriche originali provider e altri ingressi restano A03. |
 | #111 | `c513d2bab2f2da5f0ed2dd4f564240c86014e362` | Policy client estratta; nessuno dei 51 percorsi originali modificato. Dipendenza preparatoria B02, non recupero del gate Q&A. |
-| #112 | `598c66e882d8c487754e8f3f1cfecc8f4415742b` | Trasporto raw isolato; nessuno dei 51 percorsi originali modificato. Dipendenza preparatoria B02, non attivazione runtime. |
+| #112 | `598c66e882d8c487754e8f3f1cfecc8f4415742b` | Head integrato nel commit main `ca2459a`; trasporto raw isolato su due file, nessuno dei 51 percorsi originali modificato. 48 test mirati locali passati; CI full post-merge pending. Dipendenza preparatoria B02, non attivazione runtime né certificazione Q&A. |
 
 ## Report storico e limiti delle prove
 
