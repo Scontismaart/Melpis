@@ -1,6 +1,35 @@
 # Melpis V1 — allineamento Git e stato locale
 
-Verifica: 16 ottobre 2026. Canonico Scontismaart/Melpis. Baseline origin/main 2994fae7. Questo inventario distingue commit pubblicati, checkout locali, modifiche non committate e runtime; non attribuisce la CI remota a modifiche locali.
+Aggiornamento: 18 ottobre 2026. Canonico Scontismaart/Melpis. Main corrente `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef`, CI39134693561 post-merge #109 in corso. Primo ciclo di cinque PR concluso; #115 ha CI/GHCR post-merge verdi. Questo inventario distingue commit pubblicati, checkout locali, modifiche non committate e runtime; non attribuisce la CI remota a modifiche locali.
+
+## Avanzamento corrente — sprint autorizzato del 18 ottobre 2026
+
+Il fondatore ha autorizzato esplicitamente le integrazioni separate #103/#116/#113/#114/#115 e la pubblicazione GHCR prevista dai workflow. Ogni merge successivo ha atteso la CI post-merge precedente. Nessun deploy, riavvio dei servizi Production, migrazione remota, modifica live o eliminazione backup eseguita nello sprint.
+
+| PR | Commit main | Prova post-merge |
+|---|---|---|
+| #103 | `a25930ecd8ace14e4bf5ffa1492f56824e807793` | [CI39082774889](https://github.com/Scontismaart/Melpis/actions/runs/39082774889) verde; 11 test di accettazione sul main esatto, #86 chiusa. |
+| #116 | `2d26baf02204c81bb68b77cb06468b2b7907f922` | [CI39113224120](https://github.com/Scontismaart/Melpis/actions/runs/39113224120) verde, 2.752 passati e 33 live esclusi. Soli test, A03 aperta. |
+| #113 | `0e1c60b13ed8b78d4dcdfaab7fe54f9d3326b020` | [CI39114444996](https://github.com/Scontismaart/Melpis/actions/runs/39114444996) verde. Google Cloud Production e OAuth reale non certificati. |
+| #114 | `d526001fbcafdf275387531384eea9ef9194d791` | [CI39115843721](https://github.com/Scontismaart/Melpis/actions/runs/39115843721) verde completa, GHCR riuscita. Delete/retention restano aperti. |
+| #115 | `b82ca786364ebbcd17daaeebbed173ced09b3ff3` | [CI39117170849](https://github.com/Scontismaart/Melpis/actions/runs/39117170849) verde: 2.896 passati/33 live esclusi; quattro immagini e due manifest immutabili verificati. |
+| #109 | `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef` | [CI39134693561](https://github.com/Scontismaart/Melpis/actions/runs/39134693561) post-merge in corso; A03 resta aperta. |
+
+Il primo ciclo #103/#116/#113/#114/#115 è concluso. Per #115 sono verificate quattro immagini e due manifest API/web immutabili con tag `sha-b82ca786364ebbcd17daaeebbed173ced09b3ff3`, senza deploy dei servizi. #109 è stata integrata successivamente, con verifica post-merge ancora in corso sul main corrente.
+
+Candidato #115 `de4c3f`: [CI39115288952](https://github.com/Scontismaart/Melpis/actions/runs/39115288952) verde, 2.861 passati e 33 live esclusi; 172 test billing locali passati. Stripe Test, SDK/API `2024-06-20`: tre prezzi mensili 29/69/149 EUR, nove Checkout (tre piani × 7 giorni/49 ore/scaduto), parametri accettati e retry idempotente. Tentativi 47 ore/23 ore/30 minuti rifiutati da Stripe; il trial applicativo originale prosegue senza carta e senza estensione. Tutte le sessioni sintetiche fatte scadere, customer sintetico rimosso; nessun addebito reale o modifica alla configurazione live. Fattura/cancellazione/replay da subscription Test diretta trattati dall'handler de4c3f su PostgreSQL locale: non certificano consegna webhook pubblica o intera UI Checkout. A02 resta aperta per validatore subscription, rinnovi/fallimenti, riconciliazione e A04.
+
+A00 #85 chiusa: inventario/recupero `33a7e94` e [attribuzione completa di 49+2 file](MELPIS-V1-A00-RESIDUAL-ASSIGNMENT.md); originali e snapshot preservati. La chiusura riguarda recupero/attribuzione; i residui applicativi hanno issue proprie, non certificazione implicita. A01 #86 chiusa. Totale: **2 completati, 4 in lavorazione, 7 bloccati, 5 da fare**; quattro attività ancora in lavorazione A02/A03/B02/C01.
+
+#109 integrata main `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef`, [CI39134693561](https://github.com/Scontismaart/Melpis/actions/runs/39134693561) post-merge in corso. Candidato `d6a9d114c1046f74e2bee2a9a77d7245b86f2a61`: tre file runtime/quattro test, 93 test locali, [CI39116119080](https://github.com/Scontismaart/Melpis/actions/runs/39116119080) verde con 2.854 passati/33 live esclusi/quattro build riuscite. Riutilizzati i frammenti presenti, senza duplicare #106/#109. Metriche raw provider e tutti gli ingressi restano A03. #112 ha nuovamente passato 48 test locali; trasporto Q&A isolato, runtime non attivato. B02 attende A03/A04; C01 attende prove applicative e schema finale. I 33 test live esclusi restano gate beta.
+
+Consolidamento A02 nella #108 esistente in lavorazione locale, non ancora pubblicato: validatore rigoroso snapshot subscription che non concede nuove quote, upgrade o periodi, conserva il trial minimo e non rilassa stati restrittivi. Verifica locale non ancora conclusa; nessun nuovo SHA/CI remota da attribuirgli. Restano rinnovi/fallimenti, riconciliazione e A04.
+
+Il batch Staging 058/059/UNIQUE era già applicato con backup/restore verificati; non ripetuto nello sprint. Backup cifrato e chiavi conservati, disponibili per rollback: eliminazione soltanto dopo conferma umana. Nessun deploy o modifica Production autorizzato da questa ricognizione. Le prove provider circoscritte non completano i gate esterni.
+
+## Inventario storico — 16 ottobre 2026
+
+Da questo punto le sezioni registrano la fotografia del 16 ottobre, baseline origin/main `2994fae7`: stato runtime/Supabase, PR aperte e assenza di merge appartengono a quella data. Lo stato corrente è sopra e nel [backlog aggiornato](MELPIS-V1-BACKLOG.md). In particolare Staging è stata poi riattivata e il batch autorizzato verificato; #103 non è più aperta e non è più sul vecchio commit f6e88da.
 
 ## Azioni eseguite
 

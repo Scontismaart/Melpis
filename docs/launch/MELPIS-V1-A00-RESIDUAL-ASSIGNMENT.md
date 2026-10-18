@@ -10,15 +10,16 @@ Repository corrente: `Scontismaart/Melpis`. Worktree di recupero preservato: `C:
 
 Evidenze lette: inventario storico `docs/launch/MELPIS-STEP0-DIFF-SECURITY-REVIEW.md`, diff locale per hunk, file/diff remoti delle PR indicate, titoli delle issue #85–#102, backlog esistente. La sovrapposizione di percorso non prova equivalenza del codice o copertura dei test.
 
-## Stato delle integrazioni alla ricognizione
+## Stato corrente delle integrazioni — 18 ottobre 2026
 
 - #103: integrata in `main` al commit `a25930ecd8ace14e4bf5ffa1492f56824e807793`, CI post-merge verde; issue #86 chiusa dopo verifica circoscritta. Il limiter non recupera il gate billing locale della stessa route.
-- #116: integrata in `main` al commit abbreviato `2d26baf`; CI post-merge ancora in verifica al momento di questa ricognizione. Solo test, A03 resta aperta. Non recupera gli hunk locali di autorizzazione del runner.
-- #113: candidata `0115ae030f6347973ac7d64a6be94081ae701ac2`; redirect OAuth e relativi test. Non certifica Calendar o configurazione Google Cloud Production.
-- #114: candidata `e1022c8f746a7d59e377bd62964a2711f89dd50b`; route/store GDPR, autorizzazione runtime e consumo atomico. Non certifica delete/retention e non recupera l'intera baseline locale delle route.
-- #115: head pubblicato alla ricognizione `74f06524433ac38ecf4fdb29320f712c8c00b58d`, correzioni in lavorazione. Non dichiarata pronta né integrata. Una nuova revisione deve usare il nuovo SHA effettivamente pubblicato.
+- #116: integrata in `main` `2d26baf02204c81bb68b77cb06468b2b7907f922`; CI39113224120 verde, 2.752 passati/33 live esclusi. Solo test, A03 resta aperta. Non recupera gli hunk locali di autorizzazione del runner.
+- #113: integrata in `main` `0e1c60b13ed8b78d4dcdfaab7fe54f9d3326b020`; CI39114444996 verde. Redirect OAuth e test non certificano Calendar o Google Cloud Production.
+- #114: integrata in `main` `d526001fbcafdf275387531384eea9ef9194d791`; CI39115843721 verde completa e GHCR riuscita. Route/store GDPR, autorizzazione runtime e consumo atomico non certificano delete/retention né l'intera baseline globale delle route.
+- #115: integrata in `main` `b82ca786364ebbcd17daaeebbed173ced09b3ff3`; CI39117170849 verde, 2.896 passati/33 live esclusi, quattro immagini e due manifest immutabili verificati con tag `sha-b82ca786364ebbcd17daaeebbed173ced09b3ff3`. Primo ciclo di cinque PR concluso, nessun deploy. Candidato `de4c3f`: CI39115288952 verde, 2.861 passati/33 live esclusi e 172 test billing locali; i vecchi head 74f0652 sono storici.
+- #109: integrata successivamente in `main` `c3f432ef4d3085cc1fdb6e0491840bb0b40bafef`, ora main corrente; CI39134693561 post-merge in corso. Candidato `d6a9d114c1046f74e2bee2a9a77d7245b86f2a61`: CI39116119080 verde, 2.854 passati/33 live esclusi e 93 test locali. A03 resta aperta per metriche raw/tutti gli ingressi.
 
-Gli stati qui sopra sono una fotografia, da aggiornare dopo ogni integrazione effettiva. Nessuna certificazione runtime discende da questo inventario.
+Le tabelle di attribuzione sotto conservano la fotografia delle fonti all'inventario: gli SHA stacked non sono gli stati correnti delle PR. Prevale lo stato corrente sopra. Consolidamento A02 nella #108 esistente in lavorazione locale, non ancora pubblicato: validatore snapshot subscription senza nuove quote/upgrade/periodi, trial minimo e nessun rilassamento degli stati restrittivi. Nessun esito di test/CI remota attribuito al lavoro ancora locale. Nessuna certificazione runtime completa discende da questo inventario; backup conservati, nessun deploy o modifica Production.
 
 ## Mappa completa dei 49 file modificati e dei due nuovi file
 
@@ -99,4 +100,4 @@ I 33 test live esclusi restano gate della beta. La baseline globale route presen
 
 ## Criterio di chiusura A00
 
-Attribuzione completata per **49+2 file e report storico**. La direttiva del fondatore nello sprint di integrazione consente di chiudere A00 quando i frammenti rilevanti sono integrati oppure assegnati esplicitamente ad altre issue, senza perdere codice o dati; questo aggiorna il precedente criterio della issue che richiedeva la pubblicazione di ogni frammento. I residui hanno issue esplicite #87/#88/#90/#91/#92/#93/#95/#101, originali preservati e fonti sovrapposte identificate. A00 resta aperta fino alla pubblicazione verificata di questa attribuzione e al collegamento delle issue destinatarie. La sua chiusura amministrativa non completa le implementazioni, le prove per frammento o la certificazione runtime delle issue assegnatarie; nessun import massivo del vecchio worktree.
+Attribuzione completata per **49+2 file e report storico**. La direttiva del fondatore nello sprint di integrazione consente di chiudere A00 quando i frammenti rilevanti sono integrati oppure assegnati esplicitamente ad altre issue, senza perdere codice o dati; questo aggiorna il precedente criterio della issue che richiedeva la pubblicazione di ogni frammento. I residui hanno issue esplicite #87/#88/#90/#91/#92/#93/#95/#101, originali preservati e fonti sovrapposte identificate. Attribuzione pubblicata nel commit `33a7e947486e4c5bb4ca4a448b3497fe800aa469` della PR104, con CI verde e collegamenti alle issue destinatarie; A00 #85 è stata quindi chiusa. Le tabelle restano una fotografia delle fonti all'attribuzione, non una dichiarazione che le relative PR siano ancora aperte oggi. La sua chiusura amministrativa non completa le implementazioni, le prove per frammento o la certificazione runtime delle issue assegnatarie; nessun import massivo del vecchio worktree.
