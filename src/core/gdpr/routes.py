@@ -3,11 +3,17 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
+from src.core.auth import bff
 from src.core.auth.audit import audit_log
-from src.core.auth.dependencies import require_ruolo, require_mfa
+from src.core.auth.dependencies import (
+    get_current_user,
+    get_repo,
+    require_mfa,
+    require_ruolo,
+)
 from src.core.db.repository import CoreRepository
 from src.core.gdpr import token_store
 
@@ -75,7 +81,7 @@ DPA_HTML = """<!DOCTYPE html>
 <h2>7. Data Subject Rights</h2>
 <p>Controllers may exercise data subject rights via the GDPR API:</p>
 <ul>
-  <li><strong>Export:</strong> <code>GET /api/gdpr/export</code> — JSON export with 15-minute pre-signed URL</li>
+  <li><strong>Export:</strong> <code>GET /api/gdpr/export</code> — owner-only JSON export; download uses a 15-minute, session-bound HttpOnly cookie at <code>GET /api/gdpr/download</code></li>
   <li><strong>Deletion:</strong> <code>POST /api/gdpr/delete</code> — hard-delete with external service propagation</li>
   <li><strong>Consent:</strong> <code>GET/PUT /api/gdpr/consent-prefs</code> — manage consent preferences</li>
   <li><strong>AI Transparency:</strong> the first automated reply to each new
@@ -173,25 +179,143 @@ async def gdpr_export(
 ):
     repo: CoreRepository = request.app.state.repo
     org_id = user["organization_id"]
+    auth_user_id = user.get("auth_user_id")
+    session_id = user.get("session_id")
+    user_id = user.get("user_id")
+    if not all(isinstance(value, str) and value for value in (auth_user_id, session_id, user_id)):
+        raise HTTPException(status_code=403, detail="Sessione autenticata aggiornata richiesta")
     data = await _export_tenant_data(repo, org_id)
     token = secrets.token_urlsafe(32)
-    await token_store.save_token(token, str(org_id), data)
-    download_url = str(request.base_url) + f"api/gdpr/download/{token}"
+    try:
+        await token_store.save_token(
+            token,
+            str(org_id),
+            data,
+            auth_user_id=auth_user_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+    except token_store.TokenStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
+    # A relative same-origin URL avoids trusting Host/X-Forwarded-* headers
+    # behind TLS-terminating reverse proxies and keeps credentials out of URLs.
+    download_url = "/api/gdpr/download"
 
     await audit_log(repo, organization_id=org_id, action="gdpr.export",
                     auth_user_id=user.get("auth_user_id"),
                     details={"expires_in_minutes": 15})
 
-    return {"download_url": download_url, "expires_in_minutes": 15}
+    response = JSONResponse({"download_url": download_url, "expires_in_minutes": 15})
+    response.set_cookie(
+        token_store.DOWNLOAD_COOKIE,
+        token,
+        max_age=token_store.TOKEN_TTL_SECONDS,
+        path="/api/gdpr/download",
+        secure=bff.cookie_secure(),
+        httponly=True,
+        samesite="strict",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
-@router.get("/download/{token}")
-async def gdpr_download(token: str):
-    meta = await token_store.pop_token(token)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="Link di export scaduto o non valido")
-    data = meta["data"]
-    return data
+async def require_gdpr_download_authorization(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    _mfa: dict = Depends(require_mfa()),
+) -> tuple[str, token_store.ExportToken] | None:
+    """Authorize the token-bound owner, session and organization before consume."""
+    token = request.cookies.get(token_store.DOWNLOAD_COOKIE, "")
+    try:
+        pending = await token_store.read_token(token) if token else None
+    except token_store.TokenStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
+    if pending is None:
+        return None
+
+    # Never use get_organization_context here: its login flow can auto-provision
+    # a tenant. This check binds the export to its authenticated owner session.
+    auth_user_id = user.get("auth_user_id")
+    session_id = user.get("session_id")
+    if (
+        user.get("source") != "jwt"
+        or not auth_user_id
+        or auth_user_id != pending.auth_user_id
+        or not session_id
+        or session_id != pending.session_id
+        or user.get("aal") != "aal2"
+        or pending.role != "owner"
+    ):
+        raise HTTPException(status_code=403, detail="Il download non appartiene alla sessione autorizzata")
+
+    selected_org_id = request.headers.get("X-Organization-Id")
+    if selected_org_id and selected_org_id != pending.org_id:
+        raise HTTPException(status_code=403, detail="Selezione organizzazione non valida per questo export")
+
+    repo: CoreRepository = get_repo(request)
+    try:
+        memberships = await repo.get_memberships_by_auth(auth_user_id)
+    except Exception as exc:
+        # A repository failure is not an authorization denial and must not
+        # consume the one-time token.
+        logger.warning("gdpr_download: owner membership lookup failed")
+        raise HTTPException(status_code=503, detail="Autorizzazione temporaneamente non disponibile") from exc
+    membership = next(
+        (item for item in memberships if str(item.get("organization_id")) == pending.org_id),
+        None,
+    )
+    if (
+        membership is None
+        or membership.get("ruolo") != "owner"
+        or str(membership.get("user_id")) != pending.user_id
+        or (len(memberships) > 1 and selected_org_id != pending.org_id)
+    ):
+        raise HTTPException(status_code=403, detail="Membership owner non valida per questo export")
+
+    return token, pending
+
+
+@router.get("/download")
+async def gdpr_download(
+    request: Request,
+    authorization: tuple[str, token_store.ExportToken] | None = Depends(
+        require_gdpr_download_authorization
+    ),
+):
+    if authorization is None:
+        response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
+        _clear_download_cookie(response)
+        _set_download_response_headers(response)
+        return response
+
+    token, pending = authorization
+    try:
+        data = await token_store.consume_token(token, pending)
+    except token_store.TokenStoreUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
+    if data is None:
+        response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
+    else:
+        response = JSONResponse(content=data)
+    _clear_download_cookie(response)
+    _set_download_response_headers(response)
+    return response
+
+
+def _clear_download_cookie(response: JSONResponse) -> None:
+    response.delete_cookie(
+        token_store.DOWNLOAD_COOKIE,
+        path="/api/gdpr/download",
+        secure=bff.cookie_secure(),
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _set_download_response_headers(response: JSONResponse) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
 
 
 @router.post("/delete")

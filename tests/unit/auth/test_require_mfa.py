@@ -147,6 +147,7 @@ class TestSensitivePathList:
             "/api/billing/create-checkout-session",
             "/api/billing/create-portal-session",
             "/api/gdpr/export",
+            "/api/gdpr/download",
             "/api/gdpr/delete",
             "/api/calendar/auth",
             "/api/calendar/disconnect",

@@ -15,7 +15,6 @@ Uso:
     python scripts/audit_route_contracts.py verify docs/route_contracts_baseline.json
 """
 
-import inspect
 import json
 import os
 import sys
@@ -53,13 +52,18 @@ def _collect_routes(routes) -> list:
     return collected
 
 
-def extract_route_contracts() -> dict:
+def extract_route_contracts(app=None) -> dict:
     """Estrae i contratti di tutte le route definite in src.api.main.app."""
-    # Imposta variabili ambiente minime per import sicuro senza chiamare rete
-    os.environ.setdefault("DATABASE_URL", "")
-    os.environ.setdefault("API_KEY_SERVICE", "audit-test-key")
+    if app is None:
+        # Imposta variabili ambiente minime per import sicuro senza chiamare rete
+        os.environ.setdefault("DATABASE_URL", "")
+        os.environ.setdefault("API_KEY_SERVICE", "audit-test-key")
+        from src.api.main import app
 
-    from src.api.main import app
+    # This specialized guard authorizes the tenant bound into a one-time
+    # resource token, so it cannot use the ordinary JIT org resolver. Count
+    # only this concrete runtime dependency, never arbitrary endpoint/dep tags.
+    from src.core.gdpr.routes import require_gdpr_download_authorization
 
     contracts = {}
 
@@ -74,10 +78,12 @@ def extract_route_contracts() -> dict:
         for dep in route.dependant.dependencies:
             call = dep.call
             roles = _extract_required_roles(call)
+            if call is require_gdpr_download_authorization:
+                roles = ["owner"]
             if roles:
                 required_roles = roles
             call_name = getattr(call, "__name__", "")
-            if call_name in ("get_organization_context", "get_current_org_id"):
+            if call_name in ("get_organization_context", "get_current_org_id") or call is require_gdpr_download_authorization:
                 has_org_context = True
 
 
@@ -105,7 +111,7 @@ def dump_baseline(output_file: str) -> None:
     print(f"ROUTE CONTRACT AUDIT: Baseline salvato in {output_file} ({len(contracts)} rotte censite).")
 
 
-def verify_baseline(baseline_file: str) -> int:
+def verify_baseline(baseline_file: str, app=None) -> int:
     """Verifica che l'app attuale rispetti rigorosamente il baseline salvato."""
     path = Path(baseline_file)
     if not path.exists():
@@ -115,7 +121,7 @@ def verify_baseline(baseline_file: str) -> int:
     with open(path, "r", encoding="utf-8") as f:
         baseline = json.load(f)
 
-    current = extract_route_contracts()
+    current = extract_route_contracts(app=app)
 
     drifts = []
 
@@ -131,6 +137,14 @@ def verify_baseline(baseline_file: str) -> int:
         if base_info["required_roles"] != curr_info["required_roles"]:
             drifts.append(
                 f"AUTH DRIFT su {key}: ruoli baseline={base_info['required_roles']} vs attuali={curr_info['required_roles']}"
+            )
+
+        # 2b. Tenant context is part of the security contract as well. It must
+        # come from an actual runtime dependency, never endpoint annotations.
+        if base_info.get("has_org_context", False) != curr_info["has_org_context"]:
+            drifts.append(
+                f"ORG CONTEXT DRIFT su {key}: baseline={base_info.get('has_org_context', False)} "
+                f"vs attuale={curr_info['has_org_context']}"
             )
 
         # 3. Verifica response model

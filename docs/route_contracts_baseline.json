@@ -772,14 +772,16 @@
     "response_model": null,
     "is_llm_route": false
   },
-  "/api/gdpr/download/{token}::GET": {
-    "path": "/api/gdpr/download/{token}",
+  "/api/gdpr/download::GET": {
+    "path": "/api/gdpr/download",
     "methods": [
       "GET"
     ],
     "endpoint_name": "gdpr_download",
-    "required_roles": null,
-    "has_org_context": false,
+    "required_roles": [
+      "owner"
+    ],
+    "has_org_context": true,
     "response_model": null,
     "is_llm_route": false
   },
