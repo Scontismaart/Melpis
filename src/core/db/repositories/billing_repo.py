@@ -8,6 +8,14 @@ import asyncpg
 from src.core.db.scoping import TenantScopedRepository, system_scope
 
 
+def _assert_regular_usage_type(event_type) -> None:
+    # Protocol records must only be written by the dedicated trusted path.
+    # In particular the generic outbox drain must not turn an arbitrary queued
+    # ID/payload into an authorization record in usage_events.
+    if isinstance(event_type, str) and event_type in {"system.quota_trust_epoch", "legacy_quota_admission"}:
+        raise ValueError("Reserved quota protocol event type")
+
+
 class BillingRepository(TenantScopedRepository):
     """Repository specializzato per abbonamenti, limiti, eventi di utilizzo e integrazione Stripe."""
 
@@ -19,6 +27,7 @@ class BillingRepository(TenantScopedRepository):
     async def record_usage(
         self, organization_id: uuid.UUID | str, event_type: str, quantity: int = 1, metadata: dict | None = None
     ) -> dict:
+        _assert_regular_usage_type(event_type)
         if isinstance(organization_id, str):
             organization_id = uuid.UUID(organization_id)
         async with self.pool.acquire() as conn:
@@ -45,6 +54,7 @@ class BillingRepository(TenantScopedRepository):
                     event_type = record.get("event_type", "ai_response")
                     quantity = record.get("quantity", 1)
                     metadata = record.get("metadata", {})
+                    _assert_regular_usage_type(event_type)
                     if (not isinstance(event_type, str) or not event_type.strip()
                             or isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0
                             or not isinstance(metadata, dict)):
@@ -306,6 +316,7 @@ class BillingRepository(TenantScopedRepository):
         if not isinstance(payload, dict):
             raise ValueError("Governance payload must be an object")
         if event_kind == "usage":
+            _assert_regular_usage_type(payload.get("event_type"))
             quantity = payload.get("quantity", 1)
             if (not isinstance(payload.get("event_type"), str)
                     or not payload["event_type"].strip()
@@ -369,6 +380,7 @@ class BillingRepository(TenantScopedRepository):
                         if isinstance(payload, str):
                             payload = json.loads(payload)
                         if row["event_kind"] == "usage":
+                            _assert_regular_usage_type(payload.get("event_type"))
                             await conn.execute("""
                                 INSERT INTO usage_events(id, organization_id, event_type, quantity, metadata)
                                 VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (id) DO NOTHING

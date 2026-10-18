@@ -48,6 +48,8 @@ ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {}
 # reviewed worker/tenant-resolution functions may omit a tenant bind filter.
 # A new decorator use remains visible to the checker unless explicitly added.
 SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
+    "src/core/db/quota_provenance.py::require_quota_trust_epoch":
+        "reads the fixed NULL-organization protocol marker only; no caller-controlled row selector",
     "src/core/db/repositories/message_repo.py::claim_inbound_messages":
         "trusted worker claims the global inbound queue with SKIP LOCKED",
     "src/core/db/repositories/message_repo.py::reconstruct_payload_for_retry":
@@ -99,6 +101,7 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/db/quota_provenance.py::require_quota_trust_epoch", "6ca4c3cfbc19d39d2db05a3d9ece55d1391817dfdf370d18a81fc4860bb2c4df"): "exact read-only marker UUID, NULL organization, protocol event type and zero quantity; every other SQL literal remains checked",
     ("src/core/db/repositories/organization_repo.py::get_memberships_by_auth", "29778c3d709058faa351c858baae4a2eb2a9d9b77bcaa9a503cb77f1f6990b01"): "principal membership resolution, bound to verified auth subject",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "48f99c0cd04ace9aed7749c723e6a46fb3e8eb78bc31defca15f5d36198b8776"): "JIT lookup is bound to verified auth subject",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "JIT owner membership is inserted from the newly created organization row",
