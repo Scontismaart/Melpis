@@ -203,7 +203,7 @@ async def test_handle_invoice_paid_sets_period(repo, sample_org, valid_invoice_p
     assert billing["current_period_end"] is not None
 
 
-async def test_handle_subscription_updated_changes_plan(repo, sample_org):
+async def test_subscription_product_fallback_cannot_upgrade_plan(repo, sample_org):
     from src.core.billing.webhook_handler import handle_stripe_webhook
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test001",
@@ -228,10 +228,16 @@ async def test_handle_subscription_updated_changes_plan(repo, sample_org):
             }
         },
     }
-    await handle_stripe_webhook(event, repo, 7)
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error:
+        await handle_stripe_webhook(event, repo, 7)
+    assert error.value.status_code == 503
     billing = await repo.get_organization_billing(sample_org["id"])
-    assert billing["plan"] == "pro"
-    assert billing["messages_limit"] == 2000
+    assert billing["plan"] == "starter"
+    assert billing["messages_limit"] == 500
+    assert not await repo.pool.fetchval(
+        "SELECT EXISTS(SELECT 1 FROM processed_stripe_events WHERE event_id = $1)", event["id"]
+    )
 
 
 async def test_handle_subscription_deleted_sets_canceled(repo, sample_org):
@@ -401,12 +407,13 @@ async def test_subscription_updated_same_period_does_not_reset_usage(repo, sampl
     from src.core.billing.webhook_handler import handle_stripe_webhook
 
     fixed_start = datetime.now(timezone.utc).replace(microsecond=0)
-    fixed_end = fixed_start.replace(year=fixed_start.year + (1 if fixed_start.month == 12 else 0))
+    fixed_end = fixed_start + timedelta(days=30)
 
     await repo.update_organization_billing(sample_org["id"], {
         "stripe_customer_id": "cus_test_guard",
         "subscription_id": "sub_guard_001",
         "plan": "starter",
+        "subscription_status": "active",
         "messages_limit": 500,
         "current_period_start": fixed_start,
         "current_period_end": fixed_end,
@@ -425,9 +432,11 @@ async def test_subscription_updated_same_period_does_not_reset_usage(repo, sampl
                     "id": "sub_guard_001",
                     "customer": "cus_test_guard",
                     "status": "active",
-                    "items": {"data": [{"price": {"id": ""}, "plan": {"product": "prod_starter"}}]},
-                    "current_period_start": fixed_start.timestamp(),
-                    "current_period_end": fixed_end.timestamp(),
+                    "items": {"has_more": False, "data": [{"quantity": 1, "price": {
+                        "id": "price_test_monthly", "currency": "eur", "unit_amount": 2900,
+                        "recurring": {"interval": "month", "interval_count": 1}}}]},
+                    "current_period_start": int(fixed_start.timestamp()),
+                    "current_period_end": int(fixed_end.timestamp()),
                 }
             },
         }

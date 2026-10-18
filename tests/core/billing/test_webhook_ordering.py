@@ -636,3 +636,129 @@ async def test_bound_subscription_monthly_plan_change_keeps_original_intent_meta
     assert billing["messages_limit"] == PLANS["pro"].messages_limit
     assert billing["messages_used_this_period"] == 0
     assert billing["current_period_start"] == datetime.fromtimestamp(PERIOD_END, tz=timezone.utc)
+
+
+def _subscription_snapshot(event_id, created, *, status="active", price_id=PRICE,
+                           period_start=PERIOD_START, period_end=PERIOD_END):
+    return {"id": event_id, "created": created, "type": "customer.subscription.updated",
+            "data": {"object": {
+                "id": SUBSCRIPTION, "customer": CUSTOMER, "status": status,
+                "current_period_start": period_start, "current_period_end": period_end,
+                "items": {"has_more": False, "data": [{"quantity": 1, "price": {
+                    "id": price_id, "currency": "eur", "unit_amount": 2900,
+                    "recurring": {"interval": "month", "interval_count": 1}}}]},
+            }}}
+
+
+@pytest.mark.parametrize("previous", ["trialing", "incomplete", "past_due", "unpaid", "paused"])
+async def test_active_snapshot_cannot_recover_rights_without_invoice(repo, sample_org, previous):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status=previous, used=150,
+                     period_start=PERIOD_START, period_end=PERIOD_END)
+    event = _subscription_snapshot("evt_no_payment_proof", 400)
+    cursor_before = dict(await _event_cursor(repo, org_id))
+    with pytest.raises(HTTPException) as error:
+        await handle_stripe_webhook(event, repo, 7)
+    assert error.value.status_code == 503
+    billing = await repo.get_organization_billing(org_id)
+    assert billing["subscription_status"] == previous
+    assert billing["messages_used_this_period"] == 150
+    assert not await _processed(repo, event["id"])
+    assert dict(await _event_cursor(repo, org_id)) == cursor_before
+
+
+@pytest.mark.parametrize("change", ["period", "plan", "unknown_price"])
+async def test_active_snapshot_cannot_create_new_paid_period_or_plan(repo, sample_org, change, monkeypatch):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    from src.core.billing.plans import PLANS
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status="active", used=121,
+                     period_start=PERIOD_START, period_end=PERIOD_END)
+    await repo.update_organization_billing(org_id, {"plan": "starter", "messages_limit": 500})
+    event = _subscription_snapshot("evt_snapshot_new_rights", 400)
+    data = event["data"]["object"]
+    if change == "period":
+        data["current_period_start"] = PERIOD_END
+        data["current_period_end"] = PERIOD_END + 2592000
+    elif change == "plan":
+        monkeypatch.setattr(PLANS["pro"], "stripe_price_id", "price_verified_pro")
+        data["items"]["data"][0]["price"].update(id="price_verified_pro", unit_amount=6900)
+    else:
+        data["items"]["data"][0]["price"]["id"] = "price_unknown"
+    with pytest.raises(HTTPException) as error:
+        await handle_stripe_webhook(event, repo, 7)
+    assert error.value.status_code == 503
+    billing = await repo.get_organization_billing(org_id)
+    assert billing["plan"] == "starter"
+    assert billing["messages_limit"] == 500
+    assert billing["messages_used_this_period"] == 121
+    assert int(billing["current_period_start"].timestamp()) == PERIOD_START
+    assert not await _processed(repo, event["id"])
+
+
+@pytest.mark.parametrize("previous,incoming,expected", [
+    ("active", "unpaid", "unpaid"), ("active", "invented_status", "incomplete"),
+    ("unpaid", "past_due", "unpaid"), ("paused", "past_due", "paused"),
+    ("incomplete", "past_due", "incomplete"),
+])
+async def test_restrictive_unknown_catalog_never_relaxes_rights(repo, sample_org, previous, incoming, expected):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status=previous, used=111,
+                     period_start=PERIOD_START, period_end=PERIOD_END)
+    event = _subscription_snapshot("evt_unknown_restrictive", 400, status=incoming, price_id="unknown")
+    result = await handle_stripe_webhook(event, repo, 7)
+    assert result["action"] == "subscription_updated"
+    billing = await repo.get_organization_billing(org_id)
+    assert billing["subscription_status"] == expected
+    assert billing["messages_used_this_period"] == 111
+    assert int(billing["current_period_start"].timestamp()) == PERIOD_START
+
+
+async def test_unknown_status_tie_classified_by_effective_denial(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status="active", cursor=400, event_id="evt_prior_paid", used=111,
+                     period_start=PERIOD_START, period_end=PERIOD_END)
+    event = _subscription_snapshot("evt_tie_unknown", 400, status="unexpected", price_id="unknown")
+    assert (await handle_stripe_webhook(event, repo, 7))["action"] == "subscription_updated"
+    assert (await repo.get_organization_billing(org_id))["subscription_status"] == "incomplete"
+    assert (await handle_stripe_webhook(event, repo, 7))["action"] == "duplicate"
+
+
+async def test_trial_snapshot_preserves_150_limit_and_usage(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status="trialing", used=149)
+    end = datetime.now(timezone.utc).replace(microsecond=0)
+    from datetime import timedelta
+    end += timedelta(days=2)
+    await repo.update_organization_billing(org_id, {"trial_end": end, "messages_limit": 150})
+    event = _subscription_snapshot("evt_trial_no_upgrade", 400, status="trialing")
+    event["data"]["object"]["trial_end"] = int(end.timestamp()) + 86400
+    await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(org_id)
+    assert billing["trial_end"] == end
+    assert billing["messages_limit"] == 150
+    assert billing["messages_used_this_period"] == 149
+
+
+@pytest.mark.parametrize("short_first", [True, False])
+async def test_equal_timestamp_trial_deadlines_converge_to_shortest(repo, sample_org, short_first):
+    from datetime import timedelta
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+    org_id = sample_org["id"]
+    await _bound_org(repo, org_id, status="trialing", used=149)
+    original = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
+    shortened = original - timedelta(days=1)
+    await repo.update_organization_billing(org_id, {"trial_end": original, "messages_limit": 150})
+    deadlines = [shortened, original] if short_first else [original, shortened]
+    for index, deadline in enumerate(deadlines):
+        event = _subscription_snapshot(f"evt_trial_tie_{index}", 400, status="trialing")
+        event["data"]["object"]["trial_end"] = int(deadline.timestamp())
+        await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(org_id)
+    assert billing["trial_end"] == shortened
+    assert billing["messages_limit"] == 150
+    assert billing["messages_used_this_period"] == 149

@@ -761,7 +761,9 @@ async def test_checkout_expired_webhook_resolves_intent_for_next_explicit_checko
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider_delta", [timedelta(days=30), timedelta(hours=-2)])
-async def test_subscription_updated_never_extends_signup_trial_deadline(provider_delta):
+async def test_subscription_updated_never_extends_signup_trial_deadline(provider_delta, monkeypatch):
+    from src.core.billing.plans import PLANS
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id", "price_trial_test")
     org_id = uuid.uuid4()
     canonical_trial_end = datetime(2026, 10, 8, 12, tzinfo=timezone.utc)
     provider_trial_end = canonical_trial_end + provider_delta
@@ -788,6 +790,10 @@ async def test_subscription_updated_never_extends_signup_trial_deadline(provider
         "customer": "cus_test",
         "status": "trialing",
         "trial_end": int(provider_trial_end.timestamp()),
+        "current_period_start": 1_700_000_000, "current_period_end": 1_702_592_000,
+        "items": {"has_more": False, "data": [{"quantity": 1, "price": {
+            "id": "price_trial_test", "currency": "eur", "unit_amount": 2900,
+            "recurring": {"interval": "month", "interval_count": 1}}}]},
     }, "evt_sub_update_trial",)
 
     assert conn.execute.await_args_list[0].args[0].find("UPDATE organizations SET subscription_status") >= 0

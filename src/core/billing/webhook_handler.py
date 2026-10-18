@@ -33,19 +33,81 @@ def _init_plan_maps():
 
 
 def _resolve_plan_from_subscription(subscription_data: dict) -> str | None:
-    if not PRICE_TO_PLAN and not PRODUCT_TO_PLAN:
-        _init_plan_maps()
-    for item in subscription_data.get("items", {}).get("data", []):
-        price = item.get("price") or {}
-        if not isinstance(price, dict):
-            continue
-        price_id = price.get("id", "")
-        if price_id in PRICE_TO_PLAN:
-            return PRICE_TO_PLAN[price_id]
-        product_id = price.get("product") or (item.get("plan") or {}).get("product", "")
-        if product_id in PRODUCT_TO_PLAN:
-            return PRODUCT_TO_PLAN[product_id]
-    return None
+    """Accept one complete, uniquely configured monthly EUR service item."""
+    from src.core.billing.plans import PLANS
+
+    items = subscription_data.get("items")
+    if not isinstance(items, dict) or items.get("has_more") is not False:
+        return None
+    data = items.get("data")
+    if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
+        return None
+    item = data[0]
+    if type(item.get("quantity")) is not int or item["quantity"] != 1:
+        return None
+    price = item.get("price")
+    if not isinstance(price, dict) or not price.get("id"):
+        return None
+    matches = [(slug, plan) for slug, plan in PLANS.items()
+               if plan.stripe_price_id and plan.stripe_price_id == price["id"]]
+    if len(matches) != 1:
+        return None
+    slug, plan = matches[0]
+    recurring = price.get("recurring")
+    if (not isinstance(recurring, dict) or recurring.get("interval") != "month"
+            or type(recurring.get("interval_count")) is not int
+            or recurring["interval_count"] != 1 or price.get("currency") != "eur"
+            or type(price.get("unit_amount")) is not int
+            or price["unit_amount"] != plan.price_monthly_eur * 100):
+        return None
+    return slug
+
+
+def _subscription_period(data):
+    values = [data.get("current_period_start"), data.get("current_period_end")]
+    if any(type(value) is not int or value <= 0 for value in values) or values[1] <= values[0]:
+        return None
+    try:
+        return tuple(datetime.fromtimestamp(value, tz=timezone.utc) for value in values)
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _validated_subscription_state(org, data):
+    """Snapshots may preserve verified rights or restrict them, never grant."""
+    status = data.get("status")
+    severity = {"active": 0, "trialing": 0, "past_due": 1, "incomplete": 2,
+                "incomplete_expired": 3, "unpaid": 3, "paused": 3, "canceled": 4}
+    if status not in severity:
+        status = "incomplete"
+    previous = org.get("subscription_status")
+    if status not in {"active", "trialing"}:
+        # In particular, unpaid/paused must not relax into legacy past_due.
+        if severity.get(previous, 5) > severity[status]:
+            status = previous if previous in severity else "incomplete"
+        return status, None
+    plan = _resolve_plan_from_subscription(data)
+    period = _subscription_period(data)
+    if plan is None or period is None:
+        raise HTTPException(503, "Stripe subscription catalog requires reconciliation")
+    if status == "active":
+        if (previous != "active" or org.get("plan") != plan
+                or period != (org.get("current_period_start"), org.get("current_period_end"))):
+            raise HTTPException(503, "Stripe paid period requires invoice reconciliation")
+        return status, None
+    canonical_end = org.get("trial_end")
+    if previous != "trialing" or not isinstance(canonical_end, datetime):
+        raise HTTPException(503, "Stripe trial requires original application entitlement")
+    if canonical_end.tzinfo is None:
+        canonical_end = canonical_end.replace(tzinfo=timezone.utc)
+    provider_end = data.get("trial_end")
+    if type(provider_end) is not int or provider_end <= 0:
+        raise HTTPException(503, "Stripe trial deadline requires reconciliation")
+    try:
+        provider_end = datetime.fromtimestamp(provider_end, tz=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        raise HTTPException(503, "Stripe trial deadline requires reconciliation") from None
+    return status, min(canonical_end, provider_end)
 
 
 async def handle_stripe_webhook(event: dict, repo, trial_days: int) -> dict | None:
@@ -212,6 +274,13 @@ async def _lock_event_scope(conn, event, data):
             # Never adopt an unknown subscription before its checkout or a
             # paid invoice proves a durable authorized intent. Retry delivery.
             raise HTTPException(503, "Stripe subscription binding pending checkout")
+    if kind == "customer.subscription.updated":
+        # Validate before dedup/cursor changes and classify ties by effective state.
+        status, trial_end = _validated_subscription_state(org, data)
+        data["status"] = status
+        org["_trial_deadline_restricted"] = (
+            status == "trialing" and trial_end < org["trial_end"]
+        )
     if kind == "invoice.payment_failed" and await _invoice_payment_recorded(conn, org, data):
         return {**org, "ignored": "invoice_already_paid"}
     if created == previous and event["id"] != org.get("stripe_event_id"):
@@ -230,12 +299,10 @@ async def _lock_event_scope(conn, event, data):
         }.get(kind)
         severity = {"active": 0, "trialing": 0, "past_due": 1, "incomplete": 2,
                     "incomplete_expired": 3, "unpaid": 3, "paused": 3, "canceled": 4}
-        if severity.get(status, 5) <= severity.get(org.get("subscription_status"), 5):
+        if (severity.get(status, 5) <= severity.get(org.get("subscription_status"), 5)
+                and not org.get("_trial_deadline_restricted")):
             return {**org, "ignored": "ambiguous_event_order"}
         # Permit only a restrictive status transition, not plan/period changes.
-        data.pop("items", None)
-        data.pop("current_period_start", None)
-        data.pop("current_period_end", None)
     return org
 
 
@@ -520,7 +587,7 @@ async def _lookup_org_by_customer(customer_id: str, repo, conn) -> dict | None:
         return None
     row = await conn.fetchrow(
         "SELECT id, stripe_customer_id, subscription_id, subscription_status, trial_end, plan, "
-        "current_period_start, messages_used_this_period "
+        "current_period_start, current_period_end, messages_used_this_period "
         "FROM organizations WHERE stripe_customer_id = $1",
         customer_id,
     )
@@ -690,66 +757,19 @@ async def _handle_subscription_updated(conn, repo, data, event_id):
     if not org:
         return None
 
+    status, trial_end_to_store = _validated_subscription_state(org, data)
     if not await repo.process_stripe_event_in_tx(conn, event_id, org["id"]):
         return {"action": "duplicate", "status": "skipped", "organization_id": org["id"]}
 
-    plan_slug = _resolve_plan_from_subscription(data)
-    if plan_slug:
-        from src.core.billing.plans import get_plan
-        plan = get_plan(plan_slug)
-        await conn.execute("""
-            UPDATE organizations SET
-                plan = $1, messages_limit = $2, users_limit = $3,
-                whatsapp_numbers_limit = $4
-            WHERE id = $5
-        """, plan_slug, plan.messages_limit, plan.users_limit, plan.whatsapp_numbers_limit, org["id"])
-
-    canonical = {"active", "trialing", "past_due", "unpaid", "incomplete", "incomplete_expired", "canceled", "paused"}
-    status = data.get("status")
-    if status not in canonical:
-        status = "incomplete"  # Unknown upstream state is never entitlement.
-    trial_end = data.get("trial_end")
-    trial_end_to_store = None
-    if status == "trialing":
-        canonical_trial_end = org.get("trial_end")
-        if isinstance(canonical_trial_end, datetime) and canonical_trial_end.tzinfo is None:
-            canonical_trial_end = canonical_trial_end.replace(tzinfo=timezone.utc)
-        if not isinstance(canonical_trial_end, datetime):
-            # A provider event alone cannot create an application trial.
-            status = "incomplete"
-        else:
-            provider_trial_end = None
-            if isinstance(trial_end, int) and not isinstance(trial_end, bool) and trial_end > 0:
-                try:
-                    provider_trial_end = datetime.fromtimestamp(trial_end, tz=timezone.utc)
-                except (OverflowError, OSError, ValueError):
-                    provider_trial_end = None
-            trial_end_to_store = (
-                min(provider_trial_end, canonical_trial_end)
-                if provider_trial_end is not None
-                else canonical_trial_end
-            )
+    # Paid invoices alone own plan, limits, service periods and quota resets.
     await conn.execute("""
         UPDATE organizations SET subscription_status = $1,
             trial_end = CASE WHEN $1 = 'trialing' THEN $3 ELSE trial_end END,
             suspension_notified_at = CASE WHEN $1 IN ('active','trialing') THEN NULL ELSE suspension_notified_at END
         WHERE id = $2
     """, status, org["id"], trial_end_to_store)
+    return {"action": "subscription_updated", "plan": org.get("plan"), "organization_id": org["id"]}
 
-    period_start = data.get("current_period_start")
-    period_end = data.get("current_period_end")
-    if period_start and period_end:
-        new_start = datetime.fromtimestamp(period_start, tz=timezone.utc)
-        if period_end > period_start and (org.get("current_period_start") is None or new_start > org["current_period_start"]):
-            await conn.execute("""
-                UPDATE organizations SET
-                    messages_used_this_period = 0,
-                    current_period_start = $1,
-                    current_period_end = $2
-                WHERE id = $3
-            """, new_start, datetime.fromtimestamp(period_end, tz=timezone.utc), org["id"])
-
-    return {"action": "subscription_updated", "plan": plan_slug, "organization_id": org["id"]}
 
 
 async def _handle_subscription_deleted(conn, repo, data, event_id):
