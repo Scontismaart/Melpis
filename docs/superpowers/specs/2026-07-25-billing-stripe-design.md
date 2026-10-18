@@ -30,7 +30,7 @@ Cliente → Stripe Checkout Session (trial 7gg, carta richiesta)
             → checkout.session.completed → attiva subscription_status = 'trialing'
             → invoice.paid → subscription_status = 'active', reset contatore
             → invoice.payment_failed → subscription_status = 'past_due'
-            → customer.subscription.updated → aggiorna piano/limiti
+            → invoice.paid verificata → aggiorna piano/limiti
             → subscription.deleted → subscription_status = 'canceled'
 
 Cliente → Stripe Customer Portal (autogestione carta, upgrade, downgrade, cancellazione)
@@ -48,10 +48,10 @@ Audit: ogni modifica a organizations.subscription_status loggata su audit_log
 
 | Evento | Azione | Idempotenza |
 |--------|--------|-------------|
-| `checkout.session.completed` | Crea/aggiorna Stripe customer locale, setta `subscription_status='trialing'`, salva `current_period_start` e `current_period_end` dal `subscription.current_period_start/end` nel payload | Dedup su `event_id` |
-| `invoice.paid` | Setta `subscription_status='active'`, resetta `messages_used_this_period=0`, aggiorna `current_period_start/end` | Dedup su `event_id` |
+| `checkout.session.completed` | Risolve e associa l'intent durevole al Customer/subscription; conserva soltanto il trial applicativo originale. Non concede accesso pagato e non sovrascrive una subscription già nota. | Dedup su `event_id`; lifecycle separato dal cursore entitlement |
+| `invoice.paid` | Dopo verifica del pagamento, servizio mensile e binding: attiva il piano e aggiorna il periodo dalla linea; reset solo per prima inizializzazione verificata o nuovo periodo. | Dedup e audit nella stessa transazione del lock organizzazione |
 | `invoice.payment_failed` | Setta `subscription_status='past_due'`, logga su `audit_log` | Dedup su `event_id` |
-| `customer.subscription.updated` | Aggiorna `plan`, resetta contatore se cambio ciclo, aggiorna `current_period_start/end` | Dedup su `event_id` |
+| `customer.subscription.updated` | Conserva diritti già verificati sullo stesso piano/periodo oppure restringe lo stato; non cambia piano, limiti, periodo o consumo. Trial solo originario, mai esteso. Catalogo positivo invalido o pagamento mancante: 503 prima di dedup/cursore. | Dedup su `event_id`; lock organizzazione |
 | `subscription.deleted` | Setta `subscription_status='canceled'` | Dedup su `event_id` |
 
 **Firma:** Ogni webhook verificato con `Stripe-Signature` header e endpoint secret.
@@ -114,7 +114,7 @@ Funzione check_plan_limits(organization_id):
     4. Invalida cache su ogni cambiamento subscription_status (webhook)
 ```
 
-**Downgrade:** Il cambio piano via webhook `customer.subscription.updated` aggiorna `plan` e `messages_limit` immediatamente nel DB. Se l'uso corrente supera già il nuovo limite, il blocco scatta subito al prossimo messaggio — nessun grace period. Documentato: il cliente deve verificare l'uso prima del downgrade.
+**Cambio piano:** uno snapshot `customer.subscription.updated` non concede né modifica il piano pagato. Una fattura pagata e verificata può assegnare il piano del servizio mensile e il relativo periodo; prorazioni e cambi non riconciliabili rimangono da certificare prima del rilascio. Non dichiarare upgrade/downgrade completo sulla sola ricezione dello snapshot.
 
 **Avvisi soft block:** a 80%, 90%, 100% del limite, risposta 429 include header `X-Quota-Warning: 80|90|100`. Dashboard (frontend futuro) può leggere header e mostrare warning.
 
@@ -193,7 +193,7 @@ class CoreRepository:
 - `test_create_portal_session`: verifica creazione portal
 - `test_webhook_checkout_completed`: evento mockato → org passa a trialing
 - `test_webhook_invoice_paid`: evento mockato → reset contatore
-- `test_webhook_subscription_updated`: upgrade/downgrade → limiti aggiornati
+- `test_webhook_subscription_updated`: nessun upgrade/reset da snapshot; diritti esistenti preservati, restrizioni applicate, catalogo mensile rigoroso, trial originario e pareggi sulla scadenza
 - `test_webhook_subscription_deleted`: cancellazione → status canceled
 - `test_webhook_signature`: richiesta senza firma → 400 (payload non verificabile)
 - `test_webhook_idempotency`: evento duplicato → ignore
@@ -219,3 +219,10 @@ class CoreRepository:
 SDK effettivo `stripe==10.12.0`, richieste con API `2024-06-20`. Catalogo Test letto e verificato: tre prezzi attivi EUR 29/69/149, intervallo mese, quantità ricorrente uno. Nove Checkout Session sintetiche accettate (tre piani, trial originale di sette giorni, 49 ore residue e checkout esplicito senza trial); replay della stessa chiave idempotente restituisce la stessa Session. Il provider rifiuta `subscription_data.trial_end` con 47 ore, 23 ore e 30 minuti residui. Il confine locale di 48 ore resta differito per il margine tecnico documentato, senza estensione del trial.
 
 Nessuna Session completata, carta, subscription o addebito. Sessioni sintetiche scadute e Customer sintetico rimosso. Nessuna modifica al catalogo o alle impostazioni dell'account; nessun endpoint webhook Test configurato. Credenziali non salvate nel repository o nelle evidenze. Questa prova certifica i parametri Checkout, non rinnovi/cancellazioni reali, consegna webhook, riconciliazione completa o quota atomica A04. Suite locale finale: 172 test passati, una deprecazione SDK; include PostgreSQL sintetico, permutazioni/duplicati/concorrenza e firma webhook reale.
+
+
+## Consolidamento A02 — 18 ottobre 2026
+
+Gli snapshot subscription positivi richiedono una sola riga completa (`has_more=false`), quantità intera uno, Price mensile configurato univocamente, EUR, importo nominale corretto e periodo intero ordinato. Nessun fallback Product o Price annuale. `active` conserva soltanto piano e periodo già attivi; `trialing` conserva solo il trial applicativo esistente senza alterare quota o limiti. Pareggi temporali possono accorciare una scadenza trial verificata, mai estenderla. Gli stati restrittivi valgono anche con catalogo ignoto, senza allentare stati più severi. Gli aggiornamenti di piano/limiti/periodo e reset rimangono di competenza della fattura verificata. Nuovi diritti incerti rispondono 503 prima di dedup e avanzamento del cursore.
+
+Il [runbook operativo](../../operations/billing-release-runbook.md) distingue parametri Checkout verificati, consegna locale con oggetti Stripe Test, gate pubblici e quota atomica A04 ancora aperti.

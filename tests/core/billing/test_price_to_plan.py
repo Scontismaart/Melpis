@@ -1,58 +1,52 @@
+import copy
 import pytest
-
-from src.core.billing.webhook_handler import (
-    PRICE_TO_PLAN,
-    PRODUCT_TO_PLAN,
-    _init_plan_maps,
-    _resolve_plan_from_subscription,
-)
+from src.core.billing.webhook_handler import _resolve_plan_from_subscription
 
 
-@pytest.fixture(autouse=True)
-def _reset_plan_maps():
-    PRICE_TO_PLAN.clear()
-    PRODUCT_TO_PLAN.clear()
-    yield
-    PRICE_TO_PLAN.clear()
-    PRODUCT_TO_PLAN.clear()
+@pytest.fixture
+def monthly(monkeypatch):
+    from src.core.billing.plans import PLANS
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id", "price_starter_monthly")
+    monkeypatch.setattr(PLANS["starter"], "stripe_price_id_yearly", "price_starter_yearly")
+    return {"items": {"has_more": False, "data": [{"quantity": 1, "price": {
+        "id": "price_starter_monthly", "currency": "eur", "unit_amount": 2900,
+        "recurring": {"interval": "month", "interval_count": 1}}}]}}
 
 
-def _install_fake_plans(monkeypatch):
-    class FakePlan:
-        def __init__(self, monthly, yearly):
-            self.stripe_price_id = monthly
-            self.stripe_price_id_yearly = yearly
-
-    fake_plans = {
-        "starter": FakePlan("price_starter_m", "price_starter_y"),
-        "pro": FakePlan("price_pro_m", "price_pro_y"),
-    }
-    monkeypatch.setattr(
-        "src.core.billing.plans.PLANS", fake_plans, raising=False
-    )
-    return fake_plans
+def test_resolve_complete_monthly(monthly):
+    assert _resolve_plan_from_subscription(monthly) == "starter"
 
 
-def test_price_to_plan_includes_yearly(monkeypatch):
-    fake_plans = _install_fake_plans(monkeypatch)
-    _init_plan_maps()
-    for slug, plan in fake_plans.items():
-        assert PRICE_TO_PLAN[plan.stripe_price_id] == slug
-        assert PRICE_TO_PLAN[plan.stripe_price_id_yearly] == slug
+@pytest.mark.parametrize("field,value", [
+    ("id", "price_starter_yearly"), ("id", "price_unknown"),
+    ("currency", "usd"), ("unit_amount", 1), ("unit_amount", True),
+    ("recurring", {"interval": "year", "interval_count": 1}),
+    ("recurring", {"interval": "month", "interval_count": 2}),
+    ("recurring", {"interval": "month", "interval_count": True}),
+])
+def test_invalid_catalog_rejected(monthly, field, value):
+    monthly["items"]["data"][0]["price"][field] = value
+    monthly["items"]["data"][0]["price"]["product"] = "prod_starter"
+    assert _resolve_plan_from_subscription(monthly) is None
 
 
-def test_resolve_plan_from_subscription_monthly_and_yearly(monkeypatch):
-    fake_plans = _install_fake_plans(monkeypatch)
-    _init_plan_maps()
-
-    for slug, plan in fake_plans.items():
-        monthly = {"items": {"data": [{"price": {"id": plan.stripe_price_id}}]}}
-        yearly = {"items": {"data": [{"price": {"id": plan.stripe_price_id_yearly}}]}}
-        assert _resolve_plan_from_subscription(monthly) == slug
-        assert _resolve_plan_from_subscription(yearly) == slug
+@pytest.mark.parametrize("quantity", [True, 0, 2, "1", None])
+def test_invalid_quantity_rejected(monthly, quantity):
+    monthly["items"]["data"][0]["quantity"] = quantity
+    assert _resolve_plan_from_subscription(monthly) is None
 
 
-def test_resolve_plan_unknown_price_returns_none():
-    _init_plan_maps()
-    unknown = {"items": {"data": [{"price": {"id": "price_sconosciuto"}}]}}
-    assert _resolve_plan_from_subscription(unknown) is None
+def test_pagination_and_multiple_items_rejected(monthly):
+    monthly["items"]["has_more"] = True
+    assert _resolve_plan_from_subscription(monthly) is None
+    monthly["items"].pop("has_more")
+    assert _resolve_plan_from_subscription(monthly) is None
+    monthly["items"]["has_more"] = False
+    monthly["items"]["data"].append(copy.deepcopy(monthly["items"]["data"][0]))
+    assert _resolve_plan_from_subscription(monthly) is None
+
+
+def test_duplicate_price_configuration_rejected(monthly, monkeypatch):
+    from src.core.billing.plans import PLANS
+    monkeypatch.setattr(PLANS["pro"], "stripe_price_id", "price_starter_monthly")
+    assert _resolve_plan_from_subscription(monthly) is None
