@@ -66,7 +66,7 @@ def preview_api(monkeypatch):
         categoria="generico",
     )
     get_repo = MagicMock(return_value=repo)
-    billing = AsyncMock(return_value=None)
+    billing = AsyncMock(return_value={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0})
     generate_preview = AsyncMock(return_value=output)
     record_ai_usage = AsyncMock()
 
@@ -74,7 +74,7 @@ def preview_api(monkeypatch):
     monkeypatch.setattr(organization, "get_repo", get_repo)
     monkeypatch.setattr(organization, "get_billing_snapshot", billing)
     monkeypatch.setattr(organization, "generate_preview", generate_preview)
-    monkeypatch.setattr(organization, "record_ai_usage", record_ai_usage)
+    monkeypatch.setattr(organization, "record_ai_attempts", record_ai_usage)
 
     with TestClient(app, raise_server_exceptions=False) as client:
         yield {

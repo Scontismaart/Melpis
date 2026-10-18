@@ -200,6 +200,8 @@ async def generate_preview(
     payload: PreviewInput,
     repo,
     billing: dict | None = None,
+    *,
+    usage_sink: dict | None = None,
 ) -> RispostaOutput:
     """Preview reale: costruisce il profilo dal payload del wizard e lo fa
     girare nel vero responder (crew + LLM), arricchito dal contesto RAG dei
@@ -207,6 +209,9 @@ async def generate_preview(
     contesto e' vuoto e la preview procede comunque (nessun errore).
     Il guardrail post-LLM vale anche in preview: quello che il titolare
     vede e' cioo che il responder farebbe davvero (task 12)."""
+    from src.core.billing.suspension import assert_ai_generation_allowed
+
+    assert_ai_generation_allowed(billing)
     profilo = build_business_profile(payload.profilo)
 
     contesto = await recupera_contesto_documenti(
@@ -220,6 +225,7 @@ async def generate_preview(
         billing=billing,
         contesto_documenti=contesto.testo,
         variante=assegna_variante(organization_id),
+        usage_sink=usage_sink,
     )
     esito = valida_risposta(risposta, contesto.chunks, profilo)
     return applica_guardrail(risposta, esito)
