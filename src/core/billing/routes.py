@@ -46,6 +46,106 @@ class ProviderEvidenceApprovalRequest(ProviderEvidenceRequest):
     proposal_version: StrictInt = Field(ge=1)
 
 
+@router.get("/provider-attempts/recovery")
+async def list_provider_attempt_recovery(
+    request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+):
+    """Expose only the current tenant's unresolved accounting attempts."""
+    repo = getattr(request.app.state, "repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Provider accounting recovery unavailable")
+    billing_repo = getattr(repo, "billing_repo", repo)
+    try:
+        attempts = await billing_repo.list_provider_attempt_recovery(user["organization_id"])
+    except Exception:
+        raise HTTPException(status_code=503, detail="Provider accounting recovery unavailable") from None
+    return {"attempts": attempts}
+
+
+@router.post(
+    "/provider-attempts/{attempt_id}/recover",
+    description=(
+        "Fence an expired A03 worker and reconcile only proven pre-dispatch or provider-verified usage. "
+        "One active owner/manager with fresh MFA may trigger the deterministic recovery; no metrics are accepted."
+    ),
+)
+async def recover_provider_attempt(
+    attempt_id: str,
+    request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+    mfa_user: dict = Depends(require_mfa()),
+):
+    """Reconcile one tenant's expired A03 attempt without clearing unknown spend."""
+    try:
+        attempt_uuid = uuid.UUID(attempt_id)
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(status_code=422, detail="Invalid provider attempt") from None
+    repo = getattr(request.app.state, "repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Provider accounting recovery unavailable")
+    billing_repo = getattr(repo, "billing_repo", repo)
+    actor = user.get("auth_user_id")
+    aal = mfa_user.get("aal")
+    auth_time = mfa_user.get("auth_time")
+    try:
+        result = await billing_repo.recover_provider_attempt(
+            user["organization_id"], attempt_uuid,
+            actor_auth_user_id=actor, aal=aal, auth_time=auth_time,
+        )
+        if result.get("state") == "lookup_required":
+            from src.core.provider_recovery import (
+                configured_openrouter_key, fetch_openrouter_generation,
+                verify_openrouter_generation,
+            )
+
+            api_key = configured_openrouter_key()
+            raw = await fetch_openrouter_generation(api_key, result["generation_id"])
+            evidence = verify_openrouter_generation(
+                raw, generation_id=result["generation_id"],
+                attempt_id=result["attempt_id"], requested_model=result["requested_model"],
+                attempt_created_at=result["attempt_created_at"],
+                expected_request_id=result["provider_request_id"],
+            )
+            reconciled = await billing_repo.finalize_openrouter_recovery(
+                user["organization_id"], attempt_uuid,
+                actor_auth_user_id=actor, aal=aal, auth_time=auth_time,
+                recovery_worker_id=result["recovery_worker_id"],
+                lease_epoch=result["lease_epoch"], evidence=evidence,
+            )
+            if reconciled:
+                return {"state": "verified", "provider": "openrouter"}
+            raise HTTPException(
+                status_code=409,
+                detail="Provider evidence changed or could not safely reconcile; accounting remains blocked",
+            )
+        if result.get("state") in {"not_sent", "verified"}:
+            return {"state": result["state"]}
+        if result.get("state") == "worker_active":
+            raise HTTPException(status_code=409, detail="Provider worker lease is still active")
+        if result.get("state") == "lookup_required":
+            raise HTTPException(status_code=409, detail="Provider evidence is not available")
+        if result.get("state") in {"uncertain", "raced"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Provider outcome is still uncertain; no verified evidence can clear the accounting hold",
+            )
+        return {"state": result.get("state", "unavailable")}
+    except HTTPException:
+        raise
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Recent administrator MFA is required") from None
+    except ValueError:
+        raise HTTPException(status_code=409, detail="Provider evidence does not match this attempt") from None
+    except Exception:
+        # Network/provider exceptions are intentionally not logged with their
+        # response body; the tenant hold remains fail-closed.
+        raise HTTPException(
+            status_code=503,
+            detail="Provider reconciliation is unavailable; accounting remains blocked",
+        ) from None
+
+
 async def _verify_provider_evidence(request: Request, req: ProviderEvidenceRequest, user: dict):
     from src.core.provider_evidence import EvidenceUnavailable, verify_provider_evidence
 

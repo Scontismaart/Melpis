@@ -272,6 +272,115 @@
         else { pill.textContent = "Nessun abbonamento"; pill.className = "account-stato-pill stato-pausa"; }
       }
 
+      function renderProviderRecovery(attempts, token) {
+        const section = document.getElementById("account-provider-recovery");
+        const list = document.getElementById("account-provider-recovery-list");
+        if (!section || !list || !current(token)) return;
+        list.replaceChildren();
+        section.hidden = !attempts.length;
+        attempts.forEach((attempt) => {
+          const item = document.createElement("div");
+          item.className = "account-plan-card";
+          const date = new Date(attempt.created_at);
+          const dateLabel = Number.isNaN(date.getTime())
+            ? "Tentativo recente"
+            : (root.MelpisI18n?.formatDate?.(date) || date.toLocaleDateString(localeCorrente()));
+          const provider = attempt.provider === "openrouter" ? "OpenRouter"
+            : attempt.provider === "groq" ? "Groq" : "provider AI";
+          const title = document.createElement("strong");
+          title.textContent = `${provider} · ${dateLabel}`;
+          item.appendChild(title);
+          const state = document.createElement("p");
+          state.className = "settings-help";
+          if (attempt.dispatch_state === "verified") {
+            state.textContent = "Metriche provider verificate; manca una stima costo supportata. Il blocco resta attivo.";
+          } else if (!attempt.can_recover) {
+            state.textContent = "Tentativo ancora in verifica. Aggiorna lo stato più tardi; nessuna nuova generazione verrà inviata.";
+          } else {
+            state.textContent = "Puoi verificare l'esito con una sessione MFA recente. Il servizio riparte solo con prove attendibili.";
+          }
+          item.appendChild(state);
+          if (attempt.dispatch_state === "verified") {
+            list.appendChild(item);
+            return;
+          }
+          const action = document.createElement("button");
+          action.type = "button";
+          action.className = attempt.can_recover ? "review-analyze" : "report-refresh";
+          action.textContent = attempt.can_recover ? "Verifica esito e ripristina" : "Aggiorna stato";
+          if (attempt.can_recover) {
+            action.addEventListener("click", () => { void recoverProviderAttempt(attempt.attempt_id); });
+          } else {
+            action.addEventListener("click", () => { void loadProviderRecovery(); });
+          }
+          item.appendChild(action);
+          list.appendChild(item);
+        });
+      }
+
+      async function loadProviderRecovery() {
+        const token = capture();
+        if (!current(token) || !canManageBilling()) return null;
+        const key = `${scope}:provider-recovery-list`;
+        if (scopeFlights.has(key)) return scopeFlights.get(key);
+        const operation = (async () => {
+          try {
+            const response = await apiFetch(`${API_BASE}/api/billing/provider-attempts/recovery`);
+            if (!current(token)) return null;
+            if (!response.ok) throw new Error("recovery list unavailable");
+            const data = await response.json();
+            if (!current(token)) return null;
+            renderProviderRecovery(Array.isArray(data.attempts) ? data.attempts : [], token);
+            return data;
+          } catch {
+            if (!current(token)) return null;
+            const section = document.getElementById("account-provider-recovery");
+            if (section) section.hidden = true;
+            return null;
+          } finally {
+            if (scopeFlights.get(key) === operation) scopeFlights.delete(key);
+          }
+        })();
+        scopeFlights.set(key, operation);
+        return operation;
+      }
+
+      async function recoverProviderAttempt(attemptId) {
+        const token = capture();
+        if (!current(token) || !canManageBilling() || typeof attemptId !== "string") return null;
+        try {
+          const response = await apiFetch(
+            `${API_BASE}/api/billing/provider-attempts/${encodeURIComponent(attemptId)}/recover`,
+            { method: "POST" },
+          );
+          const data = await response.json().catch(() => ({}));
+          if (!current(token)) return null;
+          const status = document.getElementById("account-status");
+          if (response.status === 403) {
+            accountStatus("Per verificare l'accounting AI, accedi di nuovo con MFA e riprova.");
+          } else if (response.status === 409) {
+            accountStatus("L'esito del provider è ancora incerto. Nessuna richiesta è stata reinviata e il blocco resta attivo.");
+          } else if (!response.ok) {
+            accountStatus("Verifica non disponibile. Il blocco resta attivo; riprova più tardi.");
+          } else if (data.state === "verified" || data.state === "not_sent") {
+            accountStatus(data.state === "verified"
+              ? "Metriche verificate: il servizio AI è ripristinato."
+              : "Confermato: la richiesta non era stata inviata. Il servizio AI è ripristinato.");
+            if (status) status.style.color = "var(--green-deep)";
+          } else if (data.state === "verified_cost_unavailable") {
+            accountStatus("Metriche verificate, ma la stima costo non è disponibile. Il blocco resta attivo.");
+          } else {
+            accountStatus("Nessuna prova sufficiente per ripristinare il servizio. Il blocco resta attivo.");
+          }
+          await loadProviderRecovery();
+          return data;
+        } catch {
+          if (!current(token)) return null;
+          accountStatus("Verifica non disponibile. Il blocco resta attivo; riprova più tardi.");
+          return null;
+        }
+      }
+
       async function loadAccount() {
         const token = capture();
         if (!current(token) || !canManageBilling()) return null;
@@ -330,6 +439,7 @@
             });
           }
           if (status) status.hidden = true;
+          void loadProviderRecovery();
           return subscription;
         } catch {
           if (!current(token)) return null;

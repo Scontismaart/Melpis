@@ -148,6 +148,7 @@ class TestSensitivePathList:
             "/api/billing/create-portal-session",
             "/api/billing/provider-attempts/reconciliation/proposals",
             "/api/billing/provider-attempts/reconciliation/approvals",
+            "/api/billing/provider-attempts/{attempt_id}/recover",
             "/api/gdpr/export",
             "/api/gdpr/download",
             "/api/gdpr/delete",

@@ -24,7 +24,7 @@ from src.core.provider_accounting import (
     RawProviderUsage,
     provider_model_matches,
 )
-from src.core.provider_evidence import safe_provider_request_id
+from src.core.provider_evidence import safe_provider_generation_id, safe_provider_request_id
 
 _NETWORK_SLOTS = threading.BoundedSemaphore(3)
 _MAX_BODY = 1_048_576
@@ -90,13 +90,25 @@ def parse_raw_provider_response(body: bytes, requested_model: str):
 
 
 def _provider_request_id(payload=None, headers=None):
-    """Return a safe provider-issued request ID without logging raw headers."""
+    """Return a provider request ID; completion/generation IDs are separate."""
     candidates = []
     if type(payload) is dict:
-        candidates.append(payload.get("id"))
+        candidates.append(payload.get("request_id"))
     if headers is not None:
         candidates.extend((headers.get("x-request-id"), headers.get("request-id")))
     return next((value for value in candidates if safe_provider_request_id(value)), None)
+
+
+def _provider_generation_id(payload=None, headers=None, provider=None):
+    """Accept only OpenRouter's explicit generation namespace, never req/chatcmpl IDs."""
+    if provider != "openrouter":
+        return None
+    candidates = []
+    if headers is not None:
+        candidates.append(headers.get("x-generation-id"))
+    if type(payload) is dict:
+        candidates.append(payload.get("id"))
+    return next((value for value in candidates if safe_provider_generation_id(value)), None)
 
 
 def _with_provider_correlation(body: bytes, attempt):
@@ -231,10 +243,12 @@ class ObservedChatLLM(BaseLLM):
         deadline_expired = threading.Event()
         response_ref = {}
         attempt = None
+        dispatch_authorized = False
         started = None
         recorded = False
         usage = None
         provider_request_id = None
+        provider_generation_id = None
         content = None
         output_valid = None
         finish_latency_ms = None
@@ -267,9 +281,20 @@ class ObservedChatLLM(BaseLLM):
             deadline_timer.daemon = True
             deadline_timer.start()
             closed = False
+            self._session.bridge(self._session.mark_dispatching, attempt)
+            dispatch_authorized = True
             with client.stream("POST", url, headers=headers, content=body) as response:
                 response_ref["response"] = response
                 provider_request_id = _provider_request_id(headers=response.headers)
+                provider_generation_id = _provider_generation_id(
+                    headers=response.headers, provider=attempt.provider,
+                )
+                if provider_request_id is not None or provider_generation_id is not None:
+                    self._session.bridge(
+                        self._session.record_provider_ids, attempt,
+                        generation_id=provider_generation_id,
+                        provider_request_id=provider_request_id,
+                    )
                 self._remaining(deadline_at)
                 self._headers(response)
                 data = bytearray()
@@ -285,24 +310,39 @@ class ObservedChatLLM(BaseLLM):
             deadline_timer = None
             payload, usage = parse_raw_provider_response(bytes(data), self.model)
             provider_request_id = _provider_request_id(payload) or provider_request_id
+            provider_generation_id = _provider_generation_id(
+                payload, provider=attempt.provider,
+            ) or provider_generation_id
+            if provider_request_id is not None or provider_generation_id is not None:
+                self._session.bridge(
+                    self._session.record_provider_ids, attempt,
+                    generation_id=provider_generation_id,
+                    provider_request_id=provider_request_id,
+                )
             try:
                 content = _content(payload)
             except ProviderAccountingError:
                 output_valid = False
                 finish_latency_ms = int((time.monotonic() - started) * 1000)
-                self._session.bridge(
+                finalized = self._session.bridge(
                     self._session.finish, attempt, usage,
                     finish_latency_ms, output_valid=False,
                     provider_request_id=provider_request_id,
+                    provider_generation_id=provider_generation_id,
                 )
+                if finalized is not True:
+                    _error("Provider result is awaiting fenced recovery")
                 recorded = True
                 raise
             output_valid = True
             finish_latency_ms = int((time.monotonic() - started) * 1000)
-            self._session.bridge(
+            finalized = self._session.bridge(
                 self._session.finish, attempt, usage, finish_latency_ms,
                 provider_request_id=provider_request_id,
+                provider_generation_id=provider_generation_id,
             )
+            if finalized is not True:
+                _error("Provider result is awaiting fenced recovery")
             recorded = True
             return content
         except Exception as exc:
@@ -315,16 +355,18 @@ class ObservedChatLLM(BaseLLM):
                     # row stays unresolved; do not overwrite known metrics with
                     # an unmeasured generic failure.
                     try:
-                        self._session.bridge(
+                        finalized = self._session.bridge(
                             self._session.finish, attempt, usage, elapsed,
                             output_valid=output_valid, provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
                         )
                     except Exception:
                         pass
                     else:
-                        recorded = True
-                        if output_valid and content is not None:
-                            return content
+                        if finalized is True:
+                            recorded = True
+                            if output_valid and content is not None:
+                                return content
                 else:
                     outcome = "invalid_response"
                     actual_model = None
@@ -341,10 +383,20 @@ class ObservedChatLLM(BaseLLM):
                         if usage_present is True:
                             outcome = "invalid_usage"
                     try:
-                        self._session.bridge(
-                            self._session.fail, attempt, outcome, elapsed,
-                            actual_model, usage_present, provider_request_id=provider_request_id,
-                        )
+                        if dispatch_authorized:
+                            self._session.bridge(
+                                self._session.fail, attempt, outcome, elapsed,
+                                actual_model, usage_present, provider_request_id=provider_request_id,
+                                provider_generation_id=provider_generation_id,
+                            )
+                        else:
+                            failure_code = ("request_serialization_error"
+                                            if isinstance(exc, ProviderAccountingError)
+                                            else "local_setup_error")
+                            self._session.bridge(
+                                self._session.fail_before_dispatch, attempt,
+                                failure_code, elapsed,
+                            )
                     except Exception:
                         pass
             _error()
@@ -368,10 +420,12 @@ class ObservedChatLLM(BaseLLM):
         closed = True
         client = None
         attempt = None
+        dispatch_authorized = False
         started = None
         recorded = False
         usage = None
         provider_request_id = None
+        provider_generation_id = None
         content = None
         output_valid = None
         finish_latency_ms = None
@@ -385,27 +439,51 @@ class ObservedChatLLM(BaseLLM):
             client = create_bounded_http_client(max_response_bytes=_MAX_BODY, max_concurrency=1,
                         deadline_seconds=self._remaining(), transport=self._async_transport)
             closed = False
+            await self._session.mark_dispatching(attempt)
+            dispatch_authorized = True
             response = await client.post(url, headers=headers, content=body)
             provider_request_id = _provider_request_id(headers=response.headers)
+            provider_generation_id = _provider_generation_id(
+                headers=response.headers, provider=attempt.provider,
+            )
+            if provider_request_id is not None or provider_generation_id is not None:
+                await self._session.record_provider_ids(
+                    attempt, generation_id=provider_generation_id,
+                    provider_request_id=provider_request_id,
+                )
             self._headers(response)
             payload, usage = parse_raw_provider_response(response.content, self.model)
             provider_request_id = _provider_request_id(payload) or provider_request_id
+            provider_generation_id = _provider_generation_id(
+                payload, provider=attempt.provider,
+            ) or provider_generation_id
+            if provider_request_id is not None or provider_generation_id is not None:
+                await self._session.record_provider_ids(
+                    attempt, generation_id=provider_generation_id,
+                    provider_request_id=provider_request_id,
+                )
             try:
                 content = _content(payload)
             except ProviderAccountingError:
                 output_valid = False
                 finish_latency_ms = int((time.monotonic() - started) * 1000)
-                await self._session.finish(
+                finalized = await self._session.finish(
                     attempt, usage, finish_latency_ms, output_valid=False,
                     provider_request_id=provider_request_id,
+                    provider_generation_id=provider_generation_id,
                 )
+                if finalized is not True:
+                    _error("Provider result is awaiting fenced recovery")
                 recorded = True
                 raise
             output_valid = True
             finish_latency_ms = int((time.monotonic() - started) * 1000)
-            await self._session.finish(
+            finalized = await self._session.finish(
                 attempt, usage, finish_latency_ms, provider_request_id=provider_request_id,
+                provider_generation_id=provider_generation_id,
             )
+            if finalized is not True:
+                _error("Provider result is awaiting fenced recovery")
             recorded = True
             return content
         except Exception as exc:
@@ -414,16 +492,18 @@ class ObservedChatLLM(BaseLLM):
                            (int((time.monotonic() - started) * 1000) if started is not None else 0))
                 if usage is not None and output_valid is not None:
                     try:
-                        await self._session.finish(
+                        finalized = await self._session.finish(
                             attempt, usage, elapsed, output_valid=output_valid,
                             provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
                         )
                     except Exception:
                         pass
                     else:
-                        recorded = True
-                        if output_valid and content is not None:
-                            return content
+                        if finalized is True:
+                            recorded = True
+                            if output_valid and content is not None:
+                                return content
                 else:
                     outcome = "invalid_response"
                     actual_model = None
@@ -440,20 +520,36 @@ class ObservedChatLLM(BaseLLM):
                         if usage_present is True:
                             outcome = "invalid_usage"
                     try:
-                        await self._session.fail(
-                            attempt, outcome, elapsed, actual_model, usage_present,
-                            provider_request_id=provider_request_id,
-                        )
+                        if dispatch_authorized:
+                            await self._session.fail(
+                                attempt, outcome, elapsed, actual_model, usage_present,
+                                provider_request_id=provider_request_id,
+                                provider_generation_id=provider_generation_id,
+                            )
+                        else:
+                            failure_code = ("request_serialization_error"
+                                            if isinstance(exc, ProviderAccountingError)
+                                            else "local_setup_error")
+                            await self._session.fail_before_dispatch(
+                                attempt, failure_code, elapsed,
+                            )
                     except Exception:
                         pass
             _error()
         except asyncio.CancelledError:
             if attempt is not None and not recorded:
                 try:
-                    await asyncio.shield(self._session.fail(
-                        attempt, "cancelled",
-                        int((time.monotonic() - started) * 1000) if started is not None else 0,
-                    ))
+                    elapsed = int((time.monotonic() - started) * 1000) if started is not None else 0
+                    if dispatch_authorized:
+                        await asyncio.shield(self._session.fail(
+                            attempt, "cancelled", elapsed,
+                            provider_request_id=provider_request_id,
+                            provider_generation_id=provider_generation_id,
+                        ))
+                    else:
+                        await asyncio.shield(self._session.fail_before_dispatch(
+                            attempt, "local_setup_error", elapsed,
+                        ))
                 except Exception:
                     pass
             raise

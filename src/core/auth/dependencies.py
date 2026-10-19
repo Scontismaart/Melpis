@@ -272,6 +272,9 @@ async def get_current_user(
         # estraiamo dal JWT qui, una sola volta, e require_mfa lo legge dal
         # dict utente: evita di rivalutare il claim su ogni endpoint.
         "aal": payload.get("aal"),
+        # Used only by narrowly scoped privileged recovery routes which require
+        # a fresh MFA step-up; the claim is trusted only after JWT verification.
+        "auth_time": payload.get("auth_time"),
     }
 
 
@@ -413,6 +416,7 @@ SENSITIVE_AAL2_PATHS = frozenset({
     "/api/billing/create-portal-session",
     "/api/billing/provider-attempts/reconciliation/proposals",
     "/api/billing/provider-attempts/reconciliation/approvals",
+    "/api/billing/provider-attempts/{attempt_id}/recover",
     "/api/gdpr/export",
     "/api/gdpr/download",
     "/api/gdpr/delete",

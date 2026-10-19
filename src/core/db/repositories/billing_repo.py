@@ -367,6 +367,520 @@ class BillingRepository(TenantScopedRepository):
                 )
                 return True
 
+    async def list_provider_attempt_recovery(
+        self, organization_id: uuid.UUID | str,
+    ) -> list[dict]:
+        """List minimal tenant-scoped recovery state for the billing dashboard."""
+        try:
+            organization_id = uuid.UUID(str(organization_id))
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("Invalid recovery scope") from None
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id AS attempt_id,created_at,metadata
+                     FROM usage_events
+                    WHERE organization_id=$1
+                      AND event_type='system.provider_attempt'
+                      AND metadata->>'accounting_status'='unresolved'
+                    ORDER BY created_at,id
+                    LIMIT 20""",
+                organization_id,
+            )
+            attempt_ids = [row["attempt_id"] for row in rows]
+            runtime_rows = await conn.fetch(
+                """SELECT attempt_id,dispatch_state,
+                          (lease_expires_at IS NULL OR lease_expires_at<=now()) AS lease_expired
+                     FROM provider_attempt_runtime
+                    WHERE organization_id=$1 AND attempt_id=ANY($2::uuid[])""",
+                organization_id, attempt_ids,
+            ) if attempt_ids else []
+        runtime_by_id = {row["attempt_id"]: row for row in runtime_rows}
+        result = []
+        for row in rows:
+            metadata = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else dict(row["metadata"])
+            runtime = runtime_by_id.get(row["attempt_id"])
+            dispatch_state = runtime["dispatch_state"] if runtime else "unavailable"
+            result.append({
+                "attempt_id": str(row["attempt_id"]),
+                "created_at": row["created_at"].isoformat(),
+                "provider": metadata.get("provider"),
+                "requested_model": metadata.get("requested_model"),
+                "outcome": metadata.get("outcome"),
+                "dispatch_state": dispatch_state,
+                "can_recover": bool(runtime and runtime["lease_expired"] and dispatch_state in {
+                    "prepared", "dispatching", "uncertain",
+                }),
+            })
+        return result
+
+    @staticmethod
+    def _require_recent_aal2(aal, auth_time) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        if (aal != "aal2" or type(auth_time) is not int
+                or auth_time > now + 60 or now - auth_time > 300):
+            raise PermissionError("A recent MFA verification is required")
+
+    async def recover_provider_attempt(
+        self, organization_id: uuid.UUID | str, attempt_id: uuid.UUID | str, *,
+        actor_auth_user_id: uuid.UUID | str, aal: str, auth_time: int,
+    ) -> dict:
+        """Fence an expired attempt, resolve only pre-dispatch or verified evidence.
+
+        This one-person operation never accepts user-supplied metrics and never
+        retries a provider POST. OpenRouter can be looked up separately when a
+        generation ID was durably observed from its authenticated response.
+        """
+        from src.core.provider_evidence import safe_provider_generation_id, safe_provider_request_id
+
+        try:
+            organization_id, attempt_id, actor_auth_user_id = map(
+                lambda value: uuid.UUID(str(value)),
+                (organization_id, attempt_id, actor_auth_user_id),
+            )
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("Invalid recovery scope") from None
+        self._require_recent_aal2(aal, auth_time)
+        recovery_worker_id = uuid.uuid4()
+
+        async with self.pool.acquire() as conn, conn.transaction():
+            org = await conn.fetchrow(
+                "SELECT id FROM organizations WHERE id=$1 FOR UPDATE", organization_id,
+            )
+            if org is None:
+                return {"state": "unavailable"}
+            member = await self._provider_reconciliation_member(
+                conn, organization_id, actor_auth_user_id,
+            )
+            row = await conn.fetchrow(
+                """SELECT event_type,quantity,metadata,created_at FROM usage_events
+                     WHERE organization_id=$1 AND id=$2 FOR UPDATE""",
+                organization_id, attempt_id,
+            )
+            runtime = await conn.fetchrow(
+                """SELECT worker_id,lease_epoch,lease_expires_at,dispatch_state,
+                          generation_id,provider_request_id
+                     FROM provider_attempt_runtime
+                    WHERE organization_id=$1 AND attempt_id=$2 FOR UPDATE""",
+                organization_id, attempt_id,
+            )
+            if (row is None or row["event_type"] != "system.provider_attempt"
+                    or row["quantity"] != 1 or runtime is None):
+                return {"state": "unavailable"}
+            metadata = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else dict(row["metadata"])
+            if metadata.get("accounting_status") in {"recorded", "resolved"}:
+                if metadata.get("accounting_status") == "resolved":
+                    state = "not_sent" if metadata.get("dispatch_state") == "not_sent" else "resolved"
+                else:
+                    state = metadata.get("dispatch_state", "verified")
+                return {"state": state}
+            if metadata.get("accounting_status") != "unresolved":
+                return {"state": "unavailable"}
+            if runtime["dispatch_state"] == "verified":
+                # Metrics may be authentic while this version has no approved
+                # EUR price for the actual model. Keep the tenant blocked and
+                # report the precise unresolved condition instead of implying
+                # that another recovery action can safely clear it.
+                return {"state": "verified_cost_unavailable"}
+
+            lease_expired = runtime["lease_expires_at"] is None or await conn.fetchval(
+                "SELECT $1::timestamptz <= now()", runtime["lease_expires_at"],
+            )
+            if not lease_expired:
+                return {"state": "worker_active"}
+
+            if runtime["dispatch_state"] == "prepared":
+                # PREPARED is the only state in which the transport was never authorized.
+                dispatched = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM provider_attempt_evidence
+                         WHERE organization_id=$1 AND attempt_id=$2
+                           AND event_type='dispatch_authorized')""",
+                    organization_id, attempt_id,
+                )
+                if dispatched:
+                    raise ValueError("Prepared state conflicts with durable dispatch evidence")
+                next_epoch = runtime["lease_epoch"] + 1
+                changed = await conn.fetchval(
+                    """UPDATE provider_attempt_runtime
+                          SET worker_id=NULL,lease_epoch=$3,lease_expires_at=NULL,
+                              dispatch_state='not_sent',updated_at=now()
+                        WHERE organization_id=$1 AND attempt_id=$2
+                          AND lease_epoch=$4 AND dispatch_state='prepared'
+                          AND lease_expires_at <= now() RETURNING attempt_id""",
+                    organization_id, attempt_id, next_epoch, runtime["lease_epoch"],
+                )
+                if changed is None:
+                    return {"state": "raced"}
+                metadata.update({
+                    "dispatch_state": "not_sent", "outcome": "provider_not_sent",
+                    "accounting_status": "resolved", "failure_code": "worker_crashed_before_dispatch",
+                    "actual_model": None, "usage_present": None,
+                    "prompt_tokens": None, "completion_tokens": None,
+                    "total_tokens": None, "latency_ms": None,
+                    "estimated_cost_eur": None,
+                })
+                await conn.execute(
+                    "UPDATE usage_events SET metadata=$3::jsonb WHERE organization_id=$1 AND id=$2",
+                    organization_id, attempt_id,
+                    json.dumps(metadata, sort_keys=True, separators=(",", ":")),
+                )
+                await self._append_provider_attempt_evidence(
+                    conn, organization_id, attempt_id, runtime["worker_id"],
+                    runtime["lease_epoch"], "attempt_not_sent",
+                    {"actor_auth_user_id": str(actor_auth_user_id),
+                     "prior_epoch": runtime["lease_epoch"], "new_epoch": next_epoch},
+                )
+                await self._audit_provider_recovery(
+                    conn, organization_id, attempt_id, actor_auth_user_id, member,
+                    "provider_attempt.not_sent_recovered",
+                    {"prior_epoch": runtime["lease_epoch"], "new_epoch": next_epoch},
+                )
+                await self._refresh_provider_accounting_block(conn, organization_id)
+                return {"state": "not_sent"}
+
+            if runtime["dispatch_state"] not in {"dispatching", "uncertain"}:
+                return {"state": runtime["dispatch_state"]}
+
+            # Fence the expired sender. A replacement can only reconcile, never POST.
+            next_epoch = runtime["lease_epoch"] + 1
+            changed = await conn.fetchval(
+                """UPDATE provider_attempt_runtime
+                      SET worker_id=$3,lease_epoch=$4,
+                          lease_expires_at=now()+interval '30 seconds',
+                          dispatch_state='uncertain',updated_at=now()
+                    WHERE organization_id=$1 AND attempt_id=$2
+                      AND lease_epoch=$5 AND dispatch_state IN ('dispatching','uncertain')
+                      AND (lease_expires_at IS NULL OR lease_expires_at<=now())
+                    RETURNING attempt_id""",
+                organization_id, attempt_id, recovery_worker_id, next_epoch,
+                runtime["lease_epoch"],
+            )
+            if changed is None:
+                return {"state": "raced"}
+            metadata.update({
+                "dispatch_state": "uncertain",
+                "outcome": "uncertain" if metadata.get("outcome") == "in_flight"
+                           else metadata.get("outcome"),
+                "failure_code": metadata.get("failure_code") or "worker_lease_expired",
+            })
+            await conn.execute(
+                "UPDATE usage_events SET metadata=$3::jsonb WHERE organization_id=$1 AND id=$2",
+                organization_id, attempt_id,
+                json.dumps(metadata, sort_keys=True, separators=(",", ":")),
+            )
+            await self._append_provider_attempt_evidence(
+                conn, organization_id, attempt_id, runtime["worker_id"],
+                runtime["lease_epoch"], "worker_fenced",
+                {"new_epoch": next_epoch, "actor_auth_user_id": str(actor_auth_user_id)},
+            )
+            await self._append_provider_attempt_evidence(
+                conn, organization_id, attempt_id, recovery_worker_id,
+                next_epoch, "recovery_claimed", {"provider": metadata.get("provider")},
+            )
+
+            # A stale worker may have durably appended the exact response after
+            # it lost its lease. It is usable only with its matching dispatch proof.
+            response_evidence = await conn.fetchrow(
+                """SELECT lease_epoch,worker_id,details
+                     FROM provider_attempt_evidence
+                    WHERE organization_id=$1 AND attempt_id=$2
+                      AND event_type='provider_response_verified'
+                    ORDER BY created_at,id LIMIT 1""",
+                organization_id, attempt_id,
+            )
+            if response_evidence is not None:
+                dispatch_proof = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM provider_attempt_evidence
+                         WHERE organization_id=$1 AND attempt_id=$2 AND worker_id=$3
+                           AND lease_epoch=$4 AND event_type='dispatch_authorized')""",
+                    organization_id, attempt_id,
+                    response_evidence["worker_id"], response_evidence["lease_epoch"],
+                )
+                reconciled = False
+                if dispatch_proof:
+                    reconciled = await self._apply_provider_response_evidence(
+                        conn, organization_id, attempt_id, actor_auth_user_id, member,
+                        metadata, response_evidence,
+                    )
+                if reconciled:
+                    await self._refresh_provider_accounting_block(conn, organization_id)
+                    return {"state": "verified"}
+
+            generation_id = runtime["generation_id"]
+            request_id = runtime["provider_request_id"]
+            if not generation_id or not request_id:
+                id_events = await conn.fetch(
+                    """SELECT details FROM provider_attempt_evidence
+                         WHERE organization_id=$1 AND attempt_id=$2
+                           AND event_type='provider_ids_observed'
+                           AND EXISTS (
+                               SELECT 1 FROM provider_attempt_evidence dispatch
+                                WHERE dispatch.organization_id=$1
+                                  AND dispatch.attempt_id=$2
+                                  AND dispatch.worker_id=provider_attempt_evidence.worker_id
+                                  AND dispatch.lease_epoch=provider_attempt_evidence.lease_epoch
+                                  AND dispatch.event_type='dispatch_authorized'
+                           )
+                         ORDER BY created_at,id""",
+                    organization_id, attempt_id,
+                )
+                candidates = set()
+                request_candidates = set()
+                for item in id_events:
+                    details = json.loads(item["details"]) if isinstance(item["details"], str) else dict(item["details"])
+                    candidate = details.get("generation_id")
+                    if candidate is not None:
+                        candidates.add(candidate)
+                    request_candidate = details.get("provider_request_id")
+                    if request_candidate is not None:
+                        request_candidates.add(request_candidate)
+                if not generation_id and len(candidates) == 1:
+                    generation_id = next(iter(candidates))
+                if not request_id and len(request_candidates) == 1:
+                    request_id = next(iter(request_candidates))
+            if metadata.get("provider") != "openrouter" or not safe_provider_generation_id(generation_id):
+                await self._audit_provider_recovery(
+                    conn, organization_id, attempt_id, actor_auth_user_id, member,
+                    "provider_attempt.recovery_blocked",
+                    {"reason": "provider_evidence_unavailable", "lease_epoch": next_epoch},
+                )
+                await self._refresh_provider_accounting_block(conn, organization_id)
+                return {"state": "uncertain"}
+            if request_id is not None and not safe_provider_request_id(request_id):
+                return {"state": "uncertain"}
+            await conn.execute(
+                """UPDATE provider_attempt_runtime
+                      SET generation_id=$3,provider_request_id=$4,updated_at=now()
+                    WHERE organization_id=$1 AND attempt_id=$2 AND worker_id=$5
+                      AND lease_epoch=$6 AND dispatch_state='uncertain'""",
+                organization_id, attempt_id, generation_id, request_id,
+                recovery_worker_id, next_epoch,
+            )
+            await self._refresh_provider_accounting_block(conn, organization_id)
+            return {
+                "state": "lookup_required", "organization_id": organization_id,
+                "attempt_id": attempt_id, "recovery_worker_id": recovery_worker_id,
+                "lease_epoch": next_epoch, "generation_id": generation_id,
+                "provider_request_id": request_id, "provider": metadata["provider"],
+                "requested_model": metadata["requested_model"],
+                "attempt_created_at": row["created_at"],
+            }
+
+    async def finalize_openrouter_recovery(
+        self, organization_id: uuid.UUID | str, attempt_id: uuid.UUID | str, *,
+        actor_auth_user_id: uuid.UUID | str, aal: str, auth_time: int,
+        recovery_worker_id: uuid.UUID, lease_epoch: int, evidence,
+    ) -> bool:
+        from src.core.llm_routing import stima_costo_eur
+        from src.core.provider_recovery import is_verified_openrouter_generation
+        from src.core.provider_accounting import provider_model_matches
+
+        try:
+            organization_id, attempt_id, actor_auth_user_id = map(
+                lambda value: uuid.UUID(str(value)),
+                (organization_id, attempt_id, actor_auth_user_id),
+            )
+        except (TypeError, ValueError, AttributeError):
+            return False
+        self._require_recent_aal2(aal, auth_time)
+        if (type(recovery_worker_id) is not uuid.UUID or type(lease_epoch) is not int
+                or lease_epoch < 1 or not is_verified_openrouter_generation(evidence)):
+            return False
+        async with self.pool.acquire() as conn, conn.transaction():
+            if await conn.fetchval(
+                "SELECT id FROM organizations WHERE id=$1 FOR UPDATE", organization_id,
+            ) is None:
+                return False
+            member = await self._provider_reconciliation_member(
+                conn, organization_id, actor_auth_user_id,
+            )
+            row = await conn.fetchrow(
+                """SELECT event_type,quantity,metadata,created_at FROM usage_events
+                     WHERE organization_id=$1 AND id=$2 FOR UPDATE""",
+                organization_id, attempt_id,
+            )
+            runtime = await conn.fetchrow(
+                """SELECT worker_id,lease_epoch,lease_expires_at,dispatch_state,
+                          generation_id,provider_request_id
+                     FROM provider_attempt_runtime
+                    WHERE organization_id=$1 AND attempt_id=$2 FOR UPDATE""",
+                organization_id, attempt_id,
+            )
+            if (row is None or runtime is None or row["event_type"] != "system.provider_attempt"
+                    or row["quantity"] != 1 or runtime["worker_id"] != recovery_worker_id
+                    or runtime["lease_epoch"] != lease_epoch or runtime["dispatch_state"] != "uncertain"
+                    or runtime["lease_expires_at"] is None
+                    or not await conn.fetchval("SELECT $1::timestamptz > now()", runtime["lease_expires_at"])
+                    or runtime["generation_id"] != evidence.generation_id
+                    or evidence.attempt_id != attempt_id or evidence._issuer is None):
+                return False
+            metadata = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else dict(row["metadata"])
+            if (metadata.get("accounting_status") != "unresolved"
+                    or metadata.get("provider") != "openrouter"
+                    or not provider_model_matches(metadata.get("requested_model"), evidence.actual_model)):
+                return False
+            expected_request_id = runtime["provider_request_id"]
+            if expected_request_id is not None and evidence.request_id != expected_request_id:
+                return False
+            cost = stima_costo_eur(
+                metadata["requested_model"], evidence.prompt_tokens, evidence.completion_tokens,
+            )
+            if cost is None:
+                return False
+            now = datetime.now(timezone.utc).isoformat()
+            metadata.update({
+                "dispatch_state": "verified", "outcome": "provider_usage_reconciled",
+                "accounting_status": "recorded", "actual_model": evidence.actual_model,
+                "usage_present": True, "prompt_tokens": evidence.prompt_tokens,
+                "completion_tokens": evidence.completion_tokens, "total_tokens": evidence.total_tokens,
+                "latency_ms": evidence.latency_ms, "estimated_cost_eur": cost,
+                "provider_generation_id": evidence.generation_id,
+                "provider_request_id": evidence.request_id,
+                "provider_cost_usd": evidence.provider_cost_usd,
+                "application_outcome": "usage_reconciled_no_output_replayed",
+                "failure_code": None, "reconciled_at": now,
+                "reconciled_by": str(actor_auth_user_id),
+                "reconciliation_source": "openrouter_generation_api",
+            })
+            fenced = await conn.fetchval(
+                """UPDATE provider_attempt_runtime SET dispatch_state='verified',worker_id=NULL,
+                          lease_expires_at=NULL,provider_request_id=$3,updated_at=now()
+                    WHERE organization_id=$1 AND attempt_id=$2 AND worker_id=$4 AND lease_epoch=$5
+                      AND dispatch_state='uncertain' AND lease_expires_at>now()
+                    RETURNING attempt_id""",
+                organization_id, attempt_id, evidence.request_id,
+                recovery_worker_id, lease_epoch,
+            )
+            if fenced is None:
+                return False
+            await conn.execute(
+                "UPDATE usage_events SET metadata=$3::jsonb WHERE organization_id=$1 AND id=$2",
+                organization_id, attempt_id,
+                json.dumps(metadata, sort_keys=True, separators=(",", ":"), allow_nan=False),
+            )
+            details = {
+                "generation_id": evidence.generation_id, "provider_request_id": evidence.request_id,
+                "model": evidence.actual_model, "prompt_tokens": evidence.prompt_tokens,
+                "completion_tokens": evidence.completion_tokens, "total_tokens": evidence.total_tokens,
+                "latency_ms": evidence.latency_ms, "provider_cost_usd": evidence.provider_cost_usd,
+                "estimated_cost_eur": cost, "finish_reason": evidence.finish_reason,
+                "provider_created_at": evidence.created_at.isoformat(),
+                "recovery_worker_id": str(recovery_worker_id), "lease_epoch": lease_epoch,
+            }
+            await self._append_provider_attempt_evidence(
+                conn, organization_id, attempt_id, recovery_worker_id, lease_epoch,
+                "openrouter_generation_verified", details,
+            )
+            await self._append_provider_attempt_evidence(
+                conn, organization_id, attempt_id, recovery_worker_id, lease_epoch,
+                "attempt_reconciled", {"source": "openrouter_generation_api"},
+            )
+            await self._audit_provider_recovery(
+                conn, organization_id, attempt_id, actor_auth_user_id, member,
+                "provider_attempt.reconciled", details,
+            )
+            await self._refresh_provider_accounting_block(conn, organization_id)
+            return True
+
+    async def _apply_provider_response_evidence(
+        self, conn, organization_id, attempt_id, actor_auth_user_id, member,
+        metadata, evidence_row,
+    ) -> bool:
+        from src.core.provider_accounting import RawProviderUsage, provider_model_matches
+        from src.core.llm_routing import stima_costo_eur
+
+        try:
+            details = json.loads(evidence_row["details"]) if isinstance(evidence_row["details"], str) else dict(evidence_row["details"])
+            usage = RawProviderUsage(
+                details["actual_model"], details["prompt_tokens"],
+                details["completion_tokens"], details["total_tokens"],
+            )
+            latency_ms = details["latency_ms"]
+            if (type(latency_ms) is not int or latency_ms < 0
+                    or not provider_model_matches(metadata.get("requested_model"), usage.actual_model)):
+                return False
+            cost = stima_costo_eur(
+                metadata["requested_model"], usage.prompt_tokens, usage.completion_tokens,
+            )
+            if cost is None:
+                return False
+        except (KeyError, TypeError, ValueError):
+            return False
+        metadata.update({
+            "dispatch_state": "verified", "outcome": "provider_usage_reconciled",
+            "accounting_status": "recorded", "actual_model": usage.actual_model,
+            "usage_present": True, "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens, "total_tokens": usage.total_tokens,
+            "latency_ms": latency_ms, "estimated_cost_eur": cost,
+            "provider_generation_id": details.get("provider_generation_id"),
+            "provider_request_id": details.get("provider_request_id"),
+            "application_outcome": "usage_reconciled_no_output_replayed",
+            "reconciliation_source": "late_fenced_provider_response",
+            "reconciled_by": str(actor_auth_user_id),
+            "reconciled_at": datetime.now(timezone.utc).isoformat(),
+        })
+        fenced = await conn.fetchval(
+            """UPDATE provider_attempt_runtime SET dispatch_state='verified',worker_id=NULL,
+                      lease_expires_at=NULL,updated_at=now()
+                WHERE organization_id=$1 AND attempt_id=$2 AND dispatch_state='uncertain'
+                RETURNING attempt_id""",
+            organization_id, attempt_id,
+        )
+        if fenced is None:
+            return False
+        await conn.execute(
+            "UPDATE usage_events SET metadata=$3::jsonb WHERE organization_id=$1 AND id=$2",
+            organization_id, attempt_id,
+            json.dumps(metadata, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        )
+        details.update({"estimated_cost_eur": cost, "source_epoch": evidence_row["lease_epoch"]})
+        await self._append_provider_attempt_evidence(
+            conn, organization_id, attempt_id, evidence_row["worker_id"],
+            evidence_row["lease_epoch"], "attempt_reconciled", {"source": "late_fenced_provider_response"},
+        )
+        await self._audit_provider_recovery(
+            conn, organization_id, attempt_id, actor_auth_user_id, member,
+            "provider_attempt.reconciled", details,
+        )
+        return True
+
+    @staticmethod
+    async def _append_provider_attempt_evidence(
+        conn, organization_id, attempt_id, worker_id, lease_epoch, event_type, details,
+    ):
+        await conn.execute(
+            """INSERT INTO provider_attempt_evidence
+               (id,organization_id,attempt_id,worker_id,lease_epoch,event_type,details)
+               VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)""",
+            uuid.uuid4(), organization_id, attempt_id, worker_id, lease_epoch,
+            event_type, json.dumps(details, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        )
+
+    @staticmethod
+    async def _audit_provider_recovery(
+        conn, organization_id, attempt_id, actor_auth_user_id, member, action, details,
+    ):
+        await conn.execute(
+            """INSERT INTO audit_log
+               (id,organization_id,user_id,auth_user_id,action,target_table,target_id,details)
+               VALUES($1,$2,$3,$4,$5,'usage_events',$6,$7::jsonb)""",
+            uuid.uuid4(), organization_id, member["profile_id"],
+            str(actor_auth_user_id), action, attempt_id,
+            json.dumps(details, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        )
+
+    @staticmethod
+    async def _refresh_provider_accounting_block(conn, organization_id):
+        await conn.execute(
+            """UPDATE organizations SET ai_accounting_blocked=(
+                 EXISTS(SELECT 1 FROM governance_outbox
+                         WHERE organization_id=$1 AND event_kind='usage')
+                 OR EXISTS(SELECT 1 FROM usage_events
+                            WHERE organization_id=$1
+                              AND metadata->>'accounting_status'='unresolved')
+               ) WHERE id=$1""",
+            organization_id,
+        )
+
     async def get_usage_by_month(
         self, organization_id: uuid.UUID | str, year: int, month: int
     ) -> list[dict]:

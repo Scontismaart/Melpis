@@ -24,6 +24,7 @@ _VERSION_ID = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _PROVIDER_REF = re.compile(r"^(?:acct|req)_[A-Za-z0-9_-]{8,96}$")
 _CORRELATION_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _PROVIDER_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$")
+_PROVIDER_GENERATION_ID = re.compile(r"^gen-[0-9A-Za-z-]{1,120}$")
 _MAX_EVIDENCE_BYTES = 16 * 1024
 _SECRETISH = re.compile(
     r"(?i)(?:\bBearer\s+|\b(?:sk|gsk|rk|pk|whsec|xox[baprs])[-_][A-Za-z0-9_-]{8,}|"
@@ -211,4 +212,10 @@ def is_verified_provider_evidence(value) -> bool:
 
 def safe_provider_request_id(value) -> bool:
     return (type(value) is str and _PROVIDER_REQUEST_ID.fullmatch(value) is not None
+            and _SECRETISH.search(value) is None)
+
+
+def safe_provider_generation_id(value) -> bool:
+    """OpenRouter generation IDs are a separate namespace from request IDs."""
+    return (type(value) is str and _PROVIDER_GENERATION_ID.fullmatch(value) is not None
             and _SECRETISH.search(value) is None)

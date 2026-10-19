@@ -1,8 +1,11 @@
 import asyncio
+import asyncpg
 import json
 import threading
 import time
 import uuid
+from datetime import timezone
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -15,6 +18,7 @@ from src.core.provider_accounting import (
     ProviderAccountingError,
     RawProviderUsage,
 )
+from src.core.db.repositories.billing_repo import BillingRepository
 from src.core.llm_routing import LLMRoute
 
 
@@ -87,7 +91,7 @@ async def _events(pool, org_id):
     return result
 
 
-async def _record_provider_request_id(pool, org_id, attempt_id, value="chatcmpl_test_fixture"):
+async def _record_provider_request_id(pool, org_id, attempt_id, value="req_test_fixture"):
     async with pool.acquire() as conn:
         await conn.execute(
             """UPDATE usage_events
@@ -121,6 +125,7 @@ async def _inbound_message(pool, org_id, *, phone_suffix="00000000"):
 def _response(model="llama-3.1-8b-instant", *, prompt=0, completion=0, total=0):
     return {
         "id": "chatcmpl_test_fixture",
+        "request_id": "req_test_fixture",
         "model": model,
         "choices": [{"index": 0, "message": {"role": "assistant", "content": "Risposta test."},
                       "finish_reason": "stop"}],
@@ -198,7 +203,8 @@ def test_documented_provider_user_field_correlates_attempt_without_changing_prom
     ))
     assert correlated["user"] == str(attempt_id)
     assert correlated["messages"] == [{"role": "user", "content": "test sintetico"}]
-    assert _provider_request_id({"id": "chatcmpl_test_fixture"}) == "chatcmpl_test_fixture"
+    assert _provider_request_id({"id": "chatcmpl_test_fixture"}) is None
+    assert _provider_request_id({"request_id": "req_test_fixture"}) == "req_test_fixture"
     assert _provider_request_id(headers={"x-request-id": "req_headerfixture"}) == "req_headerfixture"
 
 
@@ -260,7 +266,7 @@ async def test_postgres_records_real_provider_response_before_returning(pg_pool,
         assert metadata["estimated_cost_eur"] == 0.0
         assert metadata["accounting_status"] == "recorded"
         assert metadata["outcome"] == "response_received"
-        assert metadata["provider_request_id"] == "chatcmpl_test_fixture"
+        assert metadata["provider_request_id"] == "req_test_fixture"
     finally:
         await context.close()
 
@@ -311,7 +317,7 @@ async def test_transient_finish_failure_retries_same_attempt_with_verified_usage
     finish_calls = 0
 
     async def finish_once_fails(attempt, usage, latency_ms, *, output_valid=True,
-                                provider_request_id=None):
+                                provider_request_id=None, provider_generation_id=None):
         nonlocal finish_calls
         finish_calls += 1
         if finish_calls == 1:
@@ -319,6 +325,7 @@ async def test_transient_finish_failure_retries_same_attempt_with_verified_usage
         return await original_finish(
             attempt, usage, latency_ms, output_valid=output_valid,
             provider_request_id=provider_request_id,
+            provider_generation_id=provider_generation_id,
         )
 
     context.finish = finish_once_fails
@@ -356,12 +363,13 @@ async def test_finish_commit_with_lost_ack_retries_idempotently(pg_pool, sample_
     committed_latency = None
 
     async def commit_then_lose_ack(attempt, usage, latency_ms, *, output_valid=True,
-                                   provider_request_id=None):
+                                   provider_request_id=None, provider_generation_id=None):
         nonlocal finish_calls, committed_latency
         finish_calls += 1
         result = await original_finish(
             attempt, usage, latency_ms, output_valid=output_valid,
             provider_request_id=provider_request_id,
+            provider_generation_id=provider_generation_id,
         )
         if finish_calls == 1:
             committed_latency = latency_ms
@@ -717,6 +725,7 @@ async def test_retry_attempts_are_distinct_and_terminal_updates_are_idempotent(
         primary = await context.begin(
             "groq", "groq/llama-3.1-8b-instant", "primary_model",
         )
+        await context.mark_dispatching(primary)
         first_usage = RawProviderUsage("llama-3.1-8b-instant", 5, 2, 7)
         await context.finish(primary, first_usage, 42)
         await context.finish(primary, first_usage, 42)
@@ -724,6 +733,7 @@ async def test_retry_attempts_are_distinct_and_terminal_updates_are_idempotent(
         fallback = await context.begin(
             "groq", "groq/openai/gpt-oss-20b", "fallback_model",
         )
+        await context.mark_dispatching(fallback)
         await context.finish(
             fallback, RawProviderUsage("openai/gpt-oss-20b", 8, 3, 11), 55,
         )
@@ -1198,6 +1208,7 @@ async def test_unknown_cost_keeps_measured_tokens_and_recovery_cannot_invent_pri
     )
     try:
         attempt = await context.begin("groq", "groq/unknown-model", "test")
+        await context.mark_dispatching(attempt)
         await context.finish(attempt, RawProviderUsage("unknown-model", 8, 4, 12), 123)
         await _record_provider_request_id(pg_pool, org_id, attempt.attempt_id)
         rows = await _events(pg_pool, org_id)
@@ -1274,7 +1285,7 @@ class _ImmutableTestEvidenceStore:
 def _evidence_bytes(attempt_id, *, outcome="provider_confirms_not_billed",
                     actual_model=None, prompt_tokens=None,
                     completion_tokens=None, total_tokens=None,
-                    provider_event_at=None, provider_request_id="chatcmpl_test_fixture"):
+                    provider_event_at=None, provider_request_id="req_test_fixture"):
     from datetime import datetime, timezone
 
     return json.dumps({
@@ -1326,6 +1337,7 @@ async def test_recovery_requires_distinct_aal2_tenant_approvers_and_audits_atomi
     repository = BillingRepository(pg_pool)
     try:
         attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.mark_dispatching(attempt)
         await context.fail(attempt, "http_error", 125, usage_present=None)
         payload = _evidence_bytes(attempt.attempt_id)
         _, object_id, digest, evidence = await _verified_evidence(org_id, attempt.attempt_id, payload)
@@ -1447,6 +1459,7 @@ async def test_in_flight_recovery_is_never_enabled_by_age_or_timeout(pg_pool, sa
     repository = BillingRepository(pg_pool)
     try:
         attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.mark_dispatching(attempt)
         async with pg_pool.acquire() as conn:
             await conn.execute(
                 "UPDATE usage_events SET created_at=now()-interval '6 days' WHERE id=$1",
@@ -1487,6 +1500,7 @@ async def test_usage_recovery_uses_artifact_metrics_and_server_pricing(pg_pool, 
     repository = BillingRepository(pg_pool)
     try:
         attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.mark_dispatching(attempt)
         await context.fail(attempt, "deadline_exceeded", 30_000)
         await _record_provider_request_id(pg_pool, org_id, attempt.attempt_id)
         payload = _evidence_bytes(
@@ -1531,6 +1545,7 @@ async def test_concurrent_approval_has_one_cas_winner(pg_pool, sample_org):
     repository = BillingRepository(pg_pool)
     try:
         attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.mark_dispatching(attempt)
         await context.fail(attempt, "http_error", 100)
         await _record_provider_request_id(pg_pool, org_id, attempt.attempt_id)
         payload = _evidence_bytes(attempt.attempt_id)
@@ -1599,5 +1614,506 @@ async def test_database_admission_failure_never_reaches_transport(pg_pool, sampl
         with pytest.raises(ProviderAccountingError):
             await asyncio.to_thread(llm.call, "private prompt")
         assert calls == 0
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_pre_dispatch_failure_is_resolved_without_fabricating_provider_usage(pg_pool, sample_org):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    try:
+        attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.fail_before_dispatch(attempt, "local_setup_error", 0)
+
+        rows = await _events(pg_pool, org_id)
+        assert len(rows) == 1
+        metadata = rows[0]["metadata"]
+        assert metadata["dispatch_state"] == "not_sent"
+        assert metadata["outcome"] == "provider_not_sent"
+        assert metadata["accounting_status"] == "resolved"
+        assert metadata["actual_model"] is None
+        assert metadata["prompt_tokens"] is None
+        assert metadata["completion_tokens"] is None
+        assert metadata["total_tokens"] is None
+        assert metadata["estimated_cost_eur"] is None
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is False
+            assert await conn.fetchval(
+                "SELECT dispatch_state FROM provider_attempt_runtime "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            ) == "not_sent"
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_evidence WHERE organization_id=$1 "
+                "AND attempt_id=$2 AND event_type='attempt_not_sent'",
+                org_id, attempt.attempt_id,
+            ) == 1
+            await conn.execute("SET ROLE service_role")
+            try:
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.execute(
+                        "UPDATE provider_attempt_evidence SET details='{}'::jsonb "
+                        "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+                    )
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.execute(
+                        "DELETE FROM provider_attempt_evidence WHERE organization_id=$1 AND attempt_id=$2",
+                        org_id, attempt.attempt_id,
+                    )
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.execute("TRUNCATE provider_attempt_evidence")
+            finally:
+                await conn.execute("RESET ROLE")
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_verified_metrics_without_supported_price_keep_accounting_hold(pg_pool, sample_org):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    try:
+        attempt = await context.begin("groq", "groq/test-model-without-approved-price", "test")
+        await context.mark_dispatching(attempt)
+        usage = RawProviderUsage("test-model-without-approved-price", 11, 4, 15)
+        assert await context.finish(attempt, usage, 123) is True
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT dispatch_state FROM provider_attempt_runtime "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            ) == "verified"
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is True
+        state = await BillingRepository(pg_pool).recover_provider_attempt(
+            org_id, attempt.attempt_id, actor_auth_user_id=actor,
+            aal="aal2", auth_time=int(time.time()),
+        )
+        assert state == {"state": "verified_cost_unavailable"}
+        metadata = (await _events(pg_pool, org_id))[0]["metadata"]
+        assert metadata["accounting_status"] == "unresolved"
+        assert metadata["actual_model"] == "test-model-without-approved-price"
+        assert metadata["prompt_tokens"] == 11
+        assert metadata["completion_tokens"] == 4
+        assert metadata["estimated_cost_eur"] is None
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_crashed_openrouter_worker_is_fenced_then_reconciled_once(pg_pool, sample_org):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    repository = BillingRepository(pg_pool)
+    generation_id = "gen-test-recovery-001"
+    request_id = "req_test_fixture"
+    auth = {
+        "actor_auth_user_id": actor,
+        "aal": "aal2",
+        "auth_time": int(time.time()),
+    }
+    try:
+        attempt = await context.begin(
+            "openrouter", "openrouter/xingchen-agi/xing4.0-29b-a4b:free", "test",
+        )
+        await context.mark_dispatching(attempt)
+        await context.record_provider_ids(
+            attempt, generation_id=generation_id, provider_request_id=request_id,
+        )
+        # Simulate a hard worker crash after dispatch: the durable row remains
+        # in_flight and only the lease expiry lets an owner fence it.
+        listed = await repository.list_provider_attempt_recovery(org_id)
+        assert len(listed) == 1
+        assert listed[0]["attempt_id"] == str(attempt.attempt_id)
+        assert listed[0]["provider"] == "openrouter"
+        assert listed[0]["can_recover"] is False
+        assert set(listed[0]) == {
+            "attempt_id", "created_at", "provider", "requested_model", "outcome",
+            "dispatch_state", "can_recover",
+        }
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            )
+        with pytest.raises(PermissionError):
+            await repository.recover_provider_attempt(
+                org_id, attempt.attempt_id, **{**auth, "auth_time": int(time.time()) - 301},
+            )
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT lease_epoch FROM provider_attempt_runtime "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            ) == attempt.lease_epoch
+
+        # Two owners racing the same recovery get one fenced claim. The other
+        # sees its live recovery lease and cannot claim or dispatch again.
+        results = await asyncio.gather(*(
+            repository.recover_provider_attempt(
+                org_id, attempt.attempt_id, **auth,
+            ) for _ in range(2)
+        ))
+        states = sorted(result["state"] for result in results)
+        assert states == ["lookup_required", "worker_active"]
+        claim = next(result for result in results if result["state"] == "lookup_required")
+        assert claim["lease_epoch"] == attempt.lease_epoch + 1
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is True
+
+        # A late response from the fenced worker is evidence only. Its finalizer
+        # cannot overwrite the recovery lease or clear the tenant hold.
+        usage = RawProviderUsage(
+            "xingchen-agi/xing4.0-29b-a4b:free", 11, 4, 15,
+        )
+        assert await context.finish(
+            attempt, usage, 123, provider_request_id=request_id,
+            provider_generation_id=generation_id,
+        ) is False
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT dispatch_state FROM provider_attempt_runtime "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            ) == "uncertain"
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            )
+
+        # The replacement worker fences again, validates dispatch provenance,
+        # applies the late response once, and restores generation for this tenant.
+        assert (await repository.recover_provider_attempt(
+            org_id, attempt.attempt_id, **auth,
+        ))["state"] == "verified"
+        async with pg_pool.acquire() as conn:
+            metadata = await conn.fetchval(
+                "SELECT metadata FROM usage_events WHERE organization_id=$1 AND id=$2",
+                org_id, attempt.attempt_id,
+            )
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+            assert metadata["accounting_status"] == "recorded"
+            assert metadata["reconciliation_source"] == "late_fenced_provider_response"
+            assert metadata["estimated_cost_eur"] == 0
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is False
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_evidence WHERE organization_id=$1 "
+                "AND attempt_id=$2 AND event_type='provider_response_verified'",
+                org_id, attempt.attempt_id,
+            ) == 1
+            assert await conn.fetchval(
+                "SELECT count(*) FROM audit_log WHERE organization_id=$1 "
+                "AND target_id=$2 AND action='provider_attempt.reconciled'",
+                org_id, attempt.attempt_id,
+            ) == 1
+        assert (await repository.recover_provider_attempt(
+            org_id, attempt.attempt_id, **auth,
+        ))["state"] == "recorded"
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_openrouter_generation_evidence_recovers_without_request_id(pg_pool, sample_org):
+    from src.core.provider_recovery import verify_openrouter_generation
+
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    repository = BillingRepository(pg_pool)
+    auth = {
+        "actor_auth_user_id": actor,
+        "aal": "aal2",
+        "auth_time": int(time.time()),
+    }
+    model = "openrouter/xingchen-agi/xing4.0-29b-a4b:free"
+    generation_id = "gen-test-verified-lookup-001"
+    try:
+        attempt = await context.begin("openrouter", model, "test")
+        await context.mark_dispatching(attempt)
+        await context.record_provider_ids(attempt, generation_id=generation_id)
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            )
+        claim = await repository.recover_provider_attempt(
+            org_id, attempt.attempt_id, **auth,
+        )
+        assert claim["state"] == "lookup_required"
+        payload = {
+            "data": {
+                "id": generation_id,
+                "external_user": str(attempt.attempt_id),
+                "model": "xingchen-agi/xing4.0-29b-a4b:free",
+                "created_at": claim["attempt_created_at"].astimezone(timezone.utc).isoformat(),
+                "finish_reason": "stop",
+                "native_tokens_prompt": 11,
+                "native_tokens_completion": 4,
+                "latency": Decimal("0.42"),
+                "total_cost": Decimal("0.0"),
+            },
+        }
+        evidence = verify_openrouter_generation(
+            payload, generation_id=generation_id, attempt_id=attempt.attempt_id,
+            requested_model=claim["requested_model"],
+            attempt_created_at=claim["attempt_created_at"], expected_request_id=None,
+        )
+        assert await repository.finalize_openrouter_recovery(
+            org_id, attempt.attempt_id, **auth,
+            recovery_worker_id=claim["recovery_worker_id"],
+            lease_epoch=claim["lease_epoch"], evidence=evidence,
+        ) is True
+        metadata = (await _events(pg_pool, org_id))[0]["metadata"]
+        assert metadata["accounting_status"] == "recorded"
+        assert metadata["provider_generation_id"] == generation_id
+        assert metadata["provider_request_id"] is None
+        assert metadata["provider_cost_usd"] == "0.0"
+        assert metadata["estimated_cost_eur"] == 0
+        assert metadata["application_outcome"] == "usage_reconciled_no_output_replayed"
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is False
+            assert await conn.fetchval(
+                "SELECT count(*) FROM audit_log WHERE organization_id=$1 "
+                "AND target_id=$2 AND action='provider_attempt.reconciled'",
+                org_id, attempt.attempt_id,
+            ) == 1
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_attempt_recovery_is_tenant_scoped(pg_pool, sample_org):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    other_org_id = uuid.uuid4()
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO organizations(id,name) VALUES($1,'Other Test Org')", other_org_id,
+        )
+    other_actor = await _tenant(pg_pool, other_org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, other_org_id, task_type="document_qa", actor_auth_user_id=other_actor,
+    )
+    try:
+        attempt = await context.begin("groq", "groq/llama-3.1-8b-instant", "test")
+        await context.mark_dispatching(attempt)
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", other_org_id, attempt.attempt_id,
+            )
+        repository = BillingRepository(pg_pool)
+        assert await repository.list_provider_attempt_recovery(org_id) == []
+        with pytest.raises(PermissionError):
+            await repository.recover_provider_attempt(
+                other_org_id, attempt.attempt_id, actor_auth_user_id=actor,
+                aal="aal2", auth_time=int(time.time()),
+            )
+        assert (await repository.recover_provider_attempt(
+            org_id, attempt.attempt_id, actor_auth_user_id=actor,
+            aal="aal2", auth_time=int(time.time()),
+        ))["state"] == "unavailable"
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_after_transport_response_does_not_replay_provider_post(
+    pg_pool, sample_org, monkeypatch,
+):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    calls = []
+    generation_id = "gen-test-no-replay-001"
+    payload = _response(
+        model="xingchen-agi/xing4.0-29b-a4b:free", prompt=11, completion=4, total=15,
+    )
+
+    def transport(request):
+        calls.append(request.method)
+        return httpx.Response(
+            200, json=payload, headers={"x-generation-id": generation_id},
+        )
+
+    async def lost_finalizer(*_args, **_kwargs):
+        raise RuntimeError("simulated worker crash at accounting boundary")
+
+    monkeypatch.setattr(context, "finish", lost_finalizer)
+    llm = ObservedChatLLM(
+        policy=LLMClientPolicy(
+            provider=PROVIDERS["openrouter"],
+            model="openrouter/xingchen-agi/xing4.0-29b-a4b:free",
+            api_key="offline-test-only", base_url=None,
+        ),
+        session=context,
+        async_transport=httpx.MockTransport(transport),
+    )
+    try:
+        with pytest.raises(ProviderAccountingError):
+            await llm.acall("synthetic recovery test")
+        assert calls == ["POST"]
+        attempt = (await _events(pg_pool, org_id))[0]
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt["id"],
+            )
+        result = await BillingRepository(pg_pool).recover_provider_attempt(
+            org_id, attempt["id"], actor_auth_user_id=actor,
+            aal="aal2", auth_time=int(time.time()),
+        )
+        assert result["state"] == "lookup_required"
+        assert result["generation_id"] == generation_id
+        assert calls == ["POST"]
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_attempt_history_survives_organization_deletion(pg_pool, sample_org):
+    """A03 evidence follows usage_events' existing SET NULL retention contract."""
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    try:
+        attempt = await context.begin("openrouter", "openrouter/test-model:free", "test")
+        await context.mark_dispatching(attempt)
+        await context.record_provider_ids(attempt, generation_id="gen-retention-test-001")
+
+        async with pg_pool.acquire() as conn:
+            await conn.execute("DELETE FROM organizations WHERE id=$1", org_id)
+            assert await conn.fetchval(
+                "SELECT organization_id FROM usage_events WHERE id=$1", attempt.attempt_id,
+            ) is None
+            runtime = await conn.fetchrow(
+                "SELECT organization_id, dispatch_state FROM provider_attempt_runtime "
+                "WHERE attempt_id=$1", attempt.attempt_id,
+            )
+            assert runtime["organization_id"] is None
+            assert runtime["dispatch_state"] == "dispatching"
+            evidence = await conn.fetchrow(
+                "SELECT organization_id, event_type FROM provider_attempt_evidence "
+                "WHERE attempt_id=$1 AND event_type='provider_ids_observed'",
+                attempt.attempt_id,
+            )
+            assert evidence["organization_id"] is None
+            assert evidence["event_type"] == "provider_ids_observed"
+            # Once detached from a live organization, tenant-scoped admin
+            # recovery cannot rediscover or mutate the historical attempt.
+            assert await BillingRepository(pg_pool).list_provider_attempt_recovery(org_id) == []
+            # If the parent billing event is later removed by its own retention
+            # policy, both A03 tables follow it rather than retaining orphans.
+            await conn.execute("DELETE FROM usage_events WHERE id=$1", attempt.attempt_id)
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_runtime WHERE attempt_id=$1",
+                attempt.attempt_id,
+            ) == 0
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_evidence WHERE attempt_id=$1",
+                attempt.attempt_id,
+            ) == 0
+    finally:
+        await context.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_attempt_backfill_accepts_historic_null_organization(pg_pool):
+    """Migration 061 must backfill legacy events after org deletion safely."""
+    attempt_id = uuid.uuid4()
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO usage_events(id, organization_id, event_type, quantity, metadata)
+               VALUES($1, NULL, 'system.provider_attempt', 1,
+                      '{"accounting_status":"unresolved"}'::jsonb)""",
+            attempt_id,
+        )
+        with open(
+            "src/core/db/migrations/061_provider_attempt_fencing.sql", encoding="utf-8",
+        ) as migration_file:
+            await conn.execute(migration_file.read())
+        runtime = await conn.fetchrow(
+            "SELECT organization_id, dispatch_state FROM provider_attempt_runtime "
+            "WHERE attempt_id=$1", attempt_id,
+        )
+        assert runtime["organization_id"] is None
+        assert runtime["dispatch_state"] == "uncertain"
+
+
+@pytest.mark.asyncio
+async def test_prepared_crash_is_fenced_and_recovered_without_provider_dispatch(
+    pg_pool, sample_org,
+):
+    org_id = sample_org["id"]
+    actor = await _tenant(pg_pool, org_id)
+    context = await ProviderAccountingContext.open(
+        pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+    )
+    repository = BillingRepository(pg_pool)
+    try:
+        attempt = await context.begin("openrouter", "openrouter/test-model:free", "test")
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            )
+
+        recovered = await repository.recover_provider_attempt(
+            org_id, attempt.attempt_id, actor_auth_user_id=actor,
+            aal="aal2", auth_time=int(time.time()),
+        )
+        assert recovered["state"] == "not_sent"
+        with pytest.raises(ProviderAccountingError):
+            await context.mark_dispatching(attempt)
+
+        metadata = (await _events(pg_pool, org_id))[0]["metadata"]
+        assert metadata["dispatch_state"] == "not_sent"
+        assert metadata["accounting_status"] == "resolved"
+        assert metadata["actual_model"] is None
+        assert metadata["prompt_tokens"] is None
+        assert metadata["completion_tokens"] is None
+        assert metadata["estimated_cost_eur"] is None
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+            ) is False
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_evidence "
+                "WHERE organization_id=$1 AND attempt_id=$2 "
+                "AND event_type='dispatch_authorized'", org_id, attempt.attempt_id,
+            ) == 0
+        replacement = await ProviderAccountingContext.open(
+            pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
+        )
+        try:
+            next_attempt = await replacement.begin(
+                "openrouter", "openrouter/test-model:free", "test_retry_after_not_sent",
+            )
+            assert next_attempt.attempt_id != attempt.attempt_id
+        finally:
+            await replacement.close()
     finally:
         await context.close()
