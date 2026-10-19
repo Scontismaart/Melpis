@@ -26,8 +26,18 @@ class _HttpAccountingSession:
         assert provider == self.attempt.provider
         return self.attempt
 
+    def mark_dispatching(self, attempt):
+        assert attempt is self.attempt
+        return True
+
+    def record_provider_ids(self, attempt, **kwargs):
+        assert attempt is self.attempt
+        return True
+
     def finish(self, attempt, usage, latency_ms, **kwargs):
+        assert attempt is self.attempt
         self.completed.append((attempt, usage, latency_ms, kwargs))
+        return True
 
     def fail(self, *args, **kwargs):
         raise AssertionError("The mocked provider response should complete successfully")
