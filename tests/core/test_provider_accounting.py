@@ -1877,6 +1877,7 @@ async def test_openrouter_generation_evidence_recovers_without_request_id(pg_poo
             requested_model=claim["requested_model"],
             attempt_created_at=claim["attempt_created_at"], expected_request_id=None,
         )
+        assert evidence.attempt_id == attempt.attempt_id
         assert await repository.finalize_openrouter_recovery(
             org_id, attempt.attempt_id, **auth,
             recovery_worker_id=claim["recovery_worker_id"],

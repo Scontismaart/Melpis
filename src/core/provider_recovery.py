@@ -31,6 +31,7 @@ class ProviderReconciliationUnavailable(Exception):
 
 @dataclass(frozen=True, slots=True, repr=False)
 class VerifiedOpenRouterGeneration:
+    attempt_id: uuid.UUID
     generation_id: str
     request_id: str | None
     actual_model: str
@@ -132,6 +133,7 @@ def verify_openrouter_generation(
         raise ProviderReconciliationUnavailable
     provider_cost_usd = _safe_decimal(data.get("total_cost"))
     return VerifiedOpenRouterGeneration(
+        attempt_id=attempt_id,
         generation_id=generation_id,
         request_id=request_id,
         actual_model=usage.actual_model,
