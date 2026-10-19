@@ -7,15 +7,20 @@ il motore decisionale AI.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
 from pydantic import BaseModel, Field
 
-from src.models.schemas import CanaleMessaggio, DatiPrenotazione, ProfiloAttivita, RispostaOutput
+from src.models.schemas import DatiPrenotazione, ProfiloAttivita
 
 
 class OrchestrationInput(BaseModel):
     """Input agnostico rispetto al canale per l'AI Receptionist."""
     organization_id: uuid.UUID | str | None = None
+    # Set by authenticated dashboard routes; never accepted from request JSON.
+    auth_user_id: uuid.UUID | str | None = Field(default=None, exclude=True)
+    trace_id: str | None = Field(default=None, exclude=True)
+    # Server-issued simulator quota claim. Excluded from all transport payloads.
+    simulation_request_id: uuid.UUID | str | None = Field(default=None, exclude=True, repr=False)
+    simulation_claim_token: uuid.UUID | str | None = Field(default=None, exclude=True, repr=False)
     message_id: uuid.UUID | str | None = None
     conversation_id: str = ""
     text: str

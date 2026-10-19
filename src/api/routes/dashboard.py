@@ -11,12 +11,14 @@ Gestisce:
 import json
 import logging
 import uuid
+import asyncio
 from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from src.api.dependencies import require_ruolo
 from src.core.crew_runner_report import genera_report as genera_report_completo
 from src.core.scheduler import get_report_cache, set_report_cache
+from src.core.provider_accounting import ProviderAccountingContext
 from src.models.schemas import EventoDashboard, ReportOutput
 
 logger = logging.getLogger(__name__)
@@ -261,16 +263,29 @@ async def ottieni_report(
         if cached:
             return cached
 
+    provider_context = None
+    report_generated = False
     try:
-        report = genera_report_completo(eventi)
-    except Exception as e:
-        logger.error("Error generating daily report: %s", e)
-        raise HTTPException(
-            status_code=502,
-            detail="Impossibile generare il report. Riprova più tardi.",
+        provider_context = await ProviderAccountingContext.open(
+            pool,
+            org_id,
+            task_type="report",
+            actor_auth_user_id=user.get("auth_user_id"),
+            context={"trace_id": getattr(request.state, "trace_id", None)},
         )
+        report = await asyncio.to_thread(genera_report_completo, eventi, provider_context)
+        report_generated = True
+    except Exception as e:
+        logger.warning("report_ai_unavailable org_id=%s error_type=%s", org_id, type(e).__name__)
+        # Dashboard access stays available; this is a deterministic summary,
+        # not an AI generation, so billing/accounting failure cannot trigger a call.
+        report = genera_report_completo(eventi)
+    finally:
+        if provider_context is not None:
+            await provider_context.close()
 
-    set_report_cache(cache_key, report)
+    if report_generated:
+        set_report_cache(cache_key, report)
     return report
 
 

@@ -4,7 +4,9 @@ import pytest
 from unittest.mock import patch
 
 from src.core import onboarding
+from src.core.provider_accounting import ProviderAccountingError
 from src.models.schemas import OnboardingProfileInput, PreviewInput, RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 from src.whatsapp.inbound_processor import _profile_from_dict
 
 
@@ -146,10 +148,14 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
 
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
          patch("src.core.onboarding.genera_risposta_async", side_effect=fake_risposta):
+        org_id = str(sample_org["id"])
         await onboarding.generate_preview(
-            str(sample_org["id"]),
+            org_id,
             PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
             repo,
+            provider_context=provider_context_stub(
+                task_type="onboarding_preview", organization_id=org_id,
+            ),
             billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
         )
     assert "tartufo nero" in captured["contesto"]
@@ -157,10 +163,14 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
     captured["contesto"] = ""
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
          patch("src.core.onboarding.genera_risposta_async", side_effect=fake_risposta):
+        org_id = str(other_org["id"])
         await onboarding.generate_preview(
-            str(other_org["id"]),
+            org_id,
             PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
             repo,
+            provider_context=provider_context_stub(
+                task_type="onboarding_preview", organization_id=org_id,
+            ),
             billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
         )
     # l'org B non ha documenti: contesto vuoto, nessun leak dal tenant A
@@ -168,21 +178,34 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
 
 
 @pytest.mark.asyncio
-async def test_generate_preview_forwards_usage_sink(repo, sample_org):
-    usage_sink = {"attempts": []}
+async def test_generate_preview_forwards_tenant_bound_provider_context(repo, sample_org):
+    org_id = str(sample_org["id"])
+    provider_context = provider_context_stub(
+        task_type="onboarding_preview", organization_id=org_id,
+    )
 
-    async def fake_risposta(*args, usage_sink=None, **kwargs):
-        assert usage_sink is not None
-        usage_sink["attempts"].append({"model": "test-model"})
+    async def fake_risposta(*args, provider_context=None, **kwargs):
+        assert provider_context is not None
         return RispostaOutput(risposta="ok", richiede_umano=False, motivo="", categoria="info")
 
     with patch("src.core.onboarding.genera_risposta_async", side_effect=fake_risposta):
         await onboarding.generate_preview(
-            str(sample_org["id"]),
+            org_id,
             PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
             repo,
-            usage_sink=usage_sink,
+            provider_context=provider_context,
             billing={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0},
         )
 
-    assert usage_sink["attempts"] == [{"model": "test-model"}]
+
+@pytest.mark.asyncio
+async def test_preview_rejects_provider_context_from_another_tenant(repo, sample_org):
+    with pytest.raises(ProviderAccountingError, match="AI generation is not authorized"):
+        await onboarding.generate_preview(
+            str(sample_org["id"]),
+            PreviewInput(profilo=_profile(), messaggio="Cosa contiene il menu?"),
+            repo,
+            provider_context=provider_context_stub(
+                task_type="onboarding_preview", organization_id="00000000-0000-0000-0000-000000000099",
+            ),
+        )

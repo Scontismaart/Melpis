@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 ORG_A = "00000000-0000-0000-0000-00000000000a"
@@ -68,13 +69,14 @@ def preview_api(monkeypatch):
     get_repo = MagicMock(return_value=repo)
     billing = AsyncMock(return_value={"subscription_status": "active", "messages_limit": 500, "messages_used_this_period": 0})
     generate_preview = AsyncMock(return_value=output)
-    record_ai_usage = AsyncMock()
+    context = provider_context_stub()
+    open_context = AsyncMock(return_value=context)
 
     app.dependency_overrides[get_organization_context] = trusted_membership
     monkeypatch.setattr(organization, "get_repo", get_repo)
     monkeypatch.setattr(organization, "get_billing_snapshot", billing)
     monkeypatch.setattr(organization, "generate_preview", generate_preview)
-    monkeypatch.setattr(organization, "record_ai_attempts", record_ai_usage)
+    monkeypatch.setattr(organization.ProviderAccountingContext, "open", open_context)
 
     with TestClient(app, raise_server_exceptions=False) as client:
         yield {
@@ -82,7 +84,7 @@ def preview_api(monkeypatch):
             "repo": get_repo,
             "billing": billing,
             "generate": generate_preview,
-            "record_usage": record_ai_usage,
+            "open_context": open_context,
         }
     app.dependency_overrides.clear()
 

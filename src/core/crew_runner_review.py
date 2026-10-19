@@ -1,7 +1,7 @@
 from src.agents.review_agent import crea_review_crew
 from src.core.llm_config import LLMRouteRequest, budget_ratio_from_billing, route_llm
 from src.models.schemas import LINGUA_DEFAULT, RispostaRecensioneOutput
-import time
+from src.core.provider_accounting import ProviderAccountingContext, ProviderAccountingError
 
 
 def genera_risposta_recensione(
@@ -13,8 +13,14 @@ def genera_risposta_recensione(
     lingua_default: str = LINGUA_DEFAULT,
     profilo_attivita: dict | None = None,
     contesto_documenti: str = "",
-    usage_sink: dict | None = None,
+    provider_context: ProviderAccountingContext | None = None,
 ) -> RispostaRecensioneOutput:
+    if type(provider_context) is not ProviderAccountingContext:
+        raise ProviderAccountingError("AI generation is not authorized or accounting is unavailable")
+    provider_context.assert_task({"review"})
+    from src.core.billing.suspension import assert_ai_generation_allowed
+    assert_ai_generation_allowed(provider_context.billing_snapshot)
+    billing = provider_context.billing_snapshot
     route = route_llm(
         LLMRouteRequest(
             task_type="review",
@@ -23,11 +29,10 @@ def genera_risposta_recensione(
         )
     )
     errors: list[str] = []
-    # Review drafts use one authorized provider invocation. A fallback would be
-    # a second billable call beyond the single org-scoped rate-limit reservation.
-    for attempt_index, model in enumerate([route.model]):
-        crew = None
-        attempt_started = time.monotonic()
+    # A single route avoids silently continuing when a failed attempt left
+    # accounting unresolved. CrewAI retries that actually dispatch are each
+    # recorded by the private LLM adapter.
+    for model in [route.model]:
         try:
             crew = crea_review_crew(
                 testo, stelle, autore, model=model,
@@ -35,24 +40,12 @@ def genera_risposta_recensione(
                 lingua_default=lingua_default,
                 profilo_attivita=profilo_attivita,
                 contesto_documenti=contesto_documenti,
+                provider_context=provider_context,
             )
             risultato = crew.kickoff()
             break
-        except Exception as exc:
+        except Exception:
             errors.append(model)
-        finally:
-            if usage_sink is not None and crew is not None:
-                metrics = getattr(crew, "usage_metrics", None)
-                attempts = usage_sink.setdefault("attempts", [])
-                attempts.append({
-                    "model": model,
-                    "reason": route.reason,
-                    "prompt_tokens": getattr(metrics, "prompt_tokens", None),
-                    "completion_tokens": getattr(metrics, "completion_tokens", None),
-                    "total_tokens": getattr(metrics, "total_tokens", None),
-                    "latency_ms": int((time.monotonic() - attempt_started) * 1000),
-                    "fallback": attempt_index > 0,
-                })
     else:
         raise RuntimeError(
             "Tutti i modelli configurati hanno fallito. " + " | ".join(errors)

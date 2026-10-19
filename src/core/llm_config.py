@@ -4,11 +4,10 @@ import asyncio
 import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-from crewai import LLM
-from src.core.ai_providers import provider_for_model
-from src.core.cost_policy import DEFAULT_FREE_MODEL, assert_model_allowed, free_only
-from src.core.llm_client_policy import resolve_llm_client_policy
-from src.core.llm_routing import (
+from src.core.ai_providers import provider_for_model  # noqa: E402
+from src.core.cost_policy import DEFAULT_FREE_MODEL, assert_model_allowed, free_only  # noqa: E402
+from src.core.llm_client_policy import resolve_llm_client_policy  # noqa: E402
+from src.core.llm_routing import (  # noqa: E402
     LLMRoute,
     LLMRouteRequest,
     budget_ratio_from_billing,
@@ -70,7 +69,28 @@ def crea_llm(
     route_request: LLMRouteRequest | None = None,
     max_tokens: int | None = None,
     timeout: float | None = None,
-) -> LLM:
+    *,
+    provider_context=None,
+    reason: str = "generation",
+    sync_transport=None,
+    async_transport=None,
+):
+    from src.core.observed_llm import ObservedChatLLM
+    from src.core.provider_accounting import ProviderAccountingContext, ProviderAccountingError
+
+    if type(provider_context) is not ProviderAccountingContext:
+        raise ProviderAccountingError("AI generation is not authorized or accounting is unavailable")
+    expected_task = {
+        "customer_message": {"customer_message", "simulator", "onboarding_preview"},
+        "review": {"review"},
+        "report": {"report"},
+        "document_qa": {"document_qa"},
+        "intent_classification": {"intent_classification"},
+    }
+    route_task = route_request.task_type if route_request is not None else provider_context.task_type
+    if provider_context.task_type not in expected_task.get(route_task, set()):
+        raise ProviderAccountingError("AI generation is not authorized or accounting is unavailable")
+    provider_context.assert_http_admission()
     selected_model = model
     if selected_model is None and route_request is not None:
         selected_model = route_llm(route_request).model
@@ -80,17 +100,16 @@ def crea_llm(
     if max_tokens is None:
         max_tokens = int(os.getenv("LLM_MAX_TOKENS", "250"))
 
-    llm_params: dict[str, object] = {
-        **policy.client_params(),
-        "temperature": temperature,
-        "max_tokens": max(1, min(max_tokens, 1000)),
-        # CrewAI's LLM timeout is passed to LiteLLM/provider HTTP clients.
-        # This bounds a provider call even when the surrounding thread cannot be cancelled.
-        "timeout": min(LLM_TIMEOUT_SECONDS, max(0.1, timeout)) if timeout is not None else LLM_TIMEOUT_SECONDS,
-        "num_retries": 1,
-    }
-
-    return LLM(**llm_params)
+    return ObservedChatLLM(
+        policy=policy,
+        session=provider_context,
+        reason=reason,
+        temperature=temperature,
+        max_tokens=max(1, min(max_tokens, 1000)),
+        timeout=min(LLM_TIMEOUT_SECONDS, max(0.1, timeout)) if timeout is not None else LLM_TIMEOUT_SECONDS,
+        sync_transport=sync_transport,
+        async_transport=async_transport,
+    )
 
 
 __all__ = [

@@ -8,7 +8,7 @@ from src.agents.prompts_report import (
 from src.models.schemas import StatisticheReport, ReportOutput
 
 
-def crea_report_agent(model: str | None = None) -> Agent:
+def crea_report_agent(model: str | None = None, provider_context=None) -> Agent:
     return Agent(
         role="Analista business conversazioni clienti",
         goal=(
@@ -21,6 +21,8 @@ def crea_report_agent(model: str | None = None) -> Agent:
             model=model,
             temperature=0.5,
             route_request=LLMRouteRequest(task_type="report"),
+            provider_context=provider_context,
+            reason="daily_report",
         ),
         verbose=False,
         allow_delegation=False,
@@ -43,9 +45,9 @@ def crea_report_task(agent: Agent, statistiche: StatisticheReport) -> Task:
 
 
 def crea_report_crew(
-    statistiche: StatisticheReport, model: str | None = None
+    statistiche: StatisticheReport, model: str | None = None, provider_context=None
 ) -> Crew:
-    agent = crea_report_agent(model=model)
+    agent = crea_report_agent(model=model, provider_context=provider_context)
     task = crea_report_task(agent, statistiche)
 
     return Crew(

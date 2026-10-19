@@ -14,6 +14,7 @@ def _assert_regular_usage_type(event_type) -> None:
     # ID/payload into an authorization record in usage_events.
     if isinstance(event_type, str) and event_type in {
         "system.quota_trust_epoch", "legacy_quota_admission", "system.quota_reservation",
+        "system.provider_attempt",
     }:
         raise ValueError("Reserved quota protocol event type")
 

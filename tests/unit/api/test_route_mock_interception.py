@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.core.auth.dependencies import get_organization_context
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 @pytest.fixture
@@ -109,10 +110,15 @@ def test_simulatore_recensione_intercepts_genera_risposta(client, mock_auth, cle
     async def claim(*_args, **_kwargs):
         yield True
 
+    async def open_accounting_context(pool, organization_id, *, task_type,
+                                      actor_auth_user_id=None, worker_message_id=None,
+                                      context=None):
+        return provider_context_stub(task_type=task_type, organization_id=organization_id)
+
     with patch.object(app.state, "repo", mock_repo, create=True), \
          patch("src.api.main.genera_risposta_recensione", return_value=fake_review) as mock_gen, \
+         patch("src.core.provider_accounting.ProviderAccountingContext.open", new=AsyncMock(side_effect=open_accounting_context)), \
          patch("src.core.reviews.ai_governance.authorize_review_generation", new_callable=AsyncMock, return_value={"plan": "business"}), \
-         patch("src.core.reviews.ai_governance.record_review_usage", new_callable=AsyncMock), \
          patch("src.core.documenti.rag_context.recupera_contesto_documenti", new_callable=AsyncMock, return_value=MagicMock(testo="knowledge")), \
          patch("src.core.reviews.idempotency.claim_external_review", claim):
         res = client.post("/api/recensione", json={

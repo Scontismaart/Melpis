@@ -503,7 +503,6 @@ async def csrf_middleware(request: Request, call_next):
 from src.api.routes.common import (
     audit_event as _audit,
     get_billing_snapshot as _get_billing_snapshot,
-    record_ai_usage as _record_ai_usage,
     check_feature_blocked_by_plan as _piano_blocca_feature,
     get_shared_event_history,
     next_event_id,

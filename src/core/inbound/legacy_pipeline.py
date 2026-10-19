@@ -13,18 +13,13 @@ from src.agents.prompts import (
     formatta_disponibilita,
 )
 from src.core.bookings.service import SlotPienoError
-from src.core.ai_safety import apply_booking_result, booking_failed, record_ai_attempts, replay_requires_intervention, validate_ai_input
+from src.core.ai_safety import apply_booking_result, booking_failed, replay_requires_intervention, validate_ai_input
 from src.core.crew_runner import genera_risposta_async
 from src.core.documenti.rag_context import recupera_contesto_documenti
 from src.core.guardrails import faq_cache
 from src.core.guardrails.intent_classifier import classifica_intent, modello_intent
 from src.core.guardrails.validator import applica_guardrail, valida_risposta
-from src.core.llm_routing import (
-    LLMRouteRequest,
-    budget_ratio_from_billing,
-    route_llm,
-    stima_costo_eur,
-)
+from src.core.provider_accounting import ProviderAccountingContext
 from src.core.verticals import get_vertical_strategy
 from pydantic import ValidationError
 from src.models.schemas import CanaleMessaggio, LINGUA_DEFAULT, MessaggioInput, ProfiloAttivita, WhatsAppBusinessProfile
@@ -209,7 +204,17 @@ class LegacyInboundPipeline:
             heartbeat_task = asyncio.ensure_future(heartbeat_coro(msg["id"], org_id))
 
         try:
-            usage: dict = {}
+            provider_context = await ProviderAccountingContext.open(
+                self.repo.pool,
+                org_id,
+                task_type="customer_message",
+                worker_message_id=msg["id"],
+                context={
+                    "message_id": str(msg["id"]),
+                    "conversation_id": str(msg.get("conversation_id") or "") or None,
+                    "trace_id": str(msg.get("trace_id") or "") or None,
+                },
+            )
             recupera_doc_fn = _get_proc_symbol("recupera_contesto_documenti", recupera_contesto_documenti)
             contesto = await recupera_doc_fn(str(org_id), text, self.repo, q_emb=q_emb)
 
@@ -270,17 +275,18 @@ class LegacyInboundPipeline:
                 messaggio,
                 profilo,
                 cronologia=cronologia,
-                billing=state,
+                billing=provider_context.billing_snapshot,
                 contesto_documenti=contesto.testo,
                 intent=intent_result.intent,
                 variante=variante_prompt,
                 contesto_disponibilita=contesto_disp,
-                usage_sink=usage,
+                provider_context=provider_context,
             )
         finally:
             if heartbeat_task:
                 heartbeat_task.cancel()
-            await record_ai_attempts(self.repo, org_id, usage, msg["id"], msg.get("conversation_id"))
+            if "provider_context" in locals():
+                await provider_context.close()
 
         valida_fn = _get_proc_symbol("valida_risposta", valida_risposta)
         applica_guard_fn = _get_proc_symbol("applica_guardrail", applica_guardrail)
@@ -303,56 +309,6 @@ class LegacyInboundPipeline:
                     )
                 except Exception as e:
                     logger.warning("Guardrail usage logging failed for org %s msg %s: %s", org_id, msg["id"],type(e).__name__)
-
-        try:
-            route_fn = _get_proc_symbol("route_llm", route_llm)
-            budget_ratio_fn = _get_proc_symbol("budget_ratio_from_billing", budget_ratio_from_billing)
-            stima_costo_fn = _get_proc_symbol("stima_costo_eur", stima_costo_eur)
-            route = route_fn(
-                LLMRouteRequest(
-                    task_type="customer_message",
-                    user_text=text,
-                    remaining_budget_ratio=budget_ratio_fn(state),
-                    intent=intent_result.intent,
-                )
-            )
-            if not usage.get("attempts"):
-                await self.repo.record_usage(
-                    org_id,
-                    "ai_response",
-                    quantity=1,
-                    metadata={
-                        "channel": canale,
-                        "model": route.model,
-                        "tier": route.tier,
-                        "reason": route.reason,
-                        "intent": intent_result.intent,
-                        "intent_source": intent_result.source,
-                        "prompt_variant": variante_prompt,
-                        "conversation_id": str(msg.get("conversation_id", "")),
-                        "message_id": str(msg["id"]),
-                        **{
-                            k: usage[k]
-                            for k in (
-                                "model_effettivo",
-                                "fallback_usato",
-                                "latenza_ms",
-                                "prompt_tokens",
-                                "completion_tokens",
-                                "total_tokens",
-                                "attempts",
-                            )
-                            if k in usage
-                        },
-                        "stima_costo_eur": stima_costo_fn(
-                            usage.get("model_effettivo") or route.model,
-                            usage.get("prompt_tokens"),
-                            usage.get("completion_tokens"),
-                        ),
-                    },
-                )
-        except Exception as e:
-            logger.warning("AI usage logging failed for org %s msg %s: %s", org_id, msg["id"],type(e).__name__)
 
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id))
         risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, text)

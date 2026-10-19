@@ -17,7 +17,7 @@ from src.api.routes.common import (
     get_billing_snapshot,
 )
 from src.core.billing.suspension import AIGenerationBlocked, assert_ai_generation_allowed
-from src.core.ai_safety import record_ai_attempts
+from src.core.provider_accounting import ProviderAccountingContext
 from src.core.onboarding import (
     ProfileCacheInvalidationError,
     generate_preview,
@@ -183,13 +183,17 @@ async def onboarding_preview(
         assert_ai_generation_allowed(billing)
     except AIGenerationBlocked as exc:
         raise HTTPException(status_code=403, detail="Risposte AI non disponibili per questo piano o quota") from exc
-    usage = {"attempts": []}
+    provider_context = await ProviderAccountingContext.open(
+        getattr(repo, "pool", None),
+        org_id,
+        task_type="onboarding_preview",
+        actor_auth_user_id=user.get("auth_user_id"),
+        context={"trace_id": getattr(request.state, "trace_id", None)},
+    )
     try:
         output = await generate_preview(
-            org_id, richiesta, repo, billing=billing, usage_sink=usage
+            org_id, richiesta, repo, billing=billing, provider_context=provider_context
         )
     finally:
-        await record_ai_attempts(
-            repo, org_id, usage, None, None, task_type="onboarding_preview"
-        )
+        await provider_context.close()
     return output

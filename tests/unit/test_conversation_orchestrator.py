@@ -17,10 +17,10 @@ import pytest
 from src.core.bookings import SlotPienoError
 from src.core.receptionist.conversation_orchestrator import (
     ConversationOrchestrator,
-    profile_from_raw,
 )
-from src.core.receptionist.models import OrchestrationInput, OrchestrationOutput
-from src.models.schemas import DatiPrenotazione, DisponibilitaSlot, ProfiloAttivita, RispostaOutput
+from src.core.receptionist.models import OrchestrationInput
+from src.models.schemas import DatiPrenotazione, DisponibilitaSlot, RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +29,19 @@ def _mock_embeddings():
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
          patch("src.core.guardrails.faq_cache.vettorizza", return_value=[[0.1] * 384]):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_provider_accounting_context(monkeypatch):
+    from src.core.provider_accounting import ProviderAccountingContext
+
+    async def open_context(cls, pool, organization_id, *, task_type,
+                           actor_auth_user_id=None, worker_message_id=None,
+                           simulation_request_id=None, simulation_claim_token=None,
+                           context=None):
+        return provider_context_stub(task_type=task_type, organization_id=organization_id)
+
+    monkeypatch.setattr(ProviderAccountingContext, "open", classmethod(open_context))
 
 
 @pytest.fixture
@@ -128,7 +141,7 @@ async def test_standard_llm_generation_with_accounting(mock_dependencies):
         categoria="ristorante",
     )
 
-    with patch("src.core.receptionist.conversation_orchestrator.genera_risposta_async", return_value=fake_ai_output), \
+    with patch("src.core.receptionist.conversation_orchestrator.genera_risposta_async", return_value=fake_ai_output) as mock_responder, \
          patch("src.core.receptionist.conversation_orchestrator.classifica_intent") as mock_intent, \
          patch("src.core.receptionist.conversation_orchestrator.recupera_contesto_documenti") as mock_rag:
 
@@ -153,11 +166,10 @@ async def test_standard_llm_generation_with_accounting(mock_dependencies):
         assert result.response_text == "Certamente, possiamo accogliervi!"
         assert result.richiede_umano is False
 
-        # Verifica che il token accounting sia avvenuto (Invariante 8)
+        assert mock_responder.await_args.kwargs["provider_context"].task_type == "customer_message"
         record_usage_calls = mock_dependencies["billing_repo"].record_usage.call_args_list
         ai_response_calls = [c for c in record_usage_calls if c[0][1] == "ai_response"]
-        assert len(ai_response_calls) == 1
-        assert ai_response_calls[0][1]["metadata"]["intent"] == "prenotazione"
+        assert ai_response_calls == []
 
 
 @pytest.mark.asyncio

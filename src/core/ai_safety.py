@@ -14,10 +14,8 @@ def validate_ai_input(text):
 
 
 async def record_ai_attempts(repo, org_id, usage, message_id, conversation_id, *, task_type="customer_message"):
-    if org_id and usage.get("attempts"):
-        from src.core.reviews.ai_governance import record_review_usage
-        await record_review_usage(repo, str(org_id), usage, task_type=task_type,
-            context={"message_id": str(message_id or ""), "conversation_id": str(conversation_id or "")})
+    """Legacy sink disabled; only the per-dispatch provider adapter is authoritative."""
+    raise RuntimeError("AI usage must be recorded by the provider accounting adapter")
 
 
 def apply_booking_result(response, booking):

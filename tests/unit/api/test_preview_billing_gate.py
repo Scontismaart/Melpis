@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from src.core.auth.dependencies import get_organization_context
 from src.models.schemas import RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 
 VALID = {
     "subscription_status": "active",
@@ -44,13 +45,17 @@ def preview(monkeypatch):
         risposta="Siamo aperti dalle 9 alle 18.", richiede_umano=False,
         motivo="", categoria="generico",
     ))
-    record = AsyncMock()
+    context = provider_context_stub(
+        task_type="onboarding_preview",
+        organization_id="00000000-0000-0000-0000-000000000001",
+    )
+    open_context = AsyncMock(return_value=context)
     monkeypatch.setattr(organization, "enforce_org_rate_limit", AsyncMock())
     monkeypatch.setattr(organization, "get_billing_snapshot", billing)
     monkeypatch.setattr(organization, "generate_preview", generate)
-    monkeypatch.setattr(organization, "record_ai_attempts", record)
+    monkeypatch.setattr(organization.ProviderAccountingContext, "open", open_context)
     with TestClient(app, raise_server_exceptions=False) as client:
-        yield client, billing, generate, record
+        yield client, billing, generate, open_context, context
 
 
 @pytest.mark.parametrize("state,status", [
@@ -71,14 +76,14 @@ def preview(monkeypatch):
     ({**VALID, "messages_used_this_period": -1}, 403),
 ])
 def test_preview_denies_unverified_entitlement_before_generation(preview, state, status):
-    client, billing, generate, record = preview
+    client, billing, generate, open_context, _context = preview
     billing.return_value = state
 
     response = client.post("/api/onboarding/preview", json=PAYLOAD)
 
     assert response.status_code == status
     generate.assert_not_awaited()
-    record.assert_not_awaited()
+    open_context.assert_not_awaited()
 
 
 @pytest.mark.parametrize("state", [
@@ -88,7 +93,7 @@ def test_preview_denies_unverified_entitlement_before_generation(preview, state,
      "trial_end": datetime.now(timezone.utc) + timedelta(days=1)},
 ])
 def test_preview_with_verified_remaining_quota_generates_and_records(preview, state):
-    client, billing, generate, record = preview
+    client, billing, generate, open_context, context = preview
     billing.return_value = state
 
     response = client.post("/api/onboarding/preview", json=PAYLOAD)
@@ -96,32 +101,31 @@ def test_preview_with_verified_remaining_quota_generates_and_records(preview, st
     assert response.status_code == 200
     assert response.json()["risposta"] == "Siamo aperti dalle 9 alle 18."
     generate.assert_awaited_once()
-    assert "usage_sink" in generate.await_args.kwargs
-    record.assert_awaited_once()
-    assert record.await_args.kwargs["task_type"] == "onboarding_preview"
-    assert record.await_args.args[2] == {"attempts": []}
+    assert generate.await_args.kwargs["provider_context"] is context
+    open_context.assert_awaited_once()
+    assert open_context.await_args.kwargs["task_type"] == "onboarding_preview"
+    assert context._closed is True
 
 
 def test_preview_records_attempts_when_generation_raises(preview):
-    client, _, generate, record = preview
+    client, _, generate, open_context, context = preview
     generate.side_effect = TimeoutError("provider timed out")
 
     response = client.post("/api/onboarding/preview", json=PAYLOAD)
 
     assert response.status_code == 500
-    record.assert_awaited_once()
-    assert record.await_args.args[2] == {"attempts": []}
+    open_context.assert_awaited_once()
+    assert context._closed is True
 
 
-def test_preview_accounting_failure_never_returns_success(preview):
-    client, _, generate, record = preview
-    record.side_effect = RuntimeError("ledger unavailable")
+def test_preview_accounting_failure_never_dispatches_provider(preview):
+    client, _, generate, open_context, _context = preview
+    open_context.side_effect = RuntimeError("ledger unavailable")
 
     response = client.post("/api/onboarding/preview", json=PAYLOAD)
 
     assert response.status_code == 500
-    generate.assert_awaited_once()
-    record.assert_awaited_once()
+    generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

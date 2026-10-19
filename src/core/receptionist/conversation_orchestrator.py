@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, Callable
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -19,14 +19,14 @@ from src.agents.prompts import (
     formatta_disponibilita,
 )
 from src.core.bookings import SlotPienoError
-from src.core.ai_safety import apply_booking_result, booking_failed, record_ai_attempts, validate_ai_input
+from src.core.ai_safety import apply_booking_result, booking_failed, validate_ai_input
 from src.core.crew_runner import genera_risposta_async
 from src.core.documenti.rag_context import ContestoDocumenti, recupera_contesto_documenti
 from src.core.guardrails import faq_cache
 from src.core.guardrails.intent_classifier import classifica_intent, modello_intent
 from src.core.guardrails.validator import applica_guardrail, valida_risposta
-from src.core.llm_config import LLMRouteRequest, budget_ratio_from_billing, route_llm
-from src.core.llm_routing import stima_costo_eur
+from src.core.llm_config import budget_ratio_from_billing
+from src.core.provider_accounting import ProviderAccountingContext
 from src.core.receptionist.models import OrchestrationInput, OrchestrationOutput
 from src.core.verticals import get_vertical_strategy
 from src.models.schemas import (
@@ -106,6 +106,14 @@ class ConversationOrchestrator:
                 org_id = uuid.UUID(org_id)
             except Exception:
                 pass
+
+        # Anonymous demo requests may use deterministic application behavior,
+        # but cannot create a provider capability or call an LLM.
+        if not org_id:
+            return OrchestrationOutput(
+                response_text="Accedi e collega un'organizzazione per usare l'assistente AI.",
+                source="manual_gate", intent="out_of_scope", richiede_umano=False,
+            )
 
         # 1. Normalizzazione Profilo Attività
         profilo = await self._resolve_profile(org_id, req.business_profile)
@@ -206,7 +214,6 @@ class ConversationOrchestrator:
                 logger.warning("Failed to fetch billing state for org %s: %s", org_id,type(e).__name__)
 
         variante_prompt = assegna_variante(str(org_id)) if org_id else "control"
-        usage: dict = {}
 
         # 7.5 Airtable AI tools (Fase A, P1.4): offerti solo se intent CRM,
         # budget ok e connessione attiva; mai delete. Fail-closed: [].
@@ -240,6 +247,20 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.warning("Airtable tools usage logging failed for org %s: %s", org_id,type(e).__name__)
 
+        provider_context = await ProviderAccountingContext.open(
+            getattr(self.billing_repo, "pool", None),
+            org_id,
+            task_type="simulator" if req.is_simulation else "customer_message",
+            actor_auth_user_id=req.auth_user_id,
+            worker_message_id=(req.message_id if req.auth_user_id is None else None),
+            simulation_request_id=req.simulation_request_id if req.is_simulation else None,
+            simulation_claim_token=req.simulation_claim_token if req.is_simulation else None,
+            context={
+                "message_id": str(req.message_id) if req.message_id else None,
+                "conversation_id": req.conversation_id or None,
+                "trace_id": req.trace_id or None,
+            },
+        )
         try:
             canale_enum = (
                 CanaleMessaggio(req.channel)
@@ -261,18 +282,16 @@ class ConversationOrchestrator:
                 messaggio,
                 profilo,
                 cronologia=cronologia,
-                billing=billing_state,
+                billing=provider_context.billing_snapshot,
                 contesto_documenti=contesto.testo,
                 intent=intent_result.intent,
                 variante=variante_prompt,
                 contesto_disponibilita=contesto_disp,
-                usage_sink=usage,
+                provider_context=provider_context,
                 tools=airtable_tools or None,
             )
         finally:
-            if req.record_billing_usage:
-                await record_ai_attempts(self.billing_repo, org_id, usage, req.message_id, req.conversation_id,
-                    task_type="simulatore" if req.is_simulation else "customer_message")
+            await provider_context.close()
 
         # 9. Guardrail Pipeline & Filtering
         esito = valida_risposta(risposta, contesto.chunks, profilo)
@@ -297,56 +316,9 @@ class ConversationOrchestrator:
                 except Exception as e:
                     logger.warning("Guardrail usage logging failed for org %s: %s", org_id,type(e).__name__)
 
-        # 10. LLM Routing & Cost Governance (Invariante 8)
-        usage_metrics = {}
-        try:
-            route = route_llm(
-                LLMRouteRequest(
-                    task_type="customer_message",
-                    user_text=req.text,
-                    remaining_budget_ratio=budget_ratio_from_billing(billing_state),
-                    intent=intent_result.intent,
-                )
-            )
-            usage_metrics = {
-                "channel": req.channel,
-                "model": route.model,
-                "tier": route.tier,
-                "reason": route.reason,
-                "intent": intent_result.intent,
-                "intent_source": intent_result.source,
-                "prompt_variant": variante_prompt,
-                "conversation_id": req.conversation_id,
-                "message_id": str(req.message_id or ""),
-                **{
-                    k: usage[k]
-                    for k in (
-                        "model_effettivo",
-                        "fallback_usato",
-                        "latenza_ms",
-                        "prompt_tokens",
-                        "completion_tokens",
-                        "total_tokens",
-                        "attempts",
-                    )
-                    if k in usage
-                },
-                "stima_costo_eur": stima_costo_eur(
-                    usage.get("model_effettivo") or route.model,
-                    usage.get("prompt_tokens"),
-                    usage.get("completion_tokens"),
-                ),
-            }
-            if org_id and req.record_billing_usage and self.billing_repo and not usage.get("attempts"):
-                # Per il simulatore autenticato, aggiunge il task_type "simulatore"
-                event_metadata = {**usage_metrics}
-                if req.is_simulation:
-                    event_metadata["task_type"] = "simulatore"
-                await self.billing_repo.record_usage(
-                    org_id, "ai_response", quantity=1, metadata=event_metadata
-                )
-        except Exception as e:
-            logger.warning("AI usage tracking failed for org %s: %s", org_id,type(e).__name__)
+        # Provider costs and dispatch attempts are persisted one by one by the
+        # execution-local adapter. Final billable responses remain a separate
+        # A04 concern and are intentionally not inferred here.
 
         # 11. Vertical Strategy & Booking Creation / Validation
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id) if org_id else None)
@@ -452,7 +424,6 @@ class ConversationOrchestrator:
             slot_full_alternatives=slot_full_alternatives,
             guardrail_action=guardrail_action,
             guardrail_motivo=guardrail_motivo,
-            usage_metrics=usage_metrics,
         )
 
     async def _resolve_profile(self, org_id, raw_profile) -> ProfiloAttivita:

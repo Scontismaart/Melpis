@@ -4,12 +4,7 @@ from unittest.mock import AsyncMock, patch
 pytestmark = pytest.mark.asyncio
 
 
-class _FakeLLM:
-    def call(self, prompt):
-        return "La pizza margherita costa 8 euro."
-
-
-async def test_rispondi_richiede_organization_id():
+async def test_rispondi_requires_authenticated_provider_context():
     repo = AsyncMock()
     repo.search_similar = AsyncMock(return_value=[{
         "content": "Pizza margherita: 8 euro",
@@ -20,10 +15,11 @@ async def test_rispondi_richiede_organization_id():
     from src.core.documenti.qa_agent import rispondi
     with patch("src.core.documenti.qa_agent.vettorizza",
                return_value=[[0.1] * 384]), \
-         patch("src.core.documenti.qa_agent.crea_llm", return_value=_FakeLLM()):
+         patch("src.core.documenti.qa_agent.crea_llm") as make_llm:
         out = await rispondi("org-1", "quanto costa la pizza?", repo, k=5)
     repo.search_similar.assert_awaited_once()
-    assert out["risposta"] == "La pizza margherita costa 8 euro."
+    make_llm.assert_not_called()
+    assert "Non ho potuto analizzare" in out["risposta"]
     assert out["fonti"][0]["documento"] == "menu.pdf"
 
 

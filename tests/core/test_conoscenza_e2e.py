@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 from unittest.mock import patch, AsyncMock
 import httpx
 import pytest
@@ -89,18 +90,44 @@ async def test_vertical_aware_prompt_and_hierarchy(repo, sample_org):
         {"tipo": "documento", "fonte": "vecchio_listino.pdf"},
     )
 
+    auth_user_id = uuid.uuid4()
+    async with repo.pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO auth.users(id,email) VALUES($1,$2)",
+            auth_user_id, f"{auth_user_id}@example.test",
+        )
+        profile_id = await conn.fetchval(
+            "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
+        )
+        await conn.execute(
+            "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
+            "VALUES($1,$2,'owner',now())",
+            sample_org["id"], profile_id,
+        )
+        await conn.execute(
+            """UPDATE organizations SET subscription_status='trialing',
+                      trial_start=now()-interval '1 hour', trial_end=now()+interval '2 days',
+                      messages_limit=150, messages_used_this_period=0,
+                      ai_accounting_blocked=false WHERE id=$1""",
+            sample_org["id"],
+        )
+
     prompt_catturato = []
 
     class _CaptureLLM:
-        def call(self, prompt):
+        async def acall(self, prompt):
             prompt_catturato.append(prompt)
             return "Il prezzo ufficiale del Taglio Uomo è di 25 euro."
 
     with patch("src.core.documenti.qa_agent.vettorizza", return_value=[[0.1] * 384]), \
-         patch("src.core.documenti.qa_agent.crea_llm", return_value=_CaptureLLM()):
-        res = await rispondi(str(sample_org["id"]), "Quanto costa il taglio uomo?", repo)
+         patch("src.core.documenti.qa_agent.crea_llm", return_value=_CaptureLLM()) as make_llm:
+        res = await rispondi(
+            str(sample_org["id"]), "Quanto costa il taglio uomo?", repo,
+            actor_auth_user_id=auth_user_id,
+        )
 
     assert len(prompt_catturato) == 1
+    assert make_llm.call_args.kwargs["provider_context"].organization_id == sample_org["id"]
     prompt = prompt_catturato[0]
 
     # Verifica: il prompt NON parla di ristorante / allergeni / carta vini

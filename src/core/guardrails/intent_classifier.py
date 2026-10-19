@@ -22,7 +22,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from src.core.llm_config import crea_llm
+from src.core.llm_config import LLMRouteRequest, crea_llm
 from src.core.llm_routing import _ESCALATION_KEYWORDS, _FAQ_KEYWORDS
 
 INTENTS = frozenset({"faq", "booking", "complaint", "chitchat", "out_of_scope"})
@@ -116,7 +116,12 @@ def _modello_intent() -> str:
 # Alias pubblico: i chiamanti loggano il modello usato nell'usage event.
 modello_intent = _modello_intent
 
-async def classifica_intent(testo: str, *, allow_llm: bool = True) -> IntentResult:
+async def classifica_intent(
+    testo: str,
+    *,
+    allow_llm: bool = False,
+    provider_context=None,
+) -> IntentResult:
     """Classifica l'intento del messaggio. Non solleva mai: il peggio che
     possa accadere e' l'esito euristico (source="heuristic")."""
     esito = _euristica(testo)
@@ -126,7 +131,11 @@ async def classifica_intent(testo: str, *, allow_llm: bool = True) -> IntentResu
     try:
         timeout = float(os.getenv("GUARDRAIL_INTENT_TIMEOUT", str(_TIMEOUT_DEFAULT)))
         timeout = max(0.1, min(timeout, _TIMEOUT_DEFAULT))
-        llm = crea_llm(model=_modello_intent(), temperature=0.0, timeout=timeout)
+        llm = crea_llm(
+            model=_modello_intent(), temperature=0.0, timeout=timeout,
+            route_request=LLMRouteRequest(task_type="intent_classification"),
+            provider_context=provider_context, reason="intent_classification",
+        )
         raw = await asyncio.wait_for(
             asyncio.to_thread(llm.call, _PROMPT_CLASSIFICATORE.format(testo=testo)),
             timeout=timeout,

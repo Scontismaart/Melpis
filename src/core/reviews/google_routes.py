@@ -240,7 +240,7 @@ async def google_reviews_sync(
         raise HTTPException(status_code=403, detail=blocco)
     service = _get_service(request)
     try:
-        result = await service.fetch_reviews(org_id)
+        result = await service.fetch_reviews(org_id, actor_auth_user_id=user.get("auth_user_id"))
     except Exception:
         trace_id = getattr(request.state, "trace_id", "unavailable")
         logger.error("business=sync_fail org_id=%s trace_id=%s", org_id, trace_id)

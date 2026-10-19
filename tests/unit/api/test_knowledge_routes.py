@@ -202,7 +202,6 @@ def test_chiedi_documenti_success(client):
     }
     mock_repo = AsyncMock()
     mock_repo.get_organization_billing.return_value = {"plan": "business", "subscription_status": "active"}
-    mock_repo.record_ai_usage.return_value = None
 
     mock_qa_output = {
         "risposta": "Il prezzo del corso VIP e' 499 euro e include tutoraggio.",
@@ -213,8 +212,7 @@ def test_chiedi_documenti_success(client):
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
     with patch.object(app.state, "repo", mock_repo, create=True), \
-         patch("src.api.routes.knowledge.rispondi", new_callable=AsyncMock, return_value=mock_qa_output), \
-         patch("src.api.routes.knowledge.record_ai_usage", new_callable=AsyncMock):
+         patch("src.api.routes.knowledge.rispondi", new_callable=AsyncMock, return_value=mock_qa_output):
         res = client.post(
             "/api/documenti/chiedi",
             json={"domanda": "Quanto costa il corso VIP?", "k": 3},

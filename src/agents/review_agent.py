@@ -12,6 +12,8 @@ def crea_review_agent(
     model: str | None = None,
     lingue_supportate: list[str] | None = None,
     lingua_default: str = LINGUA_DEFAULT,
+    provider_context=None,
+    reason: str = "review",
 ) -> Agent:
     return Agent(
         role="Esperto gestione reputazione online",
@@ -24,6 +26,8 @@ def crea_review_agent(
             model=model,
             temperature=0.3,
             route_request=LLMRouteRequest(task_type="review"),
+            provider_context=provider_context,
+            reason=reason,
         ),
         verbose=False,
         allow_delegation=False,
@@ -65,9 +69,10 @@ def crea_review_crew(
     lingua_default: str = LINGUA_DEFAULT,
     profilo_attivita: dict | None = None,
     contesto_documenti: str = "",
+    provider_context=None,
 ) -> Crew:
     agent = crea_review_agent(model=model, lingue_supportate=lingue_supportate,
-                              lingua_default=lingua_default)
+                              lingua_default=lingua_default, provider_context=provider_context)
     task = crea_review_task(
         agent, testo, stelle, autore, profilo_attivita, contesto_documenti
     )

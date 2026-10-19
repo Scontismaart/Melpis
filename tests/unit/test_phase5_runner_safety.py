@@ -10,6 +10,7 @@ from src.core.ai_safety import apply_booking_result, record_ai_attempts, replay_
 from src.core.bookings.service import BookingService
 from src.core.llm_routing import LLMRoute
 from src.models.schemas import MessaggioInput, ProfiloAttivita, RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 @pytest.fixture
@@ -101,11 +102,9 @@ def test_runner_fallback_hides_provider_error_and_never_passes_tools(
     monkeypatch.setattr(crew_runner, "route_llm", lambda _request: route)
     monkeypatch.setattr(crew_runner, "crea_crew", make_crew)
     caplog.set_level(logging.ERROR)
-    usage = {}
-
     with pytest.raises(RuntimeError) as exc_info:
         crew_runner.genera_risposta(
-            message, profile, tools=[object()], usage_sink=usage
+            message, profile, tools=[object()], provider_context=provider_context_stub()
         )
 
     assert "provider-secret-marker" not in str(exc_info.value)
@@ -116,8 +115,10 @@ def test_runner_fallback_hides_provider_error_and_never_passes_tools(
         *route.fallback_models,
     ]
     assert all(attempt["tools"] is None for attempt in attempts)
-    assert len(usage["attempts"]) == len(attempts)
-    assert "provider-secret-marker" not in repr(usage)
+    assert all(attempt["provider_context"] is not None for attempt in attempts)
+    assert [attempt["reason"] for attempt in attempts] == [
+        "test", "fallback:test",
+    ]
 
 
 @pytest.mark.asyncio
@@ -141,7 +142,9 @@ async def test_async_runner_timeout_is_bounded_and_sanitized(
     caplog.set_level(logging.ERROR)
 
     with pytest.raises(RuntimeError) as exc_info:
-        await crew_runner.genera_risposta_async(message, profile)
+        await crew_runner.genera_risposta_async(
+            message, profile, provider_context=provider_context_stub(),
+        )
 
     assert "TimeoutError" in str(exc_info.value)
     assert "provider-secret-marker" not in str(exc_info.value)
@@ -219,77 +222,11 @@ async def test_booking_replay_returns_existing_org_scoped_row_before_capacity_ch
 
 
 @pytest.mark.asyncio
-async def test_record_ai_attempts_blocks_ai_when_provider_usage_is_unknown(monkeypatch):
-    from src.core.db.repositories.billing_repo import BillingRepository
-
-    write_batch = AsyncMock()
-    monkeypatch.setattr(BillingRepository, "record_usage_batch", write_batch)
-    repo = SimpleNamespace(pool=object())
-    usage = {
-        "attempts": [{
-            "model": "unknown-provider/model",
-            "reason": "customer_message",
-            "fallback": False,
-            "latency_ms": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "total_tokens": None,
-            "provider_error": "raw-provider-error-marker",
-        }]
-    }
-
-    with pytest.raises(RuntimeError, match="AI generation blocked"):
+async def test_legacy_postcall_sink_is_disabled():
+    with pytest.raises(RuntimeError, match="provider accounting adapter"):
         await record_ai_attempts(
-            repo, "org-1", usage, "message-1", "conversation-1"
+            SimpleNamespace(pool=object()), "org-1", {"attempts": []}, None, None,
         )
-
-    write_batch.assert_awaited_once()
-    org_id, records = write_batch.await_args.args
-    assert org_id == "org-1"
-    assert write_batch.await_args.kwargs == {"block_ai": True}
-    metadata = records[0]["metadata"]
-    assert metadata["message_id"] == "message-1"
-    assert metadata["conversation_id"] == "conversation-1"
-    assert metadata["accounting_status"] == "unresolved"
-    assert "provider_error" not in metadata
-    assert "raw-provider-error-marker" not in repr(records)
-
-
-@pytest.mark.asyncio
-async def test_record_ai_attempts_accounts_known_groq_model_without_block(monkeypatch):
-    from src.core.db.repositories.billing_repo import BillingRepository
-
-    write_batch = AsyncMock()
-    monkeypatch.setattr(BillingRepository, "record_usage_batch", write_batch)
-    repo = SimpleNamespace(pool=object())
-    usage = {
-        "attempts": [{
-            "model": "groq/llama-3.1-8b-instant",
-            "reason": "customer_message",
-            "fallback": False,
-            "latency_ms": 17,
-            "prompt_tokens": 12,
-            "completion_tokens": 8,
-            "total_tokens": 20,
-        }]
-    }
-
-    await record_ai_attempts(repo, "org-2", usage, "message-2", "conversation-2", task_type="simulatore")
-
-    write_batch.assert_awaited_once()
-    org_id, records = write_batch.await_args.args
-    assert org_id == "org-2"
-    assert write_batch.await_args.kwargs == {"block_ai": False}
-    metadata = records[0]["metadata"]
-    assert metadata["model"] == "groq/llama-3.1-8b-instant"
-    assert metadata["accounting_status"] == "recorded"
-    assert metadata["task_type"] == "simulatore"
-    assert metadata["estimated_cost_eur"] == 0.0
-    assert metadata["prompt_tokens"] == 12
-    assert metadata["completion_tokens"] == 8
-    assert metadata["total_tokens"] == 20
-    assert metadata["message_id"] == "message-2"
-    assert metadata["conversation_id"] == "conversation-2"
 
 
 @pytest.mark.asyncio

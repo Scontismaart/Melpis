@@ -237,8 +237,8 @@ class GoogleBusinessService:
 
     async def _genera_bozza(self, testo, stelle, autore,
                            lingue_supportate=None, lingua_default=None,
-                           profilo_attivita=None, contesto_documenti="", usage_sink=None,
-                           billing=None):
+                           profilo_attivita=None, contesto_documenti="",
+                           provider_context=None, billing=None):
         """Generazione bozza isolata in un metodo — mockabile nei test
         come _build_service/_list_reviews, senza toccare il crew AI reale."""
         from src.core.crew_runner_review import genera_risposta_recensione
@@ -249,11 +249,11 @@ class GoogleBusinessService:
             lingua_default=lingua_default,
             profilo_attivita=profilo_attivita,
             contesto_documenti=contesto_documenti,
-            usage_sink=usage_sink,
+            provider_context=provider_context,
             billing=billing,
         )
 
-    async def fetch_reviews(self, org_id, page_size=50):
+    async def fetch_reviews(self, org_id, page_size=50, *, actor_auth_user_id=None):
         if not google_business_enabled():
             return {"nuove": 0, "fallimenti": 0, "parziale": False}
         from src.core.reviews.idempotency import claim_google_review_sync
@@ -263,14 +263,14 @@ class GoogleBusinessService:
                     return {"nuove": 0, "fallimenti": 1, "saltate": 0, "parziale": True,
                             "pagine_lette": 0, "recensioni_lette": 0,
                             "parziale_motivo": ["sync_in_progress"]}
-                return await self._fetch_reviews_locked(org_id, page_size)
+                return await self._fetch_reviews_locked(org_id, page_size, actor_auth_user_id=actor_auth_user_id)
         except Exception:
             logger.error("business=sync_claim_failed org_id=%s", org_id)
             return {"nuove": 0, "fallimenti": 1, "saltate": 0, "parziale": True,
                     "pagine_lette": 0, "recensioni_lette": 0,
                     "parziale_motivo": ["sync_unavailable"]}
 
-    async def _fetch_reviews_locked(self, org_id, page_size=50):
+    async def _fetch_reviews_locked(self, org_id, page_size=50, *, actor_auth_user_id=None):
         """Recupera e persiste le review Google dell'org (con dedup).
 
         Ritorna il numero di review nuove inserite (0 se non connessi o se
@@ -403,25 +403,29 @@ class GoogleBusinessService:
                 contesto = await recupera_contesto_documenti(
                     str(org_id), m["testo"], self.repo
                 )
-                from src.core.reviews.ai_governance import generic_review_fallback, record_review_usage, validate_review_draft
-                usage = {"attempts": []}
+                from src.core.reviews.ai_governance import generic_review_fallback, validate_review_draft
                 if not contesto.testo.strip():
                     output = generic_review_fallback(m["testo"])
                 else:
+                    from src.core.provider_accounting import ProviderAccountingContext
+                    provider_context = await ProviderAccountingContext.open(
+                        getattr(self.repo, "pool", None),
+                        org_id,
+                        task_type="review",
+                        actor_auth_user_id=actor_auth_user_id,
+                        context={"trace_id": None},
+                    )
                     try:
                         output = await self._genera_bozza(
                             m["testo"], m["valutazione_stelle"], m["autore"],
                             lingue_supportate=lingue,
                             lingua_default=lingua_default,
                             profilo_attivita=profilo_pubblico,
-                            contesto_documenti=contesto.testo, usage_sink=usage, billing=billing,
+                            contesto_documenti=contesto.testo,
+                            provider_context=provider_context, billing=billing,
                         )
-                    except Exception:
-                        await record_review_usage(self.repo, str(org_id), usage)
-                        raise
-                # Usage is persisted even when deterministic checks reject the returned text.
-                if usage.get("attempts"):
-                    await record_review_usage(self.repo, str(org_id), usage)
+                    finally:
+                        await provider_context.close()
                 validate_review_draft(output.bozza_risposta, m["testo"], contesto.testo)
                 await self.repo.create_review(
                     organization_id=org_id,
@@ -441,7 +445,7 @@ class GoogleBusinessService:
                 # Dedup: la review con questo external_id esiste gia' per
                 # l'org (partial unique index), il sync e' idempotente.
                 continue
-            except Exception as e:
+            except Exception:
                 fallimenti += 1
                 parziale = True
                 parziale_motivi.append("review_processing_failed")
