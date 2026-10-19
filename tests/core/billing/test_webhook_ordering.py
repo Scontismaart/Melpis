@@ -63,7 +63,7 @@ def _paid_invoice(event_id, created, *, invoice_id="in_ordering_test",
         "currency": currency,
         "period_start": period_start - 30 * 86400,
         "period_end": period_start,
-        "lines": {"data": [{
+        "lines": {"has_more": False, "data": [{
             "type": "subscription",
             "amount": 2900,
             "currency": "eur",
@@ -77,6 +77,39 @@ def _paid_invoice(event_id, created, *, invoice_id="in_ordering_test",
     if intent_id is not None:
         data["subscription_details"] = {"metadata": {"checkout_intent_id": str(intent_id)}}
     return {"id": event_id, "created": created, "type": "invoice.paid", "data": {"object": data}}
+
+
+def _current_paid_invoice(event_id, created, *, invoice_id="in_current_ordering_test",
+                          subscription=SUBSCRIPTION, customer=CUSTOMER,
+                          period_start=PERIOD_START, period_end=PERIOD_END,
+                          price_id=PRICE, amount=2900, currency="eur",
+                          proration=False, intent_id=None):
+    event = _paid_invoice(event_id, created, invoice_id=invoice_id,
+                          subscription=subscription, customer=customer,
+                          period_start=period_start, period_end=period_end,
+                          price_id=price_id, amount_paid=amount, currency=currency,
+                          intent_id=intent_id)
+    invoice = event["data"]["object"]
+    invoice.pop("subscription", None)
+    legacy_metadata = invoice.pop("subscription_details", {}).get("metadata")
+    invoice["parent"] = {"type": "subscription_details", "subscription_details": {
+        "subscription": subscription,
+    }}
+    if legacy_metadata is not None:
+        invoice["parent"]["subscription_details"]["metadata"] = legacy_metadata
+    legacy_line = invoice["lines"]["data"][0]
+    legacy_line.pop("type")
+    legacy_line.pop("subscription")
+    legacy_line.pop("price")
+    legacy_line.pop("proration")
+    legacy_line["parent"] = {"type": "subscription_item_details",
+                              "subscription_item_details": {
+                                  "subscription": subscription,
+                                  "proration": proration,
+                              }}
+    legacy_line["pricing"] = {"type": "price_details",
+                              "price_details": {"price": price_id}}
+    return event
 
 
 def _failed_invoice(event_id, created, *, invoice_id="in_ordering_test",
@@ -520,6 +553,226 @@ async def test_paid_invoice_after_local_checkout_expiry_is_accepted_for_bound_su
     assert result["action"] == "subscription_activated"
     assert billing["subscription_id"] == "sub_after_expiry"
     assert billing["subscription_status"] == "active"
+
+
+async def test_current_invoice_snapshot_binds_unbound_subscription_to_durable_intent(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="incomplete", subscription=None)
+    intent = await _seed_intent(repo, sample_org["id"])
+    event = _current_paid_invoice("evt_current_first_paid", 1_550, intent_id=intent)
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    duplicate = await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(sample_org["id"])
+
+    assert result["action"] == "subscription_activated"
+    assert duplicate["action"] == "duplicate"
+    assert billing["subscription_id"] == SUBSCRIPTION
+    assert billing["subscription_status"] == "active"
+    assert await _audit_count(repo, sample_org["id"], "billing.webhook.subscription_activated") == 1
+
+
+async def test_current_invoice_renewal_needs_no_reused_checkout_intent_and_duplicate_is_idempotent(
+    repo, sample_org,
+):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="active", cursor=1_600,
+                     period_start=PERIOD_START, period_end=PERIOD_END, used=8)
+    event = _current_paid_invoice(
+        "evt_current_renewal", 1_700, invoice_id="in_current_renewal",
+        period_start=PERIOD_END, period_end=PERIOD_END + 30 * 86400,
+    )
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    await repo.increment_message_usage(sample_org["id"])
+    duplicate = await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(sample_org["id"])
+
+    assert result["action"] == "subscription_activated"
+    assert duplicate["action"] == "duplicate"
+    assert billing["subscription_id"] == SUBSCRIPTION
+    assert billing["subscription_status"] == "active"
+    assert billing["messages_used_this_period"] == 1
+    assert await _audit_count(repo, sample_org["id"], "billing.webhook.subscription_activated") == 1
+
+
+async def test_current_failed_invoice_uses_canonical_subscription_and_sets_past_due(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="active", cursor=1_650,
+                     period_start=PERIOD_START, period_end=PERIOD_END)
+    event = _current_paid_invoice("evt_current_payment_failed", 1_700,
+                                  invoice_id="in_current_payment_failed", amount=0)
+    event["type"] = "invoice.payment_failed"
+    event["data"]["object"]["status"] = "open"
+
+    result = await handle_stripe_webhook(event, repo, 7)
+    billing = await repo.get_organization_billing(sample_org["id"])
+
+    assert result["action"] == "payment_failed"
+    assert billing["subscription_id"] == SUBSCRIPTION
+    assert billing["subscription_status"] == "past_due"
+    assert await _audit_count(repo, sample_org["id"], "billing.webhook.payment_failed") == 1
+
+
+@pytest.mark.parametrize("invalid_shape", [
+    "subscription_alias_conflict", "metadata_alias_conflict", "unknown_price",
+    "yearly_price", "product_only", "wrong_amount", "wrong_currency",
+    "proration", "multiple_lines", "incomplete_lines",
+    "missing_parent_subscription", "parent_type_conflict",
+])
+async def test_current_invoice_rejections_leave_billing_and_audit_unchanged(
+    repo, sample_org, monkeypatch, invalid_shape,
+):
+    from src.core.billing.plans import PLANS
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="active", cursor=1_800,
+                     period_start=PERIOD_START, period_end=PERIOD_END, used=9)
+    if invalid_shape == "yearly_price":
+        monkeypatch.setattr(PLANS["starter"], "stripe_price_id_yearly", "price_yearly_test")
+        price_id = "price_yearly_test"
+    elif invalid_shape == "unknown_price":
+        price_id = "price_unknown_test"
+    else:
+        price_id = PRICE
+    event = _current_paid_invoice(
+        f"evt_current_reject_{invalid_shape}", 1_900, invoice_id=f"in_reject_{invalid_shape}",
+        period_start=PERIOD_END, period_end=PERIOD_END + 30 * 86400, price_id=price_id,
+    )
+    invoice = event["data"]["object"]
+    line = invoice["lines"]["data"][0]
+    if invalid_shape == "subscription_alias_conflict":
+        invoice["subscription"] = "sub_conflicting_alias"
+    elif invalid_shape == "metadata_alias_conflict":
+        invoice["subscription_details"] = {"metadata": {"checkout_intent_id": "legacy-conflict"}}
+        invoice["parent"]["subscription_details"]["metadata"] = {
+            "checkout_intent_id": str(uuid.uuid4()),
+        }
+    elif invalid_shape == "product_only":
+        line["pricing"]["price_details"] = {"product": "prod_starter"}
+    elif invalid_shape == "wrong_amount":
+        line["amount"] = 2_899
+    elif invalid_shape == "wrong_currency":
+        line["currency"] = "usd"
+    elif invalid_shape == "proration":
+        line["parent"]["subscription_item_details"]["proration"] = True
+    elif invalid_shape == "multiple_lines":
+        invoice["lines"]["data"].append(dict(line))
+    elif invalid_shape == "incomplete_lines":
+        invoice["lines"]["has_more"] = True
+    elif invalid_shape == "missing_parent_subscription":
+        invoice["parent"]["subscription_details"]["subscription"] = None
+    elif invalid_shape == "parent_type_conflict":
+        invoice["parent"]["type"] = "quote_details"
+
+    before = await repo.get_organization_billing(sample_org["id"])
+    before_cursor = await _event_cursor(repo, sample_org["id"])
+    with pytest.raises(HTTPException) as exc:
+        await handle_stripe_webhook(event, repo, 7)
+    after = await repo.get_organization_billing(sample_org["id"])
+    after_cursor = await _event_cursor(repo, sample_org["id"])
+
+    assert exc.value.status_code == 503
+    for field in ("plan", "messages_limit", "subscription_status", "subscription_id",
+                  "current_period_start", "current_period_end", "messages_used_this_period"):
+        assert after[field] == before[field]
+    assert after_cursor == before_cursor
+    assert not await _processed(repo, event["id"])
+    assert await _audit_count(repo, sample_org["id"], "billing.webhook.subscription_activated") == 0
+
+
+async def test_current_unbound_invoice_cannot_authorize_from_invoice_metadata(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="trialing", subscription=None)
+    intent = await _seed_intent(repo, sample_org["id"])
+    event = _current_paid_invoice("evt_current_invoice_metadata_only", 1_950)
+    invoice = event["data"]["object"]
+    invoice["metadata"] = {"checkout_intent_id": str(intent)}
+    before = await repo.get_organization_billing(sample_org["id"])
+
+    with pytest.raises(HTTPException) as exc:
+        await handle_stripe_webhook(event, repo, 7)
+
+    after = await repo.get_organization_billing(sample_org["id"])
+    assert exc.value.status_code == 503
+    assert after["subscription_id"] == before["subscription_id"] is None
+    assert after["subscription_status"] == before["subscription_status"] == "trialing"
+    assert not await _processed(repo, event["id"])
+
+
+async def test_current_invoice_missing_subscription_intent_is_retryable_without_mutation(repo, sample_org):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="trialing", subscription=None)
+    event = _current_paid_invoice("evt_current_missing_intent", 1_960)
+    before = await repo.get_organization_billing(sample_org["id"])
+
+    with pytest.raises(HTTPException) as exc:
+        await handle_stripe_webhook(event, repo, 7)
+
+    after = await repo.get_organization_billing(sample_org["id"])
+    assert exc.value.status_code == 503
+    assert after["subscription_id"] == before["subscription_id"] is None
+    assert after["subscription_status"] == before["subscription_status"] == "trialing"
+    assert not await _processed(repo, event["id"])
+
+
+@pytest.mark.parametrize("api_shape", ["legacy", "current"])
+@pytest.mark.parametrize("event_type", ["invoice.paid", "invoice.payment_failed"])
+async def test_non_subscription_invoice_item_is_ignored_without_mutation(
+    repo, sample_org, api_shape, event_type,
+):
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    await _bound_org(repo, sample_org["id"], status="active", cursor=2_100,
+                     period_start=PERIOD_START, period_end=PERIOD_END, used=13)
+    line = {
+        "amount": 500,
+        "currency": "eur",
+        "quantity": 1,
+        "period": {"start": PERIOD_START, "end": PERIOD_END},
+    }
+    if api_shape == "legacy":
+        line.update({
+            "type": "invoiceitem",
+            "price": {"id": "price_one_time_test"},
+        })
+    else:
+        line.update({
+            "parent": {"type": "invoice_item_details", "invoice_item_details": {}},
+            "pricing": {"type": "price_details", "price_details": {
+                "price": "price_one_time_test",
+            }},
+        })
+    event = {
+        "id": f"evt_non_subscription_invoice_{api_shape}_{event_type.split('.')[-1]}",
+        "created": 2_200,
+        "type": event_type,
+        "data": {"object": {
+            "id": f"in_non_subscription_{api_shape}",
+            "customer": CUSTOMER,
+            "status": "paid" if event_type == "invoice.paid" else "open",
+            "amount_paid": 500 if event_type == "invoice.paid" else 0,
+            "currency": "eur",
+            "lines": {"has_more": False, "data": [line]},
+        }},
+    }
+    before = await repo.get_organization_billing(sample_org["id"])
+    before_cursor = await _event_cursor(repo, sample_org["id"])
+
+    result = await handle_stripe_webhook(event, repo, 7)
+
+    after = await repo.get_organization_billing(sample_org["id"])
+    after_cursor = await _event_cursor(repo, sample_org["id"])
+    assert result == {"action": "ignored", "reason": "non_subscription_invoice"}
+    assert after == before
+    assert after_cursor == before_cursor
+    assert not await _processed(repo, event["id"])
+    assert await _audit_count(repo, sample_org["id"], "billing.webhook.subscription_activated") == 0
 
 
 async def test_zero_paid_trial_invoice_does_not_grant_active_entitlement(repo, sample_org):
