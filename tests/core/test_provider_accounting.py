@@ -1820,9 +1820,11 @@ async def test_crashed_openrouter_worker_is_fenced_then_reconciled_once(pg_pool,
                 "AND target_id=$2 AND action='provider_attempt.reconciled'",
                 org_id, attempt.attempt_id,
             ) == 1
+        # Reconciliation is idempotent: repeated recovery returns the same
+        # terminal dispatch state without inserting another usage event.
         assert (await repository.recover_provider_attempt(
             org_id, attempt.attempt_id, **auth,
-        ))["state"] == "recorded"
+        ))["state"] == "verified"
     finally:
         await context.close()
 
