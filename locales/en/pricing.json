@@ -5,9 +5,7 @@
     "badge": "Transparent pricing",
     "title": "A plan tailored to every stage of your growth",
     "subtitle": "Activate your AI WhatsApp assistant in minutes. Free 7-day trial, no credit card required, no lock-in contracts.",
-    "monthly_toggle": "Monthly",
-    "annual_toggle": "Annual",
-    "annual_discount": "Annual billing"
+    "monthly_toggle": "Monthly"
   },
   "plans": {
     "essential": {
@@ -15,7 +13,6 @@
       "badge": "",
       "tagline": "For solo practitioners and small businesses looking to automate FAQs and business hours.",
       "price_monthly": 29,
-      "price_annual": 24,
       "period": "/month",
       "cta": "Start with Essential",
       "features": [
@@ -32,7 +29,6 @@
       "badge": "Most popular",
       "tagline": "For restaurants, salons, and medical clinics managing continuous bookings and appointments.",
       "price_monthly": 69,
-      "price_annual": 59,
       "period": "/month",
       "cta": "Try Growth free",
       "features": [
@@ -50,7 +46,6 @@
       "badge": "Maximum power",
       "tagline": "For businesses with a high volume of requests.",
       "price_monthly": 149,
-      "price_annual": 129,
       "period": "/month",
       "cta": "Upgrade to Scale",
       "features": [

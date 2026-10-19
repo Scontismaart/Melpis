@@ -50,3 +50,26 @@ def test_duplicate_price_configuration_rejected(monthly, monkeypatch):
     from src.core.billing.plans import PLANS
     monkeypatch.setattr(PLANS["pro"], "stripe_price_id", "price_starter_monthly")
     assert _resolve_plan_from_subscription(monthly) is None
+
+
+@pytest.mark.parametrize(("slug", "price_id", "amount"), [
+    ("starter", "price_starter_monthly", 2900),
+    ("pro", "price_pro_monthly", 6900),
+    ("business", "price_business_monthly", 14900),
+])
+def test_approved_monthly_catalog_mapping(slug, price_id, amount, monkeypatch):
+    from src.core.billing.plans import PLANS
+
+    for plan_slug, plan in PLANS.items():
+        monkeypatch.setattr(plan, "stripe_price_id", price_id if plan_slug == slug else f"price_{plan_slug}_monthly")
+    subscription = {"items": {"has_more": False, "data": [{
+        "quantity": 1,
+        "price": {
+            "id": price_id,
+            "currency": "eur",
+            "unit_amount": amount,
+            "recurring": {"interval": "month", "interval_count": 1},
+        },
+    }]}}
+
+    assert _resolve_plan_from_subscription(subscription) == slug

@@ -5,9 +5,7 @@
     "badge": "Prezzi trasparenti",
     "title": "Un piano per ogni fase della tua attività",
     "subtitle": "Attiva il tuo assistente WhatsApp AI in pochi minuti. Prova gratis per 7 giorni, senza carta di credito e senza vincoli contrattuali.",
-    "monthly_toggle": "Mensile",
-    "annual_toggle": "Annuale",
-    "annual_discount": "Fatturazione annuale"
+    "monthly_toggle": "Mensile"
   },
   "plans": {
     "essential": {
@@ -15,7 +13,6 @@
       "badge": "",
       "tagline": "Per liberi professionisti e piccole attività che vogliono automatizzare le domande frequenti e orari.",
       "price_monthly": 29,
-      "price_annual": 24,
       "period": "/mese",
       "cta": "Inizia con Essenziale",
       "features": [
@@ -32,7 +29,6 @@
       "badge": "Più scelto",
       "tagline": "Per ristoranti, saloni e studi medici che gestiscono prenotazioni e appuntamenti continui.",
       "price_monthly": 69,
-      "price_annual": 59,
       "period": "/mese",
       "cta": "Prova Crescita gratis",
       "features": [
@@ -50,7 +46,6 @@
       "badge": "Massima potenza",
       "tagline": "Per attività con un volume elevato di richieste.",
       "price_monthly": 149,
-      "price_annual": 129,
       "period": "/mese",
       "cta": "Passa a Scala",
       "features": [

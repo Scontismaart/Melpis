@@ -5,9 +5,7 @@
     "badge": "Transparente Tarife",
     "title": "Der passende Plan für jede Phase Ihres Wachstums",
     "subtitle": "Aktivieren Sie Ihren KI-WhatsApp-Assistenten in wenigen Minuten. 7 Tage kostenlos testen, ohne Kreditkarte und ohne Vertragslaufzeit.",
-    "monthly_toggle": "Monatlich",
-    "annual_toggle": "Jährlich",
-    "annual_discount": "Jährliche Abrechnung"
+    "monthly_toggle": "Monatlich"
   },
   "plans": {
     "essential": {
@@ -15,7 +13,6 @@
       "badge": "",
       "tagline": "Für Einzelunternehmer und kleinere Betriebe zur Automatisierung von Öffnungszeiten und Standardfragen.",
       "price_monthly": 29,
-      "price_annual": 24,
       "period": "/Monat",
       "cta": "Mit Basis starten",
       "features": [
@@ -32,7 +29,6 @@
       "badge": "Beliebteste Wahl",
       "tagline": "Für Restaurants, Salons und Praxen mit regelmäßigem Buchungsaufkommen und Terminanfragen.",
       "price_monthly": 69,
-      "price_annual": 59,
       "period": "/Monat",
       "cta": "Wachstum kostenlos testen",
       "features": [
@@ -50,7 +46,6 @@
       "badge": "Maximale Leistung",
       "tagline": "Für Unternehmen mit hohem Anfragevolumen.",
       "price_monthly": 149,
-      "price_annual": 129,
       "period": "/Monat",
       "cta": "Zu Skalierung wechseln",
       "features": [

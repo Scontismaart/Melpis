@@ -22,16 +22,39 @@ test('landing plan cards match confirmed prices and monthly message quotas', () 
   const cards = [...dom.window.document.querySelectorAll('.price-card-shell')];
   assert.equal(cards.length, 3);
   const expected = [
-    ['29', '24', '500'],
-    ['69', '59', '2.000'],
-    ['149', '129', '10.000'],
+    ['29', '500'],
+    ['69', '2.000'],
+    ['149', '10.000'],
   ];
   cards.forEach((card, index) => {
     const price = card.querySelector('.p-amount');
     assert.equal(price?.dataset.monthly, expected[index][0]);
-    assert.equal(price?.dataset.annual, expected[index][1]);
-    assert.ok(card.textContent.includes(`Fino a ${expected[index][2]} messaggi/mese`));
+    assert.equal(price?.dataset.annual, undefined);
+    assert.ok(card.textContent.includes(`Fino a ${expected[index][1]} messaggi/mese`));
   });
+});
+
+test('all launch landing home pages show monthly-only pricing', () => {
+  const pages = [
+    ['web/landing/index.html', 'Fatturazione Mensile'],
+    ['web/landing/en/index.html', 'Monthly'],
+    ['web/landing/es/index.html', 'Mensual'],
+    ['web/landing/fr/index.html', 'Mensuel'],
+    ['web/landing/de/index.html', 'Monatlich'],
+  ];
+  for (const [file, monthlyLabel] of pages) {
+    const document = new JSDOM(read(file)).window.document;
+    const billing = document.querySelector('.billing-toggle-wrap');
+    assert.ok(billing?.querySelector('.toggle-btn[aria-current="true"]'), `${file} has an accessible monthly label`);
+    assert.equal(billing?.textContent.trim(), monthlyLabel, `${file} has a localized monthly label`);
+    assert.equal(billing?.querySelector('button'), null, `${file} has no billing toggle`);
+    assert.equal(document.querySelector('#btnAnnual'), null, `${file} has no annual option`);
+    const prices = [...document.querySelectorAll('.p-amount')].map((price) => price.textContent.trim());
+    assert.deepEqual(prices, ['29', '69', '149'], `${file} shows approved monthly prices`);
+    assert.equal(document.querySelectorAll('.p-amount[data-annual]').length, 0, `${file} exposes no annual display prices`);
+  }
+  const app = read('web/landing/app.js');
+  assert.doesNotMatch(app, /btnAnnual|data-annual|setBilling\s*\(/);
 });
 
 test('localized signup success and account link do not fall back to Italian', () => {
@@ -51,17 +74,22 @@ test('localized signup success and account link do not fall back to Italian', ()
   });
 });
 
-test('all pricing locales use confirmed limits and annual prices', () => {
+test('all pricing locales use confirmed limits and canonical monthly prices', () => {
   const limits = [500, 2000, 10000];
-  const yearly = [24, 59, 129];
+  const monthly = [29, 69, 149];
   for (const lang of ['it', 'en', 'es', 'fr', 'de']) {
-    const pricing = JSON.parse(read(`locales/${lang}/pricing.json`));
-    const plans = [pricing.plans.essential, pricing.plans.growth, pricing.plans.scale];
-    plans.forEach((plan, index) => {
-      assert.equal(plan.price_annual, yearly[index], `${lang} annual price ${index}`);
-      assert.ok(plan.features.some((feature) => feature.replace(/\D/g, '') === String(limits[index])), `${lang} message limit ${limits[index]}`);
-      assert.ok(plan.features.every((feature) => !/unlimited ai conversations|conversazioni ai illimitate|conversaciones con ia ilimitadas|conversations ia illimitées|unbegrenzte ki-konversationen/i.test(feature)));
-    });
+    for (const file of [`locales/${lang}/pricing.json`, `web/locales/${lang}/pricing.json`, `web/landing/locales/${lang}/pricing.json`]) {
+      const pricing = JSON.parse(read(file));
+      const plans = [pricing.plans.essential, pricing.plans.growth, pricing.plans.scale];
+      assert.equal(pricing.hero.annual_toggle, undefined, `${file} has no annual toggle metadata`);
+      assert.equal(pricing.hero.annual_discount, undefined, `${file} has no annual billing metadata`);
+      plans.forEach((plan, index) => {
+        assert.equal(plan.price_monthly, monthly[index], `${file} monthly price ${index}`);
+        assert.equal(plan.price_annual, undefined, `${file} has no annual price ${index}`);
+        assert.ok(plan.features.some((feature) => feature.replace(/\D/g, '') === String(limits[index])), `${file} message limit ${limits[index]}`);
+        assert.ok(plan.features.every((feature) => !/unlimited ai conversations|conversazioni ai illimitate|conversaciones con ia ilimitadas|conversations ia illimitées|unbegrenzte ki-konversationen/i.test(feature)));
+      });
+    }
   }
 });
 

@@ -1292,6 +1292,16 @@ function localizeLanding(html, lang, bundle) {
   if (!c) return html;
   let res = html;
 
+  // The public landing ships monthly pricing only for V1. Keep the static
+  // monthly label localized when this page is regenerated from the Italian source.
+  const monthlyBillingLabel = bundle.pricing?.hero?.monthly_toggle;
+  if (monthlyBillingLabel) {
+    res = res.replace(
+      /(<div class="billing-toggle-wrap">\s*<span class="toggle-btn active" aria-current="true">)[^<]*(<\/span>\s*<\/div>)/,
+      `$1${monthlyBillingLabel}$2`
+    );
+  }
+
   // 1. Hero H1 and Subtitle
   res = res.replace(
     /<h1 class="hero-h1(?: hero-anim-title)?">[\s\S]*?<\/h1>/,

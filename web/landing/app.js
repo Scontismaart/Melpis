@@ -726,34 +726,6 @@
         });
     })();
 
-    /* ---------- Billing Toggle (Mensile / Annuale) ---------- */
-    function setBilling(period) {
-        var btnMonthly = document.getElementById('btnMonthly');
-        var btnAnnual = document.getElementById('btnAnnual');
-        if (!btnMonthly || !btnAnnual) return;
-
-        var isAnnual = (period === 'annual');
-        btnMonthly.classList.toggle('active', !isAnnual);
-        btnAnnual.classList.toggle('active', isAnnual);
-
-        document.querySelectorAll('.p-amount').forEach(function (el) {
-            var val = isAnnual ? el.getAttribute('data-annual') : el.getAttribute('data-monthly');
-            if (val) {
-                el.style.transform = 'scale(1.1)';
-                setTimeout(function () {
-                    el.textContent = val;
-                    el.style.transform = 'scale(1)';
-                }, 100);
-            }
-        });
-
-    }
-
-    var btnMonthlyEl = document.getElementById('btnMonthly');
-    var btnAnnualEl = document.getElementById('btnAnnual');
-    if (btnMonthlyEl) btnMonthlyEl.addEventListener('click', function () { setBilling('monthly'); });
-    if (btnAnnualEl) btnAnnualEl.addEventListener('click', function () { setBilling('annual'); });
-
     /* ---------- Signup Modal / Quick Start ---------- */
     var modal = document.getElementById('signupModal');
     var modalClose = document.getElementById('modalClose');
