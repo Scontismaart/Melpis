@@ -64,6 +64,23 @@ async def _seed_checkout_intent(repo, organization_id, event, trial_end_unix=Non
     return intent_id
 
 
+def _monthly_service_line(subscription_id):
+    start = int(datetime.now(timezone.utc).timestamp())
+    return {
+        "type": "subscription",
+        "amount": 2900,
+        "currency": "eur",
+        "subscription": subscription_id,
+        "proration": False,
+        "quantity": 1,
+        "price": {
+            "id": "price_test_monthly",
+            "recurring": {"interval": "month", "interval_count": 1},
+        },
+        "period": {"start": start, "end": start + 2592000},
+    }
+
+
 @pytest.fixture
 def valid_invoice_paid_event():
     service_start = int(datetime.now(timezone.utc).timestamp())
@@ -83,6 +100,7 @@ def valid_invoice_paid_event():
                 "period_start": service_start - 2592000,
                 "period_end": service_start,
                 "lines": {
+                    "has_more": False,
                     "data": [
                         {
                             "type": "subscription",
@@ -336,22 +354,7 @@ async def test_reactivation_resets_notification_then_resuspend(repo, sample_org)
             "currency": "eur",
             "period_start": int(datetime.now(timezone.utc).timestamp()) - 2592000,
             "period_end": int(datetime.now(timezone.utc).timestamp()),
-            "lines": {"data": [{
-                "type": "subscription",
-                "amount": 2900,
-                "currency": "eur",
-                "subscription": "sub_test002",
-                "proration": False,
-                "quantity": 1,
-                "price": {
-                    "id": "price_test_monthly",
-                    "recurring": {"interval": "month", "interval_count": 1},
-                },
-                "period": {
-                    "start": int(datetime.now(timezone.utc).timestamp()),
-                    "end": int(datetime.now(timezone.utc).timestamp()) + 2592000,
-                },
-            }]},
+                "lines": {"has_more": False, "data": [_monthly_service_line("sub_test002")]},
         }},
     }
     await handle_stripe_webhook(invoice_paid, repo, 7)
@@ -385,6 +388,9 @@ async def test_handle_invoice_payment_failed_sets_past_due(repo, sample_org):
                 "id": "in_fail_001",
                 "customer": "cus_test001",
                 "subscription": "sub_test001",
+                "status": "open",
+                "currency": "eur",
+                "lines": {"has_more": False, "data": [_monthly_service_line("sub_test001")]},
             }
         },
     }
@@ -468,7 +474,9 @@ async def test_webhook_dedup_uses_real_event_id_not_object_id(repo, sample_org):
         "id": "evt_dedup_AAA",
         "created": 100,
         "type": "invoice.payment_failed",
-        "data": {"object": {"id": "in_same_object", "customer": "cus_test_dedup", "subscription": "sub_x"}},
+        "data": {"object": {"id": "in_same_object", "customer": "cus_test_dedup", "subscription": "sub_x",
+                              "status": "open", "currency": "eur",
+                              "lines": {"has_more": False, "data": [_monthly_service_line("sub_x")]}}},
     }
     result1 = await handle_stripe_webhook(event1, repo, 7)
     assert result1["action"] == "payment_failed"
@@ -479,7 +487,9 @@ async def test_webhook_dedup_uses_real_event_id_not_object_id(repo, sample_org):
         "id": "evt_dedup_BBB",
         "created": 101,
         "type": "invoice.payment_failed",
-        "data": {"object": {"id": "in_same_object", "customer": "cus_test_dedup", "subscription": "sub_x"}},
+        "data": {"object": {"id": "in_same_object", "customer": "cus_test_dedup", "subscription": "sub_x",
+                              "status": "open", "currency": "eur",
+                              "lines": {"has_more": False, "data": [_monthly_service_line("sub_x")]}}},
     }
     result2 = await handle_stripe_webhook(event2, repo, 7)
     assert result2["action"] == "payment_failed"  # non "duplicate"

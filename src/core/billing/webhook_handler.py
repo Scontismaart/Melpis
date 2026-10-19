@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
+_NON_SUBSCRIPTION_INVOICE = object()
 
 
 def _valid_org_uuid(value) -> bool:
@@ -73,6 +74,197 @@ def _subscription_period(data):
         return None
 
 
+def _invoice_alias(paths):
+    """Return one invoice alias, rejecting snapshots that disagree.
+
+    ``paths`` is a sequence of (container, key) pairs. Presence matters: an
+    explicit null alongside a populated alias is ambiguous and must be
+    reconciled by Stripe rather than guessed locally.
+    """
+    present = [container[key] for container, key in paths
+               if isinstance(container, dict) and key in container]
+    if len(present) > 1 and any(value != present[0] for value in present[1:]):
+        raise HTTPException(503, "Stripe invoice aliases require reconciliation")
+    return present[0] if present else None
+
+
+def _normalize_invoice_snapshot(data):
+    """Normalize supported Stripe invoice API versions before any DB checks.
+
+    Stripe's older invoice snapshot puts subscription and price details at
+    the top level of each invoice line. Newer snapshots nest the subscription
+    under ``parent.subscription_details`` and line price/subscription details
+    under ``pricing.price_details`` and ``parent.subscription_item_details``.
+    Only signed subscription metadata is copied into the canonical intent
+    field; invoice-level metadata is never an authorization source.
+    """
+    if not isinstance(data, dict):
+        raise HTTPException(503, "Stripe invoice requires reconciliation")
+
+    subscription_details = data.get("subscription_details")
+    parent = data.get("parent")
+    parent_subscription = parent.get("subscription_details") if isinstance(parent, dict) else None
+    parent_type = parent.get("type") if isinstance(parent, dict) else None
+    if not isinstance(subscription_details, dict):
+        subscription_details = {}
+    if not isinstance(parent_subscription, dict):
+        parent_subscription = {}
+    legacy_metadata = subscription_details.get("metadata")
+    legacy_subscription_present = (
+        (isinstance(data.get("subscription"), str) and bool(data["subscription"].strip()))
+        or (isinstance(subscription_details.get("subscription"), str)
+            and bool(subscription_details["subscription"].strip()))
+        or (isinstance(legacy_metadata, dict) and bool(legacy_metadata.get("checkout_intent_id")))
+    )
+    if parent_type == "subscription_details":
+        nested_subscription = parent_subscription.get("subscription")
+        if not isinstance(nested_subscription, str) or not nested_subscription.strip():
+            raise HTTPException(503, "Stripe invoice subscription requires reconciliation")
+    elif parent_type is not None and (
+        "subscription_details" in (parent if isinstance(parent, dict) else {})
+        or legacy_subscription_present
+    ):
+        raise HTTPException(503, "Stripe invoice parent type requires reconciliation")
+    subscription_id = _invoice_alias((
+        (data, "subscription"),
+        (subscription_details, "subscription"),
+        (parent_subscription, "subscription"),
+    ))
+    metadata_paths = [
+        (subscription_details, "metadata"),
+        (parent_subscription, "metadata"),
+    ]
+    supplied_metadata = [(container[key]) for container, key in metadata_paths
+                         if key in container]
+    if len(supplied_metadata) > 1:
+        intent_values = [
+            metadata.get("checkout_intent_id") if isinstance(metadata, dict) else None
+            for metadata in supplied_metadata
+        ]
+        if any(value != intent_values[0] for value in intent_values[1:]):
+            raise HTTPException(503, "Stripe invoice intent metadata requires reconciliation")
+    metadata = supplied_metadata[0] if supplied_metadata else None
+    if metadata is not None and not isinstance(metadata, dict):
+        raise HTTPException(503, "Stripe invoice intent metadata requires reconciliation")
+    intent_marker = metadata.get("checkout_intent_id") if isinstance(metadata, dict) else None
+    subscription_declared = (
+        parent_type == "subscription_details"
+        or (isinstance(subscription_id, str) and bool(subscription_id.strip()))
+        or bool(intent_marker)
+    )
+    if subscription_declared and (
+        not isinstance(subscription_id, str) or not subscription_id.strip()
+    ):
+        raise HTTPException(503, "Stripe invoice subscription requires reconciliation")
+
+    # Store the canonical subscription and metadata only after checking every
+    # supplied alias. These are the values consumed by ordering and binding.
+    data["subscription"] = subscription_id
+    data["subscription_details"] = {"metadata": metadata} if metadata is not None else {}
+
+    lines = data.get("lines")
+    if not isinstance(lines, dict) or not isinstance(lines.get("data"), list):
+        return data
+    normalized_lines = []
+    saw_subscription_line = False
+    all_lines_are_invoice_items = bool(lines["data"])
+    for line in lines["data"]:
+        if not isinstance(line, dict):
+            normalized_lines.append(line)
+            all_lines_are_invoice_items = False
+            continue
+        line_parent = line.get("parent")
+        item_details = (line_parent.get("subscription_item_details")
+                        if isinstance(line_parent, dict) else None)
+        if not isinstance(item_details, dict):
+            item_details = {}
+
+        line_subscription = _invoice_alias((
+            (line, "subscription"),
+            (item_details, "subscription"),
+        ))
+        legacy_price = line.get("price") if "price" in line else None
+        if legacy_price is not None and not isinstance(legacy_price, dict):
+            raise HTTPException(503, "Stripe invoice price requires reconciliation")
+        legacy_price_id = legacy_price.get("id") if isinstance(legacy_price, dict) else None
+        pricing = line.get("pricing")
+        price_details = pricing.get("price_details") if isinstance(pricing, dict) else None
+        if (isinstance(pricing, dict) and "type" in pricing
+                and pricing.get("type") != "price_details"):
+            raise HTTPException(503, "Stripe invoice pricing type requires reconciliation")
+        current_price = price_details.get("price") if isinstance(price_details, dict) else None
+        if isinstance(current_price, dict):
+            current_price = current_price.get("id")
+        price_aliases = []
+        if "price" in line:
+            if isinstance(legacy_price, dict) and "id" in legacy_price:
+                price_aliases.append((legacy_price, "id"))
+            else:
+                price_aliases.append(({"price": legacy_price_id}, "price"))
+        if isinstance(price_details, dict) and "price" in price_details:
+            price_aliases.append(({"price": current_price}, "price"))
+        price_id = _invoice_alias(price_aliases)
+
+        legacy_type_present = "type" in line
+        current_type_present = isinstance(line_parent, dict) and "type" in line_parent
+        legacy_type = line.get("type")
+        current_type = line_parent.get("type") if isinstance(line_parent, dict) else None
+        legacy_kind = {"subscription": "subscription", "invoiceitem": "invoice_item"}.get(legacy_type)
+        current_kind = {
+            "subscription_item_details": "subscription",
+            "invoice_item_details": "invoice_item",
+        }.get(current_type)
+        if legacy_type_present and legacy_kind is None:
+            raise HTTPException(503, "Stripe invoice line type requires reconciliation")
+        if current_type_present and current_kind is None:
+            raise HTTPException(503, "Stripe invoice line type requires reconciliation")
+        if legacy_kind and current_kind and legacy_kind != current_kind:
+            raise HTTPException(503, "Stripe invoice line aliases require reconciliation")
+        line_kind = legacy_kind or current_kind
+        if line_kind == "invoice_item" and line_subscription:
+            raise HTTPException(503, "Stripe invoice line subscription requires reconciliation")
+        is_subscription_line = line_kind == "subscription" or bool(line_subscription)
+        if is_subscription_line:
+            if line_subscription != subscription_id:
+                raise HTTPException(503, "Stripe invoice line subscription requires reconciliation")
+            saw_subscription_line = True
+            all_lines_are_invoice_items = False
+        elif line_kind != "invoice_item":
+            all_lines_are_invoice_items = False
+
+        legacy_proration = line.get("proration") if "proration" in line else None
+        current_proration = item_details.get("proration") if "proration" in item_details else None
+        proration = _invoice_alias((
+            ({"value": legacy_proration} if "proration" in line else {}, "value"),
+            ({"value": current_proration} if "proration" in item_details else {}, "value"),
+        ))
+        current_format = isinstance(price_details, dict) or bool(item_details)
+        if isinstance(legacy_price, dict):
+            canonical_price = dict(legacy_price)
+            if price_id is not None:
+                canonical_price["id"] = price_id
+        elif price_id is not None:
+            canonical_price = {"id": price_id}
+            if current_format:
+                canonical_price["_catalog_monthly_snapshot"] = True
+        else:
+            canonical_price = {}
+
+        normalized = dict(line)
+        normalized["type"] = (
+            "subscription" if is_subscription_line
+            else "invoiceitem" if line_kind == "invoice_item" else None
+        )
+        normalized["subscription"] = line_subscription
+        normalized["price"] = canonical_price
+        normalized["proration"] = proration
+        normalized_lines.append(normalized)
+    data["lines"] = {**lines, "data": normalized_lines}
+    if not subscription_declared and not saw_subscription_line and all_lines_are_invoice_items:
+        return _NON_SUBSCRIPTION_INVOICE
+    return data
+
+
 def _validated_subscription_state(org, data):
     """Snapshots may preserve verified rights or restrict them, never grant."""
     status = data.get("status")
@@ -119,9 +311,13 @@ async def handle_stripe_webhook(event: dict, repo, trial_days: int) -> dict | No
     # Never mutate the caller's event while applying conservative tie handling.
     import copy
     data_obj = copy.deepcopy(event.get("data", {}).get("object", {}))
+    if event_type in {"invoice.paid", "invoice.payment_failed"}:
+        data_obj = _normalize_invoice_snapshot(data_obj)
     created = event.get("created")
     if not event_id or not isinstance(created, int) or isinstance(created, bool) or created <= 0:
         raise ValueError("Stripe event requires a stable event id and created timestamp")
+    if data_obj is _NON_SUBSCRIPTION_INVOICE:
+        return {"action": "ignored", "reason": "non_subscription_invoice"}
 
     async with repo.pool.acquire() as conn:
         async with conn.transaction():
@@ -228,6 +424,8 @@ async def _lock_event_scope(conn, event, data):
         return org
     if kind == "invoice.paid" and data.get("status") != "paid":
         return {**org, "ignored": "invoice_not_paid"}
+    if kind == "invoice.payment_failed" and _invoice_service_line(data) is None:
+        raise HTTPException(503, "Stripe failed invoice service line requires reconciliation")
     if current_sub and current_sub != incoming_sub:
         if not (kind == "invoice.paid" and org.get("subscription_status") == "canceled"):
             return {**org, "ignored": "subscription_mismatch"}
@@ -613,40 +811,50 @@ def _invoice_service_line(data):
     """
     from src.core.billing.plans import PLANS
 
-    line_collection = data.get("lines") or {}
-    if not isinstance(line_collection, dict) or line_collection.get("has_more") is True:
+    line_collection = data.get("lines")
+    if not isinstance(line_collection, dict) or line_collection.get("has_more") is not False:
         return None
     lines = line_collection.get("data", [])
-    if not isinstance(lines, list):
+    if not isinstance(lines, list) or len(lines) != 1 or not isinstance(lines[0], dict):
         return None
-    service_lines = [
-        line for line in lines if isinstance(line, dict)
-        and line.get("type") == "subscription"
-    ]
-    if len(service_lines) != 1:
+    line = lines[0]
+    if line.get("type") != "subscription":
         return None
-    line = service_lines[0]
     price = line.get("price") or {}
     if not isinstance(price, dict):
         return None
     recurring = price.get("recurring") or {}
     if (line.get("proration") is not False
-            or type(line.get("amount")) is not int or line["amount"] <= 0
             or line.get("currency") != "eur"
             or line.get("subscription") != data.get("subscription")
-            or type(line.get("quantity")) is not int or line["quantity"] != 1
-            or not isinstance(recurring, dict) or recurring.get("interval") != "month"
-            or type(recurring.get("interval_count")) is not int or recurring["interval_count"] != 1):
+            or type(line.get("quantity")) is not int or line["quantity"] != 1):
         return None
-    plans = [
-        slug for slug, plan in PLANS.items()
-        if plan.stripe_price_id and plan.stripe_price_id == price.get("id")
-    ]
+    plans = [(slug, plan) for slug, plan in PLANS.items()
+             if plan.stripe_price_id and plan.stripe_price_id == price.get("id")]
+    if len(plans) != 1:
+        return None
+    slug, plan = plans[0]
+    current_catalog_snapshot = price.get("_catalog_monthly_snapshot") is True
+    if current_catalog_snapshot:
+        # Current Stripe invoice lines reference the Price ID without copying
+        # recurring facts. The configured monthly catalog ID is authoritative.
+        if recurring and (not isinstance(recurring, dict)
+                          or recurring.get("interval") != "month"
+                          or type(recurring.get("interval_count")) is not int
+                          or recurring["interval_count"] != 1):
+            return None
+    elif (not isinstance(recurring, dict) or recurring.get("interval") != "month"
+          or type(recurring.get("interval_count")) is not int
+          or recurring["interval_count"] != 1):
+        return None
+    expected_amount = plan.price_monthly_eur * 100
+    if type(line.get("amount")) is not int or line["amount"] != expected_amount:
+        return None
     period = line.get("period") or {}
     if not isinstance(period, dict):
         return None
     dates = _period_from_timestamps(period.get("start"), period.get("end"))
-    return (plans[0], price["id"], *dates) if len(plans) == 1 and dates is not None else None
+    return (slug, price["id"], *dates) if dates is not None else None
 
 
 def _invoice_period(data):
