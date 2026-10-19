@@ -64,6 +64,7 @@ def test_policy_checks_openrouter_zdr_catalog_in_free_only(monkeypatch):
     assert params["additional_params"]["extra_body"]["provider"] == {
         "data_collection": "deny",
         "zdr": True,
+        "allow_fallbacks": False,
     }
 
 

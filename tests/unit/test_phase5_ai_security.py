@@ -8,8 +8,10 @@ import pytest
 from src.core.inbound.legacy_pipeline import LegacyInboundPipeline
 from src.core.receptionist.conversation_orchestrator import ConversationOrchestrator
 from src.core.receptionist.models import OrchestrationInput
+from src.core.provider_accounting import ProviderAccountingError
 from src.integrations.airtable.wiring import select_airtable_tools
 from src.models.schemas import DatiPrenotazione, RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 async def execute(path, *, blocked=False, error=None, simulation=False, replay_intervention=False):
@@ -32,8 +34,18 @@ async def execute(path, *, blocked=False, error=None, simulation=False, replay_i
         prenotazione=DatiPrenotazione(data="2026-12-10", ora="20:00", coperti=2,
                                      telefono="model-selected-customer"))
     org, message = uuid.uuid4(), uuid.uuid4()
+    if not simulation:
+        context = provider_context_stub(organization_id=org)
+        stack = ExitStack()
+        stack.enter_context(patch(
+            "src.core.provider_accounting.ProviderAccountingContext.open",
+            new_callable=AsyncMock,
+            return_value=context,
+        ))
+    else:
+        stack = ExitStack()
     module = "src.core.receptionist.conversation_orchestrator" if path == "orchestrator" else "src.core.inbound.legacy_pipeline"
-    with ExitStack() as stack:
+    with stack:
         stack.enter_context(patch("src.core.guardrails.faq_cache.cache_enabled", return_value=False))
         stack.enter_context(patch(module + ".genera_risposta_async", AsyncMock(return_value=output)))
         stack.enter_context(patch(module + ".classifica_intent", AsyncMock(return_value=MagicMock(intent="booking", source="rule", confidence=1.0))))
@@ -45,7 +57,8 @@ async def execute(path, *, blocked=False, error=None, simulation=False, replay_i
             result = await engine.orchestrate(OrchestrationInput(
                 organization_id=org, message_id=message, conversation_id="trusted-conversation",
                 text="Prenota per due", sender_phone="trusted-sender", business_profile=profile,
-                billing_state=billing, is_simulation=simulation))
+                billing_state=billing, is_simulation=simulation,
+                auth_user_id=uuid.uuid4() if not simulation else None))
         else:
             engine = LegacyInboundPipeline(repo, booking)
             result = await engine.execute(org_id=org, msg={"id": message, "conversation_id": "trusted-conversation"},
@@ -112,9 +125,13 @@ async def test_crm_ai_off_even_for_booking_and_injected_factory(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_simulator_never_books():
-    _, booking = await execute("orchestrator", simulation=True)
-    booking.create_booking.assert_not_awaited()
+async def test_simulator_never_books(monkeypatch):
+    monkeypatch.setattr(
+        "src.core.provider_accounting.ProviderAccountingContext.open",
+        AsyncMock(side_effect=ProviderAccountingError("provider context unavailable")),
+    )
+    with pytest.raises(ProviderAccountingError):
+        await execute("orchestrator", simulation=True)
 
 
 @pytest.mark.asyncio

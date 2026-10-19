@@ -5,7 +5,6 @@ In entrambi i casi la lingua dell'org (profilo onboarding) deve arrivare fino
 al runner; senza profilo onboarding si passano i default, senza errori.
 """
 
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,6 +20,7 @@ pytestmark = pytest.mark.usefixtures("reset_db")
 
 TEST_SESSION = "test-reviews-lingue-jwt-session"
 ENCRYPTION_KEY = "Y2xvbmUtZmVybmV0LWtleS0zMi1ieXRlcy1sb25nISE="
+TEST_AUTH_USER_ID = None
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def set_env(monkeypatch):
 
 
 @pytest.fixture
-async def async_client(repo, pg_pool, sample_org):
+async def async_client(repo, pg_pool, sample_org, monkeypatch):
     from fastapi import Depends, HTTPException
     from src.api.main import app
     from src.core.auth.dependencies import get_current_user, get_organization_context, get_token
@@ -51,8 +51,26 @@ async def async_client(repo, pg_pool, sample_org):
     service = GoogleBusinessService(repo=repo, encryption_key=ENCRYPTION_KEY)
     app.state.reviews_service = service
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = $1",
+        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_reviews_language_test', "
+        "current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', "
+        "messages_limit = 500, messages_used_this_period = 0 WHERE id = $1",
         sample_org["id"],
+    )
+    owner_id = uuid.uuid4()
+    monkeypatch.setitem(globals(), "TEST_AUTH_USER_ID", owner_id)
+    await pg_pool.execute(
+        "INSERT INTO auth.users(id,email) VALUES($1,$2)",
+        owner_id, f"review-lingue-{owner_id}@example.test",
+    )
+    profile_id = await pg_pool.fetchval(
+        "SELECT id FROM user_profiles WHERE auth_user_id=$1", owner_id,
+    )
+    await pg_pool.execute(
+        "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
+        "VALUES($1,$2,'owner',now())",
+        sample_org["id"], profile_id,
     )
 
     async def fixed_test_identity(token=Depends(get_token)):
@@ -63,8 +81,8 @@ async def async_client(repo, pg_pool, sample_org):
             "aal": "aal2",
             "organization_id": str(sample_org["id"]),
             "ruolo": "owner",
-            "auth_user_id": "00000000-0000-0000-0000-000000000001",
-            "user_id": "00000000-0000-0000-0000-000000000001",
+            "auth_user_id": str(owner_id),
+            "user_id": str(owner_id),
         }
 
     app.dependency_overrides[get_current_user] = fixed_test_identity
@@ -75,6 +93,7 @@ async def async_client(repo, pg_pool, sample_org):
             yield c, service
         finally:
             app.dependency_overrides.clear()
+            await pg_pool.execute("DELETE FROM auth.users WHERE id=$1", owner_id)
 
 
 def _headers(org_id):
@@ -123,9 +142,7 @@ async def test_api_recensione_propaga_le_lingue_dell_org(async_client, repo, sam
 
     def fake_genera(**kwargs):
         captured.update(kwargs)
-        kwargs["usage_sink"].setdefault("attempts", []).append({"model": "groq/openai/gpt-oss-20b", "reason": "test",
-                                     "prompt_tokens": 100, "completion_tokens": 20,
-                                     "total_tokens": 120, "latency_ms": 10})
+        assert kwargs["provider_context"].task_type == "review"
         return _FakeBozza()
 
     with patch("src.api.main.genera_risposta_recensione", side_effect=fake_genera):
@@ -150,9 +167,7 @@ async def test_api_recensione_senza_profilo_usa_default(async_client, repo, samp
 
     def fake_genera(**kwargs):
         captured.update(kwargs)
-        kwargs["usage_sink"].setdefault("attempts", []).append({"model": "groq/openai/gpt-oss-20b", "reason": "test",
-                                     "prompt_tokens": 100, "completion_tokens": 20,
-                                     "total_tokens": 120, "latency_ms": 10})
+        assert kwargs["provider_context"].task_type == "review"
         return _FakeBozza()
 
     with patch("src.api.main.genera_risposta_recensione", side_effect=fake_genera):
@@ -214,10 +229,7 @@ async def test_sync_google_propaga_le_lingue_dell_org(async_client, pg_pool, sam
     )
     captured = {}
     service._genera_bozza = AsyncMock(
-        side_effect=lambda *a, **kw: (kw["usage_sink"].setdefault("attempts", []).append({
-            "model": "groq/openai/gpt-oss-20b", "reason": "test", "prompt_tokens": 100,
-            "completion_tokens": 20, "total_tokens": 120, "latency_ms": 10,
-        }) or captured.update(kw) or _FakeBozza())
+        side_effect=lambda *a, **kw: (captured.update(kw) or _FakeBozza())
     )
 
     resp = await client.post("/api/reviews/google/sync", headers=_headers(sample_org["id"]))
@@ -249,10 +261,7 @@ async def test_sync_google_senza_profilo_usa_default(async_client, pg_pool, samp
         return SimpleNamespace(testo="Knowledge verificata", chunks=[{}])
     monkeypatch.setattr("src.core.documenti.rag_context.recupera_contesto_documenti", knowledge)
     service._genera_bozza = AsyncMock(
-        side_effect=lambda *a, **kw: (kw["usage_sink"].setdefault("attempts", []).append({
-            "model": "groq/openai/gpt-oss-20b", "reason": "test", "prompt_tokens": 100,
-            "completion_tokens": 20, "total_tokens": 120, "latency_ms": 10,
-        }) or captured.update(kw) or _FakeBozza())
+        side_effect=lambda *a, **kw: (captured.update(kw) or _FakeBozza())
     )
 
     resp = await client.post("/api/reviews/google/sync", headers=_headers(sample_org["id"]))

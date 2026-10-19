@@ -73,7 +73,8 @@ async def get_billing_snapshot(repo, organization_id: str | None) -> dict | None
     try:
         return await repo.get_organization_billing(organization_id)
     except Exception as e:
-        logger.warning("[llm_routing] billing snapshot non disponibile org=%s: %s", organization_id, e)
+        logger.warning("billing_snapshot_unavailable org_id=%s error_type=%s",
+                       organization_id, type(e).__name__)
         return None
 
 
@@ -85,23 +86,8 @@ async def record_ai_usage(
     billing: dict | None,
     metadata: dict | None = None,
 ) -> None:
-    """Traccia il consumo e il costo stimato della generazione AI su database (Invariante 8)."""
-    if repo is None or not organization_id:
-        raise RuntimeError("AI accounting requires storage and organization scope")
-    from src.core.llm_config import LLMRouteRequest, budget_ratio_from_billing, route_llm
-    from src.core.db.repositories.billing_repo import BillingRepository
-    route = route_llm(
-        LLMRouteRequest(
-            task_type=task_type,
-            user_text=user_text,
-            remaining_budget_ratio=budget_ratio_from_billing(billing),
-        )
-    )
-    await BillingRepository(repo.pool).enqueue_governance(organization_id, "usage", {
-        "event_type": "ai_response", "quantity": 1,
-        "metadata": {"task_type": task_type, "model": route.model, "tier": route.tier,
-                     "reason": route.reason, **(metadata or {})},
-    })
+    """Legacy sink disabled: planned routes and caller metrics are not evidence."""
+    raise RuntimeError("AI usage must be recorded by the provider accounting adapter")
 
 
 async def check_feature_blocked_by_plan(repo, org_id: str | None, feature: str) -> str | None:

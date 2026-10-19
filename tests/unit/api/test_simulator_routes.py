@@ -124,6 +124,8 @@ def test_messaggio_authenticated_organization(client):
     mock_repo.reserve_simulation_request = AsyncMock(return_value={
         "status": "reserved", "claim_token": str(uuid.uuid4()),
     })
+    request_id = uuid.uuid4()
+    claim_token = mock_repo.reserve_simulation_request.return_value["claim_token"]
     mock_repo.complete_simulation_request = AsyncMock(return_value=True)
 
     mock_orchestrator = AsyncMock()
@@ -140,7 +142,7 @@ def test_messaggio_authenticated_organization(client):
     app.dependency_overrides[get_organization_context] = lambda: mock_user
     with patch.object(app.state, "repo", mock_repo, create=True), \
          patch.object(app.state, "orchestrator", mock_orchestrator, create=True):
-        res = client.post("/api/messaggio", headers={"Idempotency-Key": str(uuid.uuid4())}, json={
+        res = client.post("/api/messaggio", headers={"Idempotency-Key": str(request_id)}, json={
             "testo": "Siete aperti stasera?",
             "id_conversazione": f"conv-{uuid.uuid4().hex[:8]}",
         })
@@ -150,6 +152,10 @@ def test_messaggio_authenticated_organization(client):
         assert call_args.organization_id == mock_org_id
         assert call_args.business_profile.nome == "Pizzeria Napoli"
         assert call_args.record_billing_usage is True
+        assert call_args.simulation_request_id == request_id
+        assert call_args.simulation_claim_token == claim_token
+        assert "simulation_claim_token" not in call_args.model_dump()
+        assert claim_token not in repr(call_args)
     app.dependency_overrides.pop(get_organization_context, None)
 
 

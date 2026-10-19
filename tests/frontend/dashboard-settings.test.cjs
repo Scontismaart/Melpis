@@ -21,6 +21,7 @@ function createSettings(role = "owner", apiFetch = async () => ({ ok: true, stat
     <section data-settings-panel="fatturazione"></section>
     <select id="settings-timezone"></select><button id="settings-timezone-save"></button>
     <p id="settings-timezone-status"></p><p id="account-status" hidden></p>
+    <section id="account-provider-recovery" hidden><div id="account-provider-recovery-list"></div></section>
     <span id="account-stato"></span><span id="account-plan-nome"></span><span id="account-plan-prezzo"></span>
     <span id="sidebar-account-plan"></span><p id="account-rinnovo"></p><div id="account-plans"></div>
     <button id="account-portal-btn"></button><button id="account-cancel-btn"></button>
@@ -236,6 +237,47 @@ test("billing keeps an active application trial card-free when Stripe checkout i
   assert.equal(checkoutCalls, 1);
   assert.deepEqual(redirects, []);
   assert.match(settings.dom.window.document.getElementById("account-status").textContent, /Non è richiesta una carta/);
+  settings.dom.window.close();
+});
+
+test("single owner can inspect and safely recover an unresolved provider attempt", async () => {
+  let listCalls = 0;
+  let recoverCalls = 0;
+  const settings = createSettings("owner", async (url, options) => {
+    if (url.endsWith("/api/billing/subscription")) {
+      return response({ plan: "starter", subscription_status: "active" });
+    }
+    if (url.endsWith("/api/billing/provider-attempts/recovery")) {
+      listCalls += 1;
+      return response({ attempts: listCalls === 1 ? [{
+        attempt_id: "attempt-test-1", created_at: "2026-10-19T09:00:00Z",
+        provider: "openrouter", requested_model: "private-model-name",
+        outcome: "transport_error", dispatch_state: "uncertain", can_recover: true,
+      }] : [] });
+    }
+    if (url.endsWith("/api/billing/provider-attempts/attempt-test-1/recover")
+        && options?.method === "POST") {
+      recoverCalls += 1;
+      return response({ state: "not_sent" });
+    }
+    return response({});
+  });
+  settings.module.onEnter("piano");
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const section = settings.dom.window.document.getElementById("account-provider-recovery");
+  assert.equal(section.hidden, false);
+  assert.match(section.textContent, /Verifica esito e ripristina/);
+  assert.doesNotMatch(section.textContent, /private-model-name/);
+  section.querySelector("button").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(recoverCalls, 1);
+  assert.equal(section.hidden, true);
+  assert.match(settings.dom.window.document.getElementById("account-status").textContent,
+    /la richiesta non era stata inviata/);
   settings.dom.window.close();
 });
 

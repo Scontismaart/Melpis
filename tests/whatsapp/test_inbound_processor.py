@@ -20,6 +20,30 @@ def _no_real_embedding_model():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _test_provider_context(monkeypatch):
+    from src.core.provider_accounting import ProviderAccountingContext
+    from tests.provider_accounting_fakes import provider_context_stub
+
+    async def open_context(cls, pool, organization_id, *, task_type,
+                           actor_auth_user_id=None, worker_message_id=None,
+                           simulation_request_id=None, simulation_claim_token=None,
+                           context=None):
+        accounting_context = provider_context_stub(
+            task_type=task_type, organization_id=organization_id,
+        )
+        accounting_context.actor_auth_user_id = (
+            uuid.UUID(str(actor_auth_user_id)) if actor_auth_user_id is not None else None
+        )
+        accounting_context.worker_message_id = (
+            uuid.UUID(str(worker_message_id)) if worker_message_id is not None else None
+        )
+        accounting_context.context = dict(context or accounting_context.context)
+        return accounting_context
+
+    monkeypatch.setattr(ProviderAccountingContext, "open", classmethod(open_context))
+
+
 @pytest.fixture
 def app_config():
     return AppConfig(
@@ -459,28 +483,39 @@ class TestInstagramDispatch:
         mock_service.send_whatsapp_message.assert_awaited_once()
         mock_ig_cls.assert_not_called()
 
-    async def test_usage_metadata_channel_instagram(
+    async def test_instagram_generation_is_scoped_to_claimed_message(
         self, app_config, mock_repo, mock_service, fake_tenant_config
     ):
         ig_msg = self._ig_msg()
         mock_repo.claim_inbound_messages = AsyncMock(return_value=[ig_msg])
         mock_repo.record_usage = AsyncMock()
-        mock_send = AsyncMock(return_value={"id": uuid.uuid4(), "status": "sent"})
+        mock_send = AsyncMock(return_value={"id": "wamid.instagram-test-1", "status": "sent"})
         fake_ig_service = MagicMock()
         fake_ig_service.send_instagram_message = mock_send
+        generation = AsyncMock(return_value=RispostaOutput(
+            risposta="Ok.", richiede_umano=False, motivo="", categoria="info",
+        ))
 
         with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)), \
-             patch("src.whatsapp.inbound_processor.genera_risposta_async", AsyncMock(return_value=RispostaOutput(
-                 risposta="Ok.", richiede_umano=False, motivo="", categoria="info",
-             ))), \
+             patch("src.whatsapp.inbound_processor.genera_risposta_async", generation), \
              patch("src.instagram.config.load_instagram_config",
                    AsyncMock(return_value=self._ig_config(ig_msg["organization_id"]))), \
              patch("src.instagram.service.InstagramService", MagicMock(return_value=fake_ig_service)):
             processor = InboundProcessor(app_config, mock_repo, mock_service)
             await processor.process_next_batch()
 
-        metadata = mock_repo.record_usage.await_args.kwargs["metadata"]
-        assert metadata["channel"] == "instagram"
+        context = generation.await_args.kwargs["provider_context"]
+        assert context.task_type == "customer_message"
+        assert context.worker_message_id == ig_msg["id"]
+        assert context.actor_auth_user_id is None
+        assert context.context.get("message_id") == str(ig_msg["id"]), (
+            context.worker_message_id, context.actor_auth_user_id, context.context,
+        )
+        assert str(context.organization_id) == str(ig_msg["organization_id"])
+        assert not any(
+            call.args[1] == "ai_response"
+            for call in mock_repo.record_usage.await_args_list
+        )
 
     async def test_missing_ig_account_does_not_crash(
         self, app_config, mock_repo, mock_service, fake_tenant_config
@@ -625,9 +660,7 @@ class TestGuardrailsProcessor:
     async def test_intent_classificato_passato_al_responder_e_al_logging(
         self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg
     ):
-        """Il classificatore (task 12) gira prima del responder: l'intent
-        arriva sia alla crew (routing del modello) sia nei metadata
-        dell'usage event, per iterare sui prompt."""
+        """L'intent arriva alla crew; il provider adapter possiede le metriche."""
         mock_repo.record_usage = AsyncMock()
         mock_repo.search_similar = AsyncMock(return_value=[
             {"content": "Il piatto costa 12 euro", "document_name": "menu.pdf"}
@@ -637,6 +670,7 @@ class TestGuardrailsProcessor:
         async def fake_risposta(messaggio, profilo, billing=None, contesto_documenti="", intent=None, variante="control", **kwargs):
             captured["intent"] = intent
             captured["variante"] = variante
+            captured["provider_context"] = kwargs["provider_context"]
             return RispostaOutput(
                 risposta="Il piatto costa 12 euro.", richiede_umano=False, motivo="", categoria="info",
             )
@@ -648,17 +682,9 @@ class TestGuardrailsProcessor:
             await processor.process_next_batch()
 
         assert captured["intent"] == "faq"
-        ai_calls = [
-            c for c in mock_repo.record_usage.await_args_list
-            if c.args[1] == "ai_response"
-        ]
-        assert ai_calls, "manca l'usage event ai_response"
-        metadata = ai_calls[0].kwargs["metadata"]
-        assert metadata["intent"] == "faq"
-        assert metadata["intent_source"] == "heuristic"
-        # A/B: la variante del prompt (default 'control') finisce nei metadata
-        assert metadata["prompt_variant"] == "control"
         assert captured["variante"] == "control"
+        assert captured["provider_context"].task_type == "customer_message"
+        assert not any(call.args[1] == "ai_response" for call in mock_repo.record_usage.await_args_list)
         # keyword sicura: il modello economico non viene speso
         intent_calls = [
             c for c in mock_repo.record_usage.await_args_list

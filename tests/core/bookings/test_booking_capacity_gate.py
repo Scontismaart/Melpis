@@ -386,7 +386,9 @@ async def test_minute_values_share_the_same_hour_capacity(booking_service, repo,
 
 
 @pytest.mark.parametrize("path", ["legacy", "orchestrator"])
-async def test_ai_booking_entrypoints_use_real_capacity_admission(path, repo, sample_org):
+async def test_ai_booking_entrypoints_use_real_capacity_admission(
+    path, repo, sample_org, mock_provider_context_open,
+):
     import uuid
     from contextlib import ExitStack
     from unittest.mock import AsyncMock, MagicMock, patch
@@ -439,7 +441,7 @@ async def test_ai_booking_entrypoints_use_real_capacity_admission(path, repo, sa
                 organization_id=sample_org["id"], message_id=message_id,
                 conversation_id="trusted-conversation", text="Prenota per uno",
                 sender_phone="trusted-sender", business_profile=profile,
-                billing_state=billing,
+                billing_state=billing, auth_user_id=uuid.uuid4(),
             ))
             assert result.booking_created is None
             response = result.response_text

@@ -8,6 +8,7 @@ from src.agents.report_agent import crea_report_agent
 from src.core.priorita import Priorita
 from src.core.llm_routing import LLMRoute, LLMRouteRequest, route_llm
 from src.models.schemas import EventoDashboard, ReportOutput, StatisticheReport
+from tests.provider_accounting_fakes import provider_context_stub
 
 
 def test_crea_report_agent_instrada_sul_task_report():
@@ -15,10 +16,11 @@ def test_crea_report_agent_instrada_sul_task_report():
     sul modello free; ora deve sempre passare task_type='report'."""
     reale = LLM(model="openrouter/openai/gpt-4o-mini", api_key="sk-test")
 
+    context = provider_context_stub(task_type="report")
     with patch(
         "src.agents.report_agent.crea_llm", return_value=reale
     ) as spy:
-        crea_report_agent()
+        crea_report_agent(provider_context=context)
 
     assert spy.call_count == 1
     chiamata = spy.call_args
@@ -26,6 +28,7 @@ def test_crea_report_agent_instrada_sul_task_report():
     assert chiamata.kwargs["route_request"] == LLMRouteRequest(
         task_type="report"
     )
+    assert chiamata.kwargs["provider_context"] is context
 
 
 def test_task_report_usa_tier_premium(monkeypatch):
@@ -86,9 +89,7 @@ def _storico() -> list[EventoDashboard]:
     ]
 
 
-def test_genera_report_ritenta_sui_model_di_fallback(monkeypatch):
-    """Il report giornaliero deve avere lo stesso ciclo retry di
-    crew_runner.py / crew_runner_review.py: primario fallito -> fallback."""
+def test_genera_report_dispatches_only_with_verified_context(monkeypatch):
     from src.core import crew_runner_report
 
     monkeypatch.setattr(
@@ -102,26 +103,25 @@ def test_genera_report_ritenta_sui_model_di_fallback(monkeypatch):
         ),
     )
 
-    modelli_usati: list[str] = []
+    dispatches = []
 
-    def fake_crea_report_crew(statistiche, model=None):
-        modelli_usati.append(model)
-        if len(modelli_usati) == 1:
-            raise RuntimeError("primo modello non disponibile")
+    def fake_crea_report_crew(statistiche, model=None, provider_context=None):
+        dispatches.append((model, provider_context))
         return _FakeCrew(_FakeRisultato(_output()))
 
     monkeypatch.setattr(
         crew_runner_report, "crea_report_crew", fake_crea_report_crew
     )
 
-    risultato = crew_runner_report.genera_report(_storico())
+    context = provider_context_stub(task_type="report")
+    risultato = crew_runner_report.genera_report(_storico(), provider_context=context)
 
-    assert modelli_usati == ["report/primary", "report/fallback"]
+    assert dispatches == [("report/primary", context)]
     assert risultato.analisi_testuale == "ok"
     assert risultato.statistiche.totale_messaggi == len(_storico())
 
 
-def test_genera_report_raises_se_tutti_i_modelli_falliscono(monkeypatch):
+def test_genera_report_failure_is_sanitized_and_no_unaccounted_fallback(monkeypatch):
     from src.core import crew_runner_report
 
     monkeypatch.setattr(
@@ -135,12 +135,18 @@ def test_genera_report_raises_se_tutti_i_modelli_falliscono(monkeypatch):
         ),
     )
 
-    def fake_crea_report_crew(statistiche, model=None):
+    calls = []
+    def fake_crea_report_crew(statistiche, model=None, provider_context=None):
+        calls.append(model)
         raise RuntimeError("sempre rotto")
 
     monkeypatch.setattr(
         crew_runner_report, "crea_report_crew", fake_crea_report_crew
     )
 
-    with pytest.raises(RuntimeError, match="Tutti i modelli configurati"):
-        crew_runner_report.genera_report(_storico())
+    with pytest.raises(RuntimeError, match="Tutti i modelli configurati") as error:
+        crew_runner_report.genera_report(
+            _storico(), provider_context=provider_context_stub(task_type="report"),
+        )
+    assert calls == ["report/primary"]
+    assert "sempre rotto" not in str(error.value)

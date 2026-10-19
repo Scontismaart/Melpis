@@ -1,7 +1,7 @@
 import os
 import pytest
 import httpx
-import json
+import uuid
 from unittest.mock import AsyncMock, patch
 
 from src.models.schemas import RispostaOutput
@@ -20,12 +20,31 @@ def set_env():
 @pytest.fixture
 async def async_client(repo, pg_pool, install_test_identity, sample_org, other_org):
     from src.api.main import app
+    auth_user_id = uuid.uuid4()
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO auth.users(id,email) VALUES($1,$2) ON CONFLICT (id) DO NOTHING",
+            auth_user_id, f"onboarding-{auth_user_id}@example.test",
+        )
+        profile_id = await conn.fetchval(
+            "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
+        )
+        for org in (sample_org, other_org):
+            await conn.execute(
+                "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
+                "VALUES($1,$2,'owner',now()) ON CONFLICT(organization_id,user_id) "
+                "DO UPDATE SET ruolo='owner',joined_at=now()",
+                org["id"], profile_id,
+            )
     await pg_pool.execute(
         "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_onboarding_test', "
+        "current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', "
         "messages_limit = 500, messages_used_this_period = 0 WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
-    install_test_identity(app, API_KEY)
+    install_test_identity(app, API_KEY, user_id=str(auth_user_id))
     app.state.repo = repo
     app.state.pool = pg_pool
     transport = httpx.ASGITransport(app=app)
@@ -34,6 +53,7 @@ async def async_client(repo, pg_pool, install_test_identity, sample_org, other_o
             yield c
         finally:
             app.dependency_overrides.clear()
+            await pg_pool.execute("DELETE FROM auth.users WHERE id=$1", auth_user_id)
 
 
 def _headers(org_id):
@@ -94,24 +114,21 @@ async def test_cross_tenant_non_sovrascrive(async_client, sample_org, other_org)
     assert mio.json()["profilo"]["nome_attivita"] == "Studio A"
 
 
-async def test_preview_org_scoped_e_usage_logged(async_client, repo, sample_org, other_org):
+async def test_preview_is_tenant_scoped_and_passes_durable_context(async_client, repo, sample_org, other_org):
     risposta = RispostaOutput(
         risposta="Certo, per le 17 ci stiamo.",
         richiede_umano=False,
         motivo="",
         categoria="booking",
     )
-    async def fake_generate(*args, usage_sink=None, **kwargs):
-        usage_sink["attempts"].append({
-            "model": "groq/llama-3.1-8b-instant", "prompt_tokens": 20,
-            "completion_tokens": 8, "total_tokens": 28, "latency_ms": 145,
-            "reason": "onboarding_preview", "fallback": False,
-        })
-        usage_sink["attempts"].append({
-            "model": "groq/openai/gpt-oss-120b", "prompt_tokens": 22,
-            "completion_tokens": 9, "total_tokens": 31, "latency_ms": 310,
-            "reason": "fallback", "fallback": True,
-        })
+    contexts = []
+
+    async def fake_generate(*args, provider_context=None, **kwargs):
+        contexts.append(provider_context)
+        assert provider_context.task_type == "onboarding_preview"
+        assert provider_context.organization_id in {
+            sample_org["id"], other_org["id"],
+        }
         return risposta
 
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
@@ -120,140 +137,49 @@ async def test_preview_org_scoped_e_usage_logged(async_client, repo, sample_org,
             "profilo": PAYLOAD,
             "messaggio": "Vorrei prenotare per le 17",
         }, headers=_headers(sample_org["id"]))
+        response_b = await async_client.post("/api/onboarding/preview", json={
+            "profilo": PAYLOAD,
+            "messaggio": "Vorrei prenotare per le 17",
+        }, headers=_headers(other_org["id"]))
     assert r.status_code == 200
     assert r.json()["risposta"] == "Certo, per le 17 ci stiamo."
-    mocked.assert_awaited_once()
+    assert response_b.status_code == 200
+    assert response_b.json()["risposta"] == "Certo, per le 17 ci stiamo."
+    assert mocked.await_count == 2
 
-    # La route persiste i dati reali di ogni tentativo provider, org-scoped.
+    assert len(contexts) == 2
+    assert contexts[0]._closed is True
+    assert contexts[0].organization_id != contexts[1].organization_id
+    assert contexts[1]._closed is True
+
+    # The mocked generator did not dispatch to a provider, so no attempt is
+    # fabricated here. The adapter's PostgreSQL contract is tested separately.
     async with repo.pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT metadata FROM usage_events WHERE organization_id = $1 ORDER BY created_at",
-            sample_org["id"],
-        )
         assert await conn.fetchval(
-            "SELECT count(*) FROM usage_events WHERE organization_id = $1", other_org["id"]
+            "SELECT count(*) FROM usage_events WHERE event_type='system.provider_attempt' "
+            "AND organization_id = ANY($1::uuid[])", [sample_org["id"], other_org["id"]]
         ) == 0
         assert await conn.fetchval(
             "SELECT messages_used_this_period FROM organizations WHERE id = $1", sample_org["id"]
         ) == 0
-    metadata = [json.loads(row["metadata"]) for row in rows]
-    assert len(metadata) == 2
-    assert [item["model"] for item in metadata] == [
-        "groq/llama-3.1-8b-instant", "groq/openai/gpt-oss-120b"
-    ]
-    assert [item["task_type"] for item in metadata] == ["onboarding_preview"] * 2
-    assert [item["accounting_status"] for item in metadata] == ["recorded"] * 2
-    assert [(item["prompt_tokens"], item["completion_tokens"], item["total_tokens"])
-            for item in metadata] == [(20, 8, 28), (22, 9, 31)]
-    assert [item["latency_ms"] for item in metadata] == [145, 310]
-    assert [item["fallback"] for item in metadata] == [False, True]
-    assert [item["estimated_cost_eur"] for item in metadata] == [0.0, 0.000007]
-    assert all(not ({"prompt", "user_text", "error", "api_key", "key"} & item.keys())
-               for item in metadata)
 
 
-async def test_preview_unresolved_attempt_blocks_next_preview(async_client, repo, sample_org):
-    risposta = RispostaOutput(
-        risposta="Anteprima non contabilizzabile.", richiede_umano=False,
-        motivo="", categoria="generico",
-    )
+async def test_preview_closes_context_when_generation_raises(async_client, sample_org):
+    contexts = []
 
-    async def fake_generate(*args, usage_sink=None, **kwargs):
-        usage_sink["attempts"].append({
-            "model": "unknown/provider-model", "prompt_tokens": 10,
-            "completion_tokens": 5, "total_tokens": 15, "latency_ms": 100,
-            "reason": "fallback", "fallback": True,
-        })
-        return risposta
+    async def fail_generation(*args, provider_context=None, **kwargs):
+        contexts.append(provider_context)
+        raise TimeoutError("synthetic provider failure")
 
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
-         patch("src.core.onboarding.genera_risposta_async", new=AsyncMock(side_effect=fake_generate)):
+         patch("src.core.onboarding.genera_risposta_async", new=AsyncMock(side_effect=fail_generation)):
         transport = httpx.ASGITransport(
             app=async_client._transport.app, raise_app_exceptions=False
         )
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            first_preview = await client.post("/api/onboarding/preview", json={
-                "profilo": PAYLOAD,
-                "messaggio": "Vorrei prenotare per le 17",
-            }, headers=_headers(sample_org["id"]))
-    assert first_preview.status_code == 500
-
-    async with repo.pool.acquire() as conn:
-        usage = await conn.fetchrow(
-            "SELECT metadata FROM usage_events WHERE organization_id = $1",
-            sample_org["id"],
-        )
-        blocked = await conn.fetchval(
-            "SELECT ai_accounting_blocked FROM organizations WHERE id = $1",
-            sample_org["id"],
-        )
-    metadata = json.loads(usage["metadata"])
-    assert metadata["accounting_status"] == "unresolved"
-    assert metadata["task_type"] == "onboarding_preview"
-    assert blocked is True
-
-    next_preview = await async_client.post("/api/onboarding/preview", json={
-        "profilo": PAYLOAD,
-        "messaggio": "Vorrei prenotare per le 17",
-    }, headers=_headers(sample_org["id"]))
-    assert next_preview.status_code == 503
-
-
-@pytest.mark.parametrize("attempt_state", ["verified", "missing_tokens", "not_started"])
-async def test_failed_preview_persists_only_actual_attempts(
-    async_client, repo, sample_org, other_org, attempt_state
-):
-    async def fake_generate(*args, usage_sink=None, **kwargs):
-        if attempt_state != "not_started":
-            attempt = {
-                "model": "groq/llama-3.1-8b-instant", "prompt_tokens": 20,
-                "completion_tokens": 8, "total_tokens": 28, "latency_ms": 145,
-                "reason": "onboarding_preview", "fallback": False,
-                "prompt": "synthetic private input", "error": "synthetic provider error",
-                "api_key": "synthetic secret never persist",
-            }
-            if attempt_state == "missing_tokens":
-                attempt.pop("completion_tokens")
-            usage_sink["attempts"].append(attempt)
-        raise TimeoutError("synthetic provider failure")
-
-    transport = httpx.ASGITransport(app=async_client._transport.app, raise_app_exceptions=False)
-    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
-         patch("src.core.onboarding.genera_risposta_async", new=AsyncMock(side_effect=fake_generate)):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/onboarding/preview", json={
                 "profilo": PAYLOAD, "messaggio": "Quali sono gli orari?",
             }, headers=_headers(sample_org["id"]))
     assert response.status_code == 500
-    async with repo.pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT metadata FROM usage_events WHERE organization_id = $1", sample_org["id"]
-        )
-        assert await conn.fetchval(
-            "SELECT count(*) FROM usage_events WHERE organization_id = $1", other_org["id"]
-        ) == 0
-        assert await conn.fetchval(
-            "SELECT messages_used_this_period FROM organizations WHERE id = $1", sample_org["id"]
-        ) == 0
-        blocked = await conn.fetchval(
-            "SELECT ai_accounting_blocked FROM organizations WHERE id = $1", sample_org["id"]
-        )
-    assert blocked is (attempt_state == "missing_tokens")
-    if attempt_state == "not_started":
-        assert rows == []
-        return
-    assert len(rows) == 1
-    metadata = json.loads(rows[0]["metadata"])
-    assert metadata["model"] == "groq/llama-3.1-8b-instant"
-    assert metadata["prompt_tokens"] == 20
-    assert metadata["latency_ms"] == 145
-    assert metadata["accounting_status"] == (
-        "unresolved" if attempt_state == "missing_tokens" else "recorded"
-    )
-    assert not ({"prompt", "error", "api_key"} & metadata.keys())
-    assert "synthetic private" not in rows[0]["metadata"]
-    if blocked:
-        next_preview = await async_client.post("/api/onboarding/preview", json={
-            "profilo": PAYLOAD, "messaggio": "Quali sono gli orari?",
-        }, headers=_headers(sample_org["id"]))
-        assert next_preview.status_code == 503
+    assert len(contexts) == 1
+    assert contexts[0]._closed is True

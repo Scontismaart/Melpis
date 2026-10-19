@@ -201,7 +201,7 @@ async def generate_preview(
     repo,
     billing: dict | None = None,
     *,
-    usage_sink: dict | None = None,
+    provider_context=None,
 ) -> RispostaOutput:
     """Preview reale: costruisce il profilo dal payload del wizard e lo fa
     girare nel vero responder (crew + LLM), arricchito dal contesto RAG dei
@@ -210,7 +210,12 @@ async def generate_preview(
     Il guardrail post-LLM vale anche in preview: quello che il titolare
     vede e' cioo che il responder farebbe davvero (task 12)."""
     from src.core.billing.suspension import assert_ai_generation_allowed
+    from src.core.provider_accounting import ProviderAccountingContext, ProviderAccountingError
 
+    if type(provider_context) is not ProviderAccountingContext:
+        raise ProviderAccountingError("AI generation is not authorized or accounting is unavailable")
+    provider_context.assert_scope(organization_id, {"onboarding_preview"})
+    billing = provider_context.billing_snapshot
     assert_ai_generation_allowed(billing)
     profilo = build_business_profile(payload.profilo)
 
@@ -225,7 +230,7 @@ async def generate_preview(
         billing=billing,
         contesto_documenti=contesto.testo,
         variante=assegna_variante(organization_id),
-        usage_sink=usage_sink,
+        provider_context=provider_context,
     )
     esito = valida_risposta(risposta, contesto.chunks, profilo)
     return applica_guardrail(risposta, esito)

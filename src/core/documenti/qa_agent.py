@@ -4,6 +4,7 @@ from src.core.llm_config import LLMRouteRequest, budget_ratio_from_billing, crea
 from src.core.documenti.embeddings import vettorizza
 from src.core.documenti.priorita import GERARCHIA_REGOLA_PROMPT, formatta_chunk_con_priorita, get_priorita_num
 from src.core.verticals import get_vertical_strategy
+from src.core.provider_accounting import ProviderAccountingContext
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,8 @@ async def rispondi(
     repo,
     k: int = 5,
     billing: dict | None = None,
+    actor_auth_user_id=None,
+    trace_id: str | None = None,
 ) -> dict:
     q_emb = vettorizza([domanda], tipo="query")[0]
     risultati = await repo.search_similar(organization_id, q_emb, k, only_active=True)
@@ -65,7 +68,8 @@ async def rispondi(
             verticale = raw_bp.get("verticale")
             nome_attivita = raw_bp.get("nome") or nome_attivita
     except Exception as e:
-        logger.warning("[qa_agent] Recupero business profile fallito per org %s: %s", organization_id, e)
+        logger.warning("qa_business_profile_unavailable org_id=%s error_type=%s",
+                       organization_id, type(e).__name__)
 
     strategy = get_vertical_strategy(verticale, organization_id=str(organization_id))
 
@@ -84,33 +88,40 @@ async def rispondi(
         f"Domanda: {domanda}"
     )
 
+    provider_context = None
     try:
+        provider_context = await ProviderAccountingContext.open(
+            getattr(repo, "pool", None),
+            organization_id,
+            task_type="document_qa",
+            actor_auth_user_id=actor_auth_user_id,
+            context={"trace_id": trace_id},
+        )
         route = route_llm(
             LLMRouteRequest(
                 task_type="document_qa",
                 user_text=domanda,
-                remaining_budget_ratio=budget_ratio_from_billing(billing),
+                remaining_budget_ratio=budget_ratio_from_billing(provider_context.billing_snapshot),
             )
         )
-        errors: list[str] = []
         risposta_raw = None
-        for model in [route.model, *route.fallback_models]:
-            try:
-                llm = crea_llm(model=model, temperature=0.15)
-                risposta_raw = llm.call(prompt)
-                break
-            except Exception as e:
-                errors.append(f"{model}: {e}")
-        if risposta_raw is None:
-            raise RuntimeError("Tutti i modelli configurati hanno fallito. " + " | ".join(errors))
+        llm = crea_llm(
+            model=route.model, temperature=0.15,
+            provider_context=provider_context, reason=route.reason,
+        )
+        risposta_raw = await llm.acall(prompt)
         risposta = str(risposta_raw).strip() if risposta_raw else (
             "Impossibile generare una risposta."
         )
     except Exception as e:
-        logger.error("[qa_agent] Errore LLM: %s", e)
+        logger.warning("qa_provider_attempt_failed org_id=%s error_type=%s",
+                       organization_id, type(e).__name__)
         risposta = (
             "Non ho potuto analizzare i documenti in questo momento. "
             "Riprova più tardi."
         )
+    finally:
+        if provider_context is not None:
+            await provider_context.close()
 
     return {"risposta": risposta, "fonti": fonti}

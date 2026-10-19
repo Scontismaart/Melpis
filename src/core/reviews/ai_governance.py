@@ -15,6 +15,8 @@ async def authorize_review_generation(repo, org_id: str):
     billing = await get_billing_snapshot(repo, org_id)
     if not billing or billing.get("ai_accounting_blocked"):
         raise RuntimeError("review billing state unavailable")
+    from src.core.billing.suspension import assert_ai_generation_allowed
+    assert_ai_generation_allowed(billing)
     limit = max(1, int(os.getenv("REVIEW_AI_RATE_LIMIT", "10")))
     window = max(1, int(os.getenv("REVIEW_AI_RATE_WINDOW_SECONDS", "3600")))
     limiter = await get_rate_limiter()
@@ -76,54 +78,5 @@ def validate_review_draft(draft: str, source: str, knowledge: str = "") -> None:
 
 
 async def record_review_usage(repo, org_id: str, usage: dict, *, task_type="review", context=None) -> None:
-    """Persist every actual provider attempt directly, without an outbox hold.
-
-    `usage` accepts either the new attempts list or a legacy single attempt.
-    Any incomplete attempted call fails closed and prevents draft persistence.
-    """
-    from src.core.llm_routing import stima_costo_eur
-    from src.core.db.repositories.billing_repo import BillingRepository
-
-    attempts = usage.get("attempts") if isinstance(usage, dict) else None
-    if attempts is None:
-        attempts = [usage] if usage else []
-    if not attempts:
-        return
-    records = []
-    unresolved = False
-    for attempt in attempts:
-        model = attempt.get("model")
-        prompt_tokens = attempt.get("prompt_tokens")
-        completion_tokens = attempt.get("completion_tokens")
-        latency_ms = attempt.get("latency_ms")
-        # Do the checks explicitly; unknown usage is itself durably recorded.
-        valid = (bool(model)
-                 and isinstance(prompt_tokens, int) and not isinstance(prompt_tokens, bool) and prompt_tokens >= 0
-                 and isinstance(completion_tokens, int) and not isinstance(completion_tokens, bool) and completion_tokens >= 0
-                 and prompt_tokens + completion_tokens > 0
-                 and isinstance(latency_ms, int) and not isinstance(latency_ms, bool) and latency_ms >= 0)
-        cost = stima_costo_eur(model, prompt_tokens, completion_tokens) if valid else None
-        valid = valid and cost is not None
-        common = {
-            **(context or {}),
-            "task_type": task_type, "model": model,
-            "prompt_tokens": prompt_tokens if isinstance(prompt_tokens, int) else None,
-            "completion_tokens": completion_tokens if isinstance(completion_tokens, int) else None,
-            "total_tokens": attempt.get("total_tokens"),
-            "latency_ms": latency_ms if isinstance(latency_ms, int) else None,
-            "reason": attempt.get("reason", "review"),
-            "fallback": bool(attempt.get("fallback", False)),
-        }
-        if valid:
-            common.update({
-                "total_tokens": attempt.get("total_tokens") or prompt_tokens + completion_tokens,
-                "estimated_cost_eur": cost,
-                "accounting_status": "recorded",
-            })
-        else:
-            unresolved = True
-            common.update({"estimated_cost_eur": None, "accounting_status": "unresolved"})
-        records.append({"event_type": "ai_response", "quantity": 1, "metadata": common})
-    await BillingRepository(repo.pool).record_usage_batch(org_id, records, block_ai=unresolved)
-    if unresolved:
-        raise RuntimeError("provider usage could not be verified; AI generation blocked")
+    """Legacy sink disabled; caller-supplied metrics cannot authorize accounting."""
+    raise RuntimeError("AI usage must be recorded by the provider accounting adapter")

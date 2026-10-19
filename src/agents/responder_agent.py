@@ -28,6 +28,8 @@ def crea_responder_agent(
     contesto_disponibilita: str = "",
     tentativi_falliti: int = 0,
     tools: list | None = None,
+    provider_context=None,
+    reason: str = "customer_message",
 ) -> Agent:
     """Costruisce l'agente con il backstory calibrato sul profilo attività.
     Il backstory in CrewAI funziona come parte del system prompt. La
@@ -45,7 +47,8 @@ def crea_responder_agent(
             contesto_disponibilita=contesto_disponibilita,
             tentativi_falliti=tentativi_falliti,
         ),
-        llm=crea_llm(model=model, route_request=route_request),
+        llm=crea_llm(model=model, route_request=route_request,
+                     provider_context=provider_context, reason=reason),
         verbose=False,
         allow_delegation=False,
         # Phase 5: no untrusted model tool execution, including injected tools.
@@ -100,6 +103,8 @@ def crea_crew(
     contesto_disponibilita: str = "",
     tentativi_falliti: int = 0,
     tools: list | None = None,
+    provider_context=None,
+    reason: str = "customer_message",
 ) -> Crew:
     """Assembla agente + task in una Crew pronta per il kickoff.
     Process.sequential è l'unico sensato con un solo task."""
@@ -109,6 +114,8 @@ def crea_crew(
         contesto_disponibilita=contesto_disponibilita,
         tentativi_falliti=tentativi_falliti,
         tools=tools,
+        provider_context=provider_context,
+        reason=reason,
     )
     task = crea_responder_task(agent, messaggio, cronologia, contesto_documenti)
 

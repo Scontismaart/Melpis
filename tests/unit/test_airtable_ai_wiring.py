@@ -20,6 +20,7 @@ from src.integrations.airtable.wiring import (
     select_airtable_tools,
 )
 from src.models.schemas import ProfiloAttivita, RispostaOutput
+from tests.provider_accounting_fakes import provider_context_stub
 
 ORG = uuid.uuid4()
 
@@ -67,7 +68,7 @@ class TestToolThreading:
         from src.models.schemas import MessaggioInput
         crew = crea_crew(
             profilo, MessaggioInput(testo="ciao", canale="whatsapp"),
-            tools=tools)
+            tools=tools, provider_context=provider_context_stub(organization_id=ORG))
         assert not crew.agents[0].tools
 
     def test_crea_crew_default_no_tools(self):
@@ -75,7 +76,10 @@ class TestToolThreading:
         from src.models.schemas import MessaggioInput
 
         profilo = self._profilo()
-        crew = crea_crew(profilo, MessaggioInput(testo="ciao", canale="whatsapp"))
+        crew = crea_crew(
+            profilo, MessaggioInput(testo="ciao", canale="whatsapp"),
+            provider_context=provider_context_stub(organization_id=ORG),
+        )
         assert not getattr(crew.agents[0], "tools", None)
 
 
@@ -189,7 +193,7 @@ def _intent_patch(intent):
 
 class TestOrchestrateWiring:
     @pytest.mark.asyncio
-    async def test_booking_intent_cannot_receive_crm_tools(self):
+    async def test_booking_intent_cannot_receive_crm_tools(self, mock_provider_context_open):
         deps = _mock_dependencies()
         factory = AsyncMock(return_value=[_tool("airtable_find_customer")])
         orchestrator = ConversationOrchestrator(
@@ -205,7 +209,10 @@ class TestOrchestrateWiring:
             mock_rag_res.chunks = []
             mock_rag.return_value = mock_rag_res
             mock_gen.return_value = fake_out
-            req = OrchestrationInput(organization_id=ORG, text="cercami il cliente Rossi")
+            req = OrchestrationInput(
+                organization_id=ORG, auth_user_id=uuid.uuid4(),
+                text="cercami il cliente Rossi",
+            )
             result = await orchestrator.orchestrate(req)
 
         factory.assert_not_awaited()
@@ -216,7 +223,7 @@ class TestOrchestrateWiring:
         assert not any(c[0][1] == "airtable_ai_tools" for c in calls)
 
     @pytest.mark.asyncio
-    async def test_faq_intent_no_tools(self):
+    async def test_faq_intent_no_tools(self, mock_provider_context_open):
         deps = _mock_dependencies()
         factory = AsyncMock()
         orchestrator = ConversationOrchestrator(
@@ -234,13 +241,15 @@ class TestOrchestrateWiring:
             mock_rag.return_value = mock_rag_res
             mock_gen.return_value = fake_out
             await orchestrator.orchestrate(
-                OrchestrationInput(organization_id=ORG, text="a che ora aprite?"))
+                OrchestrationInput(
+                    organization_id=ORG, auth_user_id=uuid.uuid4(),
+                    text="a che ora aprite?"))
 
         factory.assert_not_awaited()
         assert mock_gen.call_args[1]["tools"] is None
 
     @pytest.mark.asyncio
-    async def test_no_factory_no_tools(self):
+    async def test_no_factory_no_tools(self, mock_provider_context_open):
         deps = _mock_dependencies()
         orchestrator = ConversationOrchestrator(**deps)
         fake_out = RispostaOutput(risposta="Ok", richiede_umano=False,
@@ -255,11 +264,12 @@ class TestOrchestrateWiring:
             mock_rag.return_value = mock_rag_res
             mock_gen.return_value = fake_out
             await orchestrator.orchestrate(
-                OrchestrationInput(organization_id=ORG, text="prenota"))
+                OrchestrationInput(
+                    organization_id=ORG, auth_user_id=uuid.uuid4(), text="prenota"))
         assert mock_gen.call_args[1]["tools"] is None
 
     @pytest.mark.asyncio
-    async def test_guardrail_still_applies_with_tools(self):
+    async def test_guardrail_still_applies_with_tools(self, mock_provider_context_open):
         deps = _mock_dependencies()
         factory = AsyncMock(return_value=[_tool("airtable_find_customer")])
         orchestrator = ConversationOrchestrator(
@@ -276,6 +286,8 @@ class TestOrchestrateWiring:
             mock_rag_res.chunks = [{"content": "menu senza prezzi"}]
             mock_rag.return_value = mock_rag_res
             result = await orchestrator.orchestrate(
-                OrchestrationInput(organization_id=ORG, text="quanto costa il menu?"))
+                OrchestrationInput(
+                    organization_id=ORG, auth_user_id=uuid.uuid4(),
+                    text="quanto costa il menu?"))
 
         assert result.guardrail_action == "block"

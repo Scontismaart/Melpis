@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 from unittest.mock import patch
 import httpx
 import pytest
@@ -220,7 +221,7 @@ async def test_profile_save_reports_org_scoped_faq_invalidation_failure(
 
 
 async def test_same_question_uses_live_profile_and_knowledge_context_after_config_changes(
-    async_client, repo, sample_org, monkeypatch
+    async_client, repo, sample_org, monkeypatch, mock_provider_context_open,
 ):
     """Build the real CrewAI prompts from DB profile/RAG data with runtime mocked."""
     question = "Quanto costa il Massaggio Relax?"
@@ -253,6 +254,7 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
             profile,
             model="mock-runtime",
             variante=kwargs.get("variante", "control"),
+            provider_context=kwargs.get("provider_context"),
         )
         task = crea_responder_task(
             agent,
@@ -296,7 +298,7 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
     async def ask():
         await orchestrator.orchestrate(OrchestrationInput(
             organization_id=sample_org["id"], text=question,
-            record_billing_usage=False,
+            auth_user_id=uuid.uuid4(), record_billing_usage=False,
         ))
 
     profile_response = await async_client.post(

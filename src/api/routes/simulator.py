@@ -12,14 +12,12 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
 from src.api.dependencies import (
     get_orchestrator,
     get_optional_organization_context,
-    get_organization_context,
     get_repo,
     require_ruolo,
 )
@@ -30,7 +28,6 @@ from src.api.routes.common import (
     get_billing_snapshot,
     get_shared_event_history,
     next_event_id,
-    record_ai_usage,
     resolve_genera_risposta_recensione,
 )
 from src.core.conversation_store import store as conv_store
@@ -194,6 +191,8 @@ async def ricevi_messaggio(
 
     req = OrchestrationInput(
         organization_id=org_id,
+        auth_user_id=user.get("auth_user_id") if org_id else None,
+        trace_id=trace_id,
         conversation_id=messaggio.id_conversazione,
         text=messaggio.testo,
         channel="demo" if not org_id else "whatsapp",
@@ -202,8 +201,10 @@ async def ricevi_messaggio(
         cronologia=cronologia,
         billing_state=billing,
         is_simulation=True,
-        # Attribute real LLM usage for cost governance. This records usage_events
-        # only; it does not reserve or increment the inbound message quota.
+        simulation_request_id=request_uuid,
+        simulation_claim_token=claim_token,
+        # A03 records provider attempts from the verified simulation claim;
+        # this legacy flag does not bill the final response.
         record_billing_usage=bool(org_id),
     )
 
@@ -352,7 +353,7 @@ async def _ricevi_recensione_impl(
             )
     from src.core.reviews.ai_governance import (
         authorize_review_generation, generic_review_fallback,
-        record_review_usage, validate_review_draft,
+        validate_review_draft,
     )
     try:
         billing = await authorize_review_generation(repo, str(org_id))
@@ -373,13 +374,20 @@ async def _ricevi_recensione_impl(
     }
     from src.core.documenti.rag_context import recupera_contesto_documenti
     contesto = await recupera_contesto_documenti(str(org_id), recensione.testo, repo)
-    usage = {}
-
     if not contesto.testo.strip():
         output = generic_review_fallback(recensione.testo)
     else:
         genera_risposta_recensione = resolve_genera_risposta_recensione()
+        from src.core.provider_accounting import ProviderAccountingContext
+        provider_context = None
         try:
+            provider_context = await ProviderAccountingContext.open(
+                getattr(repo, "pool", None),
+                org_id,
+                task_type="review",
+                actor_auth_user_id=user.get("auth_user_id"),
+                context={"trace_id": getattr(request.state, "trace_id", None)},
+            )
             output = await asyncio.to_thread(
                 lambda: genera_risposta_recensione(
                     testo=recensione.testo,
@@ -390,21 +398,17 @@ async def _ricevi_recensione_impl(
                     lingua_default=lingua_default,
                     profilo_attivita=profilo_pubblico,
                     contesto_documenti=contesto.testo,
-                    usage_sink=usage,
+                    provider_context=provider_context,
                 )
             )
         except Exception:
             trace_id = getattr(request.state, "trace_id", "unavailable")
-            try:
-                await record_review_usage(repo, str(org_id), usage)
-            except Exception:
-                logger.error("review=usage_persist_failed org_id=%s trace_id=%s", org_id, trace_id)
-                raise HTTPException(status_code=503, detail="Generazione AI temporaneamente non disponibile.")
             logger.error("review=generate_failed org_id=%s trace_id=%s", org_id, trace_id)
             raise HTTPException(status_code=502, detail="Impossibile generare la bozza di risposta. Riprova più tardi.")
+        finally:
+            if provider_context is not None:
+                await provider_context.close()
     try:
-        if usage:
-            await record_review_usage(repo, str(org_id), usage)
         validate_review_draft(output.bozza_risposta, recensione.testo, contesto.testo)
     except Exception:
         trace_id = getattr(request.state, "trace_id", "unavailable")

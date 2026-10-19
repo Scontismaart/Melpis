@@ -20,7 +20,6 @@ from src.api.routes.common import (
     check_feature_blocked_by_plan,
     enforce_org_rate_limit,
     get_billing_snapshot,
-    record_ai_usage,
     resolve_estrai_da_url,
     resolve_vettorizza,
 )
@@ -58,14 +57,10 @@ async def chiedi_documenti(
         raise HTTPException(status_code=403, detail=blocco)
     await enforce_org_rate_limit(org_id, "knowledge-qa", 60, 60)
     billing = await get_billing_snapshot(repo, org_id)
-    output = await rispondi(org_id, domanda.domanda, repo, k=domanda.k, billing=billing)
-    await record_ai_usage(
-        repo,
-        org_id,
-        "document_qa",
-        domanda.domanda,
-        billing,
-        {"k": domanda.k, "fonti": output.get("fonti", [])},
+    output = await rispondi(
+        org_id, domanda.domanda, repo, k=domanda.k, billing=billing,
+        actor_auth_user_id=user.get("auth_user_id"),
+        trace_id=getattr(request.state, "trace_id", None),
     )
     return output
 

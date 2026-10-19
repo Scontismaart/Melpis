@@ -18,7 +18,11 @@ class AIGenerationBlocked(RuntimeError):
 
 
 def assert_ai_generation_allowed(billing: dict | None) -> None:
-    """Require verified entitlement and numerical quota before new AI work."""
+    """Require active/trialing entitlement and quota for a new provider call.
+
+    ``past_due`` may remain unsuspended for dashboard and recovery access while
+    Stripe retries collection, but it does not authorize new AI generation.
+    """
     if not isinstance(billing, dict) or not billing:
         raise AIGenerationBlocked("billing state unavailable")
     if billing.get("ai_accounting_blocked"):
@@ -36,7 +40,11 @@ def assert_ai_generation_allowed(billing: dict | None) -> None:
 
 
 def is_org_suspended(subscription_status: str | None, trial_end=None) -> bool:
-    """True se l'org non puo' usare il pipeline conversazionale.
+    """True when org-wide service access is suspended.
+
+    This suspension helper preserves dashboard/recovery access during Stripe
+    retries. New AI provider dispatches use the stricter
+    :func:`assert_ai_generation_allowed` entitlement check.
 
     - canceled: sempre sospesa.
     - trial_end scaduto: sospesa solo se lo status NON e' active/past_due.

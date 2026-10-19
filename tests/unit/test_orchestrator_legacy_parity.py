@@ -106,7 +106,9 @@ def mock_parity_environment():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario_text", PARITY_SCENARIOS)
-async def test_orchestrator_and_legacy_intent_and_guardrail_parity(scenario_text, mock_parity_environment):
+async def test_orchestrator_and_legacy_intent_and_guardrail_parity(
+    scenario_text, mock_parity_environment, mock_provider_context_open,
+):
     """
     Verifica che per ciascuno dei 50 scenari, sia l'Orchestratore che la Legacy Pipeline
     classifichino l'intent in modo identico e applichino le medesime logiche di routing e guardrail.
@@ -157,7 +159,8 @@ async def test_orchestrator_and_legacy_intent_and_guardrail_parity(scenario_text
             sender_phone="+393401122334",
             sender_name="Cliente Test",
             business_profile=biz_prof,
-            is_simulation=True,
+            auth_user_id=uuid.uuid4(),
+            is_simulation=False,
             record_billing_usage=False,
         )
         orch_out = await orchestrator.orchestrate(req)

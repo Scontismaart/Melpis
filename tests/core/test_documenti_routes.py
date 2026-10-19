@@ -1,4 +1,5 @@
 import os
+import uuid
 from unittest.mock import patch
 
 import httpx
@@ -18,11 +19,29 @@ def set_env():
 @pytest.fixture
 async def async_client(repo, pg_pool, install_test_identity, sample_org, other_org):
     from src.api.main import app
+    auth_user_id = uuid.uuid4()
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = ANY($1::uuid[])",
+        "INSERT INTO auth.users(id,email) VALUES($1,$2)",
+        auth_user_id, f"document-qa-{auth_user_id}@example.test",
+    )
+    profile_id = await pg_pool.fetchval(
+        "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
+    )
+    await pg_pool.execute(
+        "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
+        "VALUES($1,$2,'owner',now())",
+        sample_org["id"], profile_id,
+    )
+    await pg_pool.execute(
+        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_document_qa_test', current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', messages_limit = 500, "
+        "messages_used_this_period = 0 WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
-    install_test_identity(app, API_KEY)
+    install_test_identity(
+        app, API_KEY, default_org_id=sample_org["id"], user_id=str(auth_user_id),
+    )
     app.state.repo = repo
     app.state.pool = pg_pool
     transport = httpx.ASGITransport(app=app)
@@ -31,6 +50,7 @@ async def async_client(repo, pg_pool, install_test_identity, sample_org, other_o
             yield c
         finally:
             app.dependency_overrides.clear()
+            await pg_pool.execute("DELETE FROM auth.users WHERE id=$1", auth_user_id)
 
 
 def _headers(org_id):
@@ -40,6 +60,9 @@ def _headers(org_id):
 class _FakeLLM:
     def call(self, prompt):
         return "La pizza margherita costa 8 euro."
+
+    async def acall(self, prompt):
+        return self.call(prompt)
 
 
 async def test_chiedi_no_auth(async_client):

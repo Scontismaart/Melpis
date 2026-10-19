@@ -50,6 +50,8 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "document_chunks": ("direct", "Chunk carries organization_id and has a consistency trigger against its document."),
     "email_configs": ("direct", "Email configuration belongs to one organization."),
     "usage_events": ("direct", "Usage event is attributed to one organization."),
+    "provider_attempt_runtime": ("direct", "Provider worker lease and fencing state is bound to one organization."),
+    "provider_attempt_evidence": ("direct", "Append-only provider attempt evidence carries its organization_id."),
     "event_log": ("direct", "Event projection carries its organization_id."),
     "simulation_requests": ("direct", "Idempotent simulation request is keyed by organization and user."),
     "google_calendar_credentials": ("direct", "Calendar credentials are owned by one organization."),

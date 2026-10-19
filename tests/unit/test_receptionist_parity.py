@@ -72,7 +72,7 @@ async def test_parity_fast_path_match(mock_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_parity_guardrail_block_behavior(mock_dependencies):
+async def test_parity_guardrail_block_behavior(mock_dependencies, mock_provider_context_open):
     """Verifica che la decisione di guardrail e la riscrittura del testo
     siano identiche all'applicazione diretta della pipeline guardrail."""
     orchestrator = ConversationOrchestrator(**mock_dependencies)
@@ -107,6 +107,7 @@ async def test_parity_guardrail_block_behavior(mock_dependencies):
         req = OrchestrationInput(
             organization_id=org_id,
             text="Quanto costa la margherita?",
+            auth_user_id=uuid.uuid4(),
         )
         result = await orchestrator.orchestrate(req)
 
@@ -117,7 +118,7 @@ async def test_parity_guardrail_block_behavior(mock_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_parity_booking_parameters_propagation(mock_dependencies):
+async def test_parity_booking_parameters_propagation(mock_dependencies, mock_provider_context_open):
     """Verifica che tutti i parametri estratti dall'AI vengano passati
     al booking service esattamente come faceva l'inbound processor."""
     booking_svc = mock_dependencies["booking_service"]
@@ -157,6 +158,7 @@ async def test_parity_booking_parameters_propagation(mock_dependencies):
             sender_phone="+393400000000",
             sender_name="Marco",
             is_simulation=False,
+            auth_user_id=uuid.uuid4(),
         )
         await orchestrator.orchestrate(req)
 

@@ -71,6 +71,10 @@ async def pg_pool(postgres_container):
             END $$;
             DROP SCHEMA IF EXISTS public CASCADE;
             CREATE SCHEMA public;
+            -- Supabase grants the backend role schema visibility. Recreate
+            -- that baseline here so privilege tests can reach relations and
+            -- verify the table-level grants/revokes applied by migrations.
+            GRANT USAGE ON SCHEMA public TO service_role;
         """)
         with open("src/whatsapp/schema.sql", encoding="utf-8") as f:
             await conn.execute(f.read())
