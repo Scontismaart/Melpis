@@ -28,6 +28,9 @@ _FAILURE_OUTCOMES = frozenset({
     "cancelled", "deadline_exceeded", "provider_error",
 })
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]{1,96}$")
+_ADMISSION_WAIT_SECONDS = 35
+_ADMISSION_RETRY_SECONDS = 0.05
+_STALE_IN_FLIGHT_SECONDS = 300
 
 
 class ProviderAccountingError(AIGenerationBlocked):
@@ -215,7 +218,8 @@ class ProviderAccountingContext:
                 billing = cls._authorize_billing(
                     dict(billing_row), inbound_message, simulation_reservation,
                 )
-                if await cls._has_unresolved(conn, org_id):
+                state = await cls._unresolved_state(conn, org_id)
+                if state == "blocked":
                     _deny()
         except ProviderAccountingError:
             raise
@@ -328,15 +332,34 @@ class ProviderAccountingContext:
         return billing
 
     @staticmethod
-    async def _has_unresolved(conn, organization_id):
-        return await conn.fetchval(
-            """SELECT EXISTS(SELECT 1 FROM governance_outbox
-                              WHERE organization_id=$1 AND event_kind='usage')
-                  OR EXISTS(SELECT 1 FROM usage_events
-                            WHERE organization_id=$1
-                              AND metadata->>'accounting_status'='unresolved')""",
+    async def _unresolved_state(conn, organization_id):
+        """Return none, waitable, or blocked without holding locks across waits.
+
+        A single recent in-flight provider attempt is the only unresolved state
+        that a new request may wait behind. Outbox work, multiple in-flight
+        rows, failed attempts, and stale rows remain fail-closed.
+        """
+        if await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM governance_outbox "
+            "WHERE organization_id=$1 AND event_kind='usage')",
             organization_id,
+        ):
+            return "blocked"
+        rows = await conn.fetch(
+            """SELECT metadata->>'outcome' AS outcome,
+                      created_at >= now() - make_interval(secs => $2) AS recent
+                 FROM usage_events
+                WHERE organization_id=$1
+                  AND metadata->>'accounting_status'='unresolved'
+                ORDER BY created_at,id
+                LIMIT 2""",
+            organization_id, _STALE_IN_FLIGHT_SECONDS,
         )
+        if not rows:
+            return "none"
+        if len(rows) == 1 and rows[0]["outcome"] == "in_flight" and rows[0]["recent"]:
+            return "waitable"
+        return "blocked"
 
     async def _recheck_scope_and_billing(self, conn):
         inbound_message = None
@@ -374,9 +397,13 @@ class ProviderAccountingContext:
         if await limiter.hit(f"provider-http:{self.organization_id}", 30, 60) is not False:
             _deny()
         attempt_id = uuid4()
+        supports_user_correlation = provider in {"groq", "openrouter"}
         metadata = {
             "version": 1, "execution_id": str(self.execution_id), "attempt_id": str(attempt_id),
             "provider": provider, "requested_model": model, "actual_model": None,
+            "correlation_contract": "openai_user" if supports_user_correlation else None,
+            "client_correlation_id": str(attempt_id) if supports_user_correlation else None,
+            "provider_request_id": None,
             "reason": reason, "task_type": self.task_type, "context": self.context,
             "outcome": "in_flight", "accounting_status": "unresolved",
             "usage_present": None, "prompt_tokens": None, "completion_tokens": None,
@@ -384,38 +411,57 @@ class ProviderAccountingContext:
             "application_outcome": None,
             "failure_code": None,
         }
-        try:
-            async with self.pool.acquire() as conn, conn.transaction():
-                await self._recheck_scope_and_billing(conn)
-                if await self._has_unresolved(conn, self.organization_id):
-                    _deny()
-                await conn.execute(
-                    """INSERT INTO usage_events(id,organization_id,event_type,quantity,metadata)
-                         VALUES($1,$2,$3,1,$4::jsonb)""",
-                    attempt_id, self.organization_id, _ATTEMPT, _json(metadata),
-                )
-        except ProviderAccountingError:
-            raise
-        except Exception:
-            _deny()
-        return ProviderAttempt(self.execution_id, attempt_id, provider, model, _ISSUER)
+        deadline = self._loop.time() + _ADMISSION_WAIT_SECONDS
+        while True:
+            self.assert_http_admission()
+            wait_for_in_flight = False
+            try:
+                # Organization row locking serializes admissions across workers.
+                # The transaction is deliberately released before every sleep
+                # and before provider HTTP is dispatched.
+                async with self.pool.acquire() as conn, conn.transaction():
+                    await self._recheck_scope_and_billing(conn)
+                    state = await self._unresolved_state(conn, self.organization_id)
+                    if state == "blocked":
+                        _deny()
+                    if state == "waitable":
+                        wait_for_in_flight = True
+                    else:
+                        await conn.execute(
+                            """INSERT INTO usage_events(id,organization_id,event_type,quantity,metadata)
+                                 VALUES($1,$2,$3,1,$4::jsonb)""",
+                            attempt_id, self.organization_id, _ATTEMPT, _json(metadata),
+                        )
+            except ProviderAccountingError:
+                raise
+            except Exception:
+                _deny()
+            if not wait_for_in_flight:
+                return ProviderAttempt(self.execution_id, attempt_id, provider, model, _ISSUER)
+            if self._loop.time() >= deadline:
+                _deny()
+            await asyncio.sleep(min(_ADMISSION_RETRY_SECONDS, max(0, deadline - self._loop.time())))
 
     async def finish(self, attempt: ProviderAttempt, usage: RawProviderUsage, latency_ms: int,
-                     *, output_valid: bool = True):
+                     *, output_valid: bool = True, provider_request_id: str | None = None):
         from src.core.llm_routing import stima_costo_eur
+        from src.core.provider_evidence import safe_provider_request_id
 
         if (type(attempt) is not ProviderAttempt or attempt._issuer is not _ISSUER
                 or attempt.execution_id != self.execution_id or attempt.provider not in PROVIDERS
                 or type(usage) is not RawProviderUsage
                 or not provider_model_matches(attempt.model, usage.actual_model)
                 or type(latency_ms) is not int or latency_ms < 0
-                or type(output_valid) is not bool):
+                or type(output_valid) is not bool
+                or (provider_request_id is not None
+                    and not safe_provider_request_id(provider_request_id))):
             _deny()
         cost = stima_costo_eur(attempt.model, usage.prompt_tokens, usage.completion_tokens)
         expected = {
             "outcome": "response_received" if output_valid else "invalid_response",
             "accounting_status": "recorded" if cost is not None else "unresolved",
             "actual_model": usage.actual_model, "usage_present": True,
+            "provider_request_id": provider_request_id,
             "prompt_tokens": usage.prompt_tokens, "completion_tokens": usage.completion_tokens,
             "total_tokens": usage.total_tokens, "latency_ms": latency_ms,
             "estimated_cost_eur": cost,
@@ -463,13 +509,18 @@ class ProviderAccountingContext:
                 )
 
     async def fail(self, attempt: ProviderAttempt, outcome: str, latency_ms: int,
-                   actual_model: str | None = None, usage_present: bool | None = None):
+                   actual_model: str | None = None, usage_present: bool | None = None,
+                   *, provider_request_id: str | None = None):
+        from src.core.provider_evidence import safe_provider_request_id
+
         if (type(attempt) is not ProviderAttempt or attempt._issuer is not _ISSUER
                 or attempt.execution_id != self.execution_id or outcome not in _FAILURE_OUTCOMES
                 or type(latency_ms) is not int or latency_ms < 0
                 or (actual_model is not None
                     and not provider_model_matches(attempt.model, actual_model))
-                or (usage_present is not None and type(usage_present) is not bool)):
+                or (usage_present is not None and type(usage_present) is not bool)
+                or (provider_request_id is not None
+                    and not safe_provider_request_id(provider_request_id))):
             _deny()
         async with self.pool.acquire() as conn, conn.transaction():
             await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR UPDATE", self.organization_id)
@@ -493,6 +544,7 @@ class ProviderAccountingContext:
             expected = {
                 "outcome": outcome, "latency_ms": latency_ms, "failure_code": outcome,
                 "actual_model": actual_model, "usage_present": usage_present,
+                "provider_request_id": provider_request_id,
             }
             if metadata.get("outcome") == "in_flight":
                 metadata.update(expected)

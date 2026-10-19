@@ -24,6 +24,7 @@ from src.core.provider_accounting import (
     RawProviderUsage,
     provider_model_matches,
 )
+from src.core.provider_evidence import safe_provider_request_id
 
 _NETWORK_SLOTS = threading.BoundedSemaphore(3)
 _MAX_BODY = 1_048_576
@@ -86,6 +87,31 @@ def parse_raw_provider_response(body: bytes, requested_model: str):
     except (KeyError, TypeError, ProviderAccountingError):
         raise ProviderResponseVerificationError(actual_model, True) from None
     return payload, verified
+
+
+def _provider_request_id(payload=None, headers=None):
+    """Return a safe provider-issued request ID without logging raw headers."""
+    candidates = []
+    if type(payload) is dict:
+        candidates.append(payload.get("id"))
+    if headers is not None:
+        candidates.extend((headers.get("x-request-id"), headers.get("request-id")))
+    return next((value for value in candidates if safe_provider_request_id(value)), None)
+
+
+def _with_provider_correlation(body: bytes, attempt):
+    """Send the Melpis attempt UUID as OpenAI-compatible `user` metadata where documented."""
+    if attempt.provider not in {"groq", "openrouter"}:
+        return body
+    try:
+        payload = json.loads(body)
+        payload["user"] = str(attempt.attempt_id)
+        encoded = json.dumps(payload, allow_nan=False, ensure_ascii=False).encode("utf-8")
+    except (ValueError, TypeError, UnicodeDecodeError):
+        _error()
+    if len(encoded) > 262_144:
+        _error()
+    return encoded
 
 
 def _content(payload):
@@ -208,6 +234,7 @@ class ObservedChatLLM(BaseLLM):
         started = None
         recorded = False
         usage = None
+        provider_request_id = None
         content = None
         output_valid = None
         finish_latency_ms = None
@@ -215,6 +242,7 @@ class ObservedChatLLM(BaseLLM):
             attempt = self._session.bridge(
                 self._session.begin, self._policy.provider.name, self.model, self._reason,
             )
+            body = _with_provider_correlation(body, attempt)
             self._session.assert_http_admission()
             started = time.monotonic()
             deadline_at = started + self._timeout
@@ -241,6 +269,7 @@ class ObservedChatLLM(BaseLLM):
             closed = False
             with client.stream("POST", url, headers=headers, content=body) as response:
                 response_ref["response"] = response
+                provider_request_id = _provider_request_id(headers=response.headers)
                 self._remaining(deadline_at)
                 self._headers(response)
                 data = bytearray()
@@ -255,6 +284,7 @@ class ObservedChatLLM(BaseLLM):
             deadline_timer.cancel()
             deadline_timer = None
             payload, usage = parse_raw_provider_response(bytes(data), self.model)
+            provider_request_id = _provider_request_id(payload) or provider_request_id
             try:
                 content = _content(payload)
             except ProviderAccountingError:
@@ -263,12 +293,16 @@ class ObservedChatLLM(BaseLLM):
                 self._session.bridge(
                     self._session.finish, attempt, usage,
                     finish_latency_ms, output_valid=False,
+                    provider_request_id=provider_request_id,
                 )
                 recorded = True
                 raise
             output_valid = True
             finish_latency_ms = int((time.monotonic() - started) * 1000)
-            self._session.bridge(self._session.finish, attempt, usage, finish_latency_ms)
+            self._session.bridge(
+                self._session.finish, attempt, usage, finish_latency_ms,
+                provider_request_id=provider_request_id,
+            )
             recorded = True
             return content
         except Exception as exc:
@@ -283,7 +317,7 @@ class ObservedChatLLM(BaseLLM):
                     try:
                         self._session.bridge(
                             self._session.finish, attempt, usage, elapsed,
-                            output_valid=output_valid,
+                            output_valid=output_valid, provider_request_id=provider_request_id,
                         )
                     except Exception:
                         pass
@@ -307,8 +341,10 @@ class ObservedChatLLM(BaseLLM):
                         if usage_present is True:
                             outcome = "invalid_usage"
                     try:
-                        self._session.bridge(self._session.fail, attempt, outcome, elapsed,
-                                             actual_model, usage_present)
+                        self._session.bridge(
+                            self._session.fail, attempt, outcome, elapsed,
+                            actual_model, usage_present, provider_request_id=provider_request_id,
+                        )
                     except Exception:
                         pass
             _error()
@@ -335,6 +371,7 @@ class ObservedChatLLM(BaseLLM):
         started = None
         recorded = False
         usage = None
+        provider_request_id = None
         content = None
         output_valid = None
         finish_latency_ms = None
@@ -342,14 +379,17 @@ class ObservedChatLLM(BaseLLM):
             attempt = await self._session.begin(
                 self._policy.provider.name, self.model, self._reason,
             )
+            body = _with_provider_correlation(body, attempt)
             self._session.assert_http_admission()
             started = time.monotonic()
             client = create_bounded_http_client(max_response_bytes=_MAX_BODY, max_concurrency=1,
                         deadline_seconds=self._remaining(), transport=self._async_transport)
             closed = False
             response = await client.post(url, headers=headers, content=body)
+            provider_request_id = _provider_request_id(headers=response.headers)
             self._headers(response)
             payload, usage = parse_raw_provider_response(response.content, self.model)
+            provider_request_id = _provider_request_id(payload) or provider_request_id
             try:
                 content = _content(payload)
             except ProviderAccountingError:
@@ -357,12 +397,15 @@ class ObservedChatLLM(BaseLLM):
                 finish_latency_ms = int((time.monotonic() - started) * 1000)
                 await self._session.finish(
                     attempt, usage, finish_latency_ms, output_valid=False,
+                    provider_request_id=provider_request_id,
                 )
                 recorded = True
                 raise
             output_valid = True
             finish_latency_ms = int((time.monotonic() - started) * 1000)
-            await self._session.finish(attempt, usage, finish_latency_ms)
+            await self._session.finish(
+                attempt, usage, finish_latency_ms, provider_request_id=provider_request_id,
+            )
             recorded = True
             return content
         except Exception as exc:
@@ -373,6 +416,7 @@ class ObservedChatLLM(BaseLLM):
                     try:
                         await self._session.finish(
                             attempt, usage, elapsed, output_valid=output_valid,
+                            provider_request_id=provider_request_id,
                         )
                     except Exception:
                         pass
@@ -396,8 +440,10 @@ class ObservedChatLLM(BaseLLM):
                         if usage_present is True:
                             outcome = "invalid_usage"
                     try:
-                        await self._session.fail(attempt, outcome, elapsed,
-                                                 actual_model, usage_present)
+                        await self._session.fail(
+                            attempt, outcome, elapsed, actual_model, usage_present,
+                            provider_request_id=provider_request_id,
+                        )
                     except Exception:
                         pass
             _error()

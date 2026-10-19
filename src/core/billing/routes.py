@@ -1,8 +1,9 @@
 import os
 import asyncio
 import logging
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from src.core.auth.dependencies import require_ruolo, require_mfa
 from src.core.billing.plans import PLANS, TRIAL_MESSAGES_LIMIT
 from src.core.billing.webhook_handler import handle_stripe_webhook
@@ -22,6 +23,55 @@ class CheckoutSessionRequest(BaseModel):
     success_url: str
     cancel_url: str
     interval: str = "monthly"  # "monthly" | "yearly"
+
+
+class ProviderEvidenceAttestations(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider_account_and_request_verified: StrictBool
+    terminal_outcome_verified: StrictBool
+    metrics_verified: StrictBool
+
+
+class ProviderEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    attempt_id: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    evidence_object_id: str = Field(pattern=r"^a03e_[0-9a-f]{32}$")
+    evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    attestations: ProviderEvidenceAttestations
+
+
+class ProviderEvidenceApprovalRequest(ProviderEvidenceRequest):
+    proposal_version: StrictInt = Field(ge=1)
+
+
+async def _verify_provider_evidence(request: Request, req: ProviderEvidenceRequest, user: dict):
+    from src.core.provider_evidence import EvidenceUnavailable, verify_provider_evidence
+
+    store = getattr(request.app.state, "provider_evidence_store", None)
+    try:
+        return await verify_provider_evidence(
+            store, uuid.UUID(str(user["organization_id"])), req.evidence_object_id,
+            req.evidence_sha256, uuid.UUID(req.attempt_id),
+        )
+    except EvidenceUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Immutable provider evidence or trusted account configuration is unavailable; "
+                "accounting remains blocked"
+            ),
+        ) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Immutable provider evidence could not be verified; accounting remains blocked",
+        ) from None
 
 
 def _resolve_price_id(plan, interval: str) -> str:
@@ -132,6 +182,83 @@ async def create_portal_session(
     await audit_event(request, user, "billing.portal_session_created", "organizations", str(org_id))
 
     return {"url": session.url}
+
+
+@router.post(
+    "/provider-attempts/reconciliation/proposals",
+    description=(
+        "Propose tenant-scoped A03 recovery using an immutable evidence artifact. "
+        "Proposal does not resolve the attempt; a different active owner/manager must approve with AAL2."
+    ),
+)
+async def propose_provider_attempt_reconciliation(
+    req: ProviderEvidenceRequest,
+    request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+    mfa_user: dict = Depends(require_mfa()),
+):
+    """Create a proposal only; provider-attempt holds remain in force."""
+    repo = getattr(request.app.state, "repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+    billing_repo = getattr(repo, "billing_repo", repo)
+    try:
+        evidence = await _verify_provider_evidence(request, req, user)
+        version = await billing_repo.propose_provider_reconciliation(
+            user["organization_id"], req.attempt_id,
+            actor_auth_user_id=user.get("auth_user_id"), aal=mfa_user.get("aal"),
+            evidence=evidence, attestations=req.attestations.model_dump(),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Administrator MFA and tenant access are required") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Provider accounting recovery is unavailable") from None
+    if version is None:
+        raise HTTPException(status_code=409, detail="Attempt is unavailable, non-terminal, or already proposed")
+    return {"proposed": True, "proposal_version": version, "independent_approval_required": True}
+
+
+@router.post(
+    "/provider-attempts/reconciliation/approvals",
+    description=(
+        "Approve one existing proposal using the same immutable artifact. "
+        "The approver must be a different active owner/manager with AAL2."
+    ),
+)
+async def approve_provider_attempt_reconciliation(
+    req: ProviderEvidenceApprovalRequest,
+    request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+    mfa_user: dict = Depends(require_mfa()),
+):
+    """Approve terminal evidence atomically; never reconciles in_flight rows."""
+    repo = getattr(request.app.state, "repo", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+    billing_repo = getattr(repo, "billing_repo", repo)
+    try:
+        evidence = await _verify_provider_evidence(request, req, user)
+        reconciled = await billing_repo.approve_provider_reconciliation(
+            user["organization_id"], req.attempt_id,
+            actor_auth_user_id=user.get("auth_user_id"), aal=mfa_user.get("aal"),
+            proposal_version=req.proposal_version, evidence=evidence,
+            attestations=req.attestations.model_dump(),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Administrator MFA and tenant access are required") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Provider accounting recovery is unavailable") from None
+    if not reconciled:
+        raise HTTPException(status_code=409, detail="Proposal is stale, non-terminal, mismatched, or already approved")
+    return {"reconciled": True, "proposal_version": req.proposal_version}
 
 
 @router.get("/subscription")

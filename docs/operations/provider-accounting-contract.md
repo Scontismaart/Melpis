@@ -26,9 +26,15 @@ during Stripe retries. Deterministic dashboard access remains available when AI
 generation is blocked.
 
 The authorization check runs again for each dispatch while locking the
-organization row. This allows one in-flight provider request per tenant. A
-second request for that tenant cannot pass while its attempt remains
-unresolved; another tenant has an independent lock and ledger.
+organization row. This allows one in-flight provider request per tenant. When
+the only unresolved row is a recent `in_flight` request, a second valid request
+waits for at most 35 seconds. Each retry uses a short PostgreSQL transaction to
+revalidate the actor/message, billing window and quota; it releases all locks
+before sleeping and before provider HTTP. The next dispatch is denied if the
+first request fails, the wait expires, the context closes, authorization changes,
+or the in-flight row is older than five minutes. Failed, stale, duplicate,
+outbox-backed or otherwise uncertain attempts remain fail-closed. Other tenants
+use independent organization locks and can continue.
 
 The anonymous simulator and process-global scheduler cannot create an AI
 capability. The simulator returns a fixed sign-in prompt. The scheduled report
@@ -56,12 +62,14 @@ usage is never normalized to zero. A verified model is retained when usage is
 incomplete; `usage_present` distinguishes absent, malformed-present, and
 unverifiable payloads. Explicit zeros remain valid evidence. If
 the model's cost is unknown, measured response fields are retained, cost stays
-null, and the tenant is blocked pending reconciliation.
+null, and the tenant is blocked pending evidence-backed reconciliation. The
+recovery path remains unavailable unless an authorized immutable evidence store
+is configured.
 
 Transport, HTTP, incomplete response, cancellation, process-crash or accounting failures
 leave the attempt unresolved. They store only a bounded outcome code, never a
 provider body or raw exception, and prevent later AI dispatches until explicit
-tenant-scoped reconciliation. A completed provider response remains recorded
+tenant-scoped reconciliation backed by verified evidence. A completed provider response remains recorded
 even if the user is disabled or billing changes while the response is in
 flight, because the usage has already occurred.
 An outer model fallback is a new attempt with its own ID and authorized model;
@@ -71,6 +79,66 @@ attempt is reconciled, avoiding an unmeasured second dispatch.
 If the first database finalization fails after usage has been verified, the
 adapter retries the same attempt ID idempotently. If persistence remains
 unavailable, the pre-dispatch row stays unresolved and blocks later AI calls.
+
+## Administrative recovery
+
+Recovery is a two-step, tenant-scoped process. The proposal endpoint
+`POST /api/billing/provider-attempts/reconciliation/proposals` and approval
+endpoint `/api/billing/provider-attempts/reconciliation/approvals` each require
+an active owner/manager and a verified AAL2 session. The approving principal
+must differ from the proposer. PostgreSQL locks the organization and attempt,
+checks active membership again, and uses a monotonically increasing proposal
+version plus state/outcome compare-and-set. Proposal and approval audit records
+are written in the same transactions as their state changes.
+
+Both principals attest independently that they verified the provider account
+and request, terminal provider outcome, and metrics (or their explicit absence).
+They reference the same tenant-scoped immutable artifact using a strict object
+ID and SHA-256 digest. The server fetches the artifact from an authorized store,
+checks its digest, attempt, provider, terminal state, schema, model, and exact
+token arithmetic. This is an evidence-format and human-attestation check; the
+application does not contact the provider or automatically authenticate the
+provider account/request. It recomputes any cost from the trusted price table. A
+no-bill result is accepted only from an explicit terminal provider record.
+Only Groq and OpenRouter currently receive the random attempt UUID as the
+OpenAI-compatible `user` field. The ledger stores a safe provider-returned
+request ID when the response body or response headers provide one. The artifact
+must contain that exact ID, the matching provider correlation UUID, and a
+timezone-aware provider event time within 15 minutes of the attempt row's
+`created_at`. Recovery is rejected if the provider request ID was not recorded,
+does not match, or the provider does not have this documented correlation
+contract; the UUID in a hand-authored artifact alone is not sufficient.
+Only the evidence object ID/version/digest, attestations, actors, and validated
+accounting metrics are persisted; artifact contents and provider account/request
+references are never written to PostgreSQL or audit logs. Store implementations
+must enforce tenant-scoped access and immutable/WORM retention.
+
+Evidence artifacts are limited to 16 KiB and rejected before hashing or JSON
+parsing when empty or oversized. `GROQ_PROVIDER_ACCOUNT_REF` and
+`OPENROUTER_PROVIDER_ACCOUNT_REF` must be set in the trusted runtime
+configuration to the non-secret account identifier for the corresponding
+provider before evidence for that provider can be verified. These values are
+compared to the artifact and are never persisted or logged. They are not API
+keys.
+
+**Operational gate:** no authorized immutable evidence store is configured in
+the current application, so these endpoints fail closed with HTTP 503 and do
+not change attempt state. Do not manually construct provider references or
+upload credentials into the application. An operator must verify the exact
+provider account/request and terminal record in the provider console/support
+system before placing an evidence artifact in the approved immutable store.
+The store must return the exact immutable object version and prove a compliance-
+mode retention deadline at least 90 days in the future; the server computes
+SHA-256 from the returned bytes. Both approvers must inspect the artifact
+independently.
+
+An `outcome=in_flight` attempt is never reconciled based on age or timeout. The
+current adapter does not persist a verifiable worker fencing token or terminal
+provider correlation that would prove an old worker cannot later finalize it.
+Such attempts remain blocking until that fencing/terminality mechanism exists;
+two human approvals alone do not clear them. This is an explicit unresolved
+recovery limitation, not a completed administrative capability. The process is
+A03-only and does not reserve, refund, or alter A04 final-answer quota.
 
 ## Transport and metrics source
 
@@ -95,8 +163,11 @@ contract: returned `model`, `usage.prompt_tokens`,
 `usage.completion_tokens`, and `usage.total_tokens`. A provider response
 without those explicit values remains unverified and blocks subsequent AI.
 Offline tests exercise raw response parsing, pre-dispatch ledger creation,
-success, failure, tenant separation and concurrent admission. No live provider
-request is part of local CI; none was made for this change.
+success, failure, tenant separation and concurrent admission. PostgreSQL tests
+run two valid inbound WhatsApp messages for one organization, verify bounded
+same-tenant wait and separate recorded attempts, and verify another tenant can
+progress independently. Waiting attempts revalidate the message before
+dispatch. No live provider request is part of local CI.
 
 ## Entry point inventory
 

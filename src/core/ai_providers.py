@@ -44,7 +44,13 @@ class ProviderAdapter:
             params["base_url"] = endpoint
         if self.deny_training:
             params["additional_params"] = {
-                "extra_body": {"provider": {"data_collection": "deny", "zdr": True}},
+                "extra_body": {"provider": {
+                    "data_collection": "deny",
+                    "zdr": True,
+                    # Do not let upstream routing escape the explicitly
+                    # selected model/provider policy (including :free).
+                    "allow_fallbacks": False,
+                }},
             }
         return params
 

@@ -146,6 +146,8 @@ class TestSensitivePathList:
         assert SENSITIVE_AAL2_PATHS == frozenset({
             "/api/billing/create-checkout-session",
             "/api/billing/create-portal-session",
+            "/api/billing/provider-attempts/reconciliation/proposals",
+            "/api/billing/provider-attempts/reconciliation/approvals",
             "/api/gdpr/export",
             "/api/gdpr/download",
             "/api/gdpr/delete",
@@ -233,3 +235,53 @@ class TestMfaGateOnRoute:
         )
 
         assert response.status_code == 401, response.text
+
+    def test_provider_attempt_recovery_route_requires_aal2_and_store_before_repository(self, monkeypatch):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from src.core.billing.routes import router as billing_router
+
+        app = FastAPI()
+        actor_id = str(uuid.uuid4())
+        org_id = str(uuid.uuid4())
+        user = {"source": "jwt", "auth_user_id": actor_id, "organization_id": org_id,
+                "ruolo": "owner", "aal": "aal1"}
+        billing_repo = SimpleNamespace(
+            propose_provider_reconciliation=AsyncMock(return_value=1),
+            approve_provider_reconciliation=AsyncMock(return_value=True),
+        )
+        app.state.repo = SimpleNamespace(billing_repo=billing_repo)
+        app.include_router(billing_router)
+        app.dependency_overrides[deps.get_current_user] = lambda: user
+        app.dependency_overrides[deps.get_organization_context] = lambda: user
+        client = TestClient(app)
+        payload = {
+            "attempt_id": str(uuid.uuid4()),
+            "evidence_object_id": "a03e_0123456789abcdef0123456789abcdef",
+            "evidence_sha256": "a" * 64,
+            "attestations": {
+                "provider_account_and_request_verified": True,
+                "terminal_outcome_verified": True,
+                "metrics_verified": True,
+            },
+        }
+
+        response = client.post("/api/billing/provider-attempts/reconciliation/proposals", json=payload)
+        assert response.status_code == 403
+        billing_repo.propose_provider_reconciliation.assert_not_awaited()
+        approval_payload = {**payload, "proposal_version": 1}
+        response = client.post(
+            "/api/billing/provider-attempts/reconciliation/approvals", json=approval_payload,
+        )
+        assert response.status_code == 403
+        billing_repo.approve_provider_reconciliation.assert_not_awaited()
+
+        user["aal"] = "aal2"
+        response = client.post("/api/billing/provider-attempts/reconciliation/proposals", json=payload)
+        assert response.status_code == 503, response.text
+        billing_repo.propose_provider_reconciliation.assert_not_awaited()
+        response = client.post(
+            "/api/billing/provider-attempts/reconciliation/approvals", json=approval_payload,
+        )
+        assert response.status_code == 503, response.text
+        billing_repo.approve_provider_reconciliation.assert_not_awaited()

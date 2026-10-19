@@ -23,7 +23,7 @@ def test_openrouter_policy_keeps_deny_training_parameters(monkeypatch):
     params = policy.client_params()
 
     assert params["additional_params"]["extra_body"]["provider"] == {
-        "data_collection": "deny", "zdr": True,
+        "data_collection": "deny", "zdr": True, "allow_fallbacks": False,
     }
 
 

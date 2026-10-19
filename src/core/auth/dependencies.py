@@ -411,6 +411,8 @@ def require_ruolo(*ruoli: str):
 SENSITIVE_AAL2_PATHS = frozenset({
     "/api/billing/create-checkout-session",
     "/api/billing/create-portal-session",
+    "/api/billing/provider-attempts/reconciliation/proposals",
+    "/api/billing/provider-attempts/reconciliation/approvals",
     "/api/gdpr/export",
     "/api/gdpr/download",
     "/api/gdpr/delete",
