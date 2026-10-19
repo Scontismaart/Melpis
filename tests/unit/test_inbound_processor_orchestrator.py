@@ -44,7 +44,9 @@ def mock_deps():
 
 
 @pytest.mark.asyncio
-async def test_inbound_processor_flag_disabled_uses_legacy(base_config, mock_deps):
+async def test_inbound_processor_flag_disabled_uses_legacy(
+    base_config, mock_deps, mock_provider_context_open,
+):
     """Con use_conversation_orchestrator=False, l'orchestrator NON deve essere invocato."""
     mock_orchestrator = AsyncMock()
     processor = InboundProcessor(

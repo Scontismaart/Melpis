@@ -145,6 +145,8 @@ def test_genera_report_failure_is_sanitized_and_no_unaccounted_fallback(monkeypa
     )
 
     with pytest.raises(RuntimeError, match="Tutti i modelli configurati") as error:
-        crew_runner_report.genera_report(_storico(), provider_context=provider_context_stub())
+        crew_runner_report.genera_report(
+            _storico(), provider_context=provider_context_stub(task_type="report"),
+        )
     assert calls == ["report/primary"]
     assert "sempre rotto" not in str(error.value)

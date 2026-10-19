@@ -93,7 +93,7 @@ def mock_booking_repo():
 @pytest.mark.asyncio
 @respx.mock
 async def test_full_pipeline_whatsapp_to_simplybook_success(
-    mock_external_repo, mock_booking_repo
+    mock_external_repo, mock_booking_repo, mock_provider_context_open,
 ):
     """Test E2E del flusso completo: messaggio utente -> AI -> BookingService -> Router -> SimplyBookAdapter."""
     # 1. Mock risposte wire SimplyBook JSON-RPC 2.0
@@ -171,6 +171,7 @@ async def test_full_pipeline_whatsapp_to_simplybook_success(
             sender_name="Andrea Neri",
             business_profile=profilo,
             is_simulation=False,
+            auth_user_id=uuid.uuid4(),
         )
 
         out = await orchestrator.orchestrate(req)
@@ -194,7 +195,7 @@ async def test_full_pipeline_whatsapp_to_simplybook_success(
 @pytest.mark.asyncio
 @respx.mock
 async def test_full_pipeline_external_failure_triggers_human_escalation(
-    mock_external_repo, mock_booking_repo
+    mock_external_repo, mock_booking_repo, mock_provider_context_open,
 ):
     """Test E2E fallimento esterno: se SimplyBook è irraggiungibile o rifiuta, scala all'operatore umano."""
     # 1. Mock SimplyBook login OK ma book() restituisce slot pieno
@@ -265,6 +266,7 @@ async def test_full_pipeline_external_failure_triggers_human_escalation(
             sender_name="Andrea Neri",
             business_profile=profilo,
             is_simulation=False,
+            auth_user_id=uuid.uuid4(),
         )
 
         out = await orchestrator.orchestrate(req)

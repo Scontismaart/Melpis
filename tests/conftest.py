@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
+import uuid
 
 from src.core.rate_limit import reset_memory_rate_limiter
 
@@ -93,6 +94,50 @@ def install_test_identity():
         app.dependency_overrides[get_organization_context] = identity
 
     return install
+
+
+@pytest.fixture
+def mock_provider_context_open(monkeypatch):
+    """Authorize tests whose provider transport is mocked, never live.
+
+    Tests that exercise provider accounting itself must use the PostgreSQL
+    fixture and real ``ProviderAccountingContext.open`` instead.
+    """
+    from src.core.provider_accounting import ProviderAccountingContext
+    from tests.provider_accounting_fakes import provider_context_stub
+
+    opened = []
+
+    async def open_test_context(
+        _pool,
+        organization_id,
+        *,
+        task_type,
+        actor_auth_user_id=None,
+        worker_message_id=None,
+        simulation_request_id=None,
+        simulation_claim_token=None,
+        context=None,
+    ):
+        test_context = provider_context_stub(
+            task_type=task_type,
+            organization_id=organization_id,
+        )
+        opened.append({
+            "organization_id": uuid.UUID(str(organization_id)),
+            "task_type": task_type,
+            "actor_auth_user_id": actor_auth_user_id,
+            "worker_message_id": worker_message_id,
+            "simulation_request_id": simulation_request_id,
+            "simulation_claim_token": simulation_claim_token,
+            "context": context,
+        })
+        return test_context
+
+    monkeypatch.setattr(
+        ProviderAccountingContext, "open", staticmethod(open_test_context),
+    )
+    return opened
 
 
 def pytest_addoption(parser):

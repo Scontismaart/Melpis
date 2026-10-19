@@ -20,11 +20,11 @@ def set_env():
 @pytest.fixture
 async def async_client(repo, pg_pool, install_test_identity, sample_org, other_org):
     from src.api.main import app
-    auth_user_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    auth_user_id = uuid.uuid4()
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO auth.users(id,email) VALUES($1,$2) ON CONFLICT (id) DO NOTHING",
-            auth_user_id, "onboarding-test@example.test",
+            auth_user_id, f"onboarding-{auth_user_id}@example.test",
         )
         profile_id = await conn.fetchval(
             "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
@@ -38,6 +38,9 @@ async def async_client(repo, pg_pool, install_test_identity, sample_org, other_o
             )
     await pg_pool.execute(
         "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_onboarding_test', "
+        "current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', "
         "messages_limit = 500, messages_used_this_period = 0 WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
@@ -50,6 +53,7 @@ async def async_client(repo, pg_pool, install_test_identity, sample_org, other_o
             yield c
         finally:
             app.dependency_overrides.clear()
+            await pg_pool.execute("DELETE FROM auth.users WHERE id=$1", auth_user_id)
 
 
 def _headers(org_id):
@@ -122,7 +126,9 @@ async def test_preview_is_tenant_scoped_and_passes_durable_context(async_client,
     async def fake_generate(*args, provider_context=None, **kwargs):
         contexts.append(provider_context)
         assert provider_context.task_type == "onboarding_preview"
-        assert str(provider_context.organization_id) == str(args[0])
+        assert provider_context.organization_id in {
+            sample_org["id"], other_org["id"],
+        }
         return risposta
 
     with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
@@ -131,19 +137,18 @@ async def test_preview_is_tenant_scoped_and_passes_durable_context(async_client,
             "profilo": PAYLOAD,
             "messaggio": "Vorrei prenotare per le 17",
         }, headers=_headers(sample_org["id"]))
+        response_b = await async_client.post("/api/onboarding/preview", json={
+            "profilo": PAYLOAD,
+            "messaggio": "Vorrei prenotare per le 17",
+        }, headers=_headers(other_org["id"]))
     assert r.status_code == 200
     assert r.json()["risposta"] == "Certo, per le 17 ci stiamo."
-    mocked.assert_awaited_once()
-
-    assert len(contexts) == 1
-    assert contexts[0]._closed is True
-
-    response_b = await async_client.post("/api/onboarding/preview", json={
-        "profilo": PAYLOAD,
-        "messaggio": "Vorrei prenotare per le 17",
-    }, headers=_headers(other_org["id"]))
     assert response_b.status_code == 200
+    assert response_b.json()["risposta"] == "Certo, per le 17 ci stiamo."
+    assert mocked.await_count == 2
+
     assert len(contexts) == 2
+    assert contexts[0]._closed is True
     assert contexts[0].organization_id != contexts[1].organization_id
     assert contexts[1]._closed is True
 

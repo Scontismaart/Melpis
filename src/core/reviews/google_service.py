@@ -445,11 +445,12 @@ class GoogleBusinessService:
                 # Dedup: la review con questo external_id esiste gia' per
                 # l'org (partial unique index), il sync e' idempotente.
                 continue
-            except Exception:
+            except Exception as exc:
                 fallimenti += 1
                 parziale = True
                 parziale_motivi.append("review_processing_failed")
-                logger.error("business=review_process_fail org_id=%s", org_id)
+                logger.error("business=review_process_fail org_id=%s error_type=%s",
+                             org_id, type(exc).__name__)
         if fallimenti == 0 and not time_limit_hit:
             # A page-bounded run advances to the next page. A complete run resets
             # the cursor; failed/time-limited runs retain their starting cursor,

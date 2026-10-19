@@ -20,7 +20,7 @@ pytestmark = pytest.mark.usefixtures("reset_db")
 
 TEST_SESSION = "test-reviews-lingue-jwt-session"
 ENCRYPTION_KEY = "Y2xvbmUtZmVybmV0LWtleS0zMi1ieXRlcy1sb25nISE="
-TEST_AUTH_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+TEST_AUTH_USER_ID = None
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def set_env(monkeypatch):
 
 
 @pytest.fixture
-async def async_client(repo, pg_pool, sample_org):
+async def async_client(repo, pg_pool, sample_org, monkeypatch):
     from fastapi import Depends, HTTPException
     from src.api.main import app
     from src.core.auth.dependencies import get_current_user, get_organization_context, get_token
@@ -51,15 +51,21 @@ async def async_client(repo, pg_pool, sample_org):
     service = GoogleBusinessService(repo=repo, encryption_key=ENCRYPTION_KEY)
     app.state.reviews_service = service
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = $1",
+        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_reviews_language_test', "
+        "current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', "
+        "messages_limit = 500, messages_used_this_period = 0 WHERE id = $1",
         sample_org["id"],
     )
+    owner_id = uuid.uuid4()
+    monkeypatch.setitem(globals(), "TEST_AUTH_USER_ID", owner_id)
     await pg_pool.execute(
         "INSERT INTO auth.users(id,email) VALUES($1,$2)",
-        TEST_AUTH_USER_ID, "review-lingue@example.test",
+        owner_id, f"review-lingue-{owner_id}@example.test",
     )
     profile_id = await pg_pool.fetchval(
-        "SELECT id FROM user_profiles WHERE auth_user_id=$1", TEST_AUTH_USER_ID,
+        "SELECT id FROM user_profiles WHERE auth_user_id=$1", owner_id,
     )
     await pg_pool.execute(
         "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
@@ -75,8 +81,8 @@ async def async_client(repo, pg_pool, sample_org):
             "aal": "aal2",
             "organization_id": str(sample_org["id"]),
             "ruolo": "owner",
-            "auth_user_id": str(TEST_AUTH_USER_ID),
-            "user_id": str(TEST_AUTH_USER_ID),
+            "auth_user_id": str(owner_id),
+            "user_id": str(owner_id),
         }
 
     app.dependency_overrides[get_current_user] = fixed_test_identity
@@ -87,6 +93,7 @@ async def async_client(repo, pg_pool, sample_org):
             yield c, service
         finally:
             app.dependency_overrides.clear()
+            await pg_pool.execute("DELETE FROM auth.users WHERE id=$1", owner_id)
 
 
 def _headers(org_id):

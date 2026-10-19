@@ -35,15 +35,21 @@ DROP TABLE IF EXISTS user_profiles CASCADE;
 DROP TABLE IF EXISTS event_log CASCADE;
 DROP TABLE IF EXISTS organizations CASCADE;
 DROP TABLE IF EXISTS usage_events CASCADE;
+DROP TABLE IF EXISTS governance_outbox CASCADE;
 DROP TABLE IF EXISTS outbound_dedup CASCADE;
 
 CREATE TABLE organizations (
     id UUID PRIMARY KEY,
     name TEXT DEFAULT 'Test Org',
-    subscription_status TEXT DEFAULT 'active',
-    trial_end TIMESTAMPTZ,
+    subscription_status TEXT DEFAULT 'trialing',
+    subscription_id TEXT,
+    trial_start TIMESTAMPTZ DEFAULT now() - interval '1 day',
+    trial_end TIMESTAMPTZ DEFAULT now() + interval '7 days',
+    current_period_start TIMESTAMPTZ,
+    current_period_end TIMESTAMPTZ,
     messages_used_this_period INT NOT NULL DEFAULT 0,
     messages_limit INT NOT NULL DEFAULT 1000,
+    ai_accounting_blocked BOOLEAN NOT NULL DEFAULT FALSE,
     sla_minutes INT NOT NULL DEFAULT 15,
     business_profile JSONB DEFAULT '{}'::jsonb
 );
@@ -114,6 +120,7 @@ CREATE TABLE messages (
     quota_exceeded_at TIMESTAMPTZ,
     processing_at TIMESTAMPTZ,
     heartbeat_at TIMESTAMPTZ,
+    claimed_at TIMESTAMPTZ,
     replied_at TIMESTAMPTZ,
     dead_letter_count INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -134,6 +141,14 @@ CREATE TABLE usage_events (
     event_type TEXT NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
     metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE governance_outbox (
+    id UUID PRIMARY KEY,
+    organization_id UUID NOT NULL REFERENCES organizations(id),
+    event_kind TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 """
@@ -180,7 +195,10 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
     # Inserimento dati iniziali nel Postgres reale
     async with real_db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO organizations (id, name, messages_limit) VALUES ($1, 'Ristorante P0', 100)",
+            """INSERT INTO organizations (id, name, subscription_status, trial_start,
+                    trial_end, messages_limit)
+               VALUES ($1, 'Ristorante P0', 'trialing', now() - interval '1 day',
+                    now() + interval '7 days', 100)""",
             org_id
         )
         await conn.execute(
@@ -230,7 +248,10 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
          patch("src.whatsapp.inbound_processor.genera_risposta_async", fake_llm), \
          patch("src.whatsapp.inbound_processor.recupera_contesto_documenti", AsyncMock(return_value=AsyncMock(testo="", chunks=[]))):
         try:
-            msg_row = await repo.reconstruct_payload_for_retry(msg_id)
+            # Exercise the real queue claim: A03 only admits messages whose
+            # worker claim set status='processing'. Reconstructing an unclaimed
+            # inbound row bypassed that production precondition.
+            msg_row = (await repo.claim_inbound_messages(limit=1))[0]
             await processor1._process_one(msg_row)
         except RuntimeError:
             pass  # Crash simulato

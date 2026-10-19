@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, AsyncMock
 pytestmark = pytest.mark.usefixtures("reset_db")
 
 API_KEY = "test-google-reviews-api-key-12345"
-TEST_AUTH_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+TEST_AUTH_USER_ID = None
 ENCRYPTION_KEY = "Y2xvbmUtZmVybmV0LWtleS0zMi1ieXRlcy1sb25nISE="  # 32 byte b64
 
 
@@ -45,7 +45,11 @@ async def async_client(repo, pg_pool, monkeypatch, sample_org, other_org, instal
     from src.api.main import app
     from src.core.reviews.google_service import GoogleBusinessService
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = ANY($1::uuid[])",
+        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id = 'sub_reviews_test', "
+        "current_period_start = now() - interval '1 day', "
+        "current_period_end = now() + interval '29 days', "
+        "messages_limit = 500, messages_used_this_period = 0 WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
     app.state.repo = repo
@@ -54,21 +58,22 @@ async def async_client(repo, pg_pool, monkeypatch, sample_org, other_org, instal
     app.state.reviews_service = service
     # OAuth start resolves an exact membership from the verified Auth identity,
     # rather than trusting the organization-context override used by old tests.
-    owner_id = TEST_AUTH_USER_ID
+    owner_id = uuid.uuid4()
+    monkeypatch.setitem(globals(), "TEST_AUTH_USER_ID", owner_id)
     await pg_pool.execute(
         "INSERT INTO auth.users (id, email) VALUES ($1, $2)",
-        owner_id, "oauth-owner@example.test",
+        owner_id, f"oauth-owner-{owner_id}@example.test",
     )
     await pg_pool.execute(
         """INSERT INTO user_profiles (id, auth_user_id, email)
            VALUES ($1, $1, $2)
            ON CONFLICT (auth_user_id) DO UPDATE SET id = EXCLUDED.id""",
-        owner_id, "oauth-owner@example.test",
+        owner_id, f"oauth-owner-{owner_id}@example.test",
     )
     await pg_pool.execute(
         "INSERT INTO organization_memberships (organization_id, user_id, ruolo, joined_at) "
-        "VALUES ($1, $2, 'owner', now()), ($3, $2, 'owner', now())",
-        sample_org["id"], owner_id, other_org["id"],
+        "VALUES ($1, $2, 'owner', now())",
+        sample_org["id"], owner_id,
     )
     install_test_identity(app, API_KEY, default_org_id=sample_org["id"], user_id=str(owner_id))
     transport = httpx.ASGITransport(app=app)
@@ -104,6 +109,17 @@ async def _inserisci_credenziali(pg_pool, org_id, *, account="accounts/123", loc
             datetime.now(timezone.utc) + timedelta(hours=1),
             account, location,
         )
+
+
+async def _grant_owner_membership(pg_pool, org_id, auth_user_id):
+    profile_id = await pg_pool.fetchval(
+        "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
+    )
+    await pg_pool.execute(
+        "INSERT INTO organization_memberships(organization_id,user_id,ruolo,joined_at) "
+        "VALUES($1,$2,'owner',now()) ON CONFLICT(organization_id,user_id) DO NOTHING",
+        org_id, profile_id,
+    )
 
 
 # ── Status ────────────────────────────────────────────────────
@@ -162,6 +178,10 @@ async def test_oauth_start_checks_database_membership_before_nonce(
     selected = sample_org["id"]
     if denied_context == "foreign":
         selected = other_org["id"]
+        await pg_pool.execute(
+            "DELETE FROM organization_memberships WHERE organization_id = $1",
+            selected,
+        )
     elif denied_context == "revoked":
         await pg_pool.execute(
             "DELETE FROM organization_memberships WHERE organization_id = $1",
@@ -398,6 +418,7 @@ async def test_review_drafts_receive_tenant_profile_and_fresh_public_knowledge(
 ):
     """Exercise scoped DB/RAG inputs and actual rendered prompts with mocked provider."""
     client, service = async_client
+    await _grant_owner_membership(pg_pool, other_org["id"], TEST_AUTH_USER_ID)
     await _inserisci_credenziali(pg_pool, sample_org["id"])
     await _inserisci_credenziali(pg_pool, other_org["id"], account="accounts/222", location="accounts/222/locations/333")
 
@@ -549,11 +570,12 @@ async def test_review_drafts_receive_tenant_profile_and_fresh_public_knowledge(
 
 
 async def test_manual_review_uses_tenant_profile_and_retrieval_before_persist(
-    async_client, sample_org, other_org, repo, monkeypatch
+    async_client, pg_pool, sample_org, other_org, repo, monkeypatch
 ):
     from src.models.schemas import RispostaRecensioneOutput
 
     client, _service = async_client
+    await _grant_owner_membership(pg_pool, other_org["id"], TEST_AUTH_USER_ID)
     from src.api.routes.common import get_shared_event_history
     shared_history = get_shared_event_history()
     history_before = list(shared_history)
@@ -778,6 +800,7 @@ async def test_sync_dedup_idempotente(async_client, pg_pool, sample_org, repo):
 
 async def test_sync_non_contamina_altra_org(async_client, pg_pool, sample_org, other_org, repo):
     client, service = async_client
+    await _grant_owner_membership(pg_pool, other_org["id"], TEST_AUTH_USER_ID)
     await _inserisci_credenziali(pg_pool, other_org["id"])
 
     fake = [{"reviewId": "rev-altra", "starRating": "ONE",

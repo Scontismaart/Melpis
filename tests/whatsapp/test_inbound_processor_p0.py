@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 from src.whatsapp.inbound_processor import InboundProcessor
 
 class TestP0Blockers:
-    async def test_booking_idempotency_on_crash(self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg):
+    async def test_booking_idempotency_on_crash(
+        self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg,
+        mock_provider_context_open,
+    ):
         from src.core.bookings.service import BookingService
         from src.models.schemas import RispostaOutput
         mock_repo.get_booking_settings = AsyncMock(return_value={"capienze_orarie": {"12:00": 10}})
@@ -34,7 +37,10 @@ class TestP0Blockers:
         kwargs = mock_repo.create_booking.await_args.kwargs
         assert kwargs["source_message_id"] == str(sample_msg["id"])
 
-    async def test_message_retained_on_api_failure(self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg):
+    async def test_message_retained_on_api_failure(
+        self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg,
+        mock_provider_context_open,
+    ):
         from src.models.schemas import RispostaOutput
         mock_service.send_whatsapp_message = AsyncMock(side_effect=Exception("API Down"))
         mock_repo.save_outbound_dedup = AsyncMock()
