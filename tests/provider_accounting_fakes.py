@@ -17,8 +17,8 @@ def provider_context_stub(*, task_type="customer_message", organization_id=None,
     context.task_type = task_type
     context._quota_operation = quota_operation
     context._quota_ticket = quota_ticket
-    context._quota_lease_failed = False
-    context._quota_lease_task = None
+    from src.core.billing.quota_reservations import QuotaLease
+    context._caller_quota_lease = QuotaLease.current(quota_operation, quota_ticket)
     context.context = {"trace_id": str(uuid.uuid4())}
     context.billing_snapshot = {
         "subscription_status": "trialing",
