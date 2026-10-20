@@ -31,6 +31,7 @@ from src.api.routes.common import (
     resolve_genera_risposta_recensione,
 )
 from src.core.conversation_store import store as conv_store
+from src.core.billing.quota_reservations import QuotaLease
 from src.core.priorita import calcola_priorita
 from src.core.receptionist.models import OrchestrationInput
 from src.models.business_profile import PROFILI_DEMO
@@ -56,6 +57,11 @@ async def ricevi_messaggio(
     profilo_id: str = "trattoria_da_mario",
 ):
     """Simulatore messaggi per playground UI e test di interazione AI (Invarianti 1, 5, 7, 8)."""
+    async with QuotaLease() as lease:
+        return await _ricevi_messaggio(request, messaggio, response, idempotency_key, profilo_id, lease)
+
+
+async def _ricevi_messaggio(request, messaggio, response, idempotency_key, profilo_id, lease):
     trace_id = getattr(request.state, "trace_id", "unavailable")
     # Solo la modalita' demo esplicitamente abilitata accetta richieste anonime.
     org_id = None
@@ -164,6 +170,7 @@ async def ricevi_messaggio(
         quota_ticket = reservation.get("ticket")
         if quota_ticket is None:
             raise HTTPException(status_code=503, detail="Proprietà della richiesta simulata non disponibile")
+        lease.bind(quota_reservations, quota_operation, quota_ticket)
 
     if org_id is None:
         if not is_demo_mode():
@@ -238,7 +245,7 @@ async def ricevi_messaggio(
         prenotazione=out.prenotazione,
     )
 
-    if org_id is not None and out.source in {"fast_path", "manual_gate"}:
+    if org_id is not None and (out.source in {"fast_path", "manual_gate"} or out._quota_exempt is True):
         try:
             await quota_reservations.release(quota_operation, quota_ticket)
         except Exception:
@@ -248,7 +255,9 @@ async def ricevi_messaggio(
             final = out._quota_final
             if final is None:
                 raise RuntimeError("A04 final response proof missing")
+            await lease.checkpoint()
             persisted = await quota_reservations.commit(quota_operation, quota_ticket, final)
+            await lease.stop()
             risposta = RispostaOutput.model_validate(persisted)
         except Exception:
             # A commit may have succeeded despite a connection error. The

@@ -25,6 +25,9 @@ class _QuotaReservations:
         self.reserve_calls.append(operation)
         return self.reservation
 
+    async def renew(self, operation, ticket):
+        return ticket
+
     async def commit(self, operation, ticket, final):
         self.commit_calls.append((operation, ticket, final))
         return self.response

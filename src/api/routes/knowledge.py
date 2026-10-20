@@ -29,7 +29,7 @@ from src.core.documenti.chunking import chunk_testo
 from src.core.documenti.extractor import estrai_testo
 from src.core.documenti.priorita import rileva_conflitti_prezzo
 from src.core.documenti.qa_agent import rispondi
-from src.core.billing.quota_reservations import QuotaConflict, QuotaOperation, QuotaReservations
+from src.core.billing.quota_reservations import QuotaConflict, QuotaLease, QuotaOperation, QuotaReservations
 from src.models.schemas import (
     CaricaDocumentoInput,
     DatiStrutturaInput,
@@ -54,6 +54,11 @@ async def chiedi_documenti(
     user: dict = Depends(require_ruolo("owner", "manager", "staff")),
 ):
     """Risponde a una domanda basandosi sui documenti indicizzati del tenant."""
+    async with QuotaLease() as lease:
+        return await _chiedi_documenti(domanda, request, idempotency_key, user, lease)
+
+
+async def _chiedi_documenti(domanda, request, idempotency_key, user, lease):
     repo = get_repo(request)
     org_id = user.get("organization_id")
     blocco = await check_feature_blocked_by_plan(repo, org_id, "rag")
@@ -101,6 +106,7 @@ async def chiedi_documenti(
         raise HTTPException(status_code=503, detail="Impossibile riservare la risposta")
 
     ticket = reservation["ticket"]
+    lease.bind(reservations, operation, ticket)
     try:
         output = await rispondi(
             org_id, domanda.domanda, repo, k=domanda.k,
@@ -115,7 +121,9 @@ async def chiedi_documenti(
             # only after A03 confirms that no uncertain cost is outstanding.
             await reservations.release(operation, ticket)
             return output
+        await lease.checkpoint()
         stored = await reservations.commit(operation, ticket, final)
+        await lease.stop()
         return stored
     except HTTPException:
         raise

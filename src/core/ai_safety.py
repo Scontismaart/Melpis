@@ -5,6 +5,7 @@
 CRM_AI_TOOLS_ENABLED = False
 AI_INPUT_MAX_CHARS = 12000
 BOOKING_FAILURE_REPLY = "Non posso confermare la prenotazione. Chiedo allo staff di verificare."
+BOOKING_RECEIVED_REPLY = "Richiesta di prenotazione ricevuta, in attesa di verifica."
 
 
 def validate_ai_input(text):

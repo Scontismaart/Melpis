@@ -1,10 +1,13 @@
 import pytest
 import uuid
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.whatsapp.config import AppConfig
 from src.whatsapp.inbound_processor import InboundProcessor
 from src.core.receptionist.models import OrchestrationOutput
+from src.models.schemas import RispostaOutput
 
 
 @pytest.fixture
@@ -27,7 +30,8 @@ def mock_deps(monkeypatch):
     class QuotaReservationsStub:
         def __init__(self):
             self.reserve = AsyncMock(return_value={"status": "reserved", "ticket": object()})
-            self.commit = AsyncMock()
+            self.commit = AsyncMock(side_effect=lambda _operation, _ticket, final: json.loads(final.serialized))
+            self.renew = AsyncMock(side_effect=lambda _operation, ticket: ticket)
             self.release = AsyncMock()
 
     quota = QuotaReservationsStub()
@@ -86,7 +90,7 @@ async def test_inbound_processor_flag_disabled_uses_legacy(
          patch("src.whatsapp.inbound_processor.genera_risposta_async") as mock_gen, \
          patch("src.whatsapp.inbound_processor.valida_risposta") as mock_valida, \
          patch("src.whatsapp.inbound_processor.route_llm") as mock_route, \
-         patch("src.core.billing.quota_reservations.validate_final_response", return_value=object()), \
+         patch("src.core.billing.quota_reservations.validate_final_response", side_effect=lambda _op, _ticket, response, **_kw: SimpleNamespace(serialized=response.model_dump_json())), \
          patch.object(processor, "_send_ai_reply", new_callable=AsyncMock) as mock_send, \
          patch.object(processor, "_finalize_message", new_callable=AsyncMock):
 
@@ -99,11 +103,7 @@ async def test_inbound_processor_flag_disabled_uses_legacy(
         intent_obj.source = "rule"
         mock_intent.return_value = intent_obj
 
-        risp_obj = MagicMock()
-        risp_obj.risposta = "Siamo aperti dalle 19:00"
-        risp_obj.richiede_umano = False
-        risp_obj.motivo = ""
-        risp_obj.prenotazione = None
+        risp_obj = RispostaOutput(risposta="Siamo aperti dalle 19:00", richiede_umano=False, motivo="", categoria="generico")
         mock_gen.return_value = risp_obj
 
         esito_obj = MagicMock()
@@ -138,7 +138,10 @@ async def test_inbound_processor_flag_enabled_uses_orchestrator(base_config, moc
         intent="faq",
         source="llm",
     )
-    fake_output._quota_final = object()
+    fake_output._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": fake_output.response_text, "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
     mock_orchestrator.orchestrate.return_value = fake_output
 
     processor = InboundProcessor(

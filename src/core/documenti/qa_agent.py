@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from src.agents.prompts import serializza_dati_non_fidati
@@ -57,7 +58,7 @@ async def rispondi(
     quota_operation=None,
     quota_ticket=None,
 ) -> dict:
-    q_emb = vettorizza([domanda], tipo="query")[0]
+    q_emb = (await asyncio.to_thread(vettorizza, [domanda], tipo="query"))[0]
     risultati = await repo.search_similar(organization_id, q_emb, k, only_active=True)
 
     if not risultati:

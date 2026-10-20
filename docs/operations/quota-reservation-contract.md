@@ -69,6 +69,12 @@ new reservation.
 Expiry alone does not prove failure: an expired reservation stays pending and
 requires reconciliation. A release fences a late worker; it is not evidence
 that an outstanding provider call incurred no technical cost.
+The inbound worker, simulator route and Q&A route own a `QuotaLease` from
+reservation through final commit/release. Renewal covers retrieval, generation
+and post-processing, rather than ending at provider-context close. A lost
+renewal prevents finalization; context cancellation only stops heartbeat and
+never releases quota automatically. Every provider dispatch and commit still
+revalidates the durable PostgreSQL claim.
 Rotating the trust epoch invalidates outstanding tickets. Historical records
 must not be adopted into the replacement epoch or silently released.
 
@@ -87,6 +93,16 @@ must not be adopted into the replacement epoch or silently released.
   delivery failure does not refund the committed answer. An existing message
   cache is never replay authority: the A04 committed request and ledger must
   match the message cache hash and billed timestamp.
+  Both first delivery and replay use the canonical payload returned by the
+  database commit. A blocked guardrail response becomes a private server-owned
+  non-billable handoff; a useful AI answer with human follow-up still counts.
+- Inbound booking proposals are guardrail-validated before persistence. The
+  persisted response states only that the request was received pending
+  verification. BookingService runs after commit from that same stored payload,
+  with independently verified customer intent from tenant-scoped source messages,
+  capacity validation and stable `source_message_id`. Replay resumes the action
+  without another generation. A failure routes to staff and never rewrites or
+  refunds the canonical response; no booking runs after a failed A04 commit.
 - `src/api/routes/simulator.py` uses the authenticated actor and mandatory
   `Idempotency-Key`; successful response and counter are durable before it is
   returned. Replays return the first response.
@@ -147,3 +163,6 @@ fences legacy writers; migration 060 is not automatically reversed.
 
 No deployment, remote migration, Production change or backup deletion is
 included in the source integration of this component.
+
+See `a04-review-and-staging-cutover.md` for the independent findings, path matrix
+and ordered inventory, drain, migration-compatibility and rollback gates.

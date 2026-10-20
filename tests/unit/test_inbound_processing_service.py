@@ -1,4 +1,6 @@
 import uuid
+import json
+from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +29,8 @@ def mock_deps(monkeypatch):
     class QuotaReservationsStub:
         def __init__(self):
             self.reserve = AsyncMock(return_value={"status": "reserved", "ticket": object()})
-            self.commit = AsyncMock()
+            self.commit = AsyncMock(side_effect=lambda _operation, _ticket, final: json.loads(final.serialized))
+            self.renew = AsyncMock(side_effect=lambda _operation, ticket: ticket)
             self.release = AsyncMock()
 
     quota = QuotaReservationsStub()
@@ -199,7 +202,10 @@ async def test_step11_12_orchestration_and_send(base_config, mock_deps, canale):
         intent="faq",
         source="llm",
     )
-    mock_orchestrator.orchestrate.return_value._quota_final = object()
+    mock_orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Siamo aperti tutti i giorni dalle 19:00.", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
 
     inbound_svc = InboundProcessingService(
         app_config=base_config,
@@ -253,7 +259,10 @@ async def test_cached_inbound_reply_fails_closed_without_a04_replay(base_config,
         response_text="Nuova risposta valida.", richiede_umano=False,
         intent="faq", source="llm",
     )
-    orchestrator.orchestrate.return_value._quota_final = object()
+    orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Nuova risposta valida.", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
     inbound_svc = InboundProcessingService(
         app_config=base_config,
         repo=mock_deps["repo"],

@@ -121,15 +121,12 @@ class ProviderAccountingContext:
         self.billing_snapshot = dict(billing_snapshot)
         self._quota_operation = quota_operation
         self._quota_ticket = quota_ticket
+        from src.core.billing.quota_reservations import QuotaLease
+        self._caller_quota_lease = QuotaLease.current(quota_operation, quota_ticket)
         self.execution_id = uuid4()
         self._loop = asyncio.get_running_loop()
         self._closed = False
-        self._quota_lease_failed = False
         self._state_lock = threading.Lock()
-        self._quota_lease_task = (
-            self._loop.create_task(self._renew_quota_lease())
-            if quota_operation is not None else None
-        )
 
     def __repr__(self):
         return "ProviderAccountingContext(<internal>)"
@@ -279,23 +276,6 @@ class ProviderAccountingContext:
             _deny()
         return cls(pool, org_id, actor_id, message_id, simulation_id, simulation_claim,
                    task_type, context, billing, quota_operation, quota_ticket, _ISSUER)
-
-    async def _renew_quota_lease(self):
-        """Keep a live A04 claim fenced while a long provider call is running."""
-        from src.core.billing.quota_reservations import QuotaReservations
-
-        try:
-            while True:
-                await asyncio.sleep(8)
-                if self._closed:
-                    return
-                self._quota_ticket = await QuotaReservations(self.pool).renew(
-                    self._quota_operation, self._quota_ticket,
-                )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            self._quota_lease_failed = True
 
     @staticmethod
     async def _verify_actor(conn, organization_id, auth_user_id):
@@ -549,9 +529,11 @@ class ProviderAccountingContext:
 
     async def mark_dispatching(self, attempt: ProviderAttempt) -> None:
         """Atomically commit one-use HTTP dispatch authorization before transport."""
+        self.assert_http_admission()
         self._validate_attempt(attempt)
         async with self.pool.acquire() as conn, conn.transaction():
             await self._recheck_scope_and_billing(conn)
+            self.assert_http_admission()
             if await conn.fetchval(
                 "SELECT id FROM organizations WHERE id=$1 FOR UPDATE", self.organization_id,
             ) is None:
@@ -953,17 +935,13 @@ class ProviderAccountingContext:
     async def close(self):
         with self._state_lock:
             self._closed = True
-        if self._quota_lease_task is not None:
-            self._quota_lease_task.cancel()
-            try:
-                await self._quota_lease_task
-            except asyncio.CancelledError:
-                pass
 
     def assert_http_admission(self):
         with self._state_lock:
-            if self._closed or self._quota_lease_failed:
+            if self._closed:
                 _deny()
+            if self._caller_quota_lease is not None:
+                self._caller_quota_lease.assert_healthy()
 
     def bridge(self, callback, *args, **kwargs):
         """Run async DB accounting on its owning loop from CrewAI's sync worker."""

@@ -6,10 +6,12 @@ private response/idempotency store. Callers authenticate and authorize the
 current tenant before every action.
 """
 
+import asyncio
 import hashlib
 import json
 import math
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -27,10 +29,88 @@ _WORKER = uuid5(NAMESPACE_URL, "melpis:quota:inbound-worker:v1")
 _CAPABILITY = object()
 _LEASE = timedelta(seconds=30)
 _CHANNELS = frozenset({"inbound", "simulator", "qa"})
+_CURRENT_LEASE = ContextVar("a04_caller_lease", default=None)
 
 
 class QuotaConflict(AIGenerationBlocked):
     """The operation cannot safely be reused or completed."""
+
+
+class QuotaLease:
+    """Caller-owned renewal from reservation through final persistence.
+
+    Cancellation stops renewal only. It never proves a failed provider call or
+    releases capacity. The database claim remains authoritative at every POST
+    and commit, including when a worker loses this heartbeat.
+    """
+
+    INTERVAL_SECONDS = 8
+
+    def __init__(self):
+        self._task = None
+        self._failed = False
+        self._stopped = False
+
+    async def __aenter__(self):
+        self._context_token = _CURRENT_LEASE.set(self)
+        return self
+
+    def bind(self, reservations, operation, ticket):
+        if self._task is not None or self._stopped:
+            raise RuntimeError("Quota lease already bound")
+        self.reservations = reservations
+        self.operation = operation
+        self.ticket = ticket
+        self._initial_ticket = ticket
+        self._task = asyncio.create_task(self._renew())
+
+    @classmethod
+    def current(cls, operation, ticket):
+        lease = _CURRENT_LEASE.get()
+        if (lease is not None and lease._task is not None
+                and lease.operation is operation and lease._initial_ticket is ticket):
+            return lease
+        return None
+
+    def assert_healthy(self):
+        if self._failed or self._stopped:
+            _deny()
+
+    async def checkpoint(self):
+        self.assert_healthy()
+        try:
+            self.ticket = await self.reservations.renew(self.operation, self.ticket)
+        except Exception:
+            self._failed = True
+            raise
+        if self._failed:
+            _deny()
+
+    async def _renew(self):
+        try:
+            while True:
+                await asyncio.sleep(self.INTERVAL_SECONDS)
+                await self.checkpoint()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._failed = True
+
+    async def __aexit__(self, *_exc):
+        try:
+            await self.stop()
+        finally:
+            _CURRENT_LEASE.reset(self._context_token)
+
+    async def stop(self):
+        self._stopped = True
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
 
 
 def _deny():

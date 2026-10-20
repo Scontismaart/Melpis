@@ -1,8 +1,10 @@
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 import pytest
 
 from src.core.bookings.service import BookingService, SlotPienoError
@@ -172,7 +174,8 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
                     "richiede_umano": False, "motivo": "", "categoria": "generico",
                 }},
             ])
-            self.commit = AsyncMock()
+            self.commit = AsyncMock(side_effect=lambda _op, _ticket, final: json.loads(final.serialized))
+            self.renew = AsyncMock(side_effect=lambda _op, ticket: ticket)
             self.release = AsyncMock()
 
     quota = QuotaReservationsStub(None)
@@ -200,7 +203,10 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         intent="faq",
         source="llm",
     )
-    inbound_svc.orchestrator.orchestrate.return_value._quota_final = object()
+    inbound_svc.orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Benvenuto da Pizzeria Bella!", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("src.core.inbound.service.load_tenant_config", AsyncMock(return_value=mock_tc))

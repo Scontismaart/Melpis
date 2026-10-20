@@ -19,7 +19,7 @@ from src.agents.prompts import (
     formatta_disponibilita,
 )
 from src.core.bookings import SlotPienoError
-from src.core.ai_safety import apply_booking_result, booking_failed, validate_ai_input
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY, apply_booking_result, booking_failed, validate_ai_input
 from src.core.crew_runner import genera_risposta_async
 from src.core.documenti.rag_context import ContestoDocumenti, recupera_contesto_documenti
 from src.core.guardrails import faq_cache
@@ -193,13 +193,22 @@ class ConversationOrchestrator:
                 if req.quota_operation is not None and req.quota_ticket is not None:
                     from src.core.billing.quota_reservations import validate_final_response
                     from src.models.schemas import RispostaOutput
+                    cached_response = RispostaOutput(
+                        risposta=cached_answer, richiede_umano=False,
+                        motivo="", categoria=intent_result.intent or "generico",
+                    )
+                    cached_response = applica_guardrail(
+                        cached_response, valida_risposta(cached_response, profilo=profilo),
+                    )
+                    if cached_response._guardrail_blocked is True:
+                        output.response_text = cached_response.risposta
+                        output.richiede_umano = True
+                        output._quota_exempt = True
+                        return output
                     output._quota_final = validate_final_response(
                         req.quota_operation,
                         req.quota_ticket,
-                        RispostaOutput(
-                            risposta=cached_answer, richiede_umano=False,
-                            motivo="", categoria=intent_result.intent or "generico",
-                        ),
+                        cached_response,
                         profile=profilo,
                     )
                 return output
@@ -358,7 +367,7 @@ class ConversationOrchestrator:
                         )
                     except Exception as e:
                         logger.warning("Simulation availability check failed: %s",type(e).__name__)
-            else:
+            elif req.quota_operation is None:
                 # CANALE REALE: creazione deterministica con slot_lock e gestione SlotPienoError
                 if self.booking_service and org_id and req.message_id:
                     try:
@@ -442,10 +451,22 @@ class ConversationOrchestrator:
         )
         if req.quota_operation is not None and req.quota_ticket is not None:
             from src.core.billing.quota_reservations import validate_final_response
+            if risposta._guardrail_blocked is True:
+                output._quota_exempt = True
+                return output
+            # Validate the original proposal before substituting truthful
+            # pending wording. A rejected response cannot authorize a booking.
             output._quota_final = validate_final_response(
                 req.quota_operation, req.quota_ticket, risposta,
                 context_chunks=contesto.chunks, profile=profilo,
             )
+            if not req.is_simulation and pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
+                risposta.risposta = BOOKING_RECEIVED_REPLY
+                output.response_text = risposta.risposta
+                output._quota_final = validate_final_response(
+                    req.quota_operation, req.quota_ticket, risposta,
+                    context_chunks=contesto.chunks, profile=profilo,
+                )
         return output
 
     async def _resolve_profile(self, org_id, raw_profile) -> ProfiloAttivita:

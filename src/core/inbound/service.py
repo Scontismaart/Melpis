@@ -6,12 +6,16 @@ import inspect
 import json
 import logging
 import os
+import re
 import uuid
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Callable
 
 from src.core.security_logger import security_audit
 from src.core.ai_safety import replay_requires_intervention
 from src.core.billing.suspension import is_org_suspended
+from src.core.billing.quota_reservations import QuotaLease
 from src.core.channels.base import ChannelOutboundPort
 from src.core.channels.delivery import DeliveryUnconfirmed, provider_message_id
 from src.core.channels.instagram_adapter import InstagramOutboundAdapter
@@ -53,6 +57,93 @@ def _extract_from(content: dict) -> str:
     if not isinstance(content, dict):
         return ""
     return str(content.get("from") or content.get("from_") or "").strip()
+
+
+def _explicit_booking_intent(newest_first: list[str]) -> bool:
+    """Conservative deterministic customer authorization, never model output.
+
+    An ambiguous continuation may use a recent explicit customer request, but
+    a later denial/cancellation stops the search and requires a human.
+    """
+    return _booking_request_index(newest_first) is not None
+
+
+def _booking_request_index(newest_first: list[str]) -> int | None:
+    for index, text in enumerate(newest_first):
+        normalized = (text or "").strip().lower()
+        if re.search(r"\b(non|annulla|cancella|cancel|don't|do not)\b", normalized):
+            return None
+        if re.search(
+            r"^(?:(?:ciao|salve|buongiorno|buonasera)[,! ]+)?"
+            r"(?:(?:vorrei|voglio|desidero|posso|potrei|vogliamo|vorremmo)\s+prenotare\b"
+            r"|prenot(?:a|o)\b|(?:i would like to|i want to|please)\s+(?:book|reserve)\b)",
+            normalized,
+        ):
+            return index
+        if not re.fullmatch(
+            r"(?:(?:s[iì]|ok|va bene|confermo|perfetto)(?:[,! ]+grazie)?"
+            r"|(?:alle?\s+)?\d{1,2}[:.]\d{2}(?:\s+per\s+(?:\d{1,2}|due|tre|quattro)"
+            r"\s*(?:persone|coperti)?)?|(?:siamo|per)\s+\d{1,2}\s*(?:persone|coperti)?)"
+            r"[.! ]*", normalized,
+        ):
+            return None
+    return None
+
+
+def _booking_values_match(rows, proposal, source_timestamp, *, default_coperti=None) -> bool:
+    """Only explicit, unambiguous customer facts authorize mandatory values."""
+    if proposal is None:
+        return False
+    dates, times, parties = set(), set(), set()
+    words = {"uno": 1, "una": 1, "due": 2, "tre": 3, "quattro": 4,
+             "cinque": 5, "sei": 6, "sette": 7, "otto": 8, "nove": 9, "dieci": 10}
+    number = r"\d{1,2}|uno|una|due|tre|quattro|cinque|sei|sette|otto|nove|dieci"
+    for row in rows:
+        if row["created_at"] > source_timestamp:
+            return False
+        anchor = row["created_at"].astimezone(ZoneInfo("Europe/Rome")).date()
+        text = (row["content_text"] or "").lower()
+        for match in re.finditer(r"\b\d{4}-\d{2}-\d{2}\b", text):
+            try:
+                dates.add(date.fromisoformat(match.group()).isoformat())
+            except ValueError:
+                return False
+        for match in re.finditer(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b", text):
+            try:
+                dates.add(date(int(match[3]), int(match[2]), int(match[1])).isoformat())
+            except ValueError:
+                return False
+        for word, offset in (("oggi", 0), ("domani", 1), ("dopodomani", 2)):
+            if re.search(rf"\b{word}\b", text):
+                dates.add((anchor + timedelta(days=offset)).isoformat())
+        for match in re.finditer(r"(?<![\d./])(\d{1,2})[:.](\d{2})(?![\d./])", text):
+            hour, minute = int(match[1]), int(match[2])
+            if hour > 23 or minute > 59:
+                return False
+            times.add(f"{hour:02d}:{minute:02d}")
+        for match in re.finditer(r"\balle\s+(\d{1,2})(?![\d:.])\b", text):
+            hour = int(match[1])
+            if hour > 23:
+                return False
+            times.add(f"{hour:02d}:00")
+        for pattern in (rf"\b(?:per|siamo|in)\s+({number})(?![\d/:.-])\b",
+                        rf"\b({number})\s+(?:persone|coperti)\b"):
+            for match in re.finditer(pattern, text):
+                value = match[1]
+                parties.add(int(value) if value.isdigit() else words[value])
+    if not parties and type(default_coperti) is int and default_coperti > 0:
+        parties.add(default_coperti)
+    return (dates == {proposal.data} and times == {proposal.ora}
+            and parties == {proposal.coperti})
+
+
+def _booking_action_is_fresh(source, proposal) -> bool:
+    now = source["verified_now"]
+    if not timedelta(0) <= now - source["created_at"] <= timedelta(minutes=30):
+        return False
+    timezone = ZoneInfo("Europe/Rome")
+    slot = datetime.fromisoformat(f"{proposal.data}T{proposal.ora}").replace(tzinfo=timezone)
+    return slot > now.astimezone(timezone)
 
 
 async def decorate_with_disclosure(
@@ -239,6 +330,127 @@ class InboundProcessingService:
         return ProcessingOutcome(action="handled", handling_type=handling_type, richiede_umano=True)
 
     async def process_message(self, msg: dict) -> ProcessingOutcome:
+        async with QuotaLease() as lease:
+            return await self._process_message(msg, lease)
+
+    async def _booking_context(self, org_id, msg, proposal):
+        """Read-only, tenant-scoped proof of an unconsumed customer request."""
+        if str(msg.get("organization_id")) != str(org_id):
+            return None
+        async with self.repo.pool.acquire() as conn:
+            source = await conn.fetchrow(
+                """SELECT m.content,m.conversation_id,m.created_at,m.billed_at,c.canale,o.business_profile,
+                          o.subscription_status,o.subscription_id,o.trial_start,o.trial_end,
+                          o.current_period_start,o.current_period_end,o.ai_accounting_blocked,
+                          clock_timestamp() AS verified_now
+                     FROM messages m JOIN conversations c
+                       ON c.id=m.conversation_id AND c.organization_id=m.organization_id
+                     JOIN organizations o ON o.id=m.organization_id
+                    WHERE m.organization_id=$1 AND c.organization_id=$1 AND o.id=$1 AND m.id=$2
+                      AND m.direction='inbound' AND m.deleted_at IS NULL""",
+                uuid.UUID(str(org_id)), uuid.UUID(str(msg["id"])),
+            )
+            if source is None or str(source["conversation_id"]) != str(msg.get("conversation_id")):
+                return None
+            # A stored reply may be delivered after admission is blocked, but
+            # it cannot authorize a new privileged booking in that state.
+            from src.core.billing.quota_reservations import QuotaConflict, _period
+            if source["ai_accounting_blocked"]:
+                return None
+            try:
+                _period(dict(source), source["verified_now"], uuid.UUID(str(org_id)))
+            except QuotaConflict:
+                return None
+            history = await conn.fetch(
+                """SELECT id,content_text,created_at FROM messages
+                    WHERE organization_id=$1 AND conversation_id=$2
+                      AND direction='inbound' AND deleted_at IS NULL
+                      AND created_at <= $3 AND created_at >= $3 - interval '30 minutes'
+                    ORDER BY (id=$4) DESC,created_at DESC,id DESC LIMIT 20""",
+                uuid.UUID(str(org_id)), source["conversation_id"], source["created_at"],
+                uuid.UUID(str(msg["id"])),
+            )
+            request_index = _booking_request_index([row["content_text"] for row in history])
+            if request_index is None:
+                return None
+            from src.core.verticals import get_vertical_strategy
+            profile = source["business_profile"] or {}
+            if isinstance(profile, str):
+                profile = json.loads(profile)
+            strategy = get_vertical_strategy(profile.get("verticale"), organization_id=str(org_id))
+            if not _booking_values_match(
+                history[:request_index + 1], proposal, source["created_at"],
+                default_coperti=strategy.default_coperti,
+            ):
+                return None
+            if request_index > 0 and source["billed_at"] is None and await conn.fetchval(
+                """SELECT EXISTS(SELECT 1 FROM bookings b JOIN messages m
+                       ON m.id::text=b.source_message_id AND m.organization_id=b.organization_id
+                     WHERE b.organization_id=$1 AND m.organization_id=$1 AND m.conversation_id=$2
+                       AND m.created_at >= $3 AND b.source_message_id<>$4)""",
+                uuid.UUID(str(org_id)), source["conversation_id"],
+                history[request_index]["created_at"], str(msg["id"]),
+            ):
+                return None
+        verified = dict(source)
+        # Continuations consume the original customer request's booking key.
+        # Concurrent confirmations therefore converge through the existing
+        # unique (organization_id, source_message_id), even across crashes.
+        verified["booking_source_message_id"] = str(history[request_index]["id"])
+        return verified
+
+    async def _apply_committed_booking(self, org_id, msg, content, canonical) -> bool:
+        """Resume a booking only from the durable final, never a model grant.
+
+        Customer intent is independently proved from tenant-scoped inbound
+        messages. Availability, validation, source dedup and external dispatch
+        continue through BookingService. Failures request staff intervention;
+        they never change/refund the commercial response or rerun the provider.
+        """
+        from src.models.schemas import RispostaOutput
+
+        response = RispostaOutput.model_validate(canonical)
+        pren = response.prenotazione
+        if response.richiede_umano or not (pren and pren.data and pren.ora and pren.coperti):
+            return False
+        if self.booking_service is None:
+            return True
+        try:
+            source = await self._booking_context(org_id, msg, pren)
+            if source is None:
+                return True
+            async with self.repo.pool.acquire() as conn:
+                existing = await conn.fetchrow(
+                    "SELECT * FROM bookings WHERE organization_id=$1 AND source_message_id=$2",
+                    uuid.UUID(str(org_id)), source["booking_source_message_id"],
+                )
+            if existing is not None:
+                return replay_requires_intervention(dict(existing))
+            if not _booking_action_is_fresh(source, pren):
+                return True
+            source_content = source["content"]
+            if isinstance(source_content, str):
+                source_content = json.loads(source_content)
+            channel = source["canale"] or "whatsapp"
+            created = await self.booking_service.create_booking(
+                organization_id=org_id,
+                nome_cliente=pren.nome_cliente or ("Cliente Instagram" if channel == "instagram" else "Cliente WhatsApp"),
+                telefono=_extract_from(source_content), data=pren.data, ora=pren.ora,
+                coperti=pren.coperti, note=pren.note or "",
+                origine="Instagram" if channel == "instagram" else "WhatsApp",
+                richiede_intervento=False,
+                id_conversazione=str(source["conversation_id"]),
+                source_message_id=source["booking_source_message_id"],
+            )
+            return replay_requires_intervention(created)
+        except Exception as exc:
+            logger.warning(
+                "inbound=postcommit_booking_requires_staff organization_id=%s message_id=%s error_type=%s",
+                org_id, msg.get("id"), type(exc).__name__,
+            )
+            return True
+
+    async def _process_message(self, msg: dict, lease: QuotaLease) -> ProcessingOutcome:
         org_id = msg["organization_id"]
         text = msg.get("content_text", "")
         content = msg.get("content", {})
@@ -328,9 +540,13 @@ class InboundProcessingService:
 
         # ── STEP 6: Sospensione Tenant (Invariante 8) ──────────────────────────
         state = await self.repo.get_org_subscription_state(org_id)
-        if not state or state.get("ai_accounting_blocked") or is_org_suspended(
+        generation_blocked = not state or state.get("ai_accounting_blocked") or is_org_suspended(
             state.get("subscription_status"), state.get("trial_end")
-        ):
+        )
+        # A marker only permits reaching strict A04 replay verification below;
+        # it cannot grant a fresh reservation/provider call. Do not replace an
+        # already committed answer merely because new generation is blocked.
+        if generation_blocked and claim_result.get("ai_reply_cache") is None:
             logger.warning(
                 "org_id=%s message_id=%s event=org_suspended — risposta AI inibita",
                 org_id,
@@ -463,6 +679,7 @@ class InboundProcessingService:
                 # retry, so release only this fresh reservation and fail shut.
                 ticket = reservation.get("ticket")
                 if ticket is not None:
+                    lease.bind(quota_reservations, quota_operation, ticket)
                     try:
                         await quota_reservations.release(quota_operation, ticket)
                     except Exception as exc:
@@ -515,6 +732,7 @@ class InboundProcessingService:
         pren = None
         q_emb = None
         variante_prompt = "control"
+        canonical_response = None
         # Existing cache/dedup markers were already validated before fast path.
         # New AI work reserves here before any provider work.
         if reservation is None:
@@ -543,15 +761,12 @@ class InboundProcessingService:
                     cached = None
             if not isinstance(cached, dict):
                 return ProcessingOutcome(action="error", handling_type="quota_replay_unavailable")
-            claim_result["ai_reply_cache"] = {
-                "text": cached.get("risposta", cached.get("text", "")),
-                "richiede_umano": bool(cached.get("richiede_umano", False)),
-                "motivo": cached.get("motivo", ""),
-            }
+            claim_result["ai_reply_cache"] = cached
         elif reservation_status == "reserved":
             quota_ticket = reservation.get("ticket")
             if quota_ticket is None:
                 return ProcessingOutcome(action="error", handling_type="quota_ticket_unavailable")
+            lease.bind(quota_reservations, quota_operation, quota_ticket)
             # Ignore any preexisting unverified cache; a reservation would have
             # rejected it in QuotaReservations._lock before reaching this path.
             claim_result["ai_reply_cache"] = None
@@ -574,9 +789,19 @@ class InboundProcessingService:
                     org_id, msg["id"], type(exc).__name__,
                 )
             quota_ticket = None
+            await lease.stop()
+
+        def apply_canonical(payload):
+            nonlocal canonical_response, risposta_text, richiede_umano, pren
+            from src.models.schemas import RispostaOutput
+            parsed = RispostaOutput.model_validate(json.loads(payload) if isinstance(payload, str) else payload)
+            canonical_response = parsed.model_dump(mode="json")
+            risposta_text = parsed.risposta
+            richiede_umano = parsed.richiede_umano
+            pren = parsed.prenotazione
 
         async def commit_quota_if_valid(final_response, *, allow_nonbillable=False):
-            nonlocal quota_ticket
+            nonlocal quota_ticket, risposta_text, richiede_umano
             if quota_ticket is None or quota_reservations is None:
                 return
             if final_response is None:
@@ -584,8 +809,27 @@ class InboundProcessingService:
                     await release_quota_if_safe()
                     return
                 raise RuntimeError("A04 final response proof missing")
-            await quota_reservations.commit(quota_operation, quota_ticket, final_response)
+            # A model-proposed booking without customer authorization is only
+            # a deterministic staff handoff, not a commercial AI final.
+            from src.core.ai_safety import BOOKING_FAILURE_REPLY
+            from src.models.schemas import RispostaOutput
+            payload = json.loads(final_response.serialized)
+            candidate = RispostaOutput.model_validate(payload)
+            proposal = candidate.prenotazione
+            if (proposal and proposal.data and proposal.ora and proposal.coperti
+                    and not candidate.richiede_umano):
+                authorized = await self._booking_context(org_id, msg, proposal)
+                if (authorized is None or self.booking_service is None
+                        or not _booking_action_is_fresh(authorized, proposal)):
+                    await release_quota_if_safe()
+                    risposta_text = BOOKING_FAILURE_REPLY
+                    richiede_umano = True
+                    return
+            await lease.checkpoint()
+            persisted = await quota_reservations.commit(quota_operation, quota_ticket, final_response)
+            apply_canonical(persisted)
             quota_ticket = None
+            await lease.stop()
 
         if outbound_dedup and reservation_status == "reserved":
             # A dedup row without a committed A04 record is a legacy or
@@ -599,7 +843,9 @@ class InboundProcessingService:
             )
             return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
 
-        if self.use_orchestrator:
+        if reservation_status == "replay":
+            apply_canonical(reservation["response"])
+        elif self.use_orchestrator:
             ai_cached = claim_result.get("ai_reply_cache")
             if ai_cached:
                 if isinstance(ai_cached, dict):
@@ -645,7 +891,9 @@ class InboundProcessingService:
                     if out.source in {"fast_path", "manual_gate"}:
                         await release_quota_if_safe()
                     else:
-                        await commit_quota_if_valid(out._quota_final)
+                        await commit_quota_if_valid(
+                            out._quota_final, allow_nonbillable=out._quota_exempt is True,
+                        )
                 except Exception as exc:
                     await release_quota_if_safe()
                     logger.error(
@@ -694,7 +942,9 @@ class InboundProcessingService:
                 from_number = _extract_from(content)
                 nome = (business_profile_raw or {}).get("nome") or "Attivita"
                 decorated = await decorate_with_disclosure(
-                    org_id, from_number, legacy_res.response_text, self.repo, nome
+                    org_id, from_number,
+                    risposta_text if canonical_response is not None else legacy_res.response_text,
+                    self.repo, nome,
                 )
                 try:
                     res = await self._send_reply(
@@ -757,6 +1007,12 @@ class InboundProcessingService:
                     )
                 except Exception as shadow_err:
                     logger.warning("[SHADOW_ORCHESTRATOR] Comparison error: %s", shadow_err)
+
+        # Only durable, guardrail-approved data may authorize this deterministic
+        # application action. Replay resumes it without another provider call.
+        if canonical_response is not None:
+            needs_staff = await self._apply_committed_booking(org_id, msg, content, canonical_response)
+            richiede_umano = richiede_umano or needs_staff
 
         # ── STEP 12: Consegna Outbound & Finalizzazione ─────────────────────────
         nome_attivita = (business_profile_raw or {}).get("nome") or "Attivita"

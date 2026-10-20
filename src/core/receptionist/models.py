@@ -53,6 +53,7 @@ class OrchestrationInput(BaseModel):
 class OrchestrationOutput(BaseModel):
     """Risultato unificato e validato dell'orchestrazione AI Receptionist."""
     _quota_final: Any = PrivateAttr(default=None)
+    _quota_exempt: bool = PrivateAttr(default=False)
     response_text: str
     richiede_umano: bool = False
     motivo_richiesta_umano: str | None = None

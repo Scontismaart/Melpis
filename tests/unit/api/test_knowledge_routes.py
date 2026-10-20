@@ -222,6 +222,9 @@ def test_chiedi_documenti_success(client):
             quota_events.append(("reserve", operation))
             return {"status": "reserved", "ticket": object()}
 
+        async def renew(self, operation, ticket):
+            return ticket
+
         async def commit(self, operation, ticket, final):
             quota_events.append(("commit", operation, ticket, final))
             return {"risposta": mock_qa_output["risposta"], "fonti": [{
