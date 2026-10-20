@@ -2,12 +2,36 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 import logging
+from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.core.auth.dependencies import get_organization_context
+
+
+class _QuotaReservations:
+    def __init__(self, _pool):
+        self.ticket = SimpleNamespace(claim_id=uuid.uuid4())
+        self.reservation = {"status": "reserved", "ticket": self.ticket}
+        self.response = {"risposta": "Risposta simulata", "richiede_umano": False,
+                         "motivo": "", "categoria": "generico", "prenotazione": None}
+        self.reserve_calls = []
+        self.commit_calls = []
+        self.release_calls = []
+
+    async def reserve(self, operation):
+        self.reserve_calls.append(operation)
+        return self.reservation
+
+    async def commit(self, operation, ticket, final):
+        self.commit_calls.append((operation, ticket, final))
+        return self.response
+
+    async def release(self, operation, ticket):
+        self.release_calls.append((operation, ticket))
+        return True
 
 
 @pytest.fixture
@@ -121,12 +145,7 @@ def test_messaggio_authenticated_organization(client):
         "plan": "business", "subscription_status": "active",
         "messages_limit": 100, "messages_used_this_period": 0,
     }
-    mock_repo.reserve_simulation_request = AsyncMock(return_value={
-        "status": "reserved", "claim_token": str(uuid.uuid4()),
-    })
     request_id = uuid.uuid4()
-    claim_token = mock_repo.reserve_simulation_request.return_value["claim_token"]
-    mock_repo.complete_simulation_request = AsyncMock(return_value=True)
 
     mock_orchestrator = AsyncMock()
     mock_out = MagicMock()
@@ -138,10 +157,14 @@ def test_messaggio_authenticated_organization(client):
     mock_out.disponibilita_slot = None
     mock_out.guardrail_action = None
     mock_orchestrator.orchestrate.return_value = mock_out
+    quota = _QuotaReservations(None)
+    quota.response = {"risposta": "Benvenuto a Pizzeria Napoli!", "richiede_umano": False,
+                      "motivo": "", "categoria": "saluto", "prenotazione": None}
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
     with patch.object(app.state, "repo", mock_repo, create=True), \
-         patch.object(app.state, "orchestrator", mock_orchestrator, create=True):
+         patch.object(app.state, "orchestrator", mock_orchestrator, create=True), \
+         patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota):
         res = client.post("/api/messaggio", headers={"Idempotency-Key": str(request_id)}, json={
             "testo": "Siete aperti stasera?",
             "id_conversazione": f"conv-{uuid.uuid4().hex[:8]}",
@@ -152,10 +175,12 @@ def test_messaggio_authenticated_organization(client):
         assert call_args.organization_id == mock_org_id
         assert call_args.business_profile.nome == "Pizzeria Napoli"
         assert call_args.record_billing_usage is True
-        assert call_args.simulation_request_id == request_id
-        assert call_args.simulation_claim_token == claim_token
+        assert call_args.simulation_request_id == quota.reserve_calls[0].id
+        assert quota.reserve_calls[0].source_id == request_id
+        assert call_args.simulation_claim_token == quota.ticket.claim_id
         assert "simulation_claim_token" not in call_args.model_dump()
-        assert claim_token not in repr(call_args)
+        assert str(quota.ticket.claim_id) not in repr(call_args)
+        assert len(quota.commit_calls) == 1
     app.dependency_overrides.pop(get_organization_context, None)
 
 
@@ -177,17 +202,15 @@ def test_messaggio_provider_failure_logs_only_org_and_trace(client, caplog):
             "nome_attivita": "Test", "tipo_attivita": "ristorante",
         },
     }
-    mock_repo.reserve_simulation_request = AsyncMock(return_value={
-        "status": "reserved", "claim_token": str(uuid.uuid4()),
-    })
-    mock_repo.fail_simulation_request = AsyncMock(return_value=True)
+    quota = _QuotaReservations(None)
     mock_orchestrator = AsyncMock()
     mock_orchestrator.orchestrate.side_effect = RuntimeError("provider-secret-response")
     app.dependency_overrides[get_organization_context] = lambda: mock_user
     caplog.set_level(logging.ERROR)
     try:
         with patch.object(app.state, "repo", mock_repo, create=True), \
-             patch.object(app.state, "orchestrator", mock_orchestrator, create=True):
+             patch.object(app.state, "orchestrator", mock_orchestrator, create=True), \
+             patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota):
             response = client.post(
                 "/api/messaggio", headers={
                     "Idempotency-Key": str(uuid.uuid4()), "X-Request-ID": "trace-review-001",
@@ -198,5 +221,6 @@ def test_messaggio_provider_failure_logs_only_org_and_trace(client, caplog):
         assert "provider-secret-response" not in caplog.text
         assert f"org_id={org_id}" in caplog.text
         assert "trace_id=trace-review-001" in caplog.text
+        assert len(quota.release_calls) == 1
     finally:
         app.dependency_overrides.pop(get_organization_context, None)

@@ -38,8 +38,12 @@ def _mock_provider_accounting_context(monkeypatch):
     async def open_context(cls, pool, organization_id, *, task_type,
                            actor_auth_user_id=None, worker_message_id=None,
                            simulation_request_id=None, simulation_claim_token=None,
+                           quota_operation=None, quota_ticket=None,
                            context=None):
-        return provider_context_stub(task_type=task_type, organization_id=organization_id)
+        return provider_context_stub(
+            task_type=task_type, organization_id=organization_id,
+            quota_operation=quota_operation, quota_ticket=quota_ticket,
+        )
 
     monkeypatch.setattr(ProviderAccountingContext, "open", classmethod(open_context))
 

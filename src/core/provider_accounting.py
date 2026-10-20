@@ -107,7 +107,7 @@ class ProviderAccountingContext:
 
     def __init__(self, pool, organization_id, actor_auth_user_id, worker_message_id,
                  simulation_request_id, simulation_claim_token, task_type, context,
-                 billing_snapshot, issuer):
+                 billing_snapshot, quota_operation, quota_ticket, issuer):
         if issuer is not _ISSUER:
             _deny()
         self.pool = pool
@@ -119,10 +119,17 @@ class ProviderAccountingContext:
         self.task_type = task_type
         self.context = dict(context)
         self.billing_snapshot = dict(billing_snapshot)
+        self._quota_operation = quota_operation
+        self._quota_ticket = quota_ticket
         self.execution_id = uuid4()
         self._loop = asyncio.get_running_loop()
         self._closed = False
+        self._quota_lease_failed = False
         self._state_lock = threading.Lock()
+        self._quota_lease_task = (
+            self._loop.create_task(self._renew_quota_lease())
+            if quota_operation is not None else None
+        )
 
     def __repr__(self):
         return "ProviderAccountingContext(<internal>)"
@@ -150,13 +157,12 @@ class ProviderAccountingContext:
     @classmethod
     async def open(cls, pool, organization_id, *, task_type, actor_auth_user_id=None,
                    worker_message_id=None, simulation_request_id=None,
-                   simulation_claim_token=None, context=None):
+                   simulation_claim_token=None, context=None,
+                   quota_operation=None, quota_ticket=None):
         """Verify scope and current entitlement before constructing an LLM client.
 
-        User-driven calls must provide the authenticated auth.users identity.
-        The only worker path accepted here is an inbound message already claimed
-        and billed by the legacy inbound processor. A client-supplied org UUID
-        alone can never create this capability.
+        A04 paths must present an unforgeable reservation ticket. Preview and
+        non-answer AI tasks retain their separate A03 authorization contract.
         """
         try:
             org_id = UUID(str(organization_id))
@@ -168,9 +174,36 @@ class ProviderAccountingContext:
                                 if simulation_claim_token is not None else None)
         except (TypeError, ValueError, AttributeError):
             _deny()
-        if (not _uuid(org_id) or task_type not in _TASKS
+        quota_bound = quota_operation is not None or quota_ticket is not None
+        if ((quota_operation is None) != (quota_ticket is None)
+                or not _uuid(org_id) or task_type not in _TASKS
                 or (actor_id is None) == (message_id is None)):
             _deny()
+        if task_type in {"customer_message", "simulator", "document_qa"} and not quota_bound:
+            _deny()
+        if quota_bound:
+            from src.core.billing.quota_reservations import QuotaOperation, QuotaTicket
+            if (type(quota_operation) is not QuotaOperation or type(quota_ticket) is not QuotaTicket
+                    or quota_operation.organization_id != org_id):
+                _deny()
+            expected_channel = {
+                "customer_message": "inbound", "simulator": "simulator", "document_qa": "qa",
+            }.get(task_type)
+            if expected_channel is None or quota_operation.channel != expected_channel:
+                _deny()
+            if quota_operation.channel == "inbound":
+                if (actor_id is not None or message_id != quota_operation.source_id
+                        or simulation_request_id is not None or simulation_claim_token is not None):
+                    _deny()
+            else:
+                if actor_id != quota_operation.auth_user_id or message_id is not None:
+                    _deny()
+                if task_type == "simulator":
+                    if (simulation_id != quota_operation.id
+                            or simulation_claim != quota_ticket.claim_id):
+                        _deny()
+                elif simulation_id is not None or simulation_claim is not None:
+                    _deny()
         simulation_claimed = simulation_id is not None and simulation_claim is not None
         if ((simulation_id is None) != (simulation_claim is None)
                 or (simulation_claimed and (actor_id is None or message_id is not None))
@@ -180,7 +213,8 @@ class ProviderAccountingContext:
         if message_id is not None and task_type not in {"customer_message", "simulator"}:
             _deny()
         context = dict(context or {})
-        if (set(context) - {"message_id", "conversation_id", "trace_id", "simulation_request_id"}
+        if (set(context) - {"message_id", "conversation_id", "trace_id", "simulation_request_id",
+                            "quota_operation_id", "quota_claim_id", "quota_period_id"}
                 or any(value is not None and (type(value) is not str or not _IDENTIFIER.fullmatch(value))
                        for value in context.values())):
             _deny()
@@ -194,33 +228,48 @@ class ProviderAccountingContext:
             _deny()
         if message_id is not None:
             context["message_id"] = str(message_id)
+        if quota_bound:
+            expected_scope = {
+                "quota_operation_id": str(quota_operation.id),
+                "quota_claim_id": str(quota_ticket.claim_id),
+                "quota_period_id": str(quota_ticket.period_id),
+            }
+            if any(context.get(key) not in {None, value} for key, value in expected_scope.items()):
+                _deny()
+            context.update(expected_scope)
         if not context.get("trace_id"):
             context["trace_id"] = str(uuid4())
 
         try:
             async with pool.acquire() as conn, conn.transaction():
-                inbound_message = None
-                simulation_reservation = None
-                if actor_id is not None:
-                    await cls._verify_actor(conn, org_id, actor_id)
-                    if simulation_claimed:
-                        simulation_reservation = await cls._verify_simulation_reservation(
-                            conn, org_id, actor_id, simulation_id, simulation_claim,
-                        )
+                if quota_bound:
+                    from src.core.billing.quota_reservations import QuotaReservations
+                    billing = await QuotaReservations(pool).verify_ticket(
+                        conn, quota_operation, quota_ticket,
+                    )
                 else:
-                    inbound_message = await cls._verify_inbound_message(conn, org_id, message_id)
-                billing_row = await conn.fetchrow(
-                    """SELECT subscription_status, subscription_id, trial_start, trial_end,
-                              current_period_start, current_period_end, messages_limit,
-                              messages_used_this_period, ai_accounting_blocked
-                         FROM organizations WHERE id=$1 FOR UPDATE""",
-                    org_id,
-                )
-                if billing_row is None:
-                    _deny()
-                billing = cls._authorize_billing(
-                    dict(billing_row), inbound_message, simulation_reservation,
-                )
+                    inbound_message = None
+                    simulation_reservation = None
+                    if actor_id is not None:
+                        await cls._verify_actor(conn, org_id, actor_id)
+                        if simulation_claimed:
+                            simulation_reservation = await cls._verify_simulation_reservation(
+                                conn, org_id, actor_id, simulation_id, simulation_claim,
+                            )
+                    else:
+                        inbound_message = await cls._verify_inbound_message(conn, org_id, message_id)
+                    billing_row = await conn.fetchrow(
+                        """SELECT subscription_status, subscription_id, trial_start, trial_end,
+                                  current_period_start, current_period_end, messages_limit,
+                                  messages_used_this_period, ai_accounting_blocked
+                             FROM organizations WHERE id=$1 FOR UPDATE""",
+                        org_id,
+                    )
+                    if billing_row is None:
+                        _deny()
+                    billing = cls._authorize_billing(
+                        dict(billing_row), inbound_message, simulation_reservation,
+                    )
                 state = await cls._unresolved_state(conn, org_id)
                 if state == "blocked":
                     _deny()
@@ -229,7 +278,24 @@ class ProviderAccountingContext:
         except Exception:
             _deny()
         return cls(pool, org_id, actor_id, message_id, simulation_id, simulation_claim,
-                   task_type, context, billing, _ISSUER)
+                   task_type, context, billing, quota_operation, quota_ticket, _ISSUER)
+
+    async def _renew_quota_lease(self):
+        """Keep a live A04 claim fenced while a long provider call is running."""
+        from src.core.billing.quota_reservations import QuotaReservations
+
+        try:
+            while True:
+                await asyncio.sleep(8)
+                if self._closed:
+                    return
+                self._quota_ticket = await QuotaReservations(self.pool).renew(
+                    self._quota_operation, self._quota_ticket,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._quota_lease_failed = True
 
     @staticmethod
     async def _verify_actor(conn, organization_id, auth_user_id):
@@ -365,6 +431,11 @@ class ProviderAccountingContext:
         return "blocked"
 
     async def _recheck_scope_and_billing(self, conn):
+        if self._quota_operation is not None:
+            from src.core.billing.quota_reservations import QuotaReservations
+            return await QuotaReservations(self.pool).verify_ticket(
+                conn, self._quota_operation, self._quota_ticket,
+            )
         inbound_message = None
         simulation_reservation = None
         if self.actor_auth_user_id is not None:
@@ -480,6 +551,7 @@ class ProviderAccountingContext:
         """Atomically commit one-use HTTP dispatch authorization before transport."""
         self._validate_attempt(attempt)
         async with self.pool.acquire() as conn, conn.transaction():
+            await self._recheck_scope_and_billing(conn)
             if await conn.fetchval(
                 "SELECT id FROM organizations WHERE id=$1 FOR UPDATE", self.organization_id,
             ) is None:
@@ -881,10 +953,16 @@ class ProviderAccountingContext:
     async def close(self):
         with self._state_lock:
             self._closed = True
+        if self._quota_lease_task is not None:
+            self._quota_lease_task.cancel()
+            try:
+                await self._quota_lease_task
+            except asyncio.CancelledError:
+                pass
 
     def assert_http_admission(self):
         with self._state_lock:
-            if self._closed:
+            if self._closed or self._quota_lease_failed:
                 _deny()
 
     def bridge(self, callback, *args, **kwargs):

@@ -108,7 +108,7 @@ class TestInstagramWebhookVerify:
 
 
 class TestInstagramWebhookReceive:
-    async def test_ingress_and_repeated_claim_bill_exactly_once(self, ig_app, pg_pool):
+    async def test_ingress_and_processing_claim_do_not_precharge_a04_quota(self, ig_app, pg_pool):
         from httpx import AsyncClient, ASGITransport
         from src.whatsapp.repository import Repository as WRepo
 
@@ -133,21 +133,21 @@ class TestInstagramWebhookReceive:
             org["id"], "ig:mid.ig.bill-once",
         )
         repo = WRepo(pool=pg_pool)
-        result = await repo.claim_message_and_check_quota(str(message_id), str(org["id"]))
-        assert result["status"] == "claimed", "The only quota unit remains available at claim"
+        result = await repo.claim_message_for_processing(str(message_id), str(org["id"]))
+        assert result["status"] == "claimed"
         await pg_pool.execute(
             "UPDATE messages SET processing_at = NULL WHERE id = $1 AND organization_id = $2",
             message_id, org["id"],
         )
-        result = await repo.claim_message_and_check_quota(str(message_id), str(org["id"]))
-        assert result["status"] == "claimed", "Worker retry must reuse billed_at"
+        result = await repo.claim_message_for_processing(str(message_id), str(org["id"]))
+        assert result["status"] == "claimed", "Worker claim retry must not be a commercial charge"
         assert await pg_pool.fetchval(
             "SELECT messages_used_this_period FROM organizations WHERE id = $1", org["id"],
-        ) == 1
+        ) == 0
         assert await pg_pool.fetchval(
             "SELECT count(*) FROM messages WHERE organization_id = $1 AND billed_at IS NOT NULL",
             org["id"],
-        ) == 1
+        ) == 0
 
     async def test_invalid_signature_403(self, ig_app, pg_pool):
         from httpx import AsyncClient, ASGITransport

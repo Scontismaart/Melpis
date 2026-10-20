@@ -321,13 +321,9 @@ def mock_repo(sample_msg):
     repo.faq_cache_lookup = AsyncMock(return_value=None)
     repo.faq_cache_store = AsyncMock(return_value=None)
     repo.pool = MagicMock()
-    repo.claim_message_and_check_quota = AsyncMock(return_value={
+    repo.claim_message_for_processing = AsyncMock(return_value={
         "status": "claimed",
         "ai_reply_cache": None,
-        "billed_at": None,
-        "sent_at": None,
-        "quota_exceeded_at": None,
-        "processing_at": None,
     })
     repo.get_outbound_dedup = AsyncMock(return_value=None)
     repo.save_outbound_dedup = AsyncMock()

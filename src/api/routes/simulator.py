@@ -102,7 +102,9 @@ async def ricevi_messaggio(
     request_uuid = None
     auth_user_uuid = None
     payload_hash = None
-    claim_token = None
+    quota_operation = None
+    quota_ticket = None
+    quota_reservations = None
     if org_id is not None:
         await enforce_org_rate_limit(str(org_id), "ai_simulator", 20, 60)
         if not idempotency_key:
@@ -125,15 +127,19 @@ async def ricevi_messaggio(
             json.dumps(stable_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         try:
-            reservation = await repo.reserve_simulation_request(
-                org_id, auth_user_uuid, request_uuid, payload_hash
+            from src.core.billing.quota_reservations import QuotaOperation, QuotaReservations
+            quota_operation = QuotaOperation(
+                organization_id=uuid.UUID(str(org_id)), source_id=request_uuid,
+                channel="simulator", payload_hash=payload_hash,
+                auth_user_id=auth_user_uuid,
             )
+            quota_reservations = QuotaReservations(getattr(repo, "pool", None))
+            reservation = await quota_reservations.reserve(quota_operation)
         except Exception:
             logger.error("simulator=reservation_failed org_id=%s trace_id=%s", org_id, trace_id)
             raise HTTPException(status_code=503, detail="Impossibile riservare la richiesta simulata")
 
         reservation_status = reservation.get("status") if reservation else None
-        claim_token = reservation.get("claim_token") if reservation else None
         if reservation_status == "replay":
             cached = reservation.get("response")
             if isinstance(cached, str):
@@ -151,9 +157,12 @@ async def ricevi_messaggio(
             raise HTTPException(status_code=409, detail="Richiesta simulata già in elaborazione")
         if reservation_status == "quota_exceeded":
             raise HTTPException(status_code=429, detail="Quota messaggi esaurita")
+        if reservation_status == "reconciliation_required":
+            raise HTTPException(status_code=503, detail="Richiesta in verifica contabile")
         if reservation_status != "reserved":
             raise HTTPException(status_code=503, detail="Impossibile riservare la richiesta simulata")
-        if not claim_token:
+        quota_ticket = reservation.get("ticket")
+        if quota_ticket is None:
             raise HTTPException(status_code=503, detail="Proprietà della richiesta simulata non disponibile")
 
     if org_id is None:
@@ -201,8 +210,10 @@ async def ricevi_messaggio(
         cronologia=cronologia,
         billing_state=billing,
         is_simulation=True,
-        simulation_request_id=request_uuid,
-        simulation_claim_token=claim_token,
+        simulation_request_id=quota_operation.id if quota_operation else None,
+        simulation_claim_token=quota_ticket.claim_id if quota_ticket else None,
+        quota_operation=quota_operation,
+        quota_ticket=quota_ticket,
         # A03 records provider attempts from the verified simulation claim;
         # this legacy flag does not bill the final response.
         record_billing_usage=bool(org_id),
@@ -214,11 +225,9 @@ async def ricevi_messaggio(
         logger.error("simulator=generation_failed org_id=%s trace_id=%s", org_id or "demo", trace_id)
         if org_id is not None:
             try:
-                await repo.fail_simulation_request(
-                    org_id, auth_user_uuid, request_uuid, payload_hash, claim_token
-                )
+                await quota_reservations.release(quota_operation, quota_ticket)
             except Exception:
-                logger.error("simulator=failure_state_update_failed org_id=%s trace_id=%s", org_id, trace_id)
+                logger.warning("simulator=quota_release_deferred org_id=%s trace_id=%s", org_id, trace_id)
         raise HTTPException(status_code=502, detail="Impossibile generare la risposta al momento. Riprova più tardi.")
 
     risposta = RispostaOutput(
@@ -229,20 +238,26 @@ async def ricevi_messaggio(
         prenotazione=out.prenotazione,
     )
 
-    if org_id is not None:
+    if org_id is not None and out.source in {"fast_path", "manual_gate"}:
         try:
-            persisted = await repo.complete_simulation_request(
-                org_id,
-                auth_user_uuid,
-                request_uuid,
-                payload_hash,
-                claim_token,
-                risposta.model_dump(mode="json"),
-            )
+            await quota_reservations.release(quota_operation, quota_ticket)
         except Exception:
+            logger.warning("simulator=quota_release_deferred org_id=%s trace_id=%s", org_id, trace_id)
+    elif org_id is not None:
+        try:
+            final = out._quota_final
+            if final is None:
+                raise RuntimeError("A04 final response proof missing")
+            persisted = await quota_reservations.commit(quota_operation, quota_ticket, final)
+            risposta = RispostaOutput.model_validate(persisted)
+        except Exception:
+            # A commit may have succeeded despite a connection error. The
+            # fenced release is safe and returns false for a committed answer.
+            try:
+                await quota_reservations.release(quota_operation, quota_ticket)
+            except Exception:
+                logger.warning("simulator=quota_reconciliation_required org_id=%s trace_id=%s", org_id, trace_id)
             logger.error("simulator=response_persist_failed org_id=%s trace_id=%s", org_id, trace_id)
-            raise HTTPException(status_code=503, detail="Impossibile salvare la risposta simulata")
-        if not persisted:
             raise HTTPException(status_code=503, detail="Impossibile salvare la risposta simulata")
 
     # Keep conversation history only after the idempotent response is durable.

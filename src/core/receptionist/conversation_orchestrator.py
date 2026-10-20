@@ -183,13 +183,26 @@ class ConversationOrchestrator:
                         )
                     except Exception as e:
                         logger.warning("Cache hit usage logging failed for org %s: %s", org_id,type(e).__name__)
-                return OrchestrationOutput(
+                output = OrchestrationOutput(
                     response_text=cached_answer,
                     source="faq_cache",
                     intent=intent_result.intent,
                     intent_confidence=intent_result.confidence,
                     richiede_umano=False,
                 )
+                if req.quota_operation is not None and req.quota_ticket is not None:
+                    from src.core.billing.quota_reservations import validate_final_response
+                    from src.models.schemas import RispostaOutput
+                    output._quota_final = validate_final_response(
+                        req.quota_operation,
+                        req.quota_ticket,
+                        RispostaOutput(
+                            risposta=cached_answer, richiede_umano=False,
+                            motivo="", categoria=intent_result.intent or "generico",
+                        ),
+                        profile=profilo,
+                    )
+                return output
 
         # 5. RAG Retrieval vettoriale pgvector
         contesto = ContestoDocumenti()
@@ -255,6 +268,8 @@ class ConversationOrchestrator:
             worker_message_id=(req.message_id if req.auth_user_id is None else None),
             simulation_request_id=req.simulation_request_id if req.is_simulation else None,
             simulation_claim_token=req.simulation_claim_token if req.is_simulation else None,
+            quota_operation=req.quota_operation,
+            quota_ticket=req.quota_ticket,
             context={
                 "message_id": str(req.message_id) if req.message_id else None,
                 "conversation_id": req.conversation_id or None,
@@ -411,7 +426,7 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.warning("FAQ cache store failed for org %s: %s", org_id,type(e).__name__)
 
-        return OrchestrationOutput(
+        output = OrchestrationOutput(
             response_text=risposta.risposta,
             richiede_umano=bool(risposta.richiede_umano),
             motivo_richiesta_umano=risposta.motivo,
@@ -425,6 +440,13 @@ class ConversationOrchestrator:
             guardrail_action=guardrail_action,
             guardrail_motivo=guardrail_motivo,
         )
+        if req.quota_operation is not None and req.quota_ticket is not None:
+            from src.core.billing.quota_reservations import validate_final_response
+            output._quota_final = validate_final_response(
+                req.quota_operation, req.quota_ticket, risposta,
+                context_chunks=contesto.chunks, profile=profilo,
+            )
+        return output
 
     async def _resolve_profile(self, org_id, raw_profile) -> ProfiloAttivita:
         if isinstance(raw_profile, ProfiloAttivita):

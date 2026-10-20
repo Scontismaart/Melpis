@@ -28,9 +28,11 @@ def _test_provider_context(monkeypatch):
     async def open_context(cls, pool, organization_id, *, task_type,
                            actor_auth_user_id=None, worker_message_id=None,
                            simulation_request_id=None, simulation_claim_token=None,
+                           quota_operation=None, quota_ticket=None,
                            context=None):
         accounting_context = provider_context_stub(
             task_type=task_type, organization_id=organization_id,
+            quota_operation=quota_operation, quota_ticket=quota_ticket,
         )
         accounting_context.actor_auth_user_id = (
             uuid.UUID(str(actor_auth_user_id)) if actor_auth_user_id is not None else None
@@ -42,6 +44,12 @@ def _test_provider_context(monkeypatch):
         return accounting_context
 
     monkeypatch.setattr(ProviderAccountingContext, "open", classmethod(open_context))
+
+
+@pytest.fixture(autouse=True)
+def _mock_a04_admission_for_business_flow_units(monkeypatch):
+    from tests.a04_admission_fakes import install_mock_a04_admission
+    install_mock_a04_admission(monkeypatch)
 
 
 @pytest.fixture
@@ -82,7 +90,7 @@ def mock_repo(sample_msg):
     repo.faq_cache_lookup = AsyncMock(return_value=None)
     repo.faq_cache_store = AsyncMock(return_value=None)
     repo.pool = MagicMock()
-    repo.claim_message_and_check_quota = AsyncMock(return_value={
+    repo.claim_message_for_processing = AsyncMock(return_value={
         "status": "claimed",
         "ai_reply_cache": None,
         "billed_at": None,
@@ -312,7 +320,7 @@ class TestInboundProcessor:
         repo = AsyncMock()
         repo.claim_inbound_messages = AsyncMock(return_value=[race_msg])
         repo.reap_stale_claims = AsyncMock(return_value=[])
-        repo.claim_message_and_check_quota = AsyncMock(side_effect=fake_claim)
+        repo.claim_message_for_processing = AsyncMock(side_effect=fake_claim)
         repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4()})
         repo.mark_ai_disclosure_sent = AsyncMock(return_value=True)
         repo.faq_cache_lookup = AsyncMock(return_value=None)

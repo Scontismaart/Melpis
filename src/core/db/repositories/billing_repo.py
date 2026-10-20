@@ -1013,21 +1013,10 @@ class BillingRepository(TenantScopedRepository):
     async def increment_message_usage(
         self, organization_id: uuid.UUID | str, conn=None
     ) -> int | None:
-        if isinstance(organization_id, str):
-            organization_id = uuid.UUID(organization_id)
-        if conn is not None:
-            return await self._increment_message_usage(conn, organization_id)
-        async with self.pool.acquire() as c:
-            return await self._increment_message_usage(c, organization_id)
+        raise RuntimeError("Direct message usage increments are disabled; use the atomic A04 commit")
 
     async def _increment_message_usage(self, conn, org_id: uuid.UUID) -> int | None:
-        row = await conn.fetchrow("""
-            UPDATE organizations
-            SET messages_used_this_period = messages_used_this_period + 1
-            WHERE id = $1 AND (messages_limit IS NULL OR messages_used_this_period < messages_limit)
-            RETURNING messages_used_this_period
-        """, org_id)
-        return row["messages_used_this_period"] if row else None
+        raise RuntimeError("Direct message usage increments are disabled; use the atomic A04 commit")
 
     async def reset_message_usage(
         self,

@@ -2,12 +2,20 @@
 
 ## Scope
 
-`QuotaReservations` is an inactive internal component. No HTTP route, worker,
-provider or booking path imports it. This change does not certify the 150-reply
-limit in the running application and does not complete A03, A04 or Staging.
-Migration 060 is a prerequisite; its remote execution requires the separately
-authorized backup, restore and migration procedure. There is no new migration
-in this component.
+`QuotaReservations` is wired into the authenticated simulator (`POST
+/api/messaggio`), every inbound AI final-response channel routed through
+`InboundProcessingService` (including WhatsApp and Instagram), and document Q&A
+(`POST /api/documenti/chiedi`). These paths reserve before provider work and
+commit only after the server-side guardrail accepts the final response. The
+current code deliberately excludes onboarding preview, reviews, outbound
+manual messages, human escalation and deterministic non-AI actions from A04.
+
+This describes source integration and local disposable-PostgreSQL evidence;
+it does not certify A04 on Staging or Production. Migration 060 is required
+before the protocol can operate remotely and must be applied only under its
+separate migration authorization. Migration 061 remains a separate A03
+provider-attempt fencing gate. Neither migration is presumed applied to
+Staging. There is no new migration in this change.
 
 The commercial counter remains `organizations.messages_used_this_period`.
 `usage_events` holds zero-quantity reservation records, not a second consumed
@@ -64,45 +72,78 @@ that an outstanding provider call incurred no technical cost.
 Rotating the trust epoch invalidates outstanding tickets. Historical records
 must not be adopted into the replacement epoch or silently released.
 
-## Required before activation
+## Code paths and remaining cutover gates
 
-The adapter work must be reviewed and tested together before enabling any path:
+- `src/core/billing/quota_reservations.py` owns the private operation, ticket,
+  guardrail proof, reservation, replay, release and atomic commit. Its only
+  commercial increment writes the existing `organizations.messages_used_this_period`
+  counter in the same transaction as the durable response and ledger transition.
+- `src/core/inbound/service.py` claims a tenant-scoped inbound row, skips
+  reservation for deterministic replies and system/manual handoffs selected
+  before AI generation, and commits every accepted AI response/cache before
+  attempting channel delivery. A valid AI-generated customer answer remains
+  billable when its guardrail output also requests human follow-up. This includes inbound
+  WhatsApp and Instagram responses routed through the shared service. A
+  delivery failure does not refund the committed answer. An existing message
+  cache is never replay authority: the A04 committed request and ledger must
+  match the message cache hash and billed timestamp.
+- `src/api/routes/simulator.py` uses the authenticated actor and mandatory
+  `Idempotency-Key`; successful response and counter are durable before it is
+  returned. Replays return the first response.
+- `src/api/routes/knowledge.py` uses an authenticated actor and mandatory
+  idempotency key; the private proof is removed before serialization. The
+  successful persisted/replayed public shape remains exactly `{risposta,fonti}`.
+- `src/core/provider_accounting.py` carries the unforgeable A04 operation and
+  ticket separately from A03 provider attempts. An uncertain A03 attempt keeps
+  its capacity reserved; lease expiry alone cannot release or zero its cost.
+- Legacy direct charge/precharge and reply-write entry points fail closed.
+  Periodic paid-cycle reset remains the billing webhook's responsibility.
 
-- Replace all legacy pre-generation charging paths in one coherent cutover.
-  Never run legacy writers alongside new pending reservations: they do not
-  account for pending slots. Drain or fence old workers during an explicitly
-  approved service deployment.
-- Authenticate the request and derive its tenant and actor server-side. A UUID
-  supplied in a request is not an authenticated identity. Continue checking
-  consent, application permissions, kill switches and provider accounting.
-- Revalidate the lease and authorization before semantic/provider work and any
-  deterministic privileged side effect. A response commit cannot retroactively
-  authorize a booking. Never let LLM output directly invoke privileged actions.
-- Preserve the private guardrail provenance until validation/commit. In
-  particular, reconstructing `RispostaOutput` from an orchestrator's public JSON
-  loses private state; the adapter must retain the actual server result.
-- Keep technical attempts, token/model attribution, latency and estimated cost
-  independent of commercial response consumption. An uncertain or late provider
-  outcome must not disappear from accounting or trigger an automatic retry.
-- Coordinate preview and Q&A idempotency with existing clients and API contracts.
-  Do not invent a random server key on retries or silently change client behavior.
-- Extend the typed final-response envelope for `RispostaDocumento` before Q&A
-  activation, preserving the authorized sources on replay. The current final
-  validator accepts `RispostaOutput`; a channel identifier alone does not prove
-  that the existing Q&A API contract is supported.
-- Reconcile existing simulator rows keyed by the old raw request ID. A completed
-  historical response may be replayed after authorization; an old pending/failed
-  charge must not be adopted or charged again. No historical row becomes proof
-  of a new reservation merely because its timestamps look plausible.
-- Align GDPR export labels and retention documentation with the shared response
-  store. The existing `simulator_responses` export includes this table and
-  organization deletion cascades to it; inbound's internal worker UUID must not
-  be presented as a real authenticated user. Expiry of a private response row
-  cannot erase the durable ledger or authorize generation again.
-- Certify the complete inbound, simulator, preview and PDF/Q&A flows, including
-  concurrent boundary requests, cancellations, process failures, webhook period
-  changes and real authorized Staging use. Local component tests alone do not
-  certify these application flows.
+Before any remote cutover, all of these conditions are required:
+
+1. Apply migration 060 only after its own explicit environment-specific
+   authorization and required backup/restore checks. Do not infer application
+   from CI or the presence of migration files. Keep migration 061 separate.
+2. Drain old application workers and deploy a version that fences legacy
+   `increment_message_usage`, inbound precharge, simulator precharge and direct
+   reply writers before allowing A04 reservations. Never overlap a legacy
+   counter writer with pending reservations.
+3. Review existing `simulation_requests` rows. Reuse only a verified completed
+   response under current tenant authorization; do not adopt or automatically
+   release old reserved/failed/ambiguous rows as A04 evidence. Review
+   historical `outbound_dedup` rows too: they are never delivery authority
+   without a matching committed A04 record, and unmatched rows remain
+   fail-closed for explicit reconciliation.
+4. Verify current membership, role, tenant, entitlement, consent, kill switch,
+   trust epoch and database ACLs in the target environment. Staging remains
+   uncertified until its migrations and real-path acceptance tests are
+   separately authorized and completed.
+5. Confirm local CI plus disposable PostgreSQL regressions for last-unit
+   contention across channels, inbound persistence, simulator replay, Q&A
+   no-leak/replay, uncertain A03 release fencing, and rollback/failure cases.
+6. Inventory billing-period anchors before enabling A04. Every entitled trial
+   organization must have a valid `trial_start`/`trial_end`; every paid
+   organization must have a valid `current_period_start`/`current_period_end`.
+   Migration 003 added these columns as nullable and did not backfill legacy
+   rows. New signup and subscription-webhook paths write the anchors, but
+   historical rows without them remain ineligible and fail closed. Do not
+   infer an anchor from `created_at` or another timestamp. Before cutover,
+   perform an authorized Staging inventory and obtain a founder-approved,
+   evidence-based remediation/backfill for any missing anchors. No remote
+   inventory or migration is part of this code change; Staging is not
+   certified.
+
+## Rollback behavior
+
+If any cutover check fails, stop new AI admission for the affected paths using
+the existing tenant kill switch or by disabling those AI entry points. Keep
+manual inbox, dashboard, billing usage reads and human escalation available.
+Do not roll back to a binary that can write the old precharge/increment paths
+while A04 reservations exist. Do not decrement the counter, delete ledger
+records, release uncertain provider attempts, or erase completed responses as
+part of rollback. Preserve pending/uncertain reservations for tenant-scoped
+reconciliation. A code rollback is safe only to a reviewed version that also
+fences legacy writers; migration 060 is not automatically reversed.
 
 No deployment, remote migration, Production change or backup deletion is
 included in the source integration of this component.

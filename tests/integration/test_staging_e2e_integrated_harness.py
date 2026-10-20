@@ -163,33 +163,35 @@ class StagingRelationalRepo:
                         break
             return claimed
 
-    async def claim_message_and_check_quota(
-        self, msg_id: uuid.UUID, org_id: uuid.UUID, max_quota: int = 1000
+    async def claim_message_for_processing(
+        self, msg_id: uuid.UUID, org_id: uuid.UUID
     ) -> dict[str, Any]:
+        """Claim only; commercial admission is deliberately not faked here."""
         async with self._lock:
             msg = self.messages.get(msg_id)
             if not msg or msg["organization_id"] != org_id:
                 return {"status": "not_found"}
-            if msg["sent_at"] is not None:
+            if msg["sent_at"] is not None or msg.get("replied_at") is not None:
                 return {"status": "already_sent"}
             if msg["quota_exceeded_at"] is not None:
                 return {"status": "quota_exceeded"}
-
-            org = self.organizations.get(org_id)
-            if org and org["messages_limit"] and org["messages_used_this_period"] >= org["messages_limit"]:
-                msg["quota_exceeded_at"] = datetime.datetime.now(datetime.timezone.utc)
-                return {"status": "quota_exceeded"}
-
-            if org:
-                org["messages_used_this_period"] += 1
-            msg["billed_at"] = datetime.datetime.now(datetime.timezone.utc)
+            if msg["status"] not in {"received_pending_ai", "processing"}:
+                return {"status": "invalid_state"}
+            if msg.get("processing_at") is not None:
+                age = (datetime.datetime.now(datetime.timezone.utc) - msg["processing_at"]).total_seconds()
+                if age < 30:
+                    return {"status": "currently_processing"}
+            msg["status"] = "processing"
+            msg["processing_at"] = datetime.datetime.now(datetime.timezone.utc)
+            msg["claimed_at"] = msg.get("claimed_at") or msg["processing_at"]
+            msg["heartbeat_at"] = msg["processing_at"]
             return {
                 "status": "claimed",
                 "ai_reply_cache": msg.get("ai_reply_cache"),
                 "sent_at": None,
-                "billed_at": msg["billed_at"],
+                "billed_at": msg.get("billed_at"),
                 "quota_exceeded_at": None,
-                "processing_at": datetime.datetime.now(datetime.timezone.utc),
+                "processing_at": msg["processing_at"],
             }
 
     async def get_conversation(self, conv_id: uuid.UUID, org_id: uuid.UUID) -> dict[str, Any] | None:
@@ -428,7 +430,10 @@ async def test_e2e_a_multi_tenant_concurrency_and_relational_invariance():
     mock_service = AsyncMock()
     mock_service.check_opt_out.return_value = {"is_opt_out": False}
     mock_service.check_human_request.return_value = False
-    mock_service.fast_path_match.return_value = None
+    # This harness checks relational isolation and worker concurrency, so use
+    # the non-billable deterministic reply path. Real AI admission is covered
+    # by the PostgreSQL quota lifecycle suite.
+    mock_service.fast_path_match.return_value = "Risposta deterministica per il test."
 
     service = InboundProcessingService(
         app_config=app_config,
@@ -512,7 +517,7 @@ async def test_e2e_a_multi_tenant_concurrency_and_relational_invariance():
 # ==============================================================================
 
 @pytest.mark.asyncio
-async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation():
+async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(monkeypatch):
     """
     Scenario E2E-B:
     1. Due InboundWorker concorrenti (W1, W2) in competizione su SKIP LOCKED:
@@ -561,7 +566,7 @@ async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(
     mock_service = AsyncMock()
     mock_service.check_opt_out.return_value = {"is_opt_out": False}
     mock_service.check_human_request.return_value = False
-    mock_service.fast_path_match.return_value = None
+    mock_service.fast_path_match.return_value = "Risposta deterministica per il test."
 
     svc = InboundProcessingService(
         app_config=app_config,
@@ -634,8 +639,8 @@ async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(
         assert mock_channel.send_reply.await_count == 0
         assert svc.orchestrator.orchestrate.await_count == 0
 
-    # Caso 2B: Crash avvenuto dopo il salvataggio dell'outbox dedup ma prima dell'invio a Meta
-    # (sent_at è None, ma la dedup è presente) -> invia da cache senza ri-invocare LLM
+    # Caso 2B: un marker legacy di outbox senza evidenza A04 non autorizza il
+    # replay; il fake repo non può creare un committed ledger record.
     crash_dedup_mid = uuid.uuid4()
     await repo.upsert_message(
         msg_id=crash_dedup_mid,
@@ -649,6 +654,8 @@ async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(
     svc.orchestrator.orchestrate.reset_mock()
     mock_channel.send_reply.reset_mock()
 
+    from tests.a04_admission_fakes import install_mock_a04_admission
+    install_mock_a04_admission(monkeypatch)
     with patch("src.core.inbound.service.load_tenant_config", AsyncMock(return_value=MagicMock(business_profile={"nome": "Test"}))):
         res_crash_retry = await svc.process_message({
             "id": crash_dedup_mid,
@@ -658,9 +665,9 @@ async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(
             "content": {"from": "+393339998877"},
             "canale": "whatsapp",
         })
-        assert res_crash_retry.action == "handled"
-        assert res_crash_retry.handling_type == "ai_handled"
-        assert mock_channel.send_reply.await_count == 1
+        assert res_crash_retry.action == "error"
+        assert res_crash_retry.handling_type == "quota_reconciliation_required"
+        assert mock_channel.send_reply.await_count == 0
         assert svc.orchestrator.orchestrate.await_count == 0
 
     # 3. Garanzia Cancellazione Heartbeat nel blocco finally
@@ -674,6 +681,7 @@ async def test_e2e_b_worker_skip_locked_outbox_dedup_and_heartbeat_cancellation(
         content={"from": "+393339998877"},
     )
 
+    mock_service.fast_path_match.return_value = None
     with patch("src.core.inbound.service.load_tenant_config", AsyncMock(return_value=MagicMock(business_profile={"nome": "Test"}))):
         captured_task = None
 

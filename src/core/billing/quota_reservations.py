@@ -1,14 +1,14 @@
-"""Inactive commercial quota protocol: reserve, persist once, release safely.
+"""Commercial quota protocol: reserve, persist once, release safely.
 
 The sole commercial counter remains organizations.messages_used_this_period.
 Pending reservations live in usage_events; simulation_requests is the existing
-private response/idempotency store. No application endpoint activates this yet.
-Callers must authenticate and authorize the current tenant before every action.
-Do not mix this protocol with the legacy pre-generation charging paths.
+private response/idempotency store. Callers authenticate and authorize the
+current tenant before every action.
 """
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,7 +26,7 @@ _EVENT = "system.quota_reservation"
 _WORKER = uuid5(NAMESPACE_URL, "melpis:quota:inbound-worker:v1")
 _CAPABILITY = object()
 _LEASE = timedelta(seconds=30)
-_CHANNELS = frozenset({"inbound", "simulator", "preview", "qa"})
+_CHANNELS = frozenset({"inbound", "simulator", "qa"})
 
 
 class QuotaConflict(AIGenerationBlocked):
@@ -141,6 +141,51 @@ def validate_final_response(
                               _json(guarded.model_dump(mode="json")), _CAPABILITY)
 
 
+def validate_qa_final_response(
+    operation: QuotaOperation, ticket: QuotaTicket, response: dict, *,
+    context_chunks: list[dict] | None = None, profile: ProfiloAttivita | None = None,
+) -> FinalQuotaResponse:
+    """Guardrail and bind the complete, safe document-Q&A response for replay."""
+    if (type(operation) is not QuotaOperation or operation.channel != "qa"
+            or type(ticket) is not QuotaTicket or not isinstance(response, dict)
+            or type(response.get("risposta")) is not str
+            or type(response.get("fonti")) is not list):
+        _deny()
+    safe_sources = []
+    for source in response["fonti"]:
+        if not isinstance(source, dict) or source.get("is_active") is False:
+            continue
+        name = source.get("fonte", source.get("documento"))
+        kind = source.get("tipo")
+        score = source.get("score")
+        status = source.get("stato", "indicizzata")
+        priority = source.get("priorita")
+        if (type(name) is not str or not name.strip() or len(name) > 300
+                or type(kind) is not str or len(kind) > 80
+                or type(status) is not str or len(status) > 80
+                or isinstance(score, bool) or not isinstance(score, (int, float))
+                or not math.isfinite(float(score))):
+            _deny()
+        if type(priority) is not int or priority < 1 or priority > 5:
+            _deny()
+        safe_sources.append({
+            "documento": name.strip(), "tipo": kind, "score": float(score),
+            "stato": status, "is_active": True, "priorita": priority,
+        })
+    validated = validate_final_response(
+        operation, ticket,
+        RispostaOutput(risposta=response["risposta"], richiede_umano=False,
+                       motivo="", categoria="document_qa"),
+        context_chunks=context_chunks, profile=profile,
+    )
+    guarded = json.loads(validated.serialized)
+    payload = {"risposta": guarded["risposta"], "fonti": safe_sources}
+    return FinalQuotaResponse(
+        operation.id, operation.payload_hash, ticket.claim_id, ticket.epoch,
+        ticket.period_id, _json(payload), _CAPABILITY,
+    )
+
+
 def _period(billing, now, organization_id):
     status = billing.get("subscription_status")
     trial = status == "trialing"
@@ -165,13 +210,23 @@ def _period(billing, now, organization_id):
     return uuid5(NAMESPACE_URL, identity), end
 
 
-def _entitlement(billing):
+def _entitlement(billing, *, for_reservation=False):
     """Never allow an inconsistent stored trial limit to grant extra replies."""
     verified = dict(billing)
     if (verified.get("subscription_status") == "trialing"
             and type(verified.get("messages_limit")) is int):
         verified["messages_limit"] = min(150, verified["messages_limit"])
-    assert_ai_generation_allowed(verified)
+    # A reservation request at the quota boundary must return the explicit
+    # exhausted result so callers can offer human escalation. Validate the
+    # entitlement independently of remaining capacity, then account for
+    # committed usage and pending reservations atomically below.
+    if (for_reservation and type(verified.get("messages_limit")) is int
+            and type(verified.get("messages_used_this_period")) is int
+            and verified["messages_used_this_period"] >= verified["messages_limit"]):
+        check = dict(verified, messages_used_this_period=0)
+        assert_ai_generation_allowed(check)
+    else:
+        assert_ai_generation_allowed(verified)
     return verified
 
 
@@ -234,10 +289,11 @@ class QuotaReservations:
             _deny()
         if operation.auth_user_id is not None and not for_release:
             membership = await conn.fetchrow(
-                """SELECT om.ruolo FROM organization_memberships om
+                    """SELECT om.ruolo FROM organization_memberships om
                     JOIN user_profiles up ON up.id=om.user_id
                     WHERE om.organization_id=$1 AND up.auth_user_id=$2
-                      AND om.ruolo IN ('owner','manager','staff') FOR SHARE OF om,up""",
+                      AND om.ruolo IN ('owner','manager','staff')
+                      AND om.joined_at IS NOT NULL FOR SHARE OF om,up""",
                 operation.organization_id, operation.auth_user_id,
             )
             if membership is None:
@@ -247,25 +303,49 @@ class QuotaReservations:
                 WHERE organization_id=$1 AND id=$2 FOR UPDATE""",
             operation.organization_id, operation.id,
         )
-        if operation.channel == "inbound" and not for_release:
+        response = await conn.fetchrow(
+            """SELECT payload_hash, claim_token, status, response, reserved_at FROM simulation_requests
+                WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3 FOR UPDATE""",
+            operation.organization_id, operation.actor_id, operation.id,
+        )
+        if operation.channel == "inbound":
             message = await conn.fetchrow(
                 """SELECT direction, status, deleted_at, sent_at, replied_at,
                           billed_at, ai_reply_cache, quota_exceeded_at FROM messages
-                    WHERE organization_id=$1 AND id=$2 FOR SHARE""",
+                    WHERE organization_id=$1 AND id=$2 FOR UPDATE""",
                 operation.organization_id, operation.source_id,
             )
             if (not message or message["direction"] != "inbound" or message["deleted_at"] is not None):
                 _deny()
-            committed = entry is not None and _decode(entry, operation)["state"] == "committed"
-            if not committed and (message["status"] != "processing"
+            metadata = _decode(entry, operation) if entry is not None else None
+            committed = metadata is not None and metadata["state"] == "committed"
+            if committed:
+                # An inbound cache is only a delivery retry source after the
+                # A04 transaction committed both its request record and the
+                # billed message cache. Do not trust legacy or independently
+                # modified cache contents.
+                if (message["billed_at"] is None or message["ai_reply_cache"] is None
+                        or response is None or response["status"] != "completed"
+                        or response["payload_hash"].strip() != operation.payload_hash
+                        or response["claim_token"] != UUID(metadata["claim_id"])):
+                    _deny()
+                try:
+                    cached = (json.loads(message["ai_reply_cache"])
+                              if isinstance(message["ai_reply_cache"], str)
+                              else message["ai_reply_cache"])
+                    stored = (json.loads(response["response"])
+                              if isinstance(response["response"], str)
+                              else response["response"])
+                except (TypeError, ValueError):
+                    _deny()
+                if (not isinstance(cached, dict) or not isinstance(stored, dict)
+                        or _hash(cached) != metadata["response_hash"]
+                        or _hash(stored) != metadata["response_hash"]):
+                    _deny()
+            elif (message["status"] != "processing"
                     or any(message[key] is not None for key in
                            ("sent_at", "replied_at", "billed_at", "ai_reply_cache", "quota_exceeded_at"))):
                 _deny()
-        response = await conn.fetchrow(
-            """SELECT payload_hash, claim_token, status, response FROM simulation_requests
-                WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3 FOR UPDATE""",
-            operation.organization_id, operation.actor_id, operation.id,
-        )
         return epoch, dict(billing), entry, response, await conn.fetchval("SELECT clock_timestamp()")
 
     async def _save(self, conn, operation, metadata):
@@ -285,11 +365,23 @@ class QuotaReservations:
                 or ticket.operation_id != operation.id or ticket.claim_id != UUID(metadata["claim_id"])
                 or ticket.epoch != epoch or metadata["epoch"] != str(epoch)
                 or ticket.period_id != period or metadata["period_id"] != str(period)
-                or ticket.lease_end != datetime.fromisoformat(metadata["lease_end"])
+                or ticket.lease_end > datetime.fromisoformat(metadata["lease_end"])
                 or metadata["state"] != "reserved"):
             _deny()
         if live and not datetime.fromisoformat(metadata["lease_start"]) <= now < datetime.fromisoformat(metadata["lease_end"]):
             _deny()
+
+    async def verify_ticket(self, conn, operation: QuotaOperation, ticket: QuotaTicket):
+        """Revalidate a private ticket on the caller's transaction/connection."""
+        epoch, billing, row, response, now = await self._lock(conn, operation)
+        metadata = _decode(row, operation)
+        billing = _entitlement(billing)
+        period, _ = _period(billing, now, operation.organization_id)
+        self._check_ticket(operation, ticket, metadata, epoch, period, now)
+        if (not response or response["status"] != "reserved" or response["response"] is not None
+                or response["claim_token"] != ticket.claim_id):
+            _deny()
+        return billing
 
     async def reserve(self, operation: QuotaOperation):
         async with self.pool.acquire() as conn, conn.transaction():
@@ -315,7 +407,7 @@ class QuotaReservations:
             elif response:
                 # Never adopt a legacy simulator row or charge from another path.
                 _deny()
-            billing = _entitlement(billing)
+            billing = _entitlement(billing, for_reservation=True)
             period, period_end = _period(billing, now, operation.organization_id)
             if row:
                 if metadata["period_id"] != str(period):
@@ -380,7 +472,7 @@ class QuotaReservations:
                 # Idempotent persistence; never overwrite the first response.
                 if (metadata["claim_id"] != str(ticket.claim_id) or metadata["epoch"] != str(epoch)
                         or ticket.epoch != epoch or ticket.period_id != UUID(metadata["period_id"])
-                        or ticket.lease_end != datetime.fromisoformat(metadata["lease_end"])
+                        or ticket.lease_end > datetime.fromisoformat(metadata["lease_end"])
                         or not response or response["status"] != "completed"):
                     _deny()
                 stored = json.loads(response["response"]) if isinstance(response["response"], str) else response["response"]
@@ -460,6 +552,32 @@ class QuotaReservations:
             self._check_ticket(operation, ticket, metadata, epoch, UUID(metadata["period_id"]), now, live=False)
             if (not response or response["status"] != "reserved" or response["response"] is not None
                     or response["claim_token"] != ticket.claim_id):
+                _deny()
+            # A03 is independent of the commercial counter. We may release a
+            # failed final answer only when every associated provider attempt
+            # has terminal, persisted accounting. An unknown outcome keeps the
+            # reservation pending for reconciliation.
+            uncertain_attempt = await conn.fetchval(
+                """SELECT EXISTS (
+                       SELECT 1 FROM usage_events
+                        WHERE organization_id=$1
+                          AND event_type='system.provider_attempt'
+                          AND created_at >= $3
+                          AND (
+                            metadata->'context'->>'quota_operation_id'=$2
+                            OR (metadata->'context'->>'quota_operation_id' IS NULL
+                                AND (
+                                  metadata->'context'->>'message_id'=$4
+                                  OR metadata->'context'->>'simulation_request_id'=$2
+                                ))
+                          )
+                          AND COALESCE(metadata->>'accounting_status','')
+                              NOT IN ('recorded','resolved')
+                   )""",
+                operation.organization_id, str(operation.id), response["reserved_at"],
+                str(operation.source_id),
+            )
+            if uncertain_attempt:
                 _deny()
             # The state transition fences this claim. A later retry receives a
             # new nonce; repeated release of this same claim is idempotent.

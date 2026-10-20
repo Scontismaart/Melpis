@@ -32,16 +32,17 @@ async def test_set_subscription_status(repo, sample_org):
     assert result["subscription_status"] == "active"
 
 
-async def test_increment_message_usage(repo, sample_org):
-    v1 = await repo.increment_message_usage(sample_org["id"])
-    assert v1 == 1
-    v2 = await repo.increment_message_usage(sample_org["id"])
-    assert v2 == 2
+async def test_increment_message_usage_is_fenced(repo, sample_org):
+    with pytest.raises(RuntimeError, match="atomic A04 commit"):
+        await repo.increment_message_usage(sample_org["id"])
+    result = await repo.get_organization_billing(sample_org["id"])
+    assert result["messages_used_this_period"] == 0
 
 
 async def test_reset_message_usage(repo, sample_org):
-    await repo.increment_message_usage(sample_org["id"])
-    await repo.increment_message_usage(sample_org["id"])
+    await repo.pool.execute(
+        "UPDATE organizations SET messages_used_this_period=2 WHERE id=$1", sample_org["id"]
+    )
     period_start = datetime.now(timezone.utc)
     period_end = datetime.now(timezone.utc)
     await repo.reset_message_usage(sample_org["id"], period_start, period_end)
@@ -76,12 +77,36 @@ async def test_update_plan_limits_business_unlimited(repo, sample_org):
     assert result["messages_limit"] == 10000
 
 
-async def test_increment_message_usage_cross_tenant(repo, sample_org, other_org):
-    await repo.increment_message_usage(sample_org["id"])
-    v_other = await repo.increment_message_usage(other_org["id"])
-    assert v_other == 1
-    v_main = await repo.increment_message_usage(sample_org["id"])
-    assert v_main == 2
+async def test_increment_message_usage_cross_tenant_writer_is_fenced(repo, sample_org, other_org):
+    for org in (sample_org, other_org):
+        with pytest.raises(RuntimeError, match="atomic A04 commit"):
+            await repo.increment_message_usage(org["id"])
+    counts = await repo.pool.fetch(
+        "SELECT messages_used_this_period FROM organizations WHERE id=ANY($1::uuid[])",
+        [sample_org["id"], other_org["id"]],
+    )
+    assert [row["messages_used_this_period"] for row in counts] == [0, 0]
+
+
+async def test_all_repository_increment_entry_points_are_fenced(repo, sample_org):
+    from src.core.db.repositories.billing_repo import BillingRepository
+    from src.whatsapp.repository import Repository as WhatsAppRepository
+
+    billing = BillingRepository(repo.pool)
+    whatsapp = WhatsAppRepository(repo.pool)
+    writers = (
+        lambda: billing.increment_message_usage(sample_org["id"]),
+        lambda: billing._increment_message_usage(None, sample_org["id"]),
+        lambda: whatsapp.increment_message_usage(sample_org["id"]),
+        lambda: whatsapp._increment_message_usage(None, sample_org["id"]),
+        lambda: whatsapp.billing_repo.increment_message_usage(sample_org["id"]),
+    )
+    for write in writers:
+        with pytest.raises(RuntimeError, match="atomic A04 commit"):
+            await write()
+    assert await repo.pool.fetchval(
+        "SELECT messages_used_this_period FROM organizations WHERE id=$1", sample_org["id"],
+    ) == 0
 
 
 async def test_get_organization_by_stripe_customer(repo, sample_org):

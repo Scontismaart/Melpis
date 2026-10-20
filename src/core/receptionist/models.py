@@ -7,7 +7,8 @@ il motore decisionale AI.
 from __future__ import annotations
 
 import uuid
-from pydantic import BaseModel, Field
+from typing import Any
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.models.schemas import DatiPrenotazione, ProfiloAttivita
 
@@ -21,6 +22,9 @@ class OrchestrationInput(BaseModel):
     # Server-issued simulator quota claim. Excluded from all transport payloads.
     simulation_request_id: uuid.UUID | str | None = Field(default=None, exclude=True, repr=False)
     simulation_claim_token: uuid.UUID | str | None = Field(default=None, exclude=True, repr=False)
+    # Internal A04 capabilities; never accepted from transport JSON or serialized.
+    quota_operation: Any = Field(default=None, exclude=True, repr=False)
+    quota_ticket: Any = Field(default=None, exclude=True, repr=False)
     message_id: uuid.UUID | str | None = None
     conversation_id: str = ""
     text: str
@@ -48,6 +52,7 @@ class OrchestrationInput(BaseModel):
 
 class OrchestrationOutput(BaseModel):
     """Risultato unificato e validato dell'orchestrazione AI Receptionist."""
+    _quota_final: Any = PrivateAttr(default=None)
     response_text: str
     richiede_umano: bool = False
     motivo_richiesta_umano: str | None = None

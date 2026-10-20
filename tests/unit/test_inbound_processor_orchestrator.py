@@ -19,17 +19,31 @@ def base_config():
 
 
 @pytest.fixture
-def mock_deps():
+def mock_deps(monkeypatch):
     repo = AsyncMock()
     service = AsyncMock()
     booking_service = AsyncMock()
+
+    class QuotaReservationsStub:
+        def __init__(self):
+            self.reserve = AsyncMock(return_value={"status": "reserved", "ticket": object()})
+            self.commit = AsyncMock()
+            self.release = AsyncMock()
+
+    quota = QuotaReservationsStub()
+    monkeypatch.setattr(
+        "src.core.billing.quota_reservations.QuotaReservations",
+        lambda _pool: quota,
+    )
 
     service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
     service.check_human_request = AsyncMock(return_value=False)
     service.fast_path_match = AsyncMock(return_value=None)
     booking_service.handle_reminder_reply = AsyncMock(return_value=None)
 
-    repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed"})
+    repo.claim_message_for_processing = AsyncMock(
+        return_value={"status": "claimed", "ai_reply_cache": None}
+    )
     repo.get_outbound_dedup = AsyncMock(return_value=None)
     repo.check_booking_exists = AsyncMock(return_value=False)
     repo.save_ai_reply = AsyncMock()
@@ -40,7 +54,7 @@ def mock_deps():
     repo.get_org_business_profile = AsyncMock(return_value={"nome": "Pizzeria Bella", "tipo_attivita": "ristorante"})
     repo.list_conversation_messages = AsyncMock(return_value=[])
 
-    return {"repo": repo, "service": service, "booking_service": booking_service}
+    return {"repo": repo, "service": service, "booking_service": booking_service, "quota": quota}
 
 
 @pytest.mark.asyncio
@@ -72,6 +86,7 @@ async def test_inbound_processor_flag_disabled_uses_legacy(
          patch("src.whatsapp.inbound_processor.genera_risposta_async") as mock_gen, \
          patch("src.whatsapp.inbound_processor.valida_risposta") as mock_valida, \
          patch("src.whatsapp.inbound_processor.route_llm") as mock_route, \
+         patch("src.core.billing.quota_reservations.validate_final_response", return_value=object()), \
          patch.object(processor, "_send_ai_reply", new_callable=AsyncMock) as mock_send, \
          patch.object(processor, "_finalize_message", new_callable=AsyncMock):
 
@@ -123,6 +138,7 @@ async def test_inbound_processor_flag_enabled_uses_orchestrator(base_config, moc
         intent="faq",
         source="llm",
     )
+    fake_output._quota_final = object()
     mock_orchestrator.orchestrate.return_value = fake_output
 
     processor = InboundProcessor(
@@ -166,7 +182,7 @@ async def test_inbound_processor_flag_enabled_uses_orchestrator(base_config, moc
         # Il legacy LLM runner NON deve essere chiamato
         mock_gen.assert_not_called()
 
-        # Verifica salvataggio ai_reply_cache e finalizzazione
-        mock_deps["repo"].save_ai_reply.assert_awaited_once()
+        # A04 atomically persists the validated final response via reservation commit.
+        mock_deps["quota"].commit.assert_awaited_once()
         mock_send.assert_awaited_once()
         mock_fin.assert_awaited_once_with(msg["id"], handling_type="ai_handled", meta_message_id="meta-456", organization_id=msg["organization_id"])

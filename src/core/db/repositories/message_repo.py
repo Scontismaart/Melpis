@@ -173,60 +173,55 @@ class MessageRepository(TenantScopedRepository):
                 return [dict(r) for r in rows]
 
     async def claim_message_and_check_quota(self, msg_id: str, org_id: str) -> dict:
+        raise RuntimeError("Legacy pre-charge is disabled; use claim_message_for_processing and A04")
+
+    async def claim_message_for_processing(self, msg_id: str, org_id: str) -> dict:
+        """Claim an inbound message without charging the AI answer counter.
+
+        A04 reserves only after the worker has selected an AI final-answer path.
+        Rows carrying an old pre-charge without a cached response are fenced for
+        reconciliation instead of being silently adopted by the new protocol.
+        """
         async with self.scoped_conn(org_id) as conn:
             async with conn.transaction():
                 row = await conn.fetchrow(
-                    "SELECT id, billed_at, ai_reply_cache, sent_at, replied_at, quota_exceeded_at, processing_at FROM messages WHERE id = $1::uuid AND organization_id = $2::uuid FOR UPDATE",
-                    msg_id, org_id
+                    """SELECT id, direction, status, billed_at, ai_reply_cache, sent_at, replied_at,
+                              quota_exceeded_at, processing_at, deleted_at
+                         FROM messages
+                        WHERE id=$1::uuid AND organization_id=$2::uuid FOR UPDATE""",
+                    msg_id, org_id,
                 )
-                if not row:
+                if not row or row["deleted_at"] is not None:
                     return {"status": "not_found"}
-
+                if row["direction"] != "inbound":
+                    return {"status": "invalid_direction"}
                 if row["sent_at"] is not None or row["replied_at"] is not None:
                     return {"status": "already_sent"}
-
                 if row["quota_exceeded_at"] is not None:
                     return {"status": "quota_exceeded"}
-
-                if (
-                    row["processing_at"] is not None
-                    and row["ai_reply_cache"] is None
-                    and (datetime.now(timezone.utc) - row["processing_at"]).total_seconds() < 30
-                ):
-                    return {"status": "currently_processing"}
-
-                if row["billed_at"] is None:
-                    updated_org = await conn.fetchrow("""
-                        UPDATE organizations
-                        SET messages_used_this_period = messages_used_this_period + 1
-                        WHERE id = $1::uuid AND (messages_limit IS NULL OR messages_used_this_period < messages_limit)
-                        RETURNING messages_used_this_period
-                    """, org_id)
-
-                    if not updated_org:
-                        await conn.execute(
-                            "UPDATE messages SET quota_exceeded_at = now() WHERE id = $1::uuid AND organization_id = $2::uuid",
-                            msg_id, org_id
-                        )
-                        return {"status": "quota_exceeded"}
-
-                    await conn.execute(
-                        "UPDATE messages SET billed_at = now() WHERE id = $1::uuid AND organization_id = $2::uuid",
-                        msg_id, org_id
-                    )
-
                 cache_val = row["ai_reply_cache"]
                 if isinstance(cache_val, str):
                     try:
                         cache_val = json.loads(cache_val)
                     except Exception:
                         cache_val = {"text": cache_val, "richiede_umano": False}
-
+                if row["billed_at"] is not None and cache_val is None:
+                    return {"status": "legacy_charge_pending"}
+                if row["status"] not in {"received_pending_ai", "processing"}:
+                    return {"status": "invalid_state"}
+                if (row["processing_at"] is not None and cache_val is None
+                        and (datetime.now(timezone.utc) - row["processing_at"]).total_seconds() < 30):
+                    return {"status": "currently_processing"}
                 if cache_val is None:
                     await conn.execute(
-                        "UPDATE messages SET processing_at = now() WHERE id = $1::uuid AND organization_id = $2::uuid", msg_id, org_id
+                        """UPDATE messages
+                              SET status='processing', claimed_at=COALESCE(claimed_at, now()),
+                                  heartbeat_at=now(), processing_at=now(), updated_at=now()
+                            WHERE id=$1::uuid AND organization_id=$2::uuid
+                              AND direction='inbound'
+                              AND status IN ('received_pending_ai','processing')""",
+                        msg_id, org_id,
                     )
-
                 return {"status": "claimed", "ai_reply_cache": cache_val}
 
     async def try_mark_replied(self, message_id, handling_type: str | None = None, *,
@@ -453,19 +448,7 @@ class MessageRepository(TenantScopedRepository):
 
     async def save_ai_reply(self, msg_id: str, reply: dict | str, richiede_umano: bool = False,
                             motivo: str = "", *, organization_id) -> None:
-        if isinstance(reply, dict):
-            payload = reply
-        else:
-            payload = {
-                "text": reply,
-                "richiede_umano": richiede_umano,
-                "motivo": motivo,
-            }
-        async with self.scoped_conn(organization_id) as conn:
-            await conn.execute(
-                "UPDATE messages SET ai_reply_cache = $2::jsonb, ai_reply_generated_at = now() WHERE id = $1::uuid AND organization_id = $3::uuid",
-                msg_id, json.dumps(payload), organization_id
-            )
+        raise RuntimeError("Direct AI reply writes are disabled; use the atomic A04 commit")
 
     async def mark_message_sent(self, msg_id: str, meta_message_id: str, organization_id) -> None:
         async with self.scoped_conn(organization_id) as conn:
@@ -491,103 +474,7 @@ class MessageRepository(TenantScopedRepository):
         request_id: uuid.UUID | str,
         payload_hash: str,
     ) -> dict:
-        """Atomically reserve one simulator message and its monthly quota unit.
-
-        Replays are resolved before checking current quota, so a completed
-        request remains replayable after that reservation exhausts the plan.
-        """
-        org_id = uuid.UUID(str(organization_id))
-        user_id = uuid.UUID(str(auth_user_id))
-        req_id = uuid.UUID(str(request_id))
-        async with self.scoped_conn(org_id) as conn:
-            async with conn.transaction():
-                inserted = await conn.fetchrow(
-                    """
-                    INSERT INTO simulation_requests
-                        (organization_id, auth_user_id, request_id, payload_hash)
-                    VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
-                    ON CONFLICT (organization_id, auth_user_id, request_id) DO NOTHING
-                    RETURNING status, claim_token
-                    """,
-                    org_id, user_id, req_id, payload_hash,
-                )
-                if inserted:
-                    quota = await conn.fetchrow(
-                        """
-                        UPDATE organizations
-                        SET messages_used_this_period = messages_used_this_period + 1
-                        WHERE id = $1::uuid
-                          AND (messages_limit IS NULL
-                               OR messages_used_this_period < messages_limit)
-                        RETURNING id
-                        """,
-                        org_id,
-                    )
-                    if quota:
-                        return {"status": "reserved", "claim_token": inserted["claim_token"]}
-
-                    # The quota update is the serialization point shared with
-                    # inbound message claims. Remove this failed reservation in
-                    # the same transaction so the key can be retried later.
-                    await conn.execute(
-                        """
-                        DELETE FROM simulation_requests
-                        WHERE organization_id = $1::uuid
-                          AND auth_user_id = $2::uuid
-                          AND request_id = $3::uuid
-                        """,
-                        org_id, user_id, req_id,
-                    )
-                    return {"status": "quota_exceeded"}
-
-                existing = await conn.fetchrow(
-                    """
-                    SELECT payload_hash, status, response, reserved_at, claim_token
-                    FROM simulation_requests
-                    WHERE organization_id = $1::uuid
-                      AND auth_user_id = $2::uuid
-                      AND request_id = $3::uuid
-                    FOR UPDATE
-                    """,
-                    org_id, user_id, req_id,
-                )
-                if existing is None:
-                    raise RuntimeError("Simulator idempotency row disappeared")
-                if existing["payload_hash"].strip() != payload_hash:
-                    return {"status": "payload_conflict"}
-                if existing["status"] == "completed":
-                    return {"status": "replay", "response": existing["response"]}
-                if existing["status"] == "failed":
-                    claim_token = uuid.uuid4()
-                    claimed = await conn.fetchrow(
-                        """
-                        UPDATE simulation_requests
-                        SET status = 'reserved', reserved_at = NOW(), completed_at = NULL,
-                            claim_token = $4::uuid
-                        WHERE organization_id = $1::uuid AND auth_user_id = $2::uuid
-                          AND request_id = $3::uuid AND status = 'failed'
-                        RETURNING claim_token
-                        """,
-                        org_id, user_id, req_id, claim_token,
-                    )
-                    if claimed:
-                        return {"status": "reserved", "claim_token": claimed["claim_token"]}
-                    return {"status": "in_progress"}
-                claim_token = uuid.uuid4()
-                stale = await conn.fetchrow(
-                    """
-                    UPDATE simulation_requests
-                    SET reserved_at = NOW(), claim_token = $4::uuid
-                    WHERE organization_id = $1::uuid AND auth_user_id = $2::uuid
-                      AND request_id = $3::uuid AND status = 'reserved'
-                      AND reserved_at < NOW() - INTERVAL '30 minutes'
-                    RETURNING claim_token
-                    """,
-                    org_id, user_id, req_id, claim_token,
-                )
-                if stale:
-                    return {"status": "reserved", "claim_token": stale["claim_token"]}
-                return {"status": "in_progress"}
+        raise RuntimeError("Legacy simulator pre-charge is disabled; use QuotaReservations")
 
     async def complete_simulation_request(
         self,
@@ -598,42 +485,7 @@ class MessageRepository(TenantScopedRepository):
         claim_token: uuid.UUID | str,
         response: dict,
     ) -> bool:
-        """Persist the response before the simulator acknowledges success."""
-        org_id = uuid.UUID(str(organization_id))
-        user_id = uuid.UUID(str(auth_user_id))
-        req_id = uuid.UUID(str(request_id))
-        async with self.scoped_conn(org_id) as conn:
-            row = await conn.fetchrow(
-                """
-                UPDATE simulation_requests
-                SET status = 'completed', response = $6::jsonb,
-                    completed_at = NOW()
-                WHERE organization_id = $1::uuid
-                  AND auth_user_id = $2::uuid
-                  AND request_id = $3::uuid
-                  AND payload_hash = $4
-                  AND claim_token = $5::uuid
-                  AND status = 'reserved'
-                RETURNING request_id
-                """,
-                org_id, user_id, req_id, payload_hash, claim_token, json.dumps(response),
-            )
-            if row:
-                return True
-            current = await conn.fetchrow(
-                """
-                SELECT status, payload_hash, claim_token FROM simulation_requests
-                WHERE organization_id = $1::uuid AND auth_user_id = $2::uuid
-                  AND request_id = $3::uuid
-                """,
-                org_id, user_id, req_id,
-            )
-            return bool(
-                current
-                and current["status"] == "completed"
-                and current["payload_hash"].strip() == payload_hash
-                and str(current["claim_token"]) == str(claim_token)
-            )
+        raise RuntimeError("Legacy simulator completion is disabled; use QuotaReservations")
 
     async def fail_simulation_request(
         self,
@@ -643,29 +495,7 @@ class MessageRepository(TenantScopedRepository):
         payload_hash: str,
         claim_token: uuid.UUID | str,
     ) -> bool:
-        """Mark a confirmed orchestration failure while preserving its quota unit."""
-        org_id = uuid.UUID(str(organization_id))
-        user_id = uuid.UUID(str(auth_user_id))
-        req_id = uuid.UUID(str(request_id))
-        async with self.scoped_conn(org_id) as conn:
-            async with conn.transaction():
-                row = await conn.fetchrow(
-                    """
-                    UPDATE simulation_requests
-                    SET status = 'failed', completed_at = NOW()
-                    WHERE organization_id = $1::uuid AND auth_user_id = $2::uuid
-                      AND request_id = $3::uuid AND payload_hash = $4
-                      AND claim_token = $5::uuid
-                      AND status = 'reserved'
-                    RETURNING request_id
-                    """,
-                    org_id, user_id, req_id, payload_hash, claim_token,
-                )
-                if not row:
-                    return False
-                # Keep the quota unit: generation may have already consumed
-                # provider tokens. Retrying this same idempotency key reuses it.
-                return True
+        raise RuntimeError("Legacy simulator failure write is disabled; use QuotaReservations")
 
     async def get_simulation_requests_by_org(self, organization_id: uuid.UUID | str) -> list[dict]:
         org_id = uuid.UUID(str(organization_id))

@@ -87,15 +87,22 @@ async def test_get_subscription_authenticated(async_client, sample_org):
     assert data["messages_used_this_period"] == 0
 
 
-async def test_get_usage_authenticated(async_client, sample_org):
+async def test_get_usage_authenticated_even_when_trial_quota_is_exhausted(async_client, sample_org, pg_pool):
+    await pg_pool.execute(
+        "UPDATE organizations SET subscription_status='trialing', messages_limit=150, "
+        "messages_used_this_period=150, trial_start=now()-interval '6 days', "
+        "trial_end=now()+interval '1 day' WHERE id=$1",
+        sample_org["id"],
+    )
     resp = await async_client.get("/api/billing/usage", headers={
         "X-API-Key": API_KEY,
         "X-Organization-Id": str(sample_org["id"]),
     })
     assert resp.status_code == 200
     data = resp.json()
-    assert data["messages_used"] == 0
-    assert data["percentage"] == 0
+    assert data["messages_used"] == 150
+    assert data["messages_limit"] == 150
+    assert data["percentage"] == 100
 
 
 async def test_create_portal_session_no_customer(async_client, sample_org):

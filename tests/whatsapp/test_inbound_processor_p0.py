@@ -1,7 +1,14 @@
 import contextlib
 import uuid
 from unittest.mock import AsyncMock, patch
+import pytest
 from src.whatsapp.inbound_processor import InboundProcessor
+
+
+@pytest.fixture(autouse=True)
+def _mock_a04_admission_for_business_flow_units(monkeypatch):
+    from tests.a04_admission_fakes import install_mock_a04_admission
+    install_mock_a04_admission(monkeypatch)
 
 class TestP0Blockers:
     async def test_booking_idempotency_on_crash(
@@ -14,7 +21,7 @@ class TestP0Blockers:
         mock_repo.list_bookings = AsyncMock(return_value=[])
         mock_repo.create_booking = AsyncMock(return_value={"id": uuid.uuid4()})
         mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
-        mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None, "billed_at": None, "sent_at": None, "quota_exceeded_at": None, "processing_at": None})
+        mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
         # AsyncMock blanket ritorna un truthy MagicMock: senza configurarlo
         # il processor prende il ramo "booking exists" e non arriva mai a
         # create_booking.
@@ -46,7 +53,7 @@ class TestP0Blockers:
         mock_repo.save_outbound_dedup = AsyncMock()
         mock_repo.try_mark_replied = AsyncMock(return_value=True) # it shouldn't be called for 'ai_handled' though
         mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
-        mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None, "billed_at": None, "sent_at": None, "quota_exceeded_at": None, "processing_at": None})
+        mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
         
         with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)), \
              patch("src.whatsapp.inbound_processor.genera_risposta_async", AsyncMock(return_value=RispostaOutput(
@@ -66,7 +73,7 @@ class TestP0Blockers:
 
     async def test_pricing_enforcement_business_tier(self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg):
         # limit reached
-        mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "quota_exceeded", "ai_reply_cache": None, "billed_at": None, "sent_at": None, "quota_exceeded_at": None, "processing_at": None})
+        mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "quota_exceeded", "ai_reply_cache": None})
         mock_repo.try_mark_replied = AsyncMock(return_value=True)
         
         with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)):

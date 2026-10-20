@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
@@ -276,7 +277,7 @@ class InboundProcessingService:
                 return ProcessingOutcome(action="handled", handling_type="opt_out")
 
         # ── STEP 1: Quota Check & Claim Atomico (P0 Concorrenza) ──────────────
-        claim_result = await self.repo.claim_message_and_check_quota(msg["id"], org_id)
+        claim_result = await self.repo.claim_message_for_processing(msg["id"], org_id)
         status = claim_result.get("status")
         if status in ("not_found", "already_sent"):
             return ProcessingOutcome(action="ignored", handling_type=status)
@@ -286,6 +287,13 @@ class InboundProcessingService:
                 msg["id"],
             )
             return ProcessingOutcome(action="yielded", handling_type="currently_processing")
+
+        if status == "legacy_charge_pending":
+            logger.warning(
+                "inbound=legacy_charge_pending organization_id=%s message_id=%s trace_id=%s",
+                org_id, msg["id"], msg.get("trace_id", "unavailable"),
+            )
+            return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
 
         if status == "quota_exceeded":
             cfg_loader = _get_proc_symbol("load_tenant_config", load_tenant_config)
@@ -389,8 +397,93 @@ class InboundProcessingService:
         if not isinstance(business_profile_raw, dict):
             business_profile_raw = {}
 
+        # Keep the old outbound-dedup marker for compatibility checks, but
+        # never deliver it as an authority. Any cache/dedup marker means this
+        # can be a retry after a committed AI answer whose delivery failed;
+        # verify the immutable A04 record before a deterministic fast path can
+        # produce a different response.
+        outbound_dedup = await self.repo.get_outbound_dedup(msg["organization_id"], msg["id"])
+
+        from src.core.billing.quota_reservations import QuotaOperation, QuotaReservations
+        try:
+            source_id = uuid.UUID(str(msg["id"]))
+            payload_hash = hashlib.sha256(json.dumps(
+                {"organization_id": str(org_id), "message_id": str(source_id),
+                 "channel": canale, "text": text},
+                ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
+            quota_operation = QuotaOperation(
+                organization_id=uuid.UUID(str(org_id)), source_id=source_id,
+                channel="inbound", payload_hash=payload_hash,
+            )
+            quota_reservations = QuotaReservations(getattr(self.repo, "pool", None))
+        except Exception as exc:
+            logger.error(
+                "inbound=quota_operation_unavailable organization_id=%s message_id=%s error_type=%s",
+                org_id, msg.get("id", "unavailable"), type(exc).__name__,
+            )
+            return ProcessingOutcome(action="error", handling_type="quota_reservation_unavailable")
+        reservation = None
+        quota_ticket = None
+        replay_marker_present = (
+            claim_result.get("ai_reply_cache") is not None or outbound_dedup is not None
+        )
+        if replay_marker_present:
+            try:
+                reservation = await quota_reservations.reserve(quota_operation)
+            except Exception as exc:
+                logger.warning(
+                    "inbound=quota_replay_verification_failed organization_id=%s message_id=%s error_type=%s",
+                    org_id, msg["id"], type(exc).__name__,
+                )
+                return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
+
+            replay_status = reservation.get("status") if reservation else None
+            if replay_status == "replay":
+                cached = reservation.get("response")
+                if isinstance(cached, str):
+                    try:
+                        cached = json.loads(cached)
+                    except ValueError:
+                        cached = None
+                if not isinstance(cached, dict) or not isinstance(
+                    cached.get("risposta", cached.get("text")), str
+                ):
+                    return ProcessingOutcome(action="error", handling_type="quota_replay_unavailable")
+                claim_result["ai_reply_cache"] = {
+                    "text": cached.get("risposta", cached.get("text", "")),
+                    "richiede_umano": bool(cached.get("richiede_umano", False)),
+                    "motivo": cached.get("motivo", ""),
+                }
+            elif replay_status == "in_progress":
+                return ProcessingOutcome(action="yielded", handling_type="currently_processing")
+            elif replay_status == "reserved":
+                # A marker without a committed A04 response is legacy or
+                # inconsistent state. No provider call has started in this
+                # retry, so release only this fresh reservation and fail shut.
+                ticket = reservation.get("ticket")
+                if ticket is not None:
+                    try:
+                        await quota_reservations.release(quota_operation, ticket)
+                    except Exception as exc:
+                        logger.warning(
+                            "inbound=quota_replay_release_deferred organization_id=%s message_id=%s error_type=%s",
+                            org_id, msg["id"], type(exc).__name__,
+                        )
+                logger.warning(
+                    "inbound=unverified_replay_marker organization_id=%s message_id=%s",
+                    org_id, msg["id"],
+                )
+                return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
+            else:
+                # Exhausted quota, stale leases, malformed state and unknown
+                # results cannot authorize delivery of a cached response.
+                return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
+
         # ── STEP 9: Fast-Path Statico ──────────────────────────────────────────
-        if self.service:
+        # Genuine new messages retain the non-billable deterministic path.
+        # Marked retries bypass it and proceed only with the A04 ledger result.
+        if not replay_marker_present and self.service:
             fast_reply = await self.service.fast_path_match(text, business_profile_raw)
             if fast_reply:
                 from_number = _extract_from(content)
@@ -414,25 +507,6 @@ class InboundProcessingService:
                     return ProcessingOutcome(action="error", handling_type="delivery_failed", error=str(e))
                 return ProcessingOutcome(action="handled", handling_type="ai_handled")
 
-        # ── STEP 10: Outbound Dedup Check (SEC-002 / P0-2) ─────────────────────
-        dedup = await self.repo.get_outbound_dedup(msg["organization_id"], msg["id"])
-        if dedup:
-            try:
-                res = await self._send_reply(
-                    org_id, msg, content, tenant_config, dedup["response_text"]
-                )
-                meta_id = provider_message_id(res)
-                await self._finalize_message(
-                    msg["id"],
-                    handling_type="ai_handled",
-                    meta_message_id=meta_id,
-                    organization_id=org_id,
-                )
-            except Exception as e:
-                logger.error("Dedup send failed for %s: %s", msg["id"], e)
-                return ProcessingOutcome(action="error", handling_type="delivery_failed", error=str(e))
-            return ProcessingOutcome(action="handled", handling_type="ai_handled")
-
         # ── STEP 11: Cognitive Orchestration ──────────────────────────────────
         risposta_text = ""
         richiede_umano = False
@@ -441,18 +515,101 @@ class InboundProcessingService:
         pren = None
         q_emb = None
         variante_prompt = "control"
+        # Existing cache/dedup markers were already validated before fast path.
+        # New AI work reserves here before any provider work.
+        if reservation is None:
+            try:
+                reservation = await quota_reservations.reserve(quota_operation)
+            except Exception as exc:
+                logger.error(
+                    "inbound=quota_reservation_unavailable organization_id=%s message_id=%s error_type=%s",
+                    org_id, msg["id"], type(exc).__name__,
+                )
+                return ProcessingOutcome(action="error", handling_type="quota_reservation_unavailable")
+
+        reservation_status = reservation.get("status") if reservation else None
+        if reservation_status == "quota_exceeded":
+            return await self._escalate(
+                org_id, msg, content, tenant_config,
+                "Stiamo ricevendo molte richieste, ti risponderà un operatore.",
+                "quota_exceeded",
+            )
+        if reservation_status == "replay":
+            cached = reservation.get("response")
+            if isinstance(cached, str):
+                try:
+                    cached = json.loads(cached)
+                except ValueError:
+                    cached = None
+            if not isinstance(cached, dict):
+                return ProcessingOutcome(action="error", handling_type="quota_replay_unavailable")
+            claim_result["ai_reply_cache"] = {
+                "text": cached.get("risposta", cached.get("text", "")),
+                "richiede_umano": bool(cached.get("richiede_umano", False)),
+                "motivo": cached.get("motivo", ""),
+            }
+        elif reservation_status == "reserved":
+            quota_ticket = reservation.get("ticket")
+            if quota_ticket is None:
+                return ProcessingOutcome(action="error", handling_type="quota_ticket_unavailable")
+            # Ignore any preexisting unverified cache; a reservation would have
+            # rejected it in QuotaReservations._lock before reaching this path.
+            claim_result["ai_reply_cache"] = None
+        elif reservation_status == "in_progress":
+            return ProcessingOutcome(action="yielded", handling_type="currently_processing")
+        else:
+            # In particular, an expired lease is not evidence that the
+            # provider did not run. Leave its reservation pending.
+            return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
+
+        async def release_quota_if_safe():
+            nonlocal quota_ticket
+            if quota_ticket is None or quota_reservations is None:
+                return
+            try:
+                await quota_reservations.release(quota_operation, quota_ticket)
+            except Exception as exc:
+                logger.warning(
+                    "inbound=quota_release_deferred organization_id=%s message_id=%s error_type=%s",
+                    org_id, msg["id"], type(exc).__name__,
+                )
+            quota_ticket = None
+
+        async def commit_quota_if_valid(final_response, *, allow_nonbillable=False):
+            nonlocal quota_ticket
+            if quota_ticket is None or quota_reservations is None:
+                return
+            if final_response is None:
+                if allow_nonbillable:
+                    await release_quota_if_safe()
+                    return
+                raise RuntimeError("A04 final response proof missing")
+            await quota_reservations.commit(quota_operation, quota_ticket, final_response)
+            quota_ticket = None
+
+        if outbound_dedup and reservation_status == "reserved":
+            # A dedup row without a committed A04 record is a legacy or
+            # inconsistent answer. No provider request has started, so release
+            # this new reservation and require reconciliation instead of
+            # trusting the row or invoking AI again.
+            await release_quota_if_safe()
+            logger.warning(
+                "inbound=unverified_outbound_dedup organization_id=%s message_id=%s",
+                org_id, msg["id"],
+            )
+            return ProcessingOutcome(action="error", handling_type="quota_reconciliation_required")
 
         if self.use_orchestrator:
             ai_cached = claim_result.get("ai_reply_cache")
             if ai_cached:
                 if isinstance(ai_cached, dict):
-                    risposta_text = ai_cached.get("text", "")
+                    risposta_text = ai_cached.get("text", ai_cached.get("risposta", ""))
                     richiede_umano = bool(ai_cached.get("richiede_umano", False))
                 elif isinstance(ai_cached, str):
                     try:
                         parsed = json.loads(ai_cached)
                         if isinstance(parsed, dict):
-                            risposta_text = parsed.get("text", "")
+                            risposta_text = parsed.get("text", parsed.get("risposta", ""))
                             richiede_umano = bool(parsed.get("richiede_umano", False))
                         else:
                             risposta_text = parsed
@@ -462,15 +619,7 @@ class InboundProcessingService:
                 existing_booking = await self.repo.get_booking_for_message(org_id, msg["id"])
                 risposta_text = "Richiesta di prenotazione già registrata. Lo staff può verificarne lo stato."
                 richiede_umano = replay_requires_intervention(existing_booking)
-                await self.repo.save_ai_reply(
-                    msg["id"],
-                    reply={
-                        "text": risposta_text,
-                        "richiede_umano": richiede_umano,
-                        "motivo": "booking_exists",
-                    },
-                    organization_id=org_id,
-                )
+                await release_quota_if_safe()
             else:
                 heartbeat_task = asyncio.ensure_future(
                     self._heartbeat_loop(msg["id"], org_id)
@@ -487,38 +636,61 @@ class InboundProcessingService:
                         business_profile=business_profile_raw,
                         is_simulation=False,
                         record_billing_usage=True,
+                        quota_operation=quota_operation,
+                        quota_ticket=quota_ticket,
                     )
                     out = await self.orchestrator.orchestrate(req)
                     risposta_text = out.response_text
                     richiede_umano = out.richiede_umano
-
-                    await self.repo.save_ai_reply(
-                        msg["id"],
-                        reply={
-                            "text": risposta_text,
-                            "richiede_umano": richiede_umano,
-                            "motivo": out.motivo_richiesta_umano
-                            or out.guardrail_motivo
-                            or "",
-                        },
-                        organization_id=org_id,
+                    if out.source in {"fast_path", "manual_gate"}:
+                        await release_quota_if_safe()
+                    else:
+                        await commit_quota_if_valid(out._quota_final)
+                except Exception as exc:
+                    await release_quota_if_safe()
+                    logger.error(
+                        "inbound=generation_or_commit_failed organization_id=%s message_id=%s error_type=%s",
+                        org_id, msg["id"], type(exc).__name__,
                     )
+                    return ProcessingOutcome(action="error", handling_type="ai_generation_failed")
                 finally:
                     heartbeat_task.cancel()
         else:
             # Esecuzione isolata nel modulo quarantenato LegacyInboundPipeline
-            legacy_res = await self.legacy_pipeline.execute(
-                org_id=org_id,
-                msg=msg,
-                text=text,
-                content=content,
-                canale=canale,
-                business_profile_raw=business_profile_raw,
-                state=state,
-                claim_result=claim_result,
-                heartbeat_coro=self._heartbeat_loop,
-            )
+            try:
+                legacy_res = await self.legacy_pipeline.execute(
+                    org_id=org_id,
+                    msg=msg,
+                    text=text,
+                    content=content,
+                    canale=canale,
+                    business_profile_raw=business_profile_raw,
+                    state=state,
+                    claim_result=claim_result,
+                    heartbeat_coro=self._heartbeat_loop,
+                    quota_operation=quota_operation,
+                    quota_ticket=quota_ticket,
+                )
+            except Exception as exc:
+                await release_quota_if_safe()
+                logger.error(
+                    "inbound=legacy_generation_failed organization_id=%s message_id=%s error_type=%s",
+                    org_id, msg["id"], type(exc).__name__,
+                )
+                return ProcessingOutcome(action="error", handling_type="ai_generation_failed")
             if legacy_res.handled:
+                try:
+                    await commit_quota_if_valid(
+                        legacy_res.quota_final,
+                        allow_nonbillable=legacy_res.quota_exempt,
+                    )
+                except Exception as exc:
+                    await release_quota_if_safe()
+                    logger.error(
+                        "inbound=quota_commit_failed organization_id=%s message_id=%s error_type=%s",
+                        org_id, msg["id"], type(exc).__name__,
+                    )
+                    return ProcessingOutcome(action="error", handling_type="quota_commit_failed")
                 from_number = _extract_from(content)
                 nome = (business_profile_raw or {}).get("nome") or "Attivita"
                 decorated = await decorate_with_disclosure(
@@ -547,8 +719,20 @@ class InboundProcessingService:
             pren = legacy_res.pren
             q_emb = legacy_res.q_emb
             variante_prompt = legacy_res.variante_prompt
+            try:
+                await commit_quota_if_valid(
+                    legacy_res.quota_final,
+                    allow_nonbillable=legacy_res.quota_exempt,
+                )
+            except Exception as exc:
+                await release_quota_if_safe()
+                logger.error(
+                    "inbound=quota_commit_failed organization_id=%s message_id=%s error_type=%s",
+                    org_id, msg["id"], type(exc).__name__,
+                )
+                return ProcessingOutcome(action="error", handling_type="quota_commit_failed")
 
-            if self.shadow_orchestrator and self.orchestrator:
+            if self.shadow_orchestrator and self.orchestrator and quota_operation is None:
                 try:
                     shadow_req = OrchestrationInput(
                         organization_id=org_id,

@@ -117,11 +117,15 @@ def mock_provider_context_open(monkeypatch):
         worker_message_id=None,
         simulation_request_id=None,
         simulation_claim_token=None,
+        quota_operation=None,
+        quota_ticket=None,
         context=None,
     ):
         test_context = provider_context_stub(
             task_type=task_type,
             organization_id=organization_id,
+            quota_operation=quota_operation,
+            quota_ticket=quota_ticket,
         )
         opened.append({
             "organization_id": uuid.UUID(str(organization_id)),
@@ -130,6 +134,8 @@ def mock_provider_context_open(monkeypatch):
             "worker_message_id": worker_message_id,
             "simulation_request_id": simulation_request_id,
             "simulation_claim_token": simulation_claim_token,
+            "quota_operation_id": getattr(quota_operation, "id", None),
+            "quota_claim_id": getattr(quota_ticket, "claim_id", None),
             "context": context,
         })
         return test_context

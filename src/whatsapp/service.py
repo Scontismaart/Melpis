@@ -95,8 +95,6 @@ class WhatsAppService:
         # provider payload also makes sandbox enforcement and idempotency
         # comparisons independent from caller-specific payload construction.
         payload = {**payload, "to": to_number, "_delivery_category": category}
-        bill_outbound = handling_type != "quota_exceeded" and not (
-            idempotency_key and idempotency_key.startswith("reply:"))
         prefs = await self.repo.get_contact_prefs(org_id, to_number)
         if prefs and (prefs.get("marketing_opt_out") or prefs.get("consent_status") == "withdrawn") and category == "marketing":
             raise self.MessageBlockedByOptOut("Contact has marketing opt-out")
@@ -121,17 +119,7 @@ class WhatsAppService:
                     meta_client=meta_client,
                     organization_id=org_id,
                 )
-                if result and bill_outbound:
-                    await self.repo.increment_message_usage(org_id)
                 return result
-        if handling_type != "quota_exceeded":
-            usage = await self.repo.check_message_usage(org_id)
-            if usage and usage["messages_limit"] is not None:
-                if usage["messages_used_this_period"] >= usage["messages_limit"]:
-                    raise self.MessageUsageExceeded(
-                        f"Message limit reached for organization {org_id}: "
-                        f"{usage['messages_used_this_period']}/{usage['messages_limit']}"
-                    )
         prefs = await self.repo.get_contact_prefs(org_id, to_number)
         if prefs and (prefs.get("marketing_opt_out") or prefs.get("consent_status") == "withdrawn") and category == "marketing":
             raise self.MessageBlockedByOptOut(
@@ -169,8 +157,6 @@ class WhatsAppService:
                 meta_client=meta_client,
                 organization_id=org_id,
             )
-            if result and bill_outbound:
-                await self.repo.increment_message_usage(org_id)
             return result
         result = await self.attempt_delivery(
             message_id=msg_id,
@@ -180,8 +166,6 @@ class WhatsAppService:
             meta_client=meta_client,
             organization_id=org_id,
         )
-        if result and bill_outbound:
-            await self.repo.increment_message_usage(org_id)
         return result
 
     async def attempt_delivery(
