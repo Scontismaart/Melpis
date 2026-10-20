@@ -126,12 +126,13 @@ async def test_carica_e_chiedi_org_scoped(async_client, sample_org, other_org, p
     assert _FakeLLM.calls == 1
 
 
-async def test_simulator_route_commits_once_and_replays_durable_response(
+async def test_simulator_route_reuses_guardrailed_response_after_commit(
     async_client, sample_org, pg_pool,
 ):
     from src.api.main import app
     from src.core.auth.dependencies import get_organization_context
     from src.core.billing.quota_reservations import validate_final_response
+    from src.core.conversation_store import store as conv_store
     from src.core.receptionist.models import OrchestrationOutput
     from src.models.schemas import RispostaOutput
 
@@ -147,12 +148,16 @@ async def test_simulator_route_commits_once_and_replays_durable_response(
     )
 
     class Orchestrator:
-        calls = 0
+        def __init__(self):
+            self.calls = 0
+            self.requests = []
 
         async def orchestrate(self, request):
             self.calls += 1
+            self.requests.append(request)
             response = RispostaOutput(
-                risposta="Siamo aperti oggi.", richiede_umano=False,
+                risposta=("**Siamo aperti oggi.**" if self.calls == 1 else "Vi aspettiamo!"),
+                richiede_umano=False,
                 motivo="", categoria="faq",
             )
             output = OrchestrationOutput(
@@ -172,29 +177,49 @@ async def test_simulator_route_commits_once_and_replays_durable_response(
         "auth_user_id": str(auth_user_id), "user_id": str(auth_user_id), "ruolo": "owner",
     }
     request_id = str(uuid.uuid4())
-    headers = {**_headers(sample_org["id"]), "Idempotency-Key": request_id}
-    payload = {"testo": "Siete aperti oggi?", "id_conversazione": "a04-simulator-test"}
-    first = await async_client.post("/api/messaggio", json=payload, headers=headers)
-    used_after_first = await pg_pool.fetchval(
-        "SELECT messages_used_this_period FROM organizations WHERE id=$1", sample_org["id"],
-    )
-    replay = await async_client.post("/api/messaggio", json=payload, headers=headers)
+    conversation_id = f"a04-simulator-{uuid.uuid4()}"
+    conversation_key = f"{sample_org['id']}:{auth_user_id}:{conversation_id}"
+    conv_store.cancella(conversation_key)
+    payload = {"testo": "Siete aperti oggi?", "id_conversazione": conversation_id}
+    first_headers = {**_headers(sample_org["id"]), "Idempotency-Key": request_id}
+    first = await async_client.post("/api/messaggio", json=payload, headers=first_headers)
+    replay = await async_client.post("/api/messaggio", json=payload, headers=first_headers)
     assert first.status_code == 200, first.text
     assert first.json()["risposta"] == "Siamo aperti oggi."
     assert replay.status_code == 200 and replay.json() == first.json()
     assert replay.headers.get("Idempotency-Replayed") == "true"
     assert set(first.json()) <= {"risposta", "richiede_umano", "motivo", "categoria", "prenotazione"}
-    assert used_after_first == 1
+    assert conv_store.recupera_cronologia(conversation_key) == [
+        ("Siete aperti oggi?", "Siamo aperti oggi."),
+    ]
+    stored = await pg_pool.fetchrow(
+        "SELECT status,response FROM simulation_requests WHERE organization_id=$1 AND request_id=$2",
+        sample_org["id"], orchestrator.requests[0].quota_operation.id,
+    )
+    assert stored is not None and stored["status"] == "completed"
+    stored_response = json.loads(stored["response"]) if isinstance(stored["response"], str) else stored["response"]
+    assert stored_response["risposta"] == first.json()["risposta"]
     assert await pg_pool.fetchval(
         "SELECT messages_used_this_period FROM organizations WHERE id=$1", sample_org["id"],
     ) == 1
     assert orchestrator.calls == 1
-    stored = await pg_pool.fetchrow(
-        "SELECT status,response FROM simulation_requests WHERE organization_id=$1 AND request_id="
-        "(SELECT id FROM usage_events WHERE organization_id=$1 AND event_type='system.quota_reservation' "
-        "AND metadata->>'channel'='simulator' LIMIT 1)", sample_org["id"],
-    )
-    assert stored is not None and stored["status"] == "completed"
+
+    second_payload = {"testo": "Grazie!", "id_conversazione": conversation_id}
+    second_headers = {**_headers(sample_org["id"]), "Idempotency-Key": str(uuid.uuid4())}
+    second = await async_client.post("/api/messaggio", json=second_payload, headers=second_headers)
+    assert second.status_code == 200, second.text
+    assert second.json()["risposta"] == "Vi aspettiamo!"
+    assert orchestrator.requests[1].cronologia == [
+        ("Siete aperti oggi?", "Siamo aperti oggi."),
+    ]
+    assert conv_store.recupera_cronologia(conversation_key) == [
+        ("Siete aperti oggi?", "Siamo aperti oggi."),
+        ("Grazie!", "Vi aspettiamo!"),
+    ]
+    assert await pg_pool.fetchval(
+        "SELECT messages_used_this_period FROM organizations WHERE id=$1", sample_org["id"],
+    ) == 2
+    conv_store.cancella(conversation_key)
 
 
 async def test_delete_cross_tenant_non_tocca_org_altrui(async_client, sample_org, other_org):

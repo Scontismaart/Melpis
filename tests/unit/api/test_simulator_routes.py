@@ -64,6 +64,7 @@ def test_messaggio_invalid_profile_404(client, monkeypatch):
 
 def test_messaggio_demo_simulation(client, monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "true")
+    conversation_id = f"conv-{uuid.uuid4().hex}"
     mock_orchestrator = AsyncMock()
     mock_out = MagicMock()
     mock_out.response_text = "Benvenuto alla Trattoria Da Mario!"
@@ -78,13 +79,19 @@ def test_messaggio_demo_simulation(client, monkeypatch):
     with patch.object(app.state, "orchestrator", mock_orchestrator, create=True):
         res = client.post("/api/messaggio", json={
             "testo": "Buongiorno",
-            "id_conversazione": f"conv-{uuid.uuid4().hex[:8]}",
+            "id_conversazione": conversation_id,
         })
         assert res.status_code == 200
         data = res.json()
         assert data["risposta"] == "Benvenuto alla Trattoria Da Mario!"
         assert data["categoria"] == "saluto"
         assert data["richiede_umano"] is False
+        from src.core.conversation_store import store as conv_store
+        demo_key = f"demo:{res.cookies.get('melpis_demo_session')}:{conversation_id}"
+        assert conv_store.recupera_cronologia(demo_key) == [
+            ("Buongiorno", "Benvenuto alla Trattoria Da Mario!"),
+        ]
+        conv_store.cancella(demo_key)
 
 
 def test_recensione_feature_blocked_by_plan(client):
@@ -153,6 +160,8 @@ def test_messaggio_authenticated_organization(client):
     mock_orchestrator = AsyncMock()
     mock_out = MagicMock()
     mock_out.response_text = "Benvenuto a Pizzeria Napoli!"
+    mock_out.source = "fast_path"
+    mock_out._quota_exempt = True
     mock_out.richiede_umano = False
     mock_out.motivo_richiesta_umano = None
     mock_out.intent = "saluto"
@@ -165,12 +174,13 @@ def test_messaggio_authenticated_organization(client):
                       "motivo": "", "categoria": "saluto", "prenotazione": None}
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
+    conversation_id = f"conv-{uuid.uuid4().hex}"
     with patch.object(app.state, "repo", mock_repo, create=True), \
          patch.object(app.state, "orchestrator", mock_orchestrator, create=True), \
          patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota):
         res = client.post("/api/messaggio", headers={"Idempotency-Key": str(request_id)}, json={
             "testo": "Siete aperti stasera?",
-            "id_conversazione": f"conv-{uuid.uuid4().hex[:8]}",
+            "id_conversazione": conversation_id,
         })
         assert res.status_code == 200
         assert res.json()["risposta"] == "Benvenuto a Pizzeria Napoli!"
@@ -183,7 +193,14 @@ def test_messaggio_authenticated_organization(client):
         assert call_args.simulation_claim_token == quota.ticket.claim_id
         assert "simulation_claim_token" not in call_args.model_dump()
         assert str(quota.ticket.claim_id) not in repr(call_args)
-        assert len(quota.commit_calls) == 1
+        assert quota.commit_calls == []
+        assert len(quota.release_calls) == 1
+        from src.core.conversation_store import store as conv_store
+        history_key = f"{mock_org_id}:{mock_user['user_id']}:{conversation_id}"
+        assert conv_store.recupera_cronologia(history_key) == [
+            ("Siete aperti stasera?", "Benvenuto a Pizzeria Napoli!"),
+        ]
+        conv_store.cancella(history_key)
     app.dependency_overrides.pop(get_organization_context, None)
 
 

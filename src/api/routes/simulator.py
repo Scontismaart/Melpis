@@ -270,7 +270,7 @@ async def _ricevi_messaggio(request, messaggio, response, idempotency_key, profi
             raise HTTPException(status_code=503, detail="Impossibile salvare la risposta simulata")
 
     # Keep conversation history only after the idempotent response is durable.
-    conv_store.aggiungi(chiave_conv, messaggio.testo, out.response_text)
+    conv_store.aggiungi(chiave_conv, messaggio.testo, risposta.risposta)
 
     prenotazione_id = None
     pren = out.prenotazione
