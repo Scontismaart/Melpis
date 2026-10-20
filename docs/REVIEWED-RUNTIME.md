@@ -1,7 +1,13 @@
 # Runtime CrewAI/MCP con derivata interna verificata
 
-Questa modifica è un candidato da revisionare: non autorizza merge, deploy o
-adozione definitiva. L'upstream CrewAI 1.15.4 richiede `mcp~=1.28.1`, mentre la
+## Stato su Melpis main - 17 ottobre 2026
+
+La correzione e stata integrata tramite PR #105 nel commit `7988f32f419019c650d77ebe9fe4a16366f5c374`. La CI post-merge [39022106060](https://github.com/Scontismaart/Melpis/actions/runs/39022106060) e verde: 2.744 test passati, 33 test live opt-in esclusi, audit OSV di 204 dipendenze senza pacchetti saltati e build API/web amd64/arm64 riuscite. Le immagini SHA del commit sono state lette direttamente da GHCR; i manifest riportano entrambe le architetture e i digest di runtime corrispondono ai tag specifici per architettura.
+
+Questo certifica il commit e la pubblicazione immagini, non un deploy o un'approvazione upstream della derivata. Nessun deploy dei servizi e stato eseguito; il fondatore ha confermato che non esistono host applicativi esterni. I 33 test live restano esclusi e da certificare prima della beta.
+
+
+La correzione e integrata in main tramite PR #105. Questo aggiornamento documenta lo stato verificato della build; non autorizza deploy o approvazione upstream della derivata. L'upstream CrewAI 1.15.4 richiede `mcp~=1.28.1`, mentre la
 correzione di sicurezza richiede MCP 1.30.0. La derivata interna rilassa soltanto
 quel vincolo a `mcp>=1.30.0,<1.31`, mantenendo `mcp==1.30.0` nel contratto Melpis.
 Non implica approvazione o firma upstream sul nuovo abbinamento.
