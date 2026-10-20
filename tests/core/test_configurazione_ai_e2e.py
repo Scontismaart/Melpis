@@ -12,6 +12,7 @@ from src.core.receptionist.models import OrchestrationInput
 from src.core.guardrails.intent_classifier import IntentResult
 from src.models.schemas import OnboardingProfileInput, RispostaOutput
 from src.agents.responder_agent import crea_responder_agent
+from src.agents.prompts import serializza_dati_non_fidati
 
 API_KEY = "test-api-key-12345"
 pytestmark = pytest.mark.asyncio
@@ -332,7 +333,7 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
 
     assert len(observed) == 3
     first, second, third = observed
-    assert all(f"<customer_input>\n{question}\n</customer_input>" in call["task"] for call in observed)
+    assert all(serializza_dati_non_fidati(question) in call["task"] for call in observed)
     old_fact = "Massaggio Relax: 25 euro, durata 50 minuti."
     new_fact = "Massaggio Relax: 40 euro, durata 50 minuti."
     assert old_fact in first["task"] and new_fact not in first["task"]

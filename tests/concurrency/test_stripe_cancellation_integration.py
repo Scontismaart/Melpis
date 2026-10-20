@@ -113,7 +113,10 @@ CREATE TABLE messages (
     meta_message_id VARCHAR(255),
     quota_exceeded_at TIMESTAMPTZ,
     processing_at TIMESTAMPTZ,
+    heartbeat_at TIMESTAMPTZ,
+    claimed_at TIMESTAMPTZ,
     replied_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );

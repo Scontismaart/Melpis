@@ -11,8 +11,10 @@ Gestisce:
 """
 
 import logging
+import hashlib
+import json
 import uuid
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 
 from src.api.dependencies import get_repo, require_ruolo
 from src.api.routes.common import (
@@ -27,6 +29,7 @@ from src.core.documenti.chunking import chunk_testo
 from src.core.documenti.extractor import estrai_testo
 from src.core.documenti.priorita import rileva_conflitti_prezzo
 from src.core.documenti.qa_agent import rispondi
+from src.core.billing.quota_reservations import QuotaConflict, QuotaLease, QuotaOperation, QuotaReservations
 from src.models.schemas import (
     CaricaDocumentoInput,
     DatiStrutturaInput,
@@ -47,22 +50,92 @@ router = APIRouter(tags=["knowledge"])
 async def chiedi_documenti(
     domanda: DomandaInput,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager", "staff")),
 ):
     """Risponde a una domanda basandosi sui documenti indicizzati del tenant."""
+    async with QuotaLease() as lease:
+        return await _chiedi_documenti(domanda, request, idempotency_key, user, lease)
+
+
+async def _chiedi_documenti(domanda, request, idempotency_key, user, lease):
     repo = get_repo(request)
     org_id = user.get("organization_id")
     blocco = await check_feature_blocked_by_plan(repo, org_id, "rag")
     if blocco:
         raise HTTPException(status_code=403, detail=blocco)
     await enforce_org_rate_limit(org_id, "knowledge-qa", 60, 60)
-    billing = await get_billing_snapshot(repo, org_id)
-    output = await rispondi(
-        org_id, domanda.domanda, repo, k=domanda.k, billing=billing,
-        actor_auth_user_id=user.get("auth_user_id"),
-        trace_id=getattr(request.state, "trace_id", None),
+    try:
+        request_uuid = uuid.UUID(idempotency_key or "")
+        auth_user_uuid = uuid.UUID(str(user.get("auth_user_id")))
+        organization_uuid = uuid.UUID(str(org_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="Idempotency-Key o identità utente non validi")
+
+    payload_hash = hashlib.sha256(json.dumps(
+        {"organization_id": str(organization_uuid), "domanda": domanda.domanda,
+         "k": domanda.k}, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    operation = QuotaOperation(
+        organization_id=organization_uuid, source_id=request_uuid, channel="qa",
+        payload_hash=payload_hash, auth_user_id=auth_user_uuid,
     )
-    return output
+    reservations = QuotaReservations(getattr(repo, "pool", None))
+    try:
+        reservation = await reservations.reserve(operation)
+    except QuotaConflict:
+        raise HTTPException(status_code=409, detail="Richiesta già in elaborazione o da riconciliare")
+    except Exception as exc:
+        logger.error("knowledge_qa=reservation_failed org_id=%s error_type=%s",
+                     org_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Impossibile riservare la risposta")
+
+    state = reservation.get("status") if reservation else None
+    if state == "replay":
+        cached = reservation.get("response")
+        if not isinstance(cached, dict):
+            raise HTTPException(status_code=503, detail="Risposta memorizzata non disponibile")
+        return cached
+    if state == "quota_exceeded":
+        raise HTTPException(status_code=429, detail="Quota risposte AI esaurita")
+    if state == "in_progress":
+        raise HTTPException(status_code=409, detail="Richiesta già in elaborazione")
+    if state == "reconciliation_required":
+        raise HTTPException(status_code=503, detail="Richiesta in verifica contabile")
+    if state != "reserved" or reservation.get("ticket") is None:
+        raise HTTPException(status_code=503, detail="Impossibile riservare la risposta")
+
+    ticket = reservation["ticket"]
+    lease.bind(reservations, operation, ticket)
+    try:
+        output = await rispondi(
+            org_id, domanda.domanda, repo, k=domanda.k,
+            billing=reservation.get("billing"),
+            actor_auth_user_id=auth_user_uuid,
+            trace_id=getattr(request.state, "trace_id", None),
+            quota_operation=operation, quota_ticket=ticket,
+        )
+        final = output.pop("_quota_final", None)
+        if final is None:
+            # No retrieved evidence means no provider-generated answer. Release
+            # only after A03 confirms that no uncertain cost is outstanding.
+            await reservations.release(operation, ticket)
+            return output
+        await lease.checkpoint()
+        stored = await reservations.commit(operation, ticket, final)
+        await lease.stop()
+        return stored
+    except HTTPException:
+        raise
+    except Exception as exc:
+        try:
+            await reservations.release(operation, ticket)
+        except Exception:
+            logger.warning("knowledge_qa=reservation_held org_id=%s error_type=%s",
+                           org_id, type(exc).__name__)
+        logger.error("knowledge_qa=answer_failed org_id=%s error_type=%s",
+                     org_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Risposta non disponibile; richiesta in verifica")
 
 
 # ── Conteggio ed Elenco Documenti ─────────────────────────────────────

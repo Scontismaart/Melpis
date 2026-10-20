@@ -37,6 +37,12 @@ DROP TABLE IF EXISTS organizations CASCADE;
 DROP TABLE IF EXISTS usage_events CASCADE;
 DROP TABLE IF EXISTS governance_outbox CASCADE;
 DROP TABLE IF EXISTS outbound_dedup CASCADE;
+DROP TABLE IF EXISTS simulation_requests CASCADE;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated; END IF;
+END $$;
 
 CREATE TABLE organizations (
     id UUID PRIMARY KEY,
@@ -137,11 +143,25 @@ CREATE TABLE outbound_dedup (
 
 CREATE TABLE usage_events (
     id UUID PRIMARY KEY,
-    organization_id UUID NOT NULL,
+    organization_id UUID,
     event_type TEXT NOT NULL,
     quantity INT NOT NULL DEFAULT 1,
     metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE simulation_requests (
+    organization_id UUID NOT NULL REFERENCES organizations(id),
+    auth_user_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    claim_token UUID NOT NULL DEFAULT gen_random_uuid(),
+    status TEXT NOT NULL DEFAULT 'reserved',
+    response JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reserved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ,
+    PRIMARY KEY (organization_id, auth_user_id, request_id)
 );
 
 CREATE TABLE governance_outbox (
@@ -151,6 +171,15 @@ CREATE TABLE governance_outbox (
     payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Exercise the same server-only trust precondition as migration 060. This
+-- isolated test schema does not run or modify any remote migration target.
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE messages, usage_events FROM PUBLIC, anon, authenticated;
+INSERT INTO usage_events (id, organization_id, event_type, quantity, metadata)
+VALUES ('6206d423-cea9-5480-bb9b-59d757503f14', NULL, 'system.quota_trust_epoch', 0,
+        jsonb_build_object('protocol_version', 1, 'trust_epoch', gen_random_uuid()::text));
 """
 
 
@@ -276,7 +305,24 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
             cache_in_db = json.loads(cache_in_db)
         assert isinstance(cache_in_db, dict), f"Atteso dict JSONB, trovato {type(cache_in_db)}"
         assert cache_in_db["richiede_umano"] is True
-        assert "responsabile eventi" in cache_in_db["text"]
+        # A04's public persisted final-response shape is RispostaOutput
+        # (`risposta`); accept `text` only for legacy fixtures, never as
+        # replay authority.
+        cached_text = cache_in_db.get("risposta", cache_in_db.get("text"))
+        assert isinstance(cached_text, str)
+        assert "responsabile eventi" in cached_text
+
+        quota_event = await conn.fetchrow(
+            """SELECT metadata FROM usage_events
+                 WHERE organization_id=$1 AND event_type='system.quota_reservation'""",
+            org_id,
+        )
+        assert quota_event is not None
+        quota_metadata = quota_event["metadata"]
+        if isinstance(quota_metadata, str):
+            quota_metadata = json.loads(quota_metadata)
+        assert quota_metadata["state"] == "committed"
+        assert quota_metadata["response_hash"]
 
     # --- FASE 2: Worker 2 (RETRY) riparte ---
     service_worker2 = AsyncMock()

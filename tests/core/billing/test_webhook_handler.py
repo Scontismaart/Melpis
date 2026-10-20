@@ -64,6 +64,14 @@ async def _seed_checkout_intent(repo, organization_id, event, trial_end_unix=Non
     return intent_id
 
 
+async def _seed_usage(repo, organization_id, units=1):
+    """Set a billing fixture directly; production increments are A04-only."""
+    await repo.pool.execute(
+        "UPDATE organizations SET messages_used_this_period=messages_used_this_period+$2 WHERE id=$1",
+        organization_id, units,
+    )
+
+
 def _monthly_service_line(subscription_id):
     start = int(datetime.now(timezone.utc).timestamp())
     return {
@@ -174,8 +182,7 @@ async def test_handle_invoice_paid_resets_usage(repo, sample_org, valid_invoice_
         "stripe_customer_id": "cus_test001",
         "subscription_id": "sub_test001",
     })
-    await repo.increment_message_usage(sample_org["id"])
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"], units=2)
     event = valid_invoice_paid_event
     event["data"]["object"]["customer"] = "cus_test001"
     await handle_stripe_webhook(event, repo, 7)
@@ -424,9 +431,7 @@ async def test_subscription_updated_same_period_does_not_reset_usage(repo, sampl
         "current_period_start": fixed_start,
         "current_period_end": fixed_end,
     })
-    await repo.increment_message_usage(sample_org["id"])
-    await repo.increment_message_usage(sample_org["id"])
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"], units=3)
 
     def make_event(evt_id, created):
         return {

@@ -54,7 +54,7 @@ async def test_quota_exceeded_meta_failure_finalizes_persisted_escalation(base_a
     }
 
     mock_repo = AsyncMock()
-    mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "quota_exceeded"})
+    mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "quota_exceeded"})
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
     mock_repo.pool = None
@@ -89,7 +89,7 @@ async def test_wants_human_meta_failure_finalizes_persisted_escalation(base_app_
     }
 
     mock_repo = AsyncMock()
-    mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
+    mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
     mock_repo.pool = None
@@ -124,7 +124,8 @@ async def test_fast_reply_meta_failure_does_not_mark_replied(base_app_config, fa
     }
 
     mock_repo = AsyncMock()
-    mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
+    mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
+    mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
@@ -159,7 +160,8 @@ async def test_all_successful_flows_finalize_properly(base_app_config, fake_tena
     }
 
     mock_repo = AsyncMock()
-    mock_repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
+    mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
+    mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
     mock_repo.try_mark_replied = AsyncMock(return_value={"id": msg_id, "status": "handled"})
     mock_repo.mark_message_sent = AsyncMock()

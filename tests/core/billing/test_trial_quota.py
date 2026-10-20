@@ -33,11 +33,10 @@ async def test_both_signup_paths_start_with_seven_days_and_150_messages(repo, pg
     assert (org["trial_end"] - org["trial_start"]).days == 7
 
 
-async def test_trial_boundary_is_atomic_idempotent_and_tenant_scoped(pg_pool):
-    # This DB integration test owns the quota boundary only: at 149, exactly
-    # one concurrent request claims message 150 and the competing request is
-    # rejected. Customer-facing upgrade/checkout behavior at that boundary is
-    # part of the separate A04 contract and is intentionally not inferred here.
+async def test_inbound_processing_claim_is_tenant_scoped_and_does_not_precharge(pg_pool):
+    # Message ownership/worker fencing happens before A04 admission. Claiming
+    # work does not spend the commercial reply quota; QuotaReservations owns
+    # the last-unit behavior in test_quota_reservation_lifecycle.py.
     from src.whatsapp.repository import Repository as WhatsAppRepository
     message_repo = WhatsAppRepository(pool=pg_pool)
     org_ids = [uuid.uuid4(), uuid.uuid4()]
@@ -70,20 +69,18 @@ async def test_trial_boundary_is_atomic_idempotent_and_tenant_scoped(pg_pool):
 
     first_org = str(org_ids[0])
     results = await asyncio.gather(*(
-        message_repo.claim_message_and_check_quota(str(message_id), first_org)
+        message_repo.claim_message_for_processing(str(message_id), first_org)
         for message_id in messages[0]
     ))
-    assert sum(result["status"] == "claimed" for result in results) == 1
-    assert sum(result["status"] == "quota_exceeded" for result in results) == 1
-    assert sorted(result["status"] for result in results) == ["claimed", "quota_exceeded"]
-    winner = messages[0][next(i for i, result in enumerate(results) if result["status"] == "claimed")]
-    assert (await message_repo.claim_message_and_check_quota(str(winner), first_org))["status"] == "currently_processing"
-    assert (await message_repo.claim_message_and_check_quota(str(winner), str(org_ids[1])))["status"] == "not_found"
-    assert (await message_repo.claim_message_and_check_quota(str(messages[1][0]), str(org_ids[1])))["status"] == "claimed"
+    assert [result["status"] for result in results] == ["claimed", "claimed"]
+    winner = messages[0][0]
+    assert (await message_repo.claim_message_for_processing(str(winner), first_org))["status"] == "currently_processing"
+    assert (await message_repo.claim_message_for_processing(str(winner), str(org_ids[1])))["status"] == "not_found"
+    assert (await message_repo.claim_message_for_processing(str(messages[1][0]), str(org_ids[1])))["status"] == "claimed"
 
     async with pg_pool.acquire() as conn:
         usage = await conn.fetch("SELECT id, messages_used_this_period FROM organizations WHERE id = ANY($1::uuid[])", org_ids)
     assert {row["id"]: row["messages_used_this_period"] for row in usage} == {
-        org_ids[0]: 150,
-        org_ids[1]: 1,
+        org_ids[0]: 149,
+        org_ids[1]: 0,
     }

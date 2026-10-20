@@ -1215,19 +1215,28 @@
       const docRispostaText = document.getElementById("doc-risposta-text");
       const docFonti = document.getElementById("doc-fonti");
       const docFontiList = document.getElementById("doc-fonti-list");
+      let qaIdempotencyKey = null;
+      let qaIdempotencyQuestion = null;
 
       docChiediBtn?.addEventListener("click", async () => {
         const token = beginMutation("query", docChiediBtn);
         if (!token) return;
         const domanda = (docQuery?.value || "").trim();
         if (!domanda) { endMutation("query", docChiediBtn); return; }
+        if (qaIdempotencyQuestion !== domanda || !qaIdempotencyKey) {
+          qaIdempotencyKey = crypto.randomUUID();
+          qaIdempotencyQuestion = domanda;
+        }
         docChiediBtn.disabled = true;
         docChiediBtn.textContent = "Interrogazione AI in corso…";
         docRisposta.hidden = true;
         try {
           const res = await apiFetch(`${API_BASE}/api/documenti/chiedi`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": qaIdempotencyKey,
+            },
             body: JSON.stringify({ domanda, k: 5 }),
           });
           if (!current(token)) return;
@@ -1237,6 +1246,8 @@
           if (!current(token)) return;
           docRispostaText.textContent = data.risposta;
           docRisposta.hidden = false;
+          qaIdempotencyKey = null;
+          qaIdempotencyQuestion = null;
 
           if (data.fonti && data.fonti.length > 0) {
             docFonti.hidden = false;

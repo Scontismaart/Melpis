@@ -13,7 +13,7 @@ from src.agents.prompts import (
     formatta_disponibilita,
 )
 from src.core.bookings.service import SlotPienoError
-from src.core.ai_safety import apply_booking_result, booking_failed, replay_requires_intervention, validate_ai_input
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY, apply_booking_result, booking_failed, replay_requires_intervention, validate_ai_input
 from src.core.crew_runner import genera_risposta_async
 from src.core.documenti.rag_context import recupera_contesto_documenti
 from src.core.guardrails import faq_cache
@@ -80,6 +80,8 @@ class LegacyExecutionResult:
     pren: Any = None
     q_emb: Any = None
     variante_prompt: str = "control"
+    quota_final: Any = None
+    quota_exempt: bool = False
 
 
 class LegacyInboundPipeline:
@@ -104,6 +106,8 @@ class LegacyInboundPipeline:
         state: dict | None,
         claim_result: dict,
         heartbeat_coro=None,
+        quota_operation=None,
+        quota_ticket=None,
     ) -> LegacyExecutionResult:
         validate_ai_input(text)
         result = LegacyExecutionResult()
@@ -163,6 +167,28 @@ class LegacyInboundPipeline:
                 result.response_text = cached_answer
                 result.richiede_umano = False
                 result.q_emb = q_emb
+                if quota_operation is not None and quota_ticket is not None:
+                    from src.core.billing.quota_reservations import validate_final_response
+                    from src.models.schemas import RispostaOutput
+                    profilo = _profile_from_dict(business_profile_raw)
+                    cached_response = RispostaOutput(
+                        risposta=cached_answer, richiede_umano=False,
+                        motivo="", categoria=intent_result.intent or "generico",
+                    )
+                    cached_response = applica_guardrail(
+                        cached_response, valida_risposta(cached_response, profilo=profilo),
+                    )
+                    if cached_response._guardrail_blocked is True:
+                        result.handled = False
+                        result.response_text = cached_response.risposta
+                        result.richiede_umano = True
+                        result.quota_exempt = True
+                        return result
+                    result.quota_final = validate_final_response(
+                        quota_operation, quota_ticket,
+                        cached_response,
+                        profile=profilo,
+                    )
                 return result
 
         result.q_emb = q_emb
@@ -192,11 +218,7 @@ class LegacyInboundPipeline:
             existing_booking = await self.repo.get_booking_for_message(org_id, msg["id"])
             result.response_text = "Richiesta di prenotazione già registrata. Lo staff può verificarne lo stato."
             result.richiede_umano = replay_requires_intervention(existing_booking)
-            await self.repo.save_ai_reply(
-                msg["id"],
-                reply={"text": result.response_text, "richiede_umano": result.richiede_umano, "motivo": "booking_exists"},
-                organization_id=org_id,
-            )
+            result.quota_exempt = True
             return result
 
         heartbeat_task = None
@@ -214,6 +236,8 @@ class LegacyInboundPipeline:
                     "conversation_id": str(msg.get("conversation_id") or "") or None,
                     "trace_id": str(msg.get("trace_id") or "") or None,
                 },
+                quota_operation=quota_operation,
+                quota_ticket=quota_ticket,
             )
             recupera_doc_fn = _get_proc_symbol("recupera_contesto_documenti", recupera_contesto_documenti)
             contesto = await recupera_doc_fn(str(org_id), text, self.repo, q_emb=q_emb)
@@ -315,7 +339,8 @@ class LegacyInboundPipeline:
         pren = risposta.prenotazione
         result.pren = pren
 
-        if pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
+        if (quota_operation is None and pren and pren.data and pren.ora
+                and pren.coperti and not risposta.richiede_umano):
             if self.booking_service and org_id and msg.get("id"):
                 try:
                     created = await self.booking_service.create_booking(
@@ -350,14 +375,20 @@ class LegacyInboundPipeline:
         result.response_text = risposta.risposta
         result.richiede_umano = bool(risposta.richiede_umano)
         result.motivo = getattr(risposta, "motivo", "") or (getattr(esito, "motivo", "") if esito else "")
-
-        await self.repo.save_ai_reply(
-            msg["id"],
-            reply={
-                "text": result.response_text,
-                "richiede_umano": result.richiede_umano,
-                "motivo": result.motivo,
-            },
-            organization_id=org_id,
-        )
+        if quota_operation is not None and quota_ticket is not None:
+            from src.core.billing.quota_reservations import validate_final_response
+            if risposta._guardrail_blocked is True:
+                result.quota_exempt = True
+                return result
+            result.quota_final = validate_final_response(
+                quota_operation, quota_ticket, risposta,
+                context_chunks=contesto.chunks, profile=profilo,
+            )
+            if pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
+                risposta.risposta = BOOKING_RECEIVED_REPLY
+                result.response_text = risposta.risposta
+                result.quota_final = validate_final_response(
+                    quota_operation, quota_ticket, risposta,
+                    context_chunks=contesto.chunks, profile=profilo,
+                )
         return result

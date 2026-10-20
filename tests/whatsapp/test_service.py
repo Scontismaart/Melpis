@@ -170,19 +170,19 @@ class TestWhatsAppService:
         service = WhatsAppService(app_config, mock_repo)
         assert await service.check_human_request("quanto costano i menu") is False
 
-    async def test_message_usage_exceeded_blocks_send(self, app_config, mock_repo, mock_meta_client):
+    async def test_manual_outbound_remains_available_at_zero_ai_quota(self, app_config, mock_repo, mock_meta_client):
         mock_repo.check_message_usage = AsyncMock(return_value={"messages_used_this_period": 100, "messages_limit": 100})
         service = WhatsAppService(app_config, mock_repo)
-        with pytest.raises(service.MessageUsageExceeded):
-            await service.send_whatsapp_message(
-                org_id=uuid.uuid4(),
-                to_number="391234567890",
-                payload={"type": "text", "text": {"body": "Ciao!"}},
-                category="utility",
-                meta_client=mock_meta_client,
-                tenant_config=MagicMock(),
-            )
-        mock_repo.upsert_message.assert_not_called()
+        result = await service.send_whatsapp_message(
+            org_id=uuid.uuid4(),
+            to_number="391234567890",
+            payload={"type": "text", "text": {"body": "Ciao!"}},
+            category="utility",
+            meta_client=mock_meta_client,
+            tenant_config=MagicMock(),
+        )
+        assert result["status"] == "sent"
+        mock_repo.check_message_usage.assert_not_awaited()
 
     async def test_message_usage_null_limit_allows_send(self, app_config, mock_repo, mock_meta_client):
         mock_repo.check_message_usage = AsyncMock(return_value={"messages_used_this_period": 500, "messages_limit": None})
@@ -197,7 +197,7 @@ class TestWhatsAppService:
         )
         assert result["status"] == "sent"
 
-    async def test_send_whatsapp_message_increments_usage(self, app_config, mock_repo, mock_meta_client):
+    async def test_manual_outbound_does_not_write_ai_usage(self, app_config, mock_repo, mock_meta_client):
         service = WhatsAppService(app_config, mock_repo)
         await service.send_whatsapp_message(
             org_id=uuid.uuid4(),
@@ -207,7 +207,7 @@ class TestWhatsAppService:
             meta_client=mock_meta_client,
             tenant_config=MagicMock(),
         )
-        mock_repo.increment_message_usage.assert_called_once()
+        mock_repo.increment_message_usage.assert_not_awaited()
 
     async def test_idempotency_key_precheck_skips_send(self, app_config, mock_repo, mock_meta_client):
         """Task 6: se l'idempotency_key esiste gia', non si tenta un secondo

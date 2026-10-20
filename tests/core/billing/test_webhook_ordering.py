@@ -170,6 +170,14 @@ def _checkout(event_id, created, org_id, intent_id, *, session_id=None,
     }
 
 
+async def _seed_usage(repo, organization_id, units=1):
+    """Set a billing fixture directly; production increments are A04-only."""
+    await repo.pool.execute(
+        "UPDATE organizations SET messages_used_this_period=messages_used_this_period+$2 WHERE id=$1",
+        organization_id, units,
+    )
+
+
 async def _processed(repo, event_id):
     return await repo.pool.fetchval(
         "SELECT EXISTS(SELECT 1 FROM processed_stripe_events WHERE event_id = $1)", event_id
@@ -206,7 +214,7 @@ async def test_checkout_then_paid_and_paid_then_checkout_converge(repo, sample_o
     intent = await _seed_intent(repo, sample_org["id"])
     checkout = _checkout("evt_checkout_first", 300, sample_org["id"], intent)
     await handle_stripe_webhook(checkout, repo, 7)
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"])
     invoice = _paid_invoice("evt_paid_after_checkout", 300, intent_id=intent,
                             price_id=PRICE)
     await handle_stripe_webhook(invoice, repo, 7)
@@ -229,7 +237,7 @@ async def test_checkout_then_paid_and_paid_then_checkout_converge(repo, sample_o
                                subscription="sub_paid_first", price_id=PRICE,
                                customer=reverse_customer, intent_id=reverse_intent)
     await handle_stripe_webhook(paid_first, repo, 7)
-    await repo.increment_message_usage(other_id)
+    await _seed_usage(repo, other_id)
     checkout_after = _checkout("evt_checkout_after_paid", 400, other_id, reverse_intent,
                                customer=reverse_customer, subscription="sub_paid_first")
     checkout_result = await handle_stripe_webhook(checkout_after, repo, 7)
@@ -361,7 +369,7 @@ async def test_checkout_after_paid_preserves_active_period_quota_and_trial(repo,
     await _bound_org(repo, sample_org["id"], status="trialing")
     intent = await _seed_intent(repo, sample_org["id"])
     await handle_stripe_webhook(_paid_invoice("evt_paid_before_checkout", 600), repo, 7)
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"])
     before = await repo.get_organization_billing(sample_org["id"])
     result = await handle_stripe_webhook(
         _checkout("evt_checkout_after_paid_preserves", 601, sample_org["id"], intent), repo, 7
@@ -586,7 +594,7 @@ async def test_current_invoice_renewal_needs_no_reused_checkout_intent_and_dupli
     )
 
     result = await handle_stripe_webhook(event, repo, 7)
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"])
     duplicate = await handle_stripe_webhook(event, repo, 7)
     billing = await repo.get_organization_billing(sample_org["id"])
 
@@ -798,7 +806,7 @@ async def test_concurrent_paid_and_failed_same_invoice_converge_without_double_g
     assert billing["subscription_status"] == "active"
     assert billing["messages_used_this_period"] == 0
     assert await _audit_count(repo, sample_org["id"], "billing.webhook.subscription_activated") == 1
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"])
     await handle_stripe_webhook(paid, repo, 7)
     assert (await repo.get_organization_billing(sample_org["id"]))["messages_used_this_period"] == 1
 
@@ -836,7 +844,7 @@ async def test_first_paid_period_replaces_later_provisional_checkout_time_once(r
     assert billing["current_period_start"] == datetime.fromtimestamp(PERIOD_START, tz=timezone.utc)
     assert billing["current_period_end"] == datetime.fromtimestamp(PERIOD_END, tz=timezone.utc)
     assert billing["messages_used_this_period"] == 0
-    await repo.increment_message_usage(sample_org["id"])
+    await _seed_usage(repo, sample_org["id"])
     await handle_stripe_webhook(event, repo, 7)
     second = _paid_invoice("evt_same_initial_period_other_invoice", 1901,
                            invoice_id="in_same_period_other", intent_id=intent)

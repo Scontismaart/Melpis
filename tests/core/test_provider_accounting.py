@@ -1,5 +1,6 @@
 import asyncio
 import asyncpg
+import hashlib
 import json
 import threading
 import time
@@ -102,6 +103,8 @@ async def _record_provider_request_id(pool, org_id, attempt_id, value="req_test_
 
 
 async def _inbound_message(pool, org_id, *, phone_suffix="00000000"):
+    if phone_suffix == "00000000":
+        phone_suffix = f"{uuid.uuid4().int % 10**8:08d}"
     contact_id, conversation_id, message_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -114,12 +117,85 @@ async def _inbound_message(pool, org_id, *, phone_suffix="00000000"):
         )
         await conn.execute(
             """INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
-                       content,status,billed_at,processing_at)
+                       content,status,processing_at)
                  VALUES($1,$2,$3,'inbound','text','{"text":"test sintetico"}'::jsonb,
-                        'processing',now(),now())""",
+                        'processing',now())""",
             message_id, org_id, conversation_id,
         )
     return message_id
+
+
+async def _a04_binding(pool, org_id, *, task_type, actor_id=None, worker_message_id=None,
+                       source_id=None):
+    """Create the real A04 reservation required before an answer-capable provider call."""
+    from src.core.billing.quota_reservations import QuotaOperation, QuotaReservations
+
+    channel = {
+        "customer_message": "inbound",
+        "simulator": "simulator",
+        "document_qa": "qa",
+    }[task_type]
+    if channel == "inbound":
+        worker_message_id = worker_message_id or await _inbound_message(pool, org_id)
+        source_id = uuid.UUID(str(worker_message_id))
+        auth_user_id = None
+    else:
+        source_id = source_id or uuid.uuid4()
+        auth_user_id = actor_id
+    operation = QuotaOperation(
+        organization_id=uuid.UUID(str(org_id)),
+        source_id=uuid.UUID(str(source_id)),
+        channel=channel,
+        payload_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+        auth_user_id=auth_user_id,
+    )
+    reservation = await QuotaReservations(pool).reserve(operation)
+    assert reservation["status"] == "reserved", reservation
+    ticket = reservation["ticket"]
+    return operation, ticket, worker_message_id
+
+
+async def _open_a04_context(pool, org_id, *, task_type, actor_auth_user_id=None,
+                            worker_message_id=None, source_id=None, context=None):
+    operation, ticket, worker_message_id = await _a04_binding(
+        pool, org_id, task_type=task_type, actor_id=actor_auth_user_id,
+        worker_message_id=worker_message_id, source_id=source_id,
+    )
+    kwargs = {
+        "quota_operation": operation,
+        "quota_ticket": ticket,
+        "context": context,
+    }
+    if task_type == "customer_message":
+        kwargs["worker_message_id"] = worker_message_id
+    elif task_type == "simulator":
+        kwargs.update({
+            "actor_auth_user_id": actor_auth_user_id,
+            "simulation_request_id": operation.id,
+            "simulation_claim_token": ticket.claim_id,
+        })
+    else:
+        kwargs["actor_auth_user_id"] = actor_auth_user_id
+    return await ProviderAccountingContext.open(
+        pool, org_id, task_type=task_type, **kwargs,
+    )
+
+
+async def _open_test_context(pool, org_id, *, task_type, **kwargs):
+    """Keep A03-only tests on their original contract; bind answer paths to A04."""
+    if task_type in {"customer_message", "simulator", "document_qa"}:
+        return await _open_a04_context(
+            pool,
+            org_id,
+            task_type=task_type,
+            actor_auth_user_id=kwargs.get("actor_auth_user_id"),
+            worker_message_id=kwargs.get("worker_message_id"),
+            source_id=kwargs.get("simulation_request_id"),
+            context=kwargs.get("context"),
+        )
+    return await ProviderAccountingContext.open(
+        pool, org_id, task_type=task_type, **kwargs,
+    )
 
 
 def _response(model="llama-3.1-8b-instant", *, prompt=0, completion=0, total=0):
@@ -223,7 +299,7 @@ async def test_postgres_records_real_provider_response_before_returning(pg_pool,
     pool = pg_pool
     org_id = sample_org["id"]
     actor = await _tenant(pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
         context={"trace_id": str(uuid.uuid4())},
     )
@@ -496,7 +572,7 @@ async def test_sync_transport_deadline_closes_a_blocked_read_without_next_chunk(
 async def test_async_adapter_records_provider_usage_from_raw_response(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     llm = ObservedChatLLM(
@@ -562,7 +638,7 @@ async def test_failure_is_durable_and_blocks_the_next_generation(pg_pool, sample
 async def test_invalid_usage_keeps_only_verified_model_and_usage_presence(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     malformed = _response(prompt=12, completion=7, total=19)
@@ -604,7 +680,7 @@ async def test_runner_fallback_is_metered_and_invalid_usage_stops_second_dispatc
         fallback_models=("groq/openai/gpt-oss-120b",),
     )
     monkeypatch.setattr(crew_runner, "route_llm", lambda _request: route)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", actor_auth_user_id=actor,
     )
     dispatched = []
@@ -661,12 +737,12 @@ async def test_runner_fallback_is_metered_and_invalid_usage_stops_second_dispatc
     finally:
         await context.close()
 
-    context = await ProviderAccountingContext.open(
-        pg_pool, org_id, task_type="customer_message", actor_auth_user_id=actor,
-    )
     async with pg_pool.acquire() as conn:
         await conn.execute("DELETE FROM usage_events WHERE organization_id=$1", org_id)
         await conn.execute("UPDATE organizations SET ai_accounting_blocked=FALSE WHERE id=$1", org_id)
+    context = await _open_test_context(
+        pg_pool, org_id, task_type="customer_message", actor_auth_user_id=actor,
+    )
     dispatched.clear()
 
     def build_failing_crew(*args, model, provider_context, reason, **kwargs):
@@ -718,7 +794,7 @@ async def test_retry_attempts_are_distinct_and_terminal_updates_are_idempotent(
 ):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", actor_auth_user_id=actor,
     )
     try:
@@ -898,11 +974,11 @@ async def test_context_denies_missing_billing_state_and_zero_quota(pg_pool, samp
 
 
 @pytest.mark.asyncio
-async def test_claimed_billed_inbound_message_allows_last_quota_unit_without_a04_reservation(
+async def test_inbound_provider_context_requires_a04_reservation_without_precharging(
     pg_pool, sample_org,
 ):
     org_id = sample_org["id"]
-    await _tenant(pg_pool, org_id, used=150, limit=150)
+    await _tenant(pg_pool, org_id, used=149, limit=150)
     contact_id, conversation_id, message_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with pg_pool.acquire() as conn:
         await conn.execute(
@@ -915,11 +991,11 @@ async def test_claimed_billed_inbound_message_allows_last_quota_unit_without_a04
         )
         await conn.execute(
             """INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
-                       content,status,billed_at,processing_at)
-                 VALUES($1,$2,$3,'inbound','text','{"text":"test"}'::jsonb,'processing',now(),now())""",
+                       content,status,processing_at)
+                 VALUES($1,$2,$3,'inbound','text','{"text":"test"}'::jsonb,'processing',now())""",
             message_id, org_id, conversation_id,
         )
-    context = await ProviderAccountingContext.open(
+    context = await _open_a04_context(
         pg_pool, org_id, task_type="customer_message", worker_message_id=message_id,
     )
     try:
@@ -932,34 +1008,25 @@ async def test_claimed_billed_inbound_message_allows_last_quota_unit_without_a04
                 "SELECT count(*) FROM usage_events WHERE organization_id=$1 AND event_type='system.quota_reservation'",
                 org_id,
             )
-        assert count == 150
-        assert reservations == 0
+        assert count == 149
+        assert reservations == 1
     finally:
         await context.close()
 
 
 @pytest.mark.asyncio
-async def test_authenticated_simulator_claim_allows_last_quota_unit_without_a04_reservation(
+async def test_authenticated_simulator_a04_reservation_holds_last_unit_until_commit(
     pg_pool, sample_org,
 ):
-    from src.core.db.repositories.message_repo import MessageRepository
-
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id, used=149, limit=150)
-    request_id = uuid.uuid4()
-    payload_hash = "a" * 64
-    repository = MessageRepository(pg_pool)
-    reservation = await repository.reserve_simulation_request(
-        org_id, actor, request_id, payload_hash,
-    )
-    assert reservation["status"] == "reserved"
-    claim_token = reservation["claim_token"]
-
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="simulator", actor_auth_user_id=actor,
-        simulation_request_id=request_id, simulation_claim_token=claim_token,
+        simulation_request_id=uuid.uuid4(),
         context={"trace_id": str(uuid.uuid4())},
     )
+    request_id = context._quota_operation.id
+    claim_token = context._quota_ticket.claim_id
     loop = asyncio.get_running_loop()
     dispatch_observed = asyncio.Event()
 
@@ -990,7 +1057,8 @@ async def test_authenticated_simulator_claim_allows_last_quota_unit_without_a04_
         assert metadata["prompt_tokens"] == 9
         assert metadata["completion_tokens"] == 4
         assert metadata["total_tokens"] == 13
-        assert str(claim_token) not in json.dumps(metadata)
+        assert metadata["context"]["quota_claim_id"] == str(claim_token)
+        assert "quota_ticket" not in metadata["context"]
         async with pg_pool.acquire() as conn:
             usage = await conn.fetchval(
                 "SELECT messages_used_this_period FROM organizations WHERE id=$1", org_id,
@@ -999,23 +1067,20 @@ async def test_authenticated_simulator_claim_allows_last_quota_unit_without_a04_
                 "SELECT count(*) FROM usage_events WHERE organization_id=$1 "
                 "AND event_type='system.quota_reservation'", org_id,
             )
-        assert usage == 150
-        assert a04_reservations == 0
+        assert usage == 149
+        assert a04_reservations == 1
     finally:
         await context.close()
 
 
 @pytest.mark.asyncio
 async def test_simulator_provider_gate_rejects_missing_or_stale_claim(pg_pool, sample_org):
-    from src.core.db.repositories.message_repo import MessageRepository
-
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    request_id = uuid.uuid4()
-    reservation = await MessageRepository(pg_pool).reserve_simulation_request(
-        org_id, actor, request_id, "b" * 64,
+    operation, ticket, _ = await _a04_binding(
+        pg_pool, org_id, task_type="simulator", actor_id=actor,
+        source_id=uuid.uuid4(),
     )
-    assert reservation["status"] == "reserved"
     with pytest.raises(ProviderAccountingError):
         await ProviderAccountingContext.open(
             pg_pool, org_id, task_type="simulator", actor_auth_user_id=actor,
@@ -1023,28 +1088,24 @@ async def test_simulator_provider_gate_rejects_missing_or_stale_claim(pg_pool, s
     with pytest.raises(ProviderAccountingError):
         await ProviderAccountingContext.open(
             pg_pool, org_id, task_type="simulator", actor_auth_user_id=actor,
-            simulation_request_id=request_id,
+            simulation_request_id=operation.id,
             simulation_claim_token=uuid.uuid4(),
         )
+    assert ticket.claim_id.int != 0
 
 
 @pytest.mark.asyncio
 async def test_simulator_claim_rotation_after_open_blocks_dispatch_before_transport(
     pg_pool, sample_org,
 ):
-    from src.core.db.repositories.message_repo import MessageRepository
-
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
     request_id = uuid.uuid4()
-    reservation = await MessageRepository(pg_pool).reserve_simulation_request(
-        org_id, actor, request_id, "c" * 64,
-    )
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="simulator", actor_auth_user_id=actor,
         simulation_request_id=request_id,
-        simulation_claim_token=reservation["claim_token"],
     )
+    request_id = context._quota_operation.id
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "UPDATE simulation_requests SET claim_token=$4 "
@@ -1080,10 +1141,10 @@ async def test_concurrent_whatsapp_messages_wait_per_tenant_and_allow_other_tena
     actor_two = await _tenant(pg_pool, other_org_id)
     message_one = await _inbound_message(pg_pool, org_id, phone_suffix="00000001")
     message_two = await _inbound_message(pg_pool, org_id, phone_suffix="00000002")
-    first = await ProviderAccountingContext.open(
+    first = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", worker_message_id=message_one,
     )
-    contender = await ProviderAccountingContext.open(
+    contender = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", worker_message_id=message_two,
     )
     other = await ProviderAccountingContext.open(
@@ -1152,10 +1213,10 @@ async def test_waiting_dispatch_rechecks_message_state_before_provider_call(
     await _tenant(pg_pool, org_id, used=2)
     message_one = await _inbound_message(pg_pool, org_id, phone_suffix="00000003")
     message_two = await _inbound_message(pg_pool, org_id, phone_suffix="00000004")
-    first = await ProviderAccountingContext.open(
+    first = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", worker_message_id=message_one,
     )
-    contender = await ProviderAccountingContext.open(
+    contender = await _open_test_context(
         pg_pool, org_id, task_type="customer_message", worker_message_id=message_two,
     )
     first_entered, release_first = threading.Event(), threading.Event()
@@ -1590,7 +1651,7 @@ async def test_reserved_attempt_type_cannot_be_written_through_generic_billing_r
 async def test_database_admission_failure_never_reaches_transport(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     calls = 0
@@ -1622,7 +1683,7 @@ async def test_database_admission_failure_never_reaches_transport(pg_pool, sampl
 async def test_pre_dispatch_failure_is_resolved_without_fabricating_provider_usage(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     try:
@@ -1677,7 +1738,7 @@ async def test_pre_dispatch_failure_is_resolved_without_fabricating_provider_usa
 async def test_verified_metrics_without_supported_price_keep_accounting_hold(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     try:
@@ -1712,7 +1773,7 @@ async def test_verified_metrics_without_supported_price_keep_accounting_hold(pg_
 async def test_crashed_openrouter_worker_is_fenced_then_reconciled_once(pg_pool, sample_org):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     repository = BillingRepository(pg_pool)
@@ -1835,7 +1896,7 @@ async def test_openrouter_generation_evidence_recovers_without_request_id(pg_poo
 
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     repository = BillingRepository(pg_pool)
@@ -1913,7 +1974,7 @@ async def test_provider_attempt_recovery_is_tenant_scoped(pg_pool, sample_org):
             "INSERT INTO organizations(id,name) VALUES($1,'Other Test Org')", other_org_id,
         )
     other_actor = await _tenant(pg_pool, other_org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, other_org_id, task_type="document_qa", actor_auth_user_id=other_actor,
     )
     try:
@@ -1945,7 +2006,7 @@ async def test_recovery_after_transport_response_does_not_replay_provider_post(
 ):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     calls = []
@@ -1999,7 +2060,7 @@ async def test_provider_attempt_history_survives_organization_deletion(pg_pool, 
     """A03 evidence follows usage_events' existing SET NULL retention contract."""
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     try:
@@ -2072,7 +2133,7 @@ async def test_prepared_crash_is_fenced_and_recovered_without_provider_dispatch(
 ):
     org_id = sample_org["id"]
     actor = await _tenant(pg_pool, org_id)
-    context = await ProviderAccountingContext.open(
+    context = await _open_test_context(
         pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
     )
     repository = BillingRepository(pg_pool)
@@ -2108,7 +2169,7 @@ async def test_prepared_crash_is_fenced_and_recovered_without_provider_dispatch(
                 "WHERE organization_id=$1 AND attempt_id=$2 "
                 "AND event_type='dispatch_authorized'", org_id, attempt.attempt_id,
             ) == 0
-        replacement = await ProviderAccountingContext.open(
+        replacement = await _open_test_context(
             pg_pool, org_id, task_type="document_qa", actor_auth_user_id=actor,
         )
         try:

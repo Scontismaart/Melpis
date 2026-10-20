@@ -1,10 +1,11 @@
-"""PG16 integration contract for the inactive quota reservation lifecycle.
+"""PG16 integration contract for A04 quota reservations.
 
 Uses only synthetic rows in pg_pool's disposable schema. This module never
 uses reset_db, because that fixture truncates the shared quota trust marker.
 """
 
 import asyncio
+import base64
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -53,7 +54,8 @@ async def _auth_member(pool, org_id, *, role="staff"):
             "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
         )
         await conn.execute(
-            "INSERT INTO organization_memberships (organization_id,user_id,ruolo) VALUES ($1,$2,$3)",
+            "INSERT INTO organization_memberships (organization_id,user_id,ruolo,joined_at) "
+            "VALUES ($1,$2,$3,now())",
             org_id, profile_id, role,
         )
     return auth_user_id
@@ -77,6 +79,62 @@ def _final(operation, ticket, text="Siamo aperti oggi."):
     )
 
 
+def _inbound_operation(org_id, message_id, *, text, channel="whatsapp"):
+    payload_hash = hashlib.sha256(json.dumps(
+        {"organization_id": str(org_id), "message_id": str(message_id),
+         "channel": channel, "text": text},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return QuotaOperation(
+        organization_id=org_id, source_id=message_id, channel="inbound",
+        payload_hash=payload_hash,
+    )
+
+
+def _inbound_service_with_real_quota(pool, org, outbound_dedup):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from src.core.inbound.service import InboundProcessingService
+    from src.whatsapp.config import AppConfig
+
+    repo = AsyncMock()
+    repo.pool = pool
+    repo.claim_message_for_processing = AsyncMock(
+        return_value={"status": "claimed", "ai_reply_cache": None},
+    )
+    repo.get_org_subscription_state = AsyncMock(return_value={
+        "subscription_status": "active", "trial_end": org["trial_end"],
+        "ai_accounting_blocked": False,
+    })
+    repo.get_conversation = AsyncMock(return_value={"ticket_status": "OPEN"})
+    repo.get_outbound_dedup = AsyncMock(return_value=outbound_dedup)
+    repo.check_booking_exists = AsyncMock(return_value=False)
+    repo.get_org_business_profile = AsyncMock(return_value={"nome": "Synthetic"})
+    repo.save_outbound_dedup = AsyncMock()
+    repo.mark_message_sent = AsyncMock()
+    repo.try_mark_replied = AsyncMock(return_value=True)
+
+    ai_service = AsyncMock()
+    ai_service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
+    ai_service.check_human_request = AsyncMock(return_value=False)
+    ai_service.fast_path_match = AsyncMock(return_value=None)
+    orchestrator = AsyncMock()
+    orchestrator.orchestrate = AsyncMock()
+    send = AsyncMock(return_value={"wam_id": "meta-a04-regression"})
+    config = AppConfig(
+        app_secret="test",
+        encryption_key=base64.urlsafe_b64encode(bytes(range(32))).decode("ascii"),
+        postgres_dsn="", verify_token="test", use_conversation_orchestrator=True,
+    )
+    service = InboundProcessingService(
+        app_config=config, repo=repo, service=ai_service,
+        orchestrator=orchestrator, send_reply_fn=send,
+    )
+    return service, repo, ai_service, orchestrator, send, SimpleNamespace(
+        business_profile={"nome": "Synthetic"},
+    )
+
+
 async def _used(pool, org_id):
     async with pool.acquire() as conn:
         return await conn.fetchval(
@@ -96,7 +154,7 @@ async def _reservation_metadata(pool, org_id, operation_id):
 async def _inbound_message(
     pool, org_id, *, direction="inbound", status="processing", deleted_at=None,
     sent_at=None, replied_at=None, billed_at=None, ai_reply_cache=None,
-    quota_exceeded_at=None,
+    quota_exceeded_at=None, canale=None,
 ):
     contact_id, conversation_id, message_id = uuid4(), uuid4(), uuid4()
     async with pool.acquire() as conn:
@@ -108,6 +166,11 @@ async def _inbound_message(
             "INSERT INTO conversations (id,organization_id,contact_id) VALUES ($1,$2,$3)",
             conversation_id, org_id, contact_id,
         )
+        if canale is not None:
+            await conn.execute(
+                "UPDATE conversations SET canale=$2 WHERE id=$1 AND organization_id=$3",
+                conversation_id, canale, org_id,
+            )
         await conn.execute(
             """INSERT INTO messages
                    (id,organization_id,conversation_id,direction,message_type,content,status)
@@ -160,8 +223,10 @@ async def test_unique_concurrent_reservations_preserve_last_unit_and_commit_once
         await conn.execute(
             "UPDATE organizations SET messages_used_this_period=151 WHERE id=$1", org["id"],
         )
-    with pytest.raises(AIGenerationBlocked):
-        await service.reserve(_operation(org["id"], actor_id=await _auth_member(pg_pool, org["id"])))
+    over_limit = await service.reserve(
+        _operation(org["id"], actor_id=await _auth_member(pg_pool, org["id"])),
+    )
+    assert over_limit["status"] == "quota_exceeded"
 
 
 @pytest.mark.asyncio
@@ -234,7 +299,12 @@ async def test_paid_period_renewal_fences_pending_but_replays_old_commit_without
 async def test_inbound_requires_unbilled_processing_message_and_commits_cache_with_counter(pg_pool):
     org = await _organization(pg_pool, used=149)
     service = QuotaReservations(pg_pool)
-    message_id = await _inbound_message(pg_pool, org["id"])
+    message_id = await _inbound_message(pg_pool, org["id"], status="received_pending_ai")
+    from src.whatsapp.repository import Repository as WhatsAppRepository
+    claim = await WhatsAppRepository(pg_pool).claim_message_for_processing(
+        str(message_id), str(org["id"]),
+    )
+    assert claim["status"] == "claimed"
     operation = _operation(org["id"], source_id=message_id, channel="inbound", actor_id=None)
 
     reserved = await service.reserve(operation)
@@ -262,6 +332,247 @@ async def test_inbound_requires_unbilled_processing_message_and_commits_cache_wi
     assert await service.commit(operation, reserved["ticket"], final) == committed
     assert await _used(pg_pool, org["id"]) == 150
     assert await pg_pool.fetchval("SELECT billed_at FROM messages WHERE id=$1", message_id) == first_billed_at
+
+
+@pytest.mark.asyncio
+async def test_inbound_cache_without_committed_a04_evidence_fails_closed(pg_pool):
+    org = await _organization(pg_pool)
+    service = QuotaReservations(pg_pool)
+    for billed_at in (None, datetime.now(timezone.utc)):
+        message_id = await _inbound_message(
+            pg_pool, org["id"], ai_reply_cache={"risposta": "legacy cache"},
+            billed_at=billed_at,
+        )
+        operation = _operation(
+            org["id"], source_id=message_id, channel="inbound", actor_id=None,
+            content=f"unverified cache {message_id}",
+        )
+        with pytest.raises(QuotaConflict):
+            await service.reserve(operation)
+        assert await pg_pool.fetchval(
+            "SELECT messages_used_this_period FROM organizations WHERE id=$1", org["id"],
+        ) == 0
+        assert await pg_pool.fetchval(
+            "SELECT count(*) FROM usage_events WHERE organization_id=$1 AND id=$2",
+            org["id"], operation.id,
+        ) == 0
+
+
+@pytest.mark.asyncio
+async def test_inbound_cache_must_match_committed_a04_ledger_and_request(pg_pool):
+    org = await _organization(pg_pool)
+    service = QuotaReservations(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"])
+    operation = _operation(
+        org["id"], source_id=message_id, channel="inbound", actor_id=None,
+        content="committed cache tamper",
+    )
+    reservation = await service.reserve(operation)
+    final = _final(operation, reservation["ticket"], "Risposta archiviata.")
+    await service.commit(operation, reservation["ticket"], final)
+    await pg_pool.execute(
+        "UPDATE messages SET ai_reply_cache=$2::jsonb WHERE id=$1",
+        message_id, json.dumps({"risposta": "risposta alterata"}),
+    )
+
+    with pytest.raises(QuotaConflict):
+        await service.reserve(operation)
+    assert await _used(pg_pool, org["id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_inbound_delivery_retry_replays_only_committed_response_without_rebilling(pg_pool):
+    org = await _organization(pg_pool)
+    service = QuotaReservations(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"])
+    operation = _operation(
+        org["id"], source_id=message_id, channel="inbound", actor_id=None,
+        content="retry after delivery failure",
+    )
+    reservation = await service.reserve(operation)
+    final = _final(operation, reservation["ticket"], "Risposta persistita prima della consegna.")
+    committed = await service.commit(operation, reservation["ticket"], final)
+
+    # The provider delivery failed, so the inbound row remains unfinalized.
+    message = await pg_pool.fetchrow(
+        "SELECT status,sent_at,replied_at,billed_at,ai_reply_cache FROM messages WHERE id=$1",
+        message_id,
+    )
+    assert message["status"] == "processing"
+    assert message["sent_at"] is None and message["replied_at"] is None
+    assert message["billed_at"] is not None
+
+    replay = await service.reserve(operation)
+    assert replay == {"status": "replay", "response": committed}
+    assert await service.commit(operation, reservation["ticket"], final) == committed
+    assert await _used(pg_pool, org["id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_outbound_dedup_without_committed_a04_response_fails_closed(pg_pool):
+    from unittest.mock import patch, AsyncMock
+
+    org = await _organization(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"])
+    text = "Orphan dedup must not send"
+    operation = _inbound_operation(org["id"], message_id, text=text)
+    await pg_pool.execute(
+        "INSERT INTO outbound_dedup(message_id,organization_id,response_text) VALUES($1,$2,$3)",
+        message_id, org["id"], "unverified cached response",
+    )
+    inbound, repo, _ai_service, orchestrator, send, tenant_config = _inbound_service_with_real_quota(
+        pg_pool, org, {"response_text": "unverified cached response"},
+    )
+    message = {
+        "id": message_id, "organization_id": org["id"],
+        "conversation_id": uuid4(), "content_text": text,
+        "content": {"from": "+393401122334"}, "canale": "whatsapp",
+    }
+    with patch("src.core.inbound.service.load_tenant_config",
+               new=AsyncMock(return_value=tenant_config)):
+        outcome = await inbound.process_message(message)
+
+    assert outcome.action == "error"
+    assert outcome.handling_type == "quota_reconciliation_required"
+    send.assert_not_awaited()
+    orchestrator.orchestrate.assert_not_awaited()
+    assert await _used(pg_pool, org["id"]) == 0
+    assert (await _reservation_metadata(pg_pool, org["id"], operation.id))["state"] == "released"
+
+
+@pytest.mark.asyncio
+async def test_outbound_dedup_replay_uses_committed_a04_response_not_cached_text(pg_pool):
+    from unittest.mock import patch, AsyncMock
+
+    org = await _organization(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"])
+    text = "Use immutable A04 response"
+    operation = _inbound_operation(org["id"], message_id, text=text)
+    quota = QuotaReservations(pg_pool)
+    reservation = await quota.reserve(operation)
+    final = _final(operation, reservation["ticket"], "Risposta dal ledger A04.")
+    committed = await quota.commit(operation, reservation["ticket"], final)
+    await pg_pool.execute(
+        "INSERT INTO outbound_dedup(message_id,organization_id,response_text) VALUES($1,$2,$3)",
+        message_id, org["id"], "tampered outbound dedup response",
+    )
+    inbound, _repo, ai_service, orchestrator, send, tenant_config = _inbound_service_with_real_quota(
+        pg_pool, org, {"response_text": "tampered outbound dedup response"},
+    )
+    # This message also matches a deterministic fast path. A committed retry
+    # must still replay the immutable A04 answer instead of generating a new
+    # answer through the fast path.
+    ai_service.fast_path_match.return_value = "Risposta fast path diversa."
+
+    async def no_disclosure(_org, _from, response_text, *_args):
+        return response_text
+
+    message = {
+        "id": message_id, "organization_id": org["id"],
+        "conversation_id": uuid4(), "content_text": text,
+        "content": {"from": "+393401122334"}, "canale": "whatsapp",
+    }
+    with patch("src.core.inbound.service.load_tenant_config",
+               new=AsyncMock(return_value=tenant_config)), \
+         patch("src.core.inbound.service.decorate_with_disclosure", new=no_disclosure):
+        outcome = await inbound.process_message(message)
+
+    assert outcome.action == "handled"
+    assert send.await_count == 1
+    assert "Risposta dal ledger A04." in send.await_args.args[4]
+    assert "tampered outbound dedup response" not in send.await_args.args[4]
+    assert "Risposta fast path diversa." not in send.await_args.args[4]
+    ai_service.fast_path_match.assert_not_awaited()
+    orchestrator.orchestrate.assert_not_awaited()
+    assert committed["risposta"] == "Risposta dal ledger A04."
+    assert await _used(pg_pool, org["id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_instagram_inbound_final_answer_is_counted_once(pg_pool):
+    org = await _organization(pg_pool)
+    service = QuotaReservations(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"], canale="instagram")
+    operation = _operation(
+        org["id"], source_id=message_id, channel="inbound", actor_id=None,
+        content="instagram inbound answer",
+    )
+
+    reservation = await service.reserve(operation)
+    final = _final(operation, reservation["ticket"], "Risposta Instagram validata.")
+    committed = await service.commit(operation, reservation["ticket"], final)
+    assert committed["risposta"] == "Risposta Instagram validata."
+    assert await _used(pg_pool, org["id"]) == 1
+    assert await pg_pool.fetchval(
+        "SELECT billed_at IS NOT NULL FROM messages WHERE id=$1", message_id,
+    ) is True
+    replay = await service.reserve(operation)
+    assert replay == {"status": "replay", "response": committed}
+    assert await _used(pg_pool, org["id"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_last_unit_is_shared_atomically_across_inbound_and_simulator(pg_pool):
+    org = await _organization(pg_pool, used=149)
+    actor = await _auth_member(pg_pool, org["id"])
+    message_id = await _inbound_message(pg_pool, org["id"])
+    operations = (
+        _operation(org["id"], source_id=message_id, channel="inbound", actor_id=None,
+                   content="inbound last unit"),
+        _operation(org["id"], source_id=uuid4(), channel="simulator", actor_id=actor,
+                   content="simulator last unit"),
+    )
+    service = QuotaReservations(pg_pool)
+    results = await asyncio.gather(*(service.reserve(op) for op in operations))
+    winners = [(op, result) for op, result in zip(operations, results)
+               if result["status"] == "reserved"]
+    assert len(winners) == 1
+    assert sorted(result["status"] for result in results) == ["quota_exceeded", "reserved"]
+    operation, reservation = winners[0]
+    await service.commit(operation, reservation["ticket"], _final(operation, reservation["ticket"]))
+    assert await _used(pg_pool, org["id"]) == 150
+    if operation.channel == "inbound":
+        assert await pg_pool.fetchval(
+            "SELECT billed_at IS NOT NULL FROM messages WHERE id=$1", message_id,
+        ) is True
+    else:
+        assert await pg_pool.fetchval(
+            "SELECT status FROM simulation_requests WHERE organization_id=$1 AND request_id=$2",
+            org["id"], operation.id,
+        ) == "completed"
+
+
+@pytest.mark.asyncio
+async def test_release_fails_closed_for_uncertain_or_malformed_a03_attempts(pg_pool):
+    org = await _organization(pg_pool)
+    message_id = await _inbound_message(pg_pool, org["id"])
+    operation = _operation(org["id"], source_id=message_id, channel="inbound", actor_id=None)
+    service = QuotaReservations(pg_pool)
+    reserved = await service.reserve(operation)
+    ticket = reserved["ticket"]
+
+    async def provider_attempt(metadata):
+        await pg_pool.execute(
+            "INSERT INTO usage_events(id,organization_id,event_type,quantity,metadata) "
+            "VALUES($1,$2,'system.provider_attempt',0,$3::jsonb)",
+            uuid4(), org["id"], json.dumps(metadata),
+        )
+
+    # A matching operation with missing claim correlation is malformed and
+    # must not be interpreted as proof that provider accounting is complete.
+    await provider_attempt({
+        "accounting_status": "unresolved", "outcome": "unknown",
+        "context": {"quota_operation_id": str(operation.id), "message_id": str(message_id)},
+    })
+    with pytest.raises(QuotaConflict):
+        await service.release(operation, ticket)
+
+    await pg_pool.execute(
+        "UPDATE usage_events SET metadata=jsonb_set(metadata,'{accounting_status}','\"recorded\"') "
+        "WHERE organization_id=$1 AND event_type='system.provider_attempt'",
+        org["id"],
+    )
+    assert await service.release(operation, ticket) is True
 
 
 @pytest.mark.asyncio
@@ -551,16 +862,19 @@ async def test_expired_reservations_keep_capacity_and_commit_rechecks_entitlemen
     limited = await _organization(pg_pool, period_end=short_end)
     limited_operation = _operation(limited["id"], actor_id=await _auth_member(pg_pool, limited["id"]))
     limited_reservation = await service.reserve(limited_operation)
-    limited_final = _final(limited_operation, limited_reservation["ticket"])
     original_end = (await _reservation_metadata(pg_pool, limited["id"], limited_operation.id))["period_end"]
     async with pg_pool.acquire() as conn:
         await conn.execute(
             "UPDATE organizations SET trial_end=trial_end + interval '1 day' WHERE id=$1", limited["id"],
         )
-    renewed = await service.renew(limited_operation, limited_reservation["ticket"])
+    original_ticket = limited_reservation["ticket"]
+    renewed = await service.renew(limited_operation, original_ticket)
     assert renewed.lease_end <= datetime.fromisoformat(original_end)
-    # Response proof binds the claim and period, not the mutable lease deadline.
-    await service.commit(limited_operation, renewed, limited_final)
+    assert renewed.lease_end > original_ticket.lease_end
+    # Long-running callers retain their original private capability across
+    # renewal; claim, epoch and period fence it while the DB lease stays live.
+    renewed_final = _final(limited_operation, original_ticket, "Renewed lease response.")
+    await service.commit(limited_operation, original_ticket, renewed_final)
 
     # Entitlement changes between reserve and commit/renew always deny access.
     cases = [

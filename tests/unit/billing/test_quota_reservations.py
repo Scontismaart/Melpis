@@ -152,7 +152,7 @@ def test_operation_identity_is_stable_and_bound_to_org_actor_channel_and_source(
     first = operation(org_id=org_id, source_id=source_id, actor_id=actor_id)
     replay = operation(org_id=org_id, source_id=source_id, actor_id=actor_id)
     another_actor = operation(org_id=org_id, source_id=source_id, actor_id=uuid4())
-    another_channel = operation(channel="preview", org_id=org_id, source_id=source_id, actor_id=actor_id)
+    another_channel = operation(channel="qa", org_id=org_id, source_id=source_id, actor_id=actor_id)
     another_org = operation(org_id=uuid4(), source_id=source_id, actor_id=actor_id)
 
     assert first.id == replay.id
@@ -177,6 +177,11 @@ def test_inbound_operation_uses_worker_identity_not_auth_user_identity():
             organization_id=org_id, source_id=source_id, channel="inbound",
             payload_hash=hashlib.sha256(b"same payload").hexdigest(), auth_user_id=uuid4(),
         )
+
+
+def test_preview_is_not_an_a04_quota_operation():
+    with pytest.raises(QuotaConflict):
+        operation(channel="preview")
 
 
 @pytest.mark.parametrize("channel", ["simulator", "preview", "qa"])

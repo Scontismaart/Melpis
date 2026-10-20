@@ -173,18 +173,23 @@ dispatch. No live provider request is part of local CI.
 
 | Path | A03 context | Notes |
 | --- | --- | --- |
-| WhatsApp/inbound responder | Claimed message ID | Applies to orchestrator and legacy pipeline |
-| Authenticated simulator | User ID plus server-issued request claim | Anonymous simulator cannot call a provider; verified precharge is recognized only in the local admission snapshot |
-| Onboarding preview | Authenticated user ID | Strict billing/quota gate |
+| Inbound responder (WhatsApp and Instagram) | Claimed message ID and private A04 operation/ticket | Applies to orchestrator and legacy pipeline; A04 counts each persisted final AI response separately |
+| Authenticated simulator | User ID plus private A04 operation/ticket | Anonymous simulator cannot call a provider; simulator response quota is atomically committed by A04 |
+| Onboarding preview | Authenticated user ID | A03 provider accounting only; excluded from A04 answer count |
 | Manual and Google review drafts | Authenticated user ID | Deterministic generic draft needs no provider |
-| Document Q&A | Authenticated user ID | Gate applies when retrieved sources reach LLM; B02 remains open |
+| Document Q&A | Authenticated user ID plus private A04 operation/ticket | A04 persists `{risposta,fonti}`; B02 PDF/RAG completion remains open |
 | Dashboard AI report | Authenticated user ID | Falls back to deterministic summary if unavailable |
 | Scheduled/global report | No tenant context | Deterministic summary only |
 | Intent classifier | Disabled by default | Optional LLM call requires explicit provider context |
 
 ## Release boundaries
 
-- No A04 response-reservation protocol is activated.
+- A04 reserve/commit paths are wired for every inbound AI channel routed
+  through `InboundProcessingService` (including WhatsApp and Instagram), the
+  authenticated simulator and document Q&A. The A03 provider attempt remains a separate technical-cost
+  record and unresolved attempts prevent unsafe A04 release.
+- Migration 060 has not been remotely applied by this source change. Migration
+  061 is a separate A03 gate. Staging is not certified.
 - No remote migration, deploy, production mutation or paid provider call is
   included.
 - Local PostgreSQL migration tests are not remote migration authorization.

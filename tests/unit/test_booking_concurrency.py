@@ -1,8 +1,10 @@
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 import pytest
 
 from src.core.bookings.service import BookingService, SlotPienoError
@@ -113,8 +115,8 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
     """Scenario 3: Send-Then-Mark Reliability & Outbound Dedup.
     - Run 1: Normal processing saves outbound dedup and delivers reply via channel adapter.
     - Run 2: If message was marked already_sent in DB, retry worker skips it completely (0 duplicate sends).
-    - Run 3: If message crashed before sending to Meta but after saving dedup, retry delivers saved reply
-             WITHOUT re-running expensive LLM cognitive orchestration.
+    - Run 3: A retry after the A04 commit replays the immutable ledger response,
+             never an independent outbound_dedup cache, without re-running AI.
     """
     app_config = AppConfig(
         app_secret="test",
@@ -145,7 +147,7 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
     }
 
     # Run 1: claim succeeds, no outbound dedup yet
-    mock_repo.claim_message_and_check_quota.return_value = {
+    mock_repo.claim_message_for_processing.return_value = {
         "status": "claimed",
         "ai_reply_cache": None,
         "sent_at": None,
@@ -162,6 +164,21 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         "ai_disclosure_sent_at": "2026-09-01",
     }
     mock_repo.get_org_subscription_state.return_value = {"subscription_status": "active"}
+
+    class QuotaReservationsStub:
+        def __init__(self, _pool):
+            self.reserve = AsyncMock(side_effect=[
+                {"status": "reserved", "ticket": object()},
+                {"status": "replay", "response": {
+                    "risposta": "Risposta committed nel ledger A04.",
+                    "richiede_umano": False, "motivo": "", "categoria": "generico",
+                }},
+            ])
+            self.commit = AsyncMock(side_effect=lambda _op, _ticket, final: json.loads(final.serialized))
+            self.renew = AsyncMock(side_effect=lambda _op, ticket: ticket)
+            self.release = AsyncMock()
+
+    quota = QuotaReservationsStub(None)
 
     # Mock tenant config loader
     mock_tc = MagicMock()
@@ -186,9 +203,14 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         intent="faq",
         source="llm",
     )
+    inbound_svc.orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Benvenuto da Pizzeria Bella!", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("src.core.inbound.service.load_tenant_config", AsyncMock(return_value=mock_tc))
+        mp.setattr("src.core.billing.quota_reservations.QuotaReservations", lambda _pool: quota)
 
         # Run 1: sends message and saves outbound dedup
         res1 = await inbound_svc.process_message(fake_msg)
@@ -201,7 +223,7 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         assert "Benvenuto da Pizzeria Bella!" in dedup_args[2]
 
         # Run 2: Simulating retry when DB has already marked message as sent
-        mock_repo.claim_message_and_check_quota.return_value = {"status": "already_sent"}
+        mock_repo.claim_message_for_processing.return_value = {"status": "already_sent"}
         res2 = await inbound_svc.process_message(fake_msg)
         assert res2.action == "ignored"
         assert res2.handling_type == "already_sent"
@@ -209,14 +231,19 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         assert mock_channel.send_reply.await_count == 1
 
         # Run 3: Simulating retry when worker died after saving dedup but before Meta send
-        mock_repo.claim_message_and_check_quota.return_value = {"status": "claimed"}
+        mock_repo.claim_message_for_processing.return_value = {
+            "status": "claimed", "ai_reply_cache": None,
+        }
         mock_repo.get_outbound_dedup.return_value = {
-            "response_text": "Benvenuto da Pizzeria Bella!",
+            "response_text": "Unverified outbound dedup must not be trusted",
         }
         res3 = await inbound_svc.process_message(fake_msg)
         assert res3.action == "handled"
         assert res3.handling_type == "ai_handled"
-        # Saved dedup delivered via channel
+        # The A04 committed response is delivered, not the independent cache.
         assert mock_channel.send_reply.await_count == 2
-        # But orchestrator was NOT called again! (0 duplicate LLM spend)
+        sent_text = mock_channel.send_reply.await_args.kwargs["text"]
+        assert "Risposta committed nel ledger A04." in sent_text
+        assert "Unverified outbound dedup" not in sent_text
+        # But orchestrator was NOT called again (no duplicate provider call).
         assert inbound_svc.orchestrator.orchestrate.await_count == 1

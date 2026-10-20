@@ -260,10 +260,10 @@ class Repository(TenantScopedRepository):
         return await self._billing_repo.check_message_usage(org_id)
 
     async def increment_message_usage(self, org_id: uuid.UUID, conn=None) -> int:
-        return await self._billing_repo.increment_message_usage(org_id, conn=conn)
+        raise RuntimeError("Direct message usage increments are disabled; use the atomic A04 commit")
 
     async def _increment_message_usage(self, conn, org_id: uuid.UUID) -> int | None:
-        return await self._billing_repo._increment_message_usage(conn, org_id)
+        raise RuntimeError("Direct message usage increments are disabled; use the atomic A04 commit")
 
     async def upsert_template(self, organization_id, name, language, category, status, components):
         return await self._org_repo.upsert_template(
@@ -355,6 +355,9 @@ class Repository(TenantScopedRepository):
 
     async def claim_message_and_check_quota(self, msg_id: str, org_id: str) -> dict:
         return await self._msg_repo.claim_message_and_check_quota(msg_id, org_id)
+
+    async def claim_message_for_processing(self, msg_id: str, org_id: str) -> dict:
+        return await self._msg_repo.claim_message_for_processing(msg_id, org_id)
 
     async def check_booking_exists(self, msg_id: str, org_id: str) -> bool:
         return await self._msg_repo.check_booking_exists(msg_id, org_id)

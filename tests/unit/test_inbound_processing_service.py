@@ -1,4 +1,6 @@
 import uuid
+import json
+from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,17 +21,32 @@ def base_config():
 
 
 @pytest.fixture
-def mock_deps():
+def mock_deps(monkeypatch):
     repo = AsyncMock()
     service = AsyncMock()
     booking_service = AsyncMock()
+
+    class QuotaReservationsStub:
+        def __init__(self):
+            self.reserve = AsyncMock(return_value={"status": "reserved", "ticket": object()})
+            self.commit = AsyncMock(side_effect=lambda _operation, _ticket, final: json.loads(final.serialized))
+            self.renew = AsyncMock(side_effect=lambda _operation, ticket: ticket)
+            self.release = AsyncMock()
+
+    quota = QuotaReservationsStub()
+    monkeypatch.setattr(
+        "src.core.billing.quota_reservations.QuotaReservations",
+        lambda _pool: quota,
+    )
 
     service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
     service.check_human_request = AsyncMock(return_value=False)
     service.fast_path_match = AsyncMock(return_value=None)
     booking_service.handle_reminder_reply = AsyncMock(return_value=None)
 
-    repo.claim_message_and_check_quota = AsyncMock(return_value={"status": "claimed"})
+    repo.claim_message_for_processing = AsyncMock(
+        return_value={"status": "claimed", "ai_reply_cache": None}
+    )
     repo.get_outbound_dedup = AsyncMock(return_value=None)
     repo.check_booking_exists = AsyncMock(return_value=False)
     repo.save_ai_reply = AsyncMock()
@@ -42,7 +59,7 @@ def mock_deps():
     repo.list_conversation_messages = AsyncMock(return_value=[])
     repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4(), "ai_disclosure_sent_at": "2026-09-01"})
 
-    return {"repo": repo, "service": service, "booking_service": booking_service}
+    return {"repo": repo, "service": service, "booking_service": booking_service, "quota": quota}
 
 
 @pytest.mark.asyncio
@@ -57,12 +74,12 @@ async def test_step1_claim_status_yields_or_ignores(base_config, mock_deps):
     msg = {"id": uuid.uuid4(), "organization_id": uuid.uuid4(), "content_text": "Ciao"}
 
     # Not found
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "not_found"}
+    mock_deps["repo"].claim_message_for_processing.return_value = {"status": "not_found"}
     res = await inbound_svc.process_message(msg)
     assert res.action == "ignored"
 
     # Currently processing
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "currently_processing"}
+    mock_deps["repo"].claim_message_for_processing.return_value = {"status": "currently_processing"}
     res = await inbound_svc.process_message(msg)
     assert res.action == "yielded"
 
@@ -92,7 +109,7 @@ async def test_step2_opt_out_fail_closed(base_config, mock_deps):
     mock_deps["repo"].try_mark_replied.assert_awaited_once_with(
         msg["id"], handling_type="opt_out", organization_id=msg["organization_id"]
     )
-    mock_deps["repo"].claim_message_and_check_quota.assert_not_awaited()
+    mock_deps["repo"].claim_message_for_processing.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -109,11 +126,11 @@ async def test_stop_is_recorded_when_quota_is_exhausted(base_config, mock_deps):
         "content": {"from": "+393401122334"},
     }
     mock_deps["service"].check_opt_out.return_value = {"is_opt_out": True}
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "quota_exceeded"}
+    mock_deps["quota"].reserve.return_value = {"status": "quota_exceeded"}
     outcome = await inbound_svc.process_message(msg)
     assert outcome.handling_type == "opt_out"
     mock_deps["repo"].record_consent_event.assert_awaited_once()
-    mock_deps["repo"].claim_message_and_check_quota.assert_not_awaited()
+    mock_deps["repo"].claim_message_for_processing.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -176,7 +193,8 @@ async def test_step7_ticket_claimed_by_operator_skips_ai(base_config, mock_deps)
 
 
 @pytest.mark.asyncio
-async def test_step11_12_orchestration_and_send(base_config, mock_deps):
+@pytest.mark.parametrize("canale", ["whatsapp", "instagram"])
+async def test_step11_12_orchestration_and_send(base_config, mock_deps, canale):
     mock_orchestrator = AsyncMock()
     mock_orchestrator.orchestrate.return_value = OrchestrationOutput(
         response_text="Siamo aperti tutti i giorni dalle 19:00.",
@@ -184,6 +202,10 @@ async def test_step11_12_orchestration_and_send(base_config, mock_deps):
         intent="faq",
         source="llm",
     )
+    mock_orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Siamo aperti tutti i giorni dalle 19:00.", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
 
     inbound_svc = InboundProcessingService(
         app_config=base_config,
@@ -199,7 +221,7 @@ async def test_step11_12_orchestration_and_send(base_config, mock_deps):
         "conversation_id": uuid.uuid4(),
         "content_text": "A che ora aprite?",
         "content": {"from": "+393401122334"},
-        "canale": "whatsapp",
+        "canale": canale,
     }
 
     with patch("src.core.inbound.service.load_tenant_config") as mock_tc, \
@@ -213,6 +235,10 @@ async def test_step11_12_orchestration_and_send(base_config, mock_deps):
         assert res.meta_message_id == "meta-reply-456"
 
         mock_orchestrator.orchestrate.assert_awaited_once()
+        orchestration_input = mock_orchestrator.orchestrate.await_args.args[0]
+        assert orchestration_input.channel == canale
+        quota_operation = mock_deps["quota"].reserve.await_args.args[0]
+        assert quota_operation.channel == "inbound"
         mock_deps["repo"].save_outbound_dedup.assert_awaited_once()
         mock_deps["repo"].mark_message_sent.assert_awaited_once_with(
             msg["id"], "meta-reply-456", msg["organization_id"]
@@ -220,6 +246,46 @@ async def test_step11_12_orchestration_and_send(base_config, mock_deps):
         mock_deps["repo"].try_mark_replied.assert_awaited_once_with(
             msg["id"], handling_type="ai_handled", organization_id=msg["organization_id"]
         )
+
+
+@pytest.mark.asyncio
+async def test_cached_inbound_reply_fails_closed_without_a04_replay(base_config, mock_deps):
+    mock_deps["repo"].claim_message_for_processing.return_value = {
+        "status": "claimed",
+        "ai_reply_cache": {"text": "legacy unverified reply", "richiede_umano": False},
+    }
+    orchestrator = AsyncMock()
+    orchestrator.orchestrate.return_value = OrchestrationOutput(
+        response_text="Nuova risposta valida.", richiede_umano=False,
+        intent="faq", source="llm",
+    )
+    orchestrator.orchestrate.return_value._quota_final = SimpleNamespace(serialized=json.dumps({
+        "risposta": "Nuova risposta valida.", "richiede_umano": False,
+        "motivo": "", "categoria": "faq", "prenotazione": None,
+    }))
+    inbound_svc = InboundProcessingService(
+        app_config=base_config,
+        repo=mock_deps["repo"],
+        service=mock_deps["service"],
+        booking_service=mock_deps["booking_service"],
+        orchestrator=orchestrator,
+    )
+    msg = {
+        "id": uuid.uuid4(), "organization_id": uuid.uuid4(),
+        "conversation_id": uuid.uuid4(), "content_text": "Domanda?",
+        "content": {"from": "+393401122334"}, "canale": "whatsapp",
+    }
+    with patch("src.core.inbound.service.load_tenant_config") as mock_tc, \
+         patch.object(inbound_svc, "_send_reply", new_callable=AsyncMock) as mock_send:
+        mock_tc.return_value = MagicMock()
+        mock_send.return_value = {"wam_id": "meta-retry-verified"}
+        result = await inbound_svc.process_message(msg)
+
+    assert result.action == "error"
+    assert result.handling_type == "quota_reconciliation_required"
+    mock_deps["quota"].reserve.assert_awaited_once()
+    orchestrator.orchestrate.assert_not_awaited()
+    mock_send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -249,7 +315,7 @@ async def test_step1_quota_exceeded_hard_cap_bill_001(base_config, mock_deps):
         "canale": "whatsapp",
     }
 
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "quota_exceeded"}
+    mock_deps["quota"].reserve.return_value = {"status": "quota_exceeded"}
 
     with patch("src.core.inbound.service.load_tenant_config") as mock_tc, \
          patch.object(inbound_svc, "_send_reply", new_callable=AsyncMock) as mock_send:
@@ -266,7 +332,7 @@ async def test_step1_quota_exceeded_hard_cap_bill_001(base_config, mock_deps):
 
         # Courtesy notification sent
         mock_send.assert_awaited_once()
-        assert "troppe richieste" in mock_send.await_args[0][4]
+        assert "molte richieste" in mock_send.await_args[0][4]
 
         # Escalated and finalized
         mock_deps["repo"].escalate_to_human.assert_awaited_once()
@@ -299,7 +365,7 @@ async def test_quota_exceeded_escalates_even_if_send_reply_fails(base_config, mo
         "canale": "whatsapp",
     }
 
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "quota_exceeded"}
+    mock_deps["quota"].reserve.return_value = {"status": "quota_exceeded"}
 
     with patch("src.core.inbound.service.load_tenant_config") as mock_tc, \
          patch.object(inbound_svc, "_send_reply", new_callable=AsyncMock) as mock_send:
@@ -349,7 +415,7 @@ async def test_quota_exceeded_marks_escalation_failed_on_escalate_error(base_con
         "canale": "whatsapp",
     }
 
-    mock_deps["repo"].claim_message_and_check_quota.return_value = {"status": "quota_exceeded"}
+    mock_deps["quota"].reserve.return_value = {"status": "quota_exceeded"}
     mock_deps["repo"].escalate_to_human.side_effect = RuntimeError("DB connection timeout during escalation")
 
     with patch("src.core.inbound.service.load_tenant_config") as mock_tc, \
@@ -413,9 +479,11 @@ async def test_step11_heartbeat_cancelled_in_finally_scenario_5(base_config, moc
     with patch("src.core.inbound.service.load_tenant_config") as mock_tc:
         mock_tc.return_value = MagicMock()
 
-        # Deve sollevare RuntimeError ma pulire il task nel blocco finally
-        with pytest.raises(RuntimeError, match="Simulated LLM network failure"):
-            await inbound_svc.process_message(msg)
+        # Errori provider sono convertiti in un esito strutturato, ma il lease
+        # heartbeat deve comunque essere cancellato.
+        outcome = await inbound_svc.process_message(msg)
+        assert outcome.action == "error"
+        assert outcome.handling_type == "ai_generation_failed"
 
         # Il heartbeat task è stato cancellato nel finally
         assert heartbeat_task_ref is not None, "Heartbeat task was not detected"

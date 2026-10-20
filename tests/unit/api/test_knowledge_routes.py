@@ -193,9 +193,11 @@ async def test_carica_file_documento_caps_read_before_size_check():
 
 def test_chiedi_documenti_success(client):
     mock_org_id = str(uuid.uuid4())
+    auth_user_id = str(uuid.uuid4())
     mock_user = {
         "source": "jwt",
         "user_id": str(uuid.uuid4()),
+        "auth_user_id": auth_user_id,
         "organization_id": mock_org_id,
         "ruolo": "owner",
         "email": "owner@example.com",
@@ -208,20 +210,53 @@ def test_chiedi_documenti_success(client):
         "fonti": [{"fonte": "listino_speciale.txt", "tipo": "documento"}],
         "richiede_operatore": False,
         "motivo": None,
+        "_quota_final": object(),
     }
+    quota_events = []
+
+    class FakeQuotaReservations:
+        def __init__(self, pool):
+            quota_events.append(("init", pool))
+
+        async def reserve(self, operation):
+            quota_events.append(("reserve", operation))
+            return {"status": "reserved", "ticket": object()}
+
+        async def renew(self, operation, ticket):
+            return ticket
+
+        async def commit(self, operation, ticket, final):
+            quota_events.append(("commit", operation, ticket, final))
+            return {"risposta": mock_qa_output["risposta"], "fonti": [{
+                "documento": "listino_speciale.txt", "tipo": "documento",
+                "score": 0.1, "stato": "indicizzata", "is_active": True,
+                "priorita": 3,
+            }]}
+
+        async def release(self, operation, ticket):
+            quota_events.append(("release", operation, ticket))
+            return True
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
     with patch.object(app.state, "repo", mock_repo, create=True), \
+         patch("src.api.routes.knowledge.QuotaReservations", FakeQuotaReservations), \
          patch("src.api.routes.knowledge.rispondi", new_callable=AsyncMock, return_value=mock_qa_output):
         res = client.post(
             "/api/documenti/chiedi",
             json={"domanda": "Quanto costa il corso VIP?", "k": 3},
+            headers={"Idempotency-Key": str(uuid.uuid4())},
         )
         assert res.status_code == 200
         data = res.json()
         assert data["risposta"] == "Il prezzo del corso VIP e' 499 euro e include tutoraggio."
-        assert data["fonti"][0]["fonte"] == "listino_speciale.txt"
+        assert data["fonti"][0]["documento"] == "listino_speciale.txt"
         assert data["fonti"][0]["tipo"] == "documento"
+        assert set(data) == {"risposta", "fonti"}
+        assert all("quota" not in key.lower() and "ticket" not in key.lower()
+                   for key in data)
+        assert [event[0] for event in quota_events] == ["init", "reserve", "commit"]
+        assert quota_events[1][1].channel == "qa"
+        assert str(quota_events[1][1].auth_user_id) == auth_user_id
     app.dependency_overrides.pop(get_organization_context, None)
 
 

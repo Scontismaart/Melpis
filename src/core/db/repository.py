@@ -333,7 +333,7 @@ class CoreRepository(TenantScopedRepository):
     async def increment_message_usage(
         self, organization_id: uuid.UUID | str
     ) -> int | None:
-        return await self._billing_repo.increment_message_usage(organization_id)
+        raise RuntimeError("Direct message usage increments are disabled; use the atomic A04 commit")
 
     async def reset_message_usage(
         self,
@@ -374,6 +374,9 @@ class CoreRepository(TenantScopedRepository):
 
     async def get_messages_by_org(self, organization_id: uuid.UUID | str) -> list[dict]:
         return await self._msg_repo.get_messages_by_org(organization_id)
+
+    async def claim_message_for_processing(self, msg_id: str, org_id: str) -> dict:
+        return await self._msg_repo.claim_message_for_processing(msg_id, org_id)
 
     async def reserve_simulation_request(
         self, organization_id, auth_user_id, request_id, payload_hash

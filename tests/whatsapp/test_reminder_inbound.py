@@ -2,6 +2,12 @@ import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from src.whatsapp.inbound_processor import InboundProcessor
+
+
+@pytest.fixture(autouse=True)
+def _mock_a04_admission_for_business_flow_units(monkeypatch):
+    from tests.a04_admission_fakes import install_mock_a04_admission
+    install_mock_a04_admission(monkeypatch)
 from src.whatsapp.config import AppConfig, TenantConfig
 
 
@@ -30,7 +36,7 @@ def mock_repo():
         "subscription_status": "active", "trial_end": None,
         "ai_accounting_blocked": False,
     })
-    repo.claim_message_and_check_quota = AsyncMock(return_value={
+    repo.claim_message_for_processing = AsyncMock(return_value={
         "status": "claimed",
         "ai_reply_cache": None,
         "billed_at": None,
@@ -109,7 +115,7 @@ async def test_opt_out_wins_over_reminder(processor, mock_booking_service, sampl
 
 
 @pytest.mark.asyncio
-async def test_reminder_returns_none_continues_to_ai(processor, mock_booking_service, sample_msg, fake_tenant_config):
+async def test_reminder_returns_none_continues_to_ai(processor, mock_booking_service, sample_msg, fake_tenant_config, mock_provider_context_open):
     """When handle_reminder_reply returns None, processing continues to fast_path/AI."""
     mock_booking_service.handle_reminder_reply.return_value = None
     with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)), \

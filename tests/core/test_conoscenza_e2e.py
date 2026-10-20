@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import hashlib
 from unittest.mock import patch, AsyncMock
 import httpx
 import pytest
@@ -114,6 +115,24 @@ async def test_vertical_aware_prompt_and_hierarchy(repo, sample_org):
 
     prompt_catturato = []
 
+    # The prompt test exercises an answer-capable Q&A call, so establish the
+    # same tenant-scoped A04 reservation the API route requires before A03.
+    from src.core.billing.quota_reservations import QuotaOperation, QuotaReservations
+
+    question = "Quanto costa il taglio uomo?"
+    source_id = uuid.uuid4()
+    payload_hash = hashlib.sha256(json.dumps(
+        {"organization_id": str(sample_org["id"]), "domanda": question, "k": 5},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    operation = QuotaOperation(
+        organization_id=uuid.UUID(str(sample_org["id"])), source_id=source_id,
+        channel="qa", payload_hash=payload_hash, auth_user_id=auth_user_id,
+    )
+    reservations = QuotaReservations(repo.pool)
+    reservation = await reservations.reserve(operation)
+    assert reservation["status"] == "reserved"
+
     class _CaptureLLM:
         async def acall(self, prompt):
             prompt_catturato.append(prompt)
@@ -122,9 +141,14 @@ async def test_vertical_aware_prompt_and_hierarchy(repo, sample_org):
     with patch("src.core.documenti.qa_agent.vettorizza", return_value=[[0.1] * 384]), \
          patch("src.core.documenti.qa_agent.crea_llm", return_value=_CaptureLLM()) as make_llm:
         res = await rispondi(
-            str(sample_org["id"]), "Quanto costa il taglio uomo?", repo,
-            actor_auth_user_id=auth_user_id,
+            str(sample_org["id"]), question, repo,
+            billing=reservation["billing"], actor_auth_user_id=auth_user_id,
+            quota_operation=operation, quota_ticket=reservation["ticket"],
         )
+
+    final = res.pop("_quota_final", None)
+    assert final is not None
+    committed = await reservations.commit(operation, reservation["ticket"], final)
 
     assert len(prompt_catturato) == 1
     assert make_llm.call_args.kwargs["provider_context"].organization_id == sample_org["id"]
@@ -139,11 +163,16 @@ async def test_vertical_aware_prompt_and_hierarchy(repo, sample_org):
     assert "Parrucchiere" in prompt
 
     # Verifica: il prompt include la gerarchia di priorità
-    assert "Dati struttura > FAQ > Documenti > Pagine web" in prompt
-    assert "Priorità 1" in prompt
+    assert "1. Dati struttura" in prompt
+    assert "2. FAQ" in prompt
+    assert "3. Documenti" in prompt
+    assert "4. Pagine web" in prompt
+    assert '"priority":1' in prompt
+    assert '"priority":3' in prompt
 
     # Verifica: il tester restituisce metadati arricchiti con priorità e stato
-    fonti = res["fonti"]
+    assert set(committed) == {"risposta", "fonti"}
+    fonti = committed["fonti"]
     assert len(fonti) >= 1
     p1_fonti = [f for f in fonti if f["priorita"] == 1]
     assert len(p1_fonti) == 1

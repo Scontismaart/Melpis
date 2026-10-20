@@ -19,7 +19,7 @@ from src.agents.prompts import (
     formatta_disponibilita,
 )
 from src.core.bookings import SlotPienoError
-from src.core.ai_safety import apply_booking_result, booking_failed, validate_ai_input
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY, apply_booking_result, booking_failed, validate_ai_input
 from src.core.crew_runner import genera_risposta_async
 from src.core.documenti.rag_context import ContestoDocumenti, recupera_contesto_documenti
 from src.core.guardrails import faq_cache
@@ -183,13 +183,35 @@ class ConversationOrchestrator:
                         )
                     except Exception as e:
                         logger.warning("Cache hit usage logging failed for org %s: %s", org_id,type(e).__name__)
-                return OrchestrationOutput(
+                output = OrchestrationOutput(
                     response_text=cached_answer,
                     source="faq_cache",
                     intent=intent_result.intent,
                     intent_confidence=intent_result.confidence,
                     richiede_umano=False,
                 )
+                if req.quota_operation is not None and req.quota_ticket is not None:
+                    from src.core.billing.quota_reservations import validate_final_response
+                    from src.models.schemas import RispostaOutput
+                    cached_response = RispostaOutput(
+                        risposta=cached_answer, richiede_umano=False,
+                        motivo="", categoria=intent_result.intent or "generico",
+                    )
+                    cached_response = applica_guardrail(
+                        cached_response, valida_risposta(cached_response, profilo=profilo),
+                    )
+                    if cached_response._guardrail_blocked is True:
+                        output.response_text = cached_response.risposta
+                        output.richiede_umano = True
+                        output._quota_exempt = True
+                        return output
+                    output._quota_final = validate_final_response(
+                        req.quota_operation,
+                        req.quota_ticket,
+                        cached_response,
+                        profile=profilo,
+                    )
+                return output
 
         # 5. RAG Retrieval vettoriale pgvector
         contesto = ContestoDocumenti()
@@ -255,6 +277,8 @@ class ConversationOrchestrator:
             worker_message_id=(req.message_id if req.auth_user_id is None else None),
             simulation_request_id=req.simulation_request_id if req.is_simulation else None,
             simulation_claim_token=req.simulation_claim_token if req.is_simulation else None,
+            quota_operation=req.quota_operation,
+            quota_ticket=req.quota_ticket,
             context={
                 "message_id": str(req.message_id) if req.message_id else None,
                 "conversation_id": req.conversation_id or None,
@@ -343,7 +367,7 @@ class ConversationOrchestrator:
                         )
                     except Exception as e:
                         logger.warning("Simulation availability check failed: %s",type(e).__name__)
-            else:
+            elif req.quota_operation is None:
                 # CANALE REALE: creazione deterministica con slot_lock e gestione SlotPienoError
                 if self.booking_service and org_id and req.message_id:
                     try:
@@ -411,7 +435,7 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.warning("FAQ cache store failed for org %s: %s", org_id,type(e).__name__)
 
-        return OrchestrationOutput(
+        output = OrchestrationOutput(
             response_text=risposta.risposta,
             richiede_umano=bool(risposta.richiede_umano),
             motivo_richiesta_umano=risposta.motivo,
@@ -425,6 +449,25 @@ class ConversationOrchestrator:
             guardrail_action=guardrail_action,
             guardrail_motivo=guardrail_motivo,
         )
+        if req.quota_operation is not None and req.quota_ticket is not None:
+            from src.core.billing.quota_reservations import validate_final_response
+            if risposta._guardrail_blocked is True:
+                output._quota_exempt = True
+                return output
+            # Validate the original proposal before substituting truthful
+            # pending wording. A rejected response cannot authorize a booking.
+            output._quota_final = validate_final_response(
+                req.quota_operation, req.quota_ticket, risposta,
+                context_chunks=contesto.chunks, profile=profilo,
+            )
+            if not req.is_simulation and pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
+                risposta.risposta = BOOKING_RECEIVED_REPLY
+                output.response_text = risposta.risposta
+                output._quota_final = validate_final_response(
+                    req.quota_operation, req.quota_ticket, risposta,
+                    context_chunks=contesto.chunks, profile=profilo,
+                )
+        return output
 
     async def _resolve_profile(self, org_id, raw_profile) -> ProfiloAttivita:
         if isinstance(raw_profile, ProfiloAttivita):
