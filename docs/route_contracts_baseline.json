@@ -307,6 +307,20 @@
     "response_model": null,
     "is_llm_route": false
   },
+  "/api/bookings/{booking_id}/calendar-sync/retry::POST": {
+    "path": "/api/bookings/{booking_id}/calendar-sync/retry",
+    "methods": [
+      "POST"
+    ],
+    "endpoint_name": "retry_calendar_sync",
+    "required_roles": [
+      "manager",
+      "owner"
+    ],
+    "has_org_context": false,
+    "response_model": null,
+    "is_llm_route": false
+  },
   "/api/bookings/{booking_id}/confirm::POST": {
     "path": "/api/bookings/{booking_id}/confirm",
     "methods": [
