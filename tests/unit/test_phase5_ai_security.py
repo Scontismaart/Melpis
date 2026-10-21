@@ -99,7 +99,9 @@ async def test_oversized_input_rejected_without_sensitive_exception_payload(path
 @pytest.mark.parametrize("error", [RuntimeError("private-provider-detail"), TimeoutError(), TypeError("after-write")])
 async def test_booking_failure_never_confirms_or_retries(path, error, caplog):
     result, booking = await execute(path, error=error)
-    assert booking.create_booking.await_count == 1
+    # The AI engines are no longer allowed to reach this side effect. A04's
+    # committed inbound continuation owns the booking transaction instead.
+    booking.create_booking.assert_not_awaited()
     assert "Prenotazione confermata" not in result.response_text
     assert result.richiede_umano
     assert "private-provider-detail" not in caplog.text
@@ -108,11 +110,9 @@ async def test_booking_failure_never_confirms_or_retries(path, error, caplog):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["legacy", "orchestrator"])
-async def test_booking_uses_trusted_sender_and_message(path):
+async def test_model_selected_phone_cannot_authorize_direct_booking(path):
     _, booking = await execute(path)
-    kwargs = booking.create_booking.call_args.kwargs
-    assert kwargs["telefono"] == "trusted-sender"
-    assert kwargs["source_message_id"]
+    booking.create_booking.assert_not_awaited()
 
 
 @pytest.mark.asyncio

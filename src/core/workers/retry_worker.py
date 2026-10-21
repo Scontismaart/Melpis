@@ -51,7 +51,7 @@ class MultiChannelRetryWorker:
             except Exception as e:
                 logger.error("Error processing delivery attempt %s: %s", attempt["id"], e)
 
-    async def _process_one(self, attempt: dict):
+    async def _process_one(self, attempt: dict, *, confirmation_guarded=False):
         message_id = attempt["message_id"]
         payload = await self.repo.reconstruct_payload_for_retry(message_id)
         if not payload:
@@ -59,6 +59,20 @@ class MultiChannelRetryWorker:
             return
 
         org_id = payload["organization_id"]
+        if payload.get("handling_type") == "booking_confirmation" and not confirmation_guarded:
+            guard = getattr(self.repo, "booking_confirmation_delivery_guard", None)
+            if not callable(guard):
+                await self.repo.update_delivery_attempt(
+                    attempt["id"], "failed", {"error": "booking_confirmation_guard_unavailable"},
+                )
+                return
+            async with guard(org_id, message_id) as confirmed:
+                if not confirmed:
+                    await self.repo.update_delivery_attempt(
+                        attempt["id"], "failed", {"error": "booking_no_longer_confirmed"},
+                    )
+                    return
+                return await self._process_one(attempt, confirmation_guarded=True)
         # P1.2 — mai reinviare alla cieca: la riga puo' essere gia' stata
         # inviata (mark arrivato dopo il claim) o in attesa webhook.
         from src.whatsapp.service import _row_awaiting_webhook, _row_is_delivered

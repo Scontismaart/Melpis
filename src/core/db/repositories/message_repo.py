@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from src.core.db.scoping import TenantScopedRepository, system_scope
@@ -333,6 +334,25 @@ class MessageRepository(TenantScopedRepository):
                         SET status='scheduled',scheduled_at=NOW() WHERE id=$1
                     """, row["id"])
                 return len(rows)
+
+    @asynccontextmanager
+    async def booking_confirmation_delivery_guard(self, organization_id, message_id):
+        """Serialize an A05 confirmation send with booking cancellation.
+
+        The booking row stays locked through the provider handoff. A
+        cancellation that committed first suppresses the notice; one that
+        follows observes a confirmation that was sent while still valid.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                state = await conn.fetchval("""
+                    SELECT b.stato FROM booking_confirmation_outbox o
+                    JOIN bookings b ON b.id=o.booking_id
+                      AND b.organization_id=o.organization_id
+                    WHERE o.organization_id=$1 AND o.outbound_message_id=$2
+                    FOR UPDATE OF b
+                """, uuid.UUID(str(organization_id)), uuid.UUID(str(message_id)))
+                yield state == "confermata"
 
     @system_scope("tabella indiretta (via messages), solo worker")
     async def update_delivery_attempt(self, attempt_id, status, error_details=None):

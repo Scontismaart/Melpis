@@ -98,6 +98,39 @@ async def test_internal_auto_confirmation_is_durable_without_google(
     assert outbox[0]["status"] == "waiting_for_reply"
 
 
+async def test_cancellation_serializes_with_confirmation_delivery(
+    repo, pg_pool, sample_org,
+):
+    org_id = sample_org["id"]
+    booking = BookingService(repo)
+    await _configure(pg_pool, booking, org_id)
+    day = (date.today() + timedelta(days=8)).isoformat()
+    msg = await _message(pg_pool, org_id, day)
+    assert await _processor(repo, booking)._apply_committed_booking(
+        org_id, msg, {}, _canonical(day),
+    ) is False
+    async with pg_pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT o.outbound_message_id,o.booking_id FROM booking_confirmation_outbox o
+            WHERE o.organization_id=$1
+        """, org_id)
+        await conn.execute("UPDATE messages SET replied_at=NOW() WHERE id=$1", msg["id"])
+    assert await repo.enqueue_ready_booking_confirmations() == 1
+
+    async with repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
+        assert valid is True
+        cancellation = asyncio.create_task(
+            repo.booking_repo.update_booking_status(
+                org_id, row["booking_id"], "cancellata", expected_status="confermata",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not cancellation.done()
+    assert await asyncio.wait_for(cancellation, timeout=2) is not None
+    async with repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
+        assert valid is False
+
+
 async def test_optional_calendar_failure_preserves_internal_confirmation(
     repo, pg_pool, sample_org,
 ):

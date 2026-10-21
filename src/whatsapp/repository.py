@@ -233,6 +233,9 @@ class Repository(TenantScopedRepository):
     async def enqueue_ready_booking_confirmations(self, limit=20):
         return await self._msg_repo.enqueue_ready_booking_confirmations(limit)
 
+    def booking_confirmation_delivery_guard(self, organization_id, message_id):
+        return self._msg_repo.booking_confirmation_delivery_guard(organization_id, message_id)
+
     async def update_delivery_attempt(self, attempt_id, status, error_details=None):
         return await self._msg_repo.update_delivery_attempt(attempt_id, status, error_details=error_details)
 
