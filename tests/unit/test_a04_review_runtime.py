@@ -10,10 +10,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.core.billing.quota_reservations import QuotaConflict, QuotaLease
-from src.core.ai_safety import BOOKING_FAILURE_REPLY, BOOKING_RECEIVED_REPLY
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY
 from src.core.guardrails.validator import FALLBACK_STAFF_TEXT
 from src.core.inbound.legacy_pipeline import LegacyExecutionResult
 from src.core.inbound.service import (
+    BookingApplicationResult,
     InboundProcessingService,
     _booking_action_is_fresh,
     _booking_values_match,
@@ -63,10 +64,12 @@ async def test_worker_delivers_canonical_commit_not_unvalidated_output(base_conf
 
 
 @pytest.mark.parametrize("orchestrated", [False, True])
-@pytest.mark.parametrize("needs_staff", [False, True])
+@pytest.mark.parametrize(("persisted_state", "needs_staff"), [
+    ("confirmed", False), ("pending", True), (None, True),
+])
 @pytest.mark.asyncio
 async def test_booking_notice_depends_on_persisted_result_not_ai_text(
-    base_config, mock_deps, orchestrated, needs_staff,
+    base_config, mock_deps, orchestrated, persisted_state, needs_staff,
 ):
     base_config.use_conversation_orchestrator = orchestrated
     canonical = _canonical("Prenotazione confermata!")
@@ -88,15 +91,22 @@ async def test_booking_notice_depends_on_persisted_result_not_ai_text(
          patch("src.core.inbound.service.enqueue_escalation"), \
          patch("src.core.inbound.service._booking_action_is_fresh", return_value=True), \
          patch.object(service, "_booking_context", new=AsyncMock(return_value={})), \
-         patch.object(service, "_apply_committed_booking", new=AsyncMock(return_value=needs_staff)), \
+         patch("src.core.billing.quota_reservations.validate_final_response", side_effect=(
+             lambda _operation, _ticket, response: SimpleNamespace(
+                 serialized=json.dumps(response.model_dump(mode="json"))
+             )
+         )), \
+         patch.object(service, "_apply_committed_booking", new=AsyncMock(return_value=(
+             BookingApplicationResult(needs_staff, persisted_state)
+         ))), \
          patch.object(service, "_send_reply", new=AsyncMock(return_value={"wam_id": "notice"})) as send:
         result = await service.process_message(_message())
     assert result.action == "handled"
-    assert send.await_args.args[4].endswith(
-        BOOKING_FAILURE_REPLY if needs_staff else BOOKING_RECEIVED_REPLY
-    )
+    assert send.await_args.args[4].endswith(BOOKING_RECEIVED_REPLY)
     assert "Prenotazione confermata!" not in send.await_args.args[4]
     mock_deps["quota"].commit.assert_awaited_once()
+    committed = json.loads(mock_deps["quota"].commit.await_args.args[2].serialized)
+    assert committed["risposta"] == BOOKING_RECEIVED_REPLY
 
 
 @pytest.mark.parametrize("orchestrated", [False, True])
