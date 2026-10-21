@@ -1,8 +1,9 @@
 """Install a hash-locked internal dependency metadata backport; audit real files.
 
 CrewAI code/version/license stay identical to its official 1.15.4 wheel. This
-internal derivative is not an upstream release or an upstream compatibility
-endorsement. No fork, dependency override, --no-deps or new advisory exception.
+internal derivative updates the MCP metadata contract and omits the unused CLI
+edge from the server runtime. It is not an upstream release or endorsement. No
+fork, dependency override, --no-deps or new advisory exception.
 """
 import argparse
 import base64
@@ -23,13 +24,14 @@ import zipfile
 SOURCE_URL = 'https://files.pythonhosted.org/packages/a2/69/efea134272b7ca3e9cf19d5561b95c106faca7d8555af5cfc4e497ed0225/crewai-1.15.4-py3-none-any.whl'
 SOURCE_SHA256 = 'bb7210ccbac3c75c231966fb5dd8d77797945c5ddb220ca3b54b50bf0a31a711'
 # Set from the canonical ZIP_STORED build, reviewed independently of downloads.
-DERIVED_SHA256 = '74baca11ee420f0cde6c76c421092a78174c963b4fa646830df33be52d053455'
-PROVENANCE_SHA256 = '11537e7bd6d0f3dd12cf26beb6e39db7503ff1f44e61a261c60cc8e0b4645def'
+DERIVED_SHA256 = '138821fe22e869559034f3ee061445b088040bb522285d6a07aec9e39f143cac'
+PROVENANCE_SHA256 = '52246730a23f5966e445c6f56fe5c7eb9e808d3e5f19a4f3549b4368033d691a'
 WHEEL_NAME = 'crewai-1.15.4-py3-none-any.whl'
 METADATA_NAME = 'crewai-1.15.4.dist-info/METADATA'
 RECORD_NAME = 'crewai-1.15.4.dist-info/RECORD'
 OLD_CONSTRAINT = b'Requires-Dist: mcp~=1.28.1\n'
 NEW_CONSTRAINT = b'Requires-Dist: mcp<1.31,>=1.30.0\n'
+UNUSED_CLI_REQUIREMENT = b'Requires-Dist: crewai-cli==1.15.4\n'
 
 
 def sha256(data):
@@ -49,9 +51,13 @@ def repack_wheel(source):
             raise ValueError('Duplicate wheel members')
         originals = {name: archive.read(name) for name in names}
     files = dict(originals)
-    if files[METADATA_NAME].count(OLD_CONSTRAINT) != 1:
+    metadata_bytes = files[METADATA_NAME]
+    if metadata_bytes.count(OLD_CONSTRAINT) != 1:
         raise ValueError('Expected exactly one reviewed MCP constraint')
-    files[METADATA_NAME] = files[METADATA_NAME].replace(OLD_CONSTRAINT, NEW_CONSTRAINT)
+    if metadata_bytes.count(UNUSED_CLI_REQUIREMENT) != 1:
+        raise ValueError('Expected exactly one unused CrewAI CLI dependency')
+    metadata_bytes = metadata_bytes.replace(OLD_CONSTRAINT, NEW_CONSTRAINT)
+    files[METADATA_NAME] = metadata_bytes.replace(UNUSED_CLI_REQUIREMENT, b'')
     rows = io.StringIO(newline='')
     writer = csv.writer(rows, lineterminator='\n')
     for name in sorted(files):
@@ -100,12 +106,14 @@ def make_manifest(wheel):
     with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
         hashes = {name: sha256(archive.read(name)) for name in archive.namelist() if name != RECORD_NAME}
     return {
-        'schema': 1, 'distribution': 'crewai', 'version': '1.15.4', 'mcp_version': '1.30.0',
+        'schema': 2, 'distribution': 'crewai', 'version': '1.15.4', 'mcp_version': '1.30.0',
         'source_url': SOURCE_URL, 'source_sha256': SOURCE_SHA256,
         'derived_sha256': sha256(wheel), 'internal_metadata_backport': True,
         'upstream_endorsed': False, 'changed_entries': [METADATA_NAME, RECORD_NAME],
         'old_constraint': OLD_CONSTRAINT.decode().strip(),
-        'new_constraint': NEW_CONSTRAINT.decode().strip(), 'installed_files': hashes,
+        'new_constraint': NEW_CONSTRAINT.decode().strip(),
+        'omitted_runtime_requirement': UNUSED_CLI_REQUIREMENT.decode().strip(),
+        'installed_files': hashes,
     }
 
 
@@ -155,6 +163,15 @@ def verify_installed_files(manifest, location):
             raise ValueError('Reviewed installed file differs: ' + name)
 
 
+def verify_cli_tools_absent():
+    for name in ('crewai-cli', 'uv'):
+        try:
+            metadata.version(name)
+        except metadata.PackageNotFoundError:
+            continue
+        raise ValueError('Unused CLI tooling must not ship in runtime: ' + name)
+
+
 def verify_runtime(manifest_path):
     content = manifest_path.read_bytes()
     if sha256(content) != PROVENANCE_SHA256:
@@ -163,6 +180,7 @@ def verify_runtime(manifest_path):
     for name, version in (('crewai', '1.15.4'), ('mcp', '1.30.0')):
         if metadata.version(name) != version:
             raise ValueError('Unreviewed installed dependency version: ' + name)
+    verify_cli_tools_absent()
     distribution = metadata.distribution('crewai')
     verify_installed_files(manifest, distribution.locate_file(''))
 
