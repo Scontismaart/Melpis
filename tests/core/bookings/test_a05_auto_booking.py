@@ -115,9 +115,9 @@ async def test_cancellation_serializes_with_confirmation_delivery(
             WHERE o.organization_id=$1
         """, org_id)
         await conn.execute("UPDATE messages SET replied_at=NOW() WHERE id=$1", msg["id"])
-    assert await repo.enqueue_ready_booking_confirmations() == 1
+    assert await repo.msg_repo.enqueue_ready_booking_confirmations() == 1
 
-    async with repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
+    async with repo.msg_repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
         assert valid is True
         cancellation = asyncio.create_task(
             repo.booking_repo.update_booking_status(
@@ -127,7 +127,7 @@ async def test_cancellation_serializes_with_confirmation_delivery(
         await asyncio.sleep(0.05)
         assert not cancellation.done()
     assert await asyncio.wait_for(cancellation, timeout=2) is not None
-    async with repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
+    async with repo.msg_repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
         assert valid is False
 
 
