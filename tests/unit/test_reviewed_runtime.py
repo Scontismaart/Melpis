@@ -23,7 +23,8 @@ def load_builder():
     return module
 
 
-def synthetic_wheel(*, requirement=b'Requires-Dist: mcp~=1.28.1\n'):
+def synthetic_wheel(*, requirement=(b'Requires-Dist: mcp~=1.28.1\n'
+                                       b'Requires-Dist: crewai-cli==1.15.4\n')):
     files = {
         'crewai/__init__.py': b'__version__="1.15.4"\n',
         'crewai-1.15.4.dist-info/METADATA': b'Name: crewai\nVersion: 1.15.4\n' + requirement,
@@ -60,7 +61,9 @@ def test_patch_changes_only_constraint_and_record_preserving_license(monkeypatch
     with zipfile.ZipFile(io.BytesIO(source)) as a, zipfile.ZipFile(io.BytesIO(derived)) as b:
         changed = [name for name in a.namelist() if a.read(name) != b.read(name)]
         assert set(changed) == {'crewai-1.15.4.dist-info/METADATA', 'crewai-1.15.4.dist-info/RECORD'}
-        assert b'Requires-Dist: mcp<1.31,>=1.30.0\n' in b.read(changed[0])
+        metadata_bytes = b.read(changed[0])
+        assert b'Requires-Dist: mcp<1.31,>=1.30.0\n' in metadata_bytes
+        assert b'Requires-Dist: crewai-cli==1.15.4\n' not in metadata_bytes
         assert b.read('crewai-1.15.4.dist-info/LICENSE') == b'Synthetic fixture license\n'
         for name, digest, size in csv.reader(io.StringIO(b.read('crewai-1.15.4.dist-info/RECORD').decode())):
             if not digest:
@@ -77,6 +80,18 @@ def test_rejects_missing_or_duplicate_target_constraint(monkeypatch):
         source = synthetic_wheel(requirement=requirement)
         monkeypatch.setattr(module, 'SOURCE_SHA256', hashlib.sha256(source).hexdigest())
         with pytest.raises(ValueError, match='constraint'):
+            module.repack_wheel(source)
+
+
+def test_rejects_missing_or_duplicate_unused_cli_edge(monkeypatch):
+    module = load_builder()
+    for requirement in (
+        b'Requires-Dist: mcp~=1.28.1\n',
+        b'Requires-Dist: mcp~=1.28.1\n' + b'Requires-Dist: crewai-cli==1.15.4\n' * 2,
+    ):
+        source = synthetic_wheel(requirement=requirement)
+        monkeypatch.setattr(module, 'SOURCE_SHA256', hashlib.sha256(source).hexdigest())
+        with pytest.raises(ValueError, match='unused CrewAI CLI dependency'):
             module.repack_wheel(source)
 
 

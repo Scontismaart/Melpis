@@ -1,10 +1,13 @@
 # Runtime CrewAI/MCP con derivata interna verificata
 
-Questa modifica è un candidato da revisionare: non autorizza merge, deploy o
-adozione definitiva. L'upstream CrewAI 1.15.4 richiede `mcp~=1.28.1`, mentre la
-correzione di sicurezza richiede MCP 1.30.0. La derivata interna rilassa soltanto
-quel vincolo a `mcp>=1.30.0,<1.31`, mantenendo `mcp==1.30.0` nel contratto Melpis.
-Non implica approvazione o firma upstream sul nuovo abbinamento.
+La derivata interna è un backport metadata del wheel CrewAI 1.15.4, non una
+release né un'approvazione upstream. Aggiorna il vincolo MCP upstream a
+`mcp>=1.30.0,<1.31` (con pin applicativo `mcp==1.30.0`) e rimuove la dipendenza
+obbligatoria `crewai-cli==1.15.4`: l'applicazione usa le API CrewAI, ma non il CLI.
+Il CLI trascina `uv~=0.11.6`; `uv` non è invocato dal servizio, non è compatibile
+con il fix minimo `uv>=0.13.4` e non deve essere distribuito nell'immagine runtime.
+Il builder verifica l'assenza di entrambi nel runtime e `pip check` verifica il
+grafo risolto; il codice CrewAI resta byte-identico alla wheel ufficiale.
 
 ## Installazione e provenienza
 
@@ -39,21 +42,23 @@ verificata con SHA-256:
 | Artefatto | SHA-256 |
 |---|---|
 | CrewAI 1.15.4 ufficiale | `bb7210ccbac3c75c231966fb5dd8d77797945c5ddb220ca3b54b50bf0a31a711` |
-| Derivata interna canonica | `74baca11ee420f0cde6c76c421092a78174c963b4fa646830df33be52d053455` |
-| Manifest di provenienza | `11537e7bd6d0f3dd12cf26beb6e39db7503ff1f44e61a261c60cc8e0b4645def` |
+| Derivata interna canonica | `138821fe22e869559034f3ee061445b088040bb522285d6a07aec9e39f143cac` |
+| Manifest di provenienza | `52246730a23f5966e445c6f56fe5c7eb9e808d3e5f19a4f3549b4368033d691a` |
 | pip 26.2.1 ufficiale | `71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e` |
 
 Fonti primarie: [CrewAI 1.15.4 su PyPI](https://pypi.org/pypi/crewai/1.15.4/json),
 [pip 26.2.1 su PyPI](https://pypi.org/pypi/pip/26.2.1/json) e
 [wheel ufficiale pip](https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl).
 
-Cambiano soltanto il vincolo in METADATA e RECORD rigenerato. I restanti 526
-file, inclusi codice, versione e licenza MIT, restano identici byte per byte.
+Cambiano soltanto il vincolo MCP e la dipendenza CLI in METADATA, più RECORD
+rigenerato. I restanti file, inclusi codice, versione e licenza MIT, restano
+identici byte per byte.
 ZIP_STORED, ordine dei file e metadati ZIP fissi evitano dipendenze da zlib e
 timestamp; il digest è stato riprodotto su Windows e Linux con Python 3.12.
 Il manifest verificato include gli hash dei 527 file installabili escluso il
 RECORD che pip riscrive. Il runtime deve avere esattamente CrewAI 1.15.4 e MCP
-1.30.0; ogni file atteso viene ricontrollato, senza importare CrewAI o provider.
+1.30.0, senza `crewai-cli` e `uv`; ogni file atteso viene ricontrollato, senza
+importare CrewAI o provider.
 
 Nessuna wheel viene caricata su un registro: ogni build la ricostruisce dalla
 sorgente ufficiale verificata. Generati e wheel rimangono ignorati da Git e dal
@@ -85,7 +90,8 @@ Il servizio PyPI di pip-audit saltava il suffisso `+cpu`; il primo report di
 laboratorio è conservato come prova del limite. Un secondo audit OSV completo
 ha riportato 204 distribuzioni, incluso Torch con versione esatta, senza skip.
 Gli advisory residui Chroma/json-repair sono gli stessi già presenti nella
-policy; gli alias non vengono riscritti per superarla. Report e inventario
+policy, con razionale limitato e versioni esatte; gli alias non vengono riscritti
+per superarla. La policy resta invariata. Report e inventario
 vengono prodotti dai controlli effettivi di ciascuna build, non dal vecchio lab.
 
 La scansione di ciascuna immagine avviene nel builder prima di copiare i file;
