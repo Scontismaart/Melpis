@@ -54,8 +54,8 @@ async def _message(pool, org_id, day, *, phone="+393330001111", text=None):
         """, conv_id, org_id, contact_id)
         await conn.execute("""
             INSERT INTO messages(id,organization_id,conversation_id,direction,
-                                 message_type,content,content_text,status)
-            VALUES($1,$2,$3,'inbound','text',$4::jsonb,$5,'handled')
+                                 message_type,content,content_text,status,handling_type)
+            VALUES($1,$2,$3,'inbound','text',$4::jsonb,$5,'handled','ai_handled')
         """, msg_id, org_id, conv_id, json.dumps({"from": phone}), text)
     return {"id": msg_id, "organization_id": org_id, "conversation_id": conv_id}
 
@@ -142,9 +142,9 @@ async def test_newer_cancellation_blocks_stale_worker(repo, pg_pool, sample_org)
     async with pg_pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO messages(id,organization_id,conversation_id,direction,
-                                 message_type,content,content_text,status,created_at)
+                                 message_type,content,content_text,status,handling_type,created_at)
             VALUES($1,$2,$3,'inbound','text',$4::jsonb,'Annulla la prenotazione',
-                   'handled',NOW()+interval '1 second')
+                   'handled','automation',NOW()+interval '1 second')
         """, uuid.uuid4(), org_id, msg["conversation_id"],
             json.dumps({"from": "+393330001111"}))
     assert await _processor(repo, booking)._apply_committed_booking(
