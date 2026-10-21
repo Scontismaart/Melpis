@@ -115,7 +115,13 @@ class BookingRepository(TenantScopedRepository):
             RETURNING *
         """, uuid.uuid4(), uuid.UUID(str(organization_id)), slot_minutes,
             json.dumps(fasce_orarie), json.dumps(capienze_orarie), json.dumps(config))
-        return dict(row)
+        result = dict(row)
+        # asyncpg returns JSONB as text here; keep the settings write contract
+        # identical to get_booking_settings for callers of the service/API.
+        for field in ("fasce_orarie", "capienze_orarie", "config"):
+            if isinstance(result.get(field), str):
+                result[field] = json.loads(result[field])
+        return result
 
     async def create_booking(self, organization_id, nome_cliente, data, ora, coperti,
                              telefono="", note="", stato="in_attesa", origine="Dashboard",

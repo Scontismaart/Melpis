@@ -118,9 +118,8 @@ async def test_parity_guardrail_block_behavior(mock_dependencies, mock_provider_
 
 
 @pytest.mark.asyncio
-async def test_parity_booking_parameters_propagation(mock_dependencies, mock_provider_context_open):
-    """Verifica che tutti i parametri estratti dall'AI vengano passati
-    al booking service esattamente come faceva l'inbound processor."""
+async def test_booking_parameters_do_not_trigger_uncommitted_write(mock_dependencies, mock_provider_context_open):
+    """I parametri estratti dall'AI non autorizzano una scrittura fuori da A04."""
     booking_svc = mock_dependencies["booking_service"]
     booking_svc.create_booking = AsyncMock(return_value={"id": str(uuid.uuid4()), "stato": "confermata"})
 
@@ -160,19 +159,8 @@ async def test_parity_booking_parameters_propagation(mock_dependencies, mock_pro
             is_simulation=False,
             auth_user_id=uuid.uuid4(),
         )
-        await orchestrator.orchestrate(req)
+        result = await orchestrator.orchestrate(req)
 
-        # Parità: il booking service deve ricevere gli stessi campi
-        booking_svc.create_booking.assert_awaited_once_with(
-            organization_id=org_id,
-            nome_cliente="Marco",
-            telefono="+393400000000",
-            data="2026-09-12",
-            ora="21:00",
-            coperti=5,
-            note="Tavolo all'aperto",
-            origine="WhatsApp",
-            richiede_intervento=False,
-            id_conversazione="conv-123",
-            source_message_id=str(msg_id),
-        )
+        booking_svc.create_booking.assert_not_awaited()
+        assert result.booking_created is None
+        assert result.richiede_umano is True

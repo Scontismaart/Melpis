@@ -236,8 +236,8 @@ async def test_simulation_mode_never_creates_booking_row(mock_dependencies):
 
 
 @pytest.mark.asyncio
-async def test_real_mode_creates_booking_row(mock_dependencies):
-    """Verifica che in modalità reale (is_simulation=False) create_booking venga invocato."""
+async def test_real_mode_does_not_book_before_a04_commit(mock_dependencies):
+    """L'orchestratore non crea prenotazioni prima del commit A04."""
     booking_svc = mock_dependencies["booking_service"]
     booking_svc.create_booking = AsyncMock(return_value={"id": str(uuid.uuid4()), "stato": "confermata"})
 
@@ -275,27 +275,14 @@ async def test_real_mode_creates_booking_row(mock_dependencies):
         )
         result = await orchestrator.orchestrate(req)
 
-        # In modalità reale create_booking viene chiamato con i dati estratti
-        booking_svc.create_booking.assert_awaited_once_with(
-            organization_id=org_id,
-            nome_cliente="Luigi",
-            telefono="+39333111222",
-            data="2026-09-10",
-            ora="20:00",
-            coperti=2,
-            note="",
-            origine="WhatsApp",
-            richiede_intervento=False,
-            id_conversazione="",
-            source_message_id=str(msg_id),
-        )
-        assert result.booking_created is not None
-        assert result.booking_created["stato"] == "confermata"
+        booking_svc.create_booking.assert_not_awaited()
+        assert result.booking_created is None
+        assert result.richiede_umano is True
 
 
 @pytest.mark.asyncio
-async def test_slot_full_offers_alternatives(mock_dependencies):
-    """Verifica gestione di SlotPienoError con proposta di fasce alternative."""
+async def test_orchestrator_does_not_probe_slot_by_writing(mock_dependencies):
+    """Le alternative richiedono una lettura autorizzata, non un tentativo di INSERT."""
     booking_svc = mock_dependencies["booking_service"]
     booking_svc.create_booking = AsyncMock(side_effect=SlotPienoError("Slot esaurito", alternative=["19:30", "21:30"]))
 
@@ -331,9 +318,9 @@ async def test_slot_full_offers_alternatives(mock_dependencies):
         )
         result = await orchestrator.orchestrate(req)
 
-        assert result.slot_full_alternatives == ["19:30", "21:30"]
-        assert "19:30 o 21:30" in result.response_text
-        assert result.motivo_richiesta_umano == "slot_prenotazione_pieno"
+        booking_svc.create_booking.assert_not_awaited()
+        assert result.slot_full_alternatives == []
+        assert result.richiede_umano is True
 
 
 @pytest.mark.asyncio
