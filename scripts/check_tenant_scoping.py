@@ -140,6 +140,7 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/db/repositories/webhook_inbox_repo.py::purge_completed", "da0121e8a54d90132082510cf95a4bb1dde88485d3e3a1ec7909b7e26308ff86"): "trusted retention worker purges completed webhook payloads after seven days",
 }
 ALLOWLISTED_SQL_FINGERPRINTS.update({
+    ("src/core/db/repositories/message_repo.py::booking_confirmation_delivery_guard", "30e6a02241fdc3b332a8d599f7c901550d390092c76974f6f3a6b4d21eb91566"): "locks only the booking joined through an outbox row bound to both organization_id and outbound_message_id; booking organization must match the outbox",
     ("src/core/db/repositories/organization_repo.py::create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "single-organization provisioning uses the id returned by its new_org CTE",
     ("src/api/routes/team.py::list_my_organizations", "f018234f9a40424316a12de8391d250b8c03179c1a30953029f60b3928893ecf"): "enumerates only memberships bound to the authenticated principal",
     ("src/core/team_invitations.py::accept_invitation", "b890eeb6b0db2692e70655634732f3cd3e534f279df2919da0253b31dbd269be"): "hashed invite-token lookup resolves its organization before scoped acceptance",
