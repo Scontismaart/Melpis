@@ -368,49 +368,9 @@ class ConversationOrchestrator:
                     except Exception as e:
                         logger.warning("Simulation availability check failed: %s",type(e).__name__)
             elif req.quota_operation is None:
-                # CANALE REALE: creazione deterministica con slot_lock e gestione SlotPienoError
-                if self.booking_service and org_id and req.message_id:
-                    try:
-                        nome = pren.nome_cliente or (
-                            req.sender_name
-                            or ("Cliente Instagram" if req.channel == "instagram" else "Cliente WhatsApp")
-                        )
-                        tel = req.sender_phone
-                        orig = "Instagram" if req.channel == "instagram" else "WhatsApp"
-                        created = await self.booking_service.create_booking(
-                                organization_id=org_id,
-                                nome_cliente=nome,
-                                data=pren.data,
-                                ora=pren.ora,
-                                coperti=pren.coperti,
-                                telefono=tel,
-                                note=pren.note or "",
-                                origine=orig,
-                                richiede_intervento=risposta.richiede_umano,
-                                id_conversazione=req.conversation_id,
-                                source_message_id=str(req.message_id) if req.message_id else None,
-                        )
-                        apply_booking_result(risposta, created)
-                        booking_created = created
-                        logger.info(
-                            "Booking %s created from AI response for org %s",
-                            created.get("id") if isinstance(created, dict) else created,
-                            org_id,
-                        )
-                    except SlotPienoError as e:
-                        booking_failed(risposta)
-                        slot_full_alternatives = e.alternative or []
-                        if e.alternative:
-                            alt_text = " o ".join(e.alternative)
-                            risposta.risposta += f" Mi dispiace, alle {pren.ora} siamo al completo per {pren.coperti} persone. Ti andrebbe bene alle {alt_text}?"
-                        else:
-                            risposta.risposta += f" Mi dispiace, alle {pren.ora} siamo al completo per {pren.coperti} persone. Posso chiedere allo staff una fascia alternativa."
-                        risposta.motivo = "slot_prenotazione_pieno"
-                    except Exception as e:
-                        logger.error("Booking creation from AI failed for org %s error_type=%s", org_id, type(e).__name__)
-                        booking_failed(risposta)
-                else:
-                    booking_failed(risposta)
+                # Real bookings require the canonical A04 post-commit proof in
+                # InboundProcessingService. A direct caller has no such grant.
+                booking_failed(risposta)
 
         # 12. Salvataggio in FAQ Cache (se abilitata, intent faq, non bloccata da guardrail e non simulazione)
         if (

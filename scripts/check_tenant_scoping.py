@@ -90,6 +90,10 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "trusted scheduled cleanup removes expired OAuth nonces platform-wide after their short TTL",
     "src/core/db/repositories/external_booking_repo.py::get_pending_syncs":
         "trusted reconciliation worker claims pending syncs across organizations",
+    "src/core/db/repositories/booking_repo.py::claim_calendar_sync":
+        "trusted worker claims a bounded optional Calendar queue, then carries each stored organization_id into scoped processing",
+    "src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations":
+        "trusted worker schedules bounded confirmations whose booking and messages agree on organization_id",
     "src/integrations/airtable/repository.py::reap_stale_processing":
         "trusted Airtable worker reclaims stale webhook queue events across organizations",
     "src/integrations/airtable/repository.py::get_subscription_by_webhook_id":
@@ -101,6 +105,10 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/db/repositories/booking_repo.py::claim_calendar_sync", "b51862a676b035b96cf9501d89b9c2c21d9d7a69331c148090a71bfdb9edc1bd"): "bounded global claim joins each calendar sync to its booking on organization_id and locks only sync rows",
+    ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "36dabbca79e0d1236dcf4361946dc3629066096493ebe13a20f2cec92ab2127b"): "bounded global confirmation claim joins inbound, outbound and booking to the same organization_id",
+    ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "810f12dd6ee94b01cec490aa87e2061c03e8912f033fc178d29326a7e20b4330"): "attempt insertion uses only the outbound message id from the locked, tenant-consistent outbox row",
+    ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "10033a45b8df8fa6c14cc2fcd746e5cf6d6c2e7da8bcbd5d8d90e31d0bdca9b4"): "outbox status update uses only the id selected and locked by the same transaction",
     ("src/core/db/quota_provenance.py::require_quota_trust_epoch", "6ca4c3cfbc19d39d2db05a3d9ece55d1391817dfdf370d18a81fc4860bb2c4df"): "exact read-only marker UUID, NULL organization, protocol event type and zero quantity; every other SQL literal remains checked",
     ("src/core/db/repositories/organization_repo.py::get_memberships_by_auth", "29778c3d709058faa351c858baae4a2eb2a9d9b77bcaa9a503cb77f1f6990b01"): "principal membership resolution, bound to verified auth subject",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "48f99c0cd04ace9aed7749c723e6a46fb3e8eb78bc31defca15f5d36198b8776"): "JIT lookup is bound to verified auth subject",

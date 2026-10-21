@@ -41,6 +41,9 @@ class MultiChannelRetryWorker:
 
     async def process_next_batch(self):
         await self.repo.reap_stale_claims()
+        schedule_confirmations = getattr(self.repo, "enqueue_ready_booking_confirmations", None)
+        if callable(schedule_confirmations):
+            await schedule_confirmations()
         attempts = await self.repo.claim_delivery_attempts(limit=10)
         for attempt in attempts:
             try:

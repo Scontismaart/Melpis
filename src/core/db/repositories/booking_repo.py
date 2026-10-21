@@ -7,7 +7,7 @@ import asyncio
 
 import asyncpg
 
-from src.core.db.scoping import TenantScopedRepository
+from src.core.db.scoping import TenantScopedRepository, system_scope
 
 class BookingRepository(TenantScopedRepository):
     """Repository specializzato per Prenotazioni, Lock di Slot (P0) e Capienze."""
@@ -40,6 +40,82 @@ class BookingRepository(TenantScopedRepository):
                     yield
                 finally:
                     self._locked_connection.reset(token)
+
+    @asynccontextmanager
+    async def auto_booking_lock(self, organization_id, conversation_id, data, ora):
+        """Serialize current customer intent and slot admission in one transaction.
+
+        Every inbound message insert locks the same conversation row. Holding
+        FOR UPDATE while the slot is checked and the booking/outbox are written
+        makes a later cancellation wait; a cancellation already persisted is
+        visible before this transaction can acquire the lock. No network calls
+        belong inside this context.
+        """
+        fascia = int(ora[:2]) if isinstance(ora, str) else ora.hour
+        canonical_date = date.fromisoformat(data).isoformat() if isinstance(data, str) else data.isoformat()
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                locked = await conn.fetchval(
+                    "SELECT id FROM conversations WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+                    uuid.UUID(str(conversation_id)), uuid.UUID(str(organization_id)),
+                )
+                if locked is None:
+                    raise ValueError("Conversation does not belong to organization")
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock_shared(hashtext($1))",
+                    f"booking-capacity|{organization_id}",
+                )
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    f"{organization_id}|{canonical_date}|{fascia}",
+                )
+                token = self._locked_connection.set((asyncio.current_task(), conn))
+                try:
+                    yield conn
+                finally:
+                    self._locked_connection.reset(token)
+
+    @asynccontextmanager
+    async def booking_settings_lock(self, organization_id):
+        """Validate and publish A05 policy and capacity as one unit."""
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                org = await conn.fetchrow(
+                    "SELECT timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE",
+                    uuid.UUID(str(organization_id)),
+                )
+                if org is None:
+                    raise ValueError("Organization not found")
+                await conn.fetchval(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    f"booking-capacity|{organization_id}",
+                )
+                token = self._locked_connection.set((asyncio.current_task(), conn))
+                try:
+                    yield dict(org)
+                finally:
+                    self._locked_connection.reset(token)
+
+    async def save_booking_settings_locked(self, organization_id, *, slot_minutes,
+                                           fasce_orarie, capienze_orarie, config):
+        owned = self._locked_connection.get()
+        if owned is None or owned[0] is not asyncio.current_task():
+            raise RuntimeError("Booking settings write requires the settings transaction")
+        conn = owned[1]
+        row = await conn.fetchrow("""
+            INSERT INTO booking_settings (id, organization_id, slot_minutes,
+                                          fasce_orarie, capienze_orarie, config)
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb)
+            ON CONFLICT (organization_id) DO UPDATE SET
+                slot_minutes=EXCLUDED.slot_minutes,
+                fasce_orarie=EXCLUDED.fasce_orarie,
+                capienze_orarie=EXCLUDED.capienze_orarie,
+                config=EXCLUDED.config,
+                updated_at=NOW()
+            RETURNING *
+        """, uuid.uuid4(), uuid.UUID(str(organization_id)), slot_minutes,
+            json.dumps(fasce_orarie), json.dumps(capienze_orarie), json.dumps(config))
+        return dict(row)
 
     async def create_booking(self, organization_id, nome_cliente, data, ora, coperti,
                              telefono="", note="", stato="in_attesa", origine="Dashboard",
@@ -90,10 +166,160 @@ class BookingRepository(TenantScopedRepository):
                 id_conversazione, richiede_deposito, completata_at, tipo_evento)
                 return dict(row)
 
+    async def insert_auto_confirmed(self, organization_id, conversation_id,
+                                    inbound_message_id, source_message_id, *,
+                                    nome_cliente, telefono, data, ora, coperti,
+                                    channel, authority):
+        """Commit a confirmed booking and its notification in the A05 lock.
+
+        The caller must have validated customer intent, policy and capacity
+        under auto_booking_lock. No provider call is performed here.
+        """
+        owned = self._locked_connection.get()
+        if owned is None or owned[0] is not asyncio.current_task():
+            raise RuntimeError("Auto booking requires the booking transaction")
+        if channel not in {"whatsapp", "instagram"} or not telefono:
+            raise ValueError("Unsupported notification destination")
+        conn = owned[1]
+        org_uuid = uuid.UUID(str(organization_id))
+        conversation_uuid = uuid.UUID(str(conversation_id))
+        inbound_uuid = uuid.UUID(str(inbound_message_id))
+        booking = await self.create_booking(
+            org_uuid, nome_cliente, data, ora, coperti,
+            telefono=telefono, note="", stato="confermata",
+            origine="Instagram" if channel == "instagram" else "WhatsApp",
+            id_conversazione=str(conversation_uuid),
+            source_message_id=str(source_message_id),
+        )
+        if not booking or booking.get("stato") != "confermata":
+            return booking
+
+        day = data.isoformat() if isinstance(data, date) else str(data)
+        slot = ora.strftime("%H:%M") if isinstance(ora, time) else str(ora)
+        notice = f"Prenotazione confermata in Melpis per il {day} alle {slot}, {coperti} persone."
+        payload = {"to": telefono, "type": "text", "text": {"body": notice}}
+        if channel == "instagram":
+            payload["channel"] = "instagram"
+        else:
+            payload["_delivery_category"] = "service"
+        key = f"booking-confirm:{org_uuid}:{source_message_id}"
+        message_id = uuid.uuid4()
+        outbound = await conn.fetchrow("""
+            INSERT INTO messages (id, organization_id, conversation_id, wam_id,
+                                  direction, message_type, content, content_text,
+                                  status, handling_type, idempotency_key)
+            VALUES ($1,$2,$3,NULL,'outbound','text',$4::jsonb,$5,'queued',
+                    'booking_confirmation',$6)
+            ON CONFLICT (organization_id,idempotency_key)
+                WHERE idempotency_key IS NOT NULL DO NOTHING
+            RETURNING id,content
+        """, message_id, org_uuid, conversation_uuid, json.dumps(payload), notice, key)
+        if outbound is None:
+            outbound = await conn.fetchrow("""
+                SELECT id,content FROM messages
+                WHERE organization_id=$1 AND idempotency_key=$2
+            """, org_uuid, key)
+            stored = outbound["content"] if outbound else None
+            if isinstance(stored, str):
+                stored = json.loads(stored)
+            if stored != payload:
+                raise ValueError("Auto booking notification idempotency conflict")
+        await conn.execute("""
+            INSERT INTO booking_confirmation_outbox
+                (organization_id,booking_id,inbound_message_id,outbound_message_id)
+            VALUES ($1,$2,$3,$4)
+            ON CONFLICT (organization_id,booking_id) DO NOTHING
+        """, org_uuid, booking["id"], inbound_uuid, outbound["id"])
+        if authority == "internal_calendar_sync":
+            await conn.execute("""
+                INSERT INTO external_booking_sync
+                    (id,organization_id,idempotency_key,internal_booking_id,
+                     provider,sync_status)
+                VALUES ($1,$2,$3,$4,'google','pending')
+                ON CONFLICT (organization_id,idempotency_key) DO NOTHING
+            """, uuid.uuid4(), org_uuid,
+                f"google-booking:{org_uuid}:{booking['id']}", booking["id"])
+        return booking
+
+    @system_scope("trusted worker claims the bounded cross-tenant optional Calendar queue")
+    async def claim_calendar_sync(self, limit=10):
+        """Claim optional Google deliveries with a bounded crash lease.
+
+        Google uses a stable event ID and ownership check, so an uncertain
+        insert can be retried without producing a second event.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch("""
+                    SELECT s.id,s.organization_id,s.internal_booking_id,s.retry_count,
+                           b.stato
+                    FROM external_booking_sync s JOIN bookings b
+                      ON b.id=s.internal_booking_id
+                     AND b.organization_id=s.organization_id
+                    WHERE s.provider='google'
+                      AND s.idempotency_key LIKE 'google-booking:%'
+                      AND (s.sync_status='pending'
+                        OR (s.sync_status IN ('pending_retry','processing')
+                            AND s.last_attempt_at<NOW()-interval '2 minutes'))
+                      AND s.retry_count<10 AND b.stato='confermata'
+                    ORDER BY s.created_at LIMIT $1
+                    FOR UPDATE OF s SKIP LOCKED
+                """, limit)
+                claimed = []
+                for row in rows:
+                    updated = await conn.fetchrow("""
+                        UPDATE external_booking_sync
+                        SET sync_status='processing',retry_count=retry_count+1,
+                            last_attempt_at=NOW(),updated_at=NOW()
+                        WHERE id=$1 AND organization_id=$2
+                        RETURNING retry_count
+                    """, row["id"], row["organization_id"])
+                    claimed.append({**dict(row), "claim_number": updated["retry_count"]})
+                return claimed
+
+    async def finish_calendar_sync(self, organization_id, sync_id, claim_number,
+                                   *, event_id=None, success=False,
+                                   error_code="provider_not_confirmed"):
+        status = "succeeded" if success else ("failed" if claim_number >= 10 else "pending_retry")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE external_booking_sync
+                SET sync_status=$4,external_booking_id=COALESCE($5,external_booking_id),
+                    sync_error=$6,updated_at=NOW()
+                WHERE organization_id=$1 AND id=$2 AND retry_count=$3
+                  AND sync_status='processing'
+            """, uuid.UUID(str(organization_id)), uuid.UUID(str(sync_id)),
+                claim_number, status, event_id, None if success else error_code)
+
+    async def request_calendar_sync_retry(self, organization_id, booking_id):
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE external_booking_sync s
+                SET sync_status='pending',retry_count=0,updated_at=NOW()
+                FROM bookings b
+                WHERE s.organization_id=$1 AND s.internal_booking_id=$2
+                  AND s.provider='google' AND s.sync_status IN ('failed','pending_retry')
+                  AND b.id=s.internal_booking_id AND b.organization_id=s.organization_id
+                  AND b.organization_id=$1 AND b.stato='confermata'
+                RETURNING b.*
+            """, uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)))
+            return dict(row) if row else None
+
     async def get_booking(self, organization_id, booking_id):
         async with self._connection() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM bookings WHERE organization_id = $1 AND id = $2",
+                """SELECT b.*,x.provider AS external_sync_provider,
+                          x.sync_status AS external_sync_status,
+                          CASE WHEN x.sync_status='failed' THEN 'sync_failed'
+                               WHEN x.sync_status='pending_retry' THEN 'retry_pending'
+                               ELSE NULL END AS external_sync_error_code
+                   FROM bookings b LEFT JOIN LATERAL (
+                     SELECT provider,sync_status FROM external_booking_sync e
+                     WHERE e.organization_id=$1 AND e.organization_id=b.organization_id
+                       AND e.internal_booking_id=b.id
+                     ORDER BY e.created_at DESC LIMIT 1
+                   ) x ON TRUE
+                   WHERE b.organization_id=$1 AND b.id=$2""",
                 organization_id, booking_id,
             )
             return dict(row) if row else None
@@ -104,12 +330,34 @@ class BookingRepository(TenantScopedRepository):
         async with self._connection() as conn:
             if data is not None:
                 rows = await conn.fetch(
-                    "SELECT * FROM bookings WHERE organization_id = $1 AND data = $2 ORDER BY ora",
+                    """SELECT b.*,x.provider AS external_sync_provider,
+                              x.sync_status AS external_sync_status,
+                              CASE WHEN x.sync_status='failed' THEN 'sync_failed'
+                                   WHEN x.sync_status='pending_retry' THEN 'retry_pending'
+                                   ELSE NULL END AS external_sync_error_code
+                       FROM bookings b LEFT JOIN LATERAL (
+                         SELECT provider,sync_status FROM external_booking_sync e
+                         WHERE e.organization_id=$1 AND e.organization_id=b.organization_id
+                           AND e.internal_booking_id=b.id
+                         ORDER BY e.created_at DESC LIMIT 1
+                       ) x ON TRUE
+                       WHERE b.organization_id=$1 AND b.data=$2 ORDER BY b.ora""",
                     organization_id, data,
                 )
             else:
                 rows = await conn.fetch(
-                    "SELECT * FROM bookings WHERE organization_id = $1 ORDER BY data DESC, ora",
+                    """SELECT b.*,x.provider AS external_sync_provider,
+                              x.sync_status AS external_sync_status,
+                              CASE WHEN x.sync_status='failed' THEN 'sync_failed'
+                                   WHEN x.sync_status='pending_retry' THEN 'retry_pending'
+                                   ELSE NULL END AS external_sync_error_code
+                       FROM bookings b LEFT JOIN LATERAL (
+                         SELECT provider,sync_status FROM external_booking_sync e
+                         WHERE e.organization_id=$1 AND e.organization_id=b.organization_id
+                           AND e.internal_booking_id=b.id
+                         ORDER BY e.created_at DESC LIMIT 1
+                       ) x ON TRUE
+                       WHERE b.organization_id=$1 ORDER BY b.data DESC,b.ora""",
                     organization_id,
                 )
             return [dict(r) for r in rows]
@@ -225,6 +473,50 @@ class BookingRepository(TenantScopedRepository):
                     WHERE organization_id = $1 AND id = $2
                     RETURNING *
                 """, organization_id, booking_id, reminder_status)
+            return dict(row) if row else None
+
+    async def list_pending_reminders_for_phone(self, organization_id, phone):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM bookings
+                WHERE organization_id = $1 AND telefono = $2
+                  AND stato = 'confermata' AND reminder_status = 'sent'
+                ORDER BY data, ora
+            """, organization_id, phone)
+            return [dict(row) for row in rows]
+
+    async def list_reminder_replies_for_phone(self, organization_id, phone,
+                                              reminder_status):
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM bookings
+                WHERE organization_id = $1 AND telefono = $2
+                  AND reminder_status = $3
+                ORDER BY reminder_responded_at DESC NULLS LAST, data, ora
+            """, organization_id, phone, reminder_status)
+            return [dict(row) for row in rows]
+
+    async def apply_reminder_reply(self, organization_id, booking_id,
+                                   reminder_status, responded_at):
+        """Atomically apply a reply only to an outstanding reminder."""
+        async with self.pool.acquire() as conn:
+            if reminder_status == "rejected":
+                row = await conn.fetchrow("""
+                    UPDATE bookings SET reminder_status = 'rejected',
+                        reminder_responded_at = $3, stato = 'cancellata',
+                        updated_at = NOW()
+                    WHERE organization_id = $1 AND id = $2
+                      AND stato = 'confermata' AND reminder_status = 'sent'
+                    RETURNING *
+                """, organization_id, booking_id, responded_at)
+            else:
+                row = await conn.fetchrow("""
+                    UPDATE bookings SET reminder_status = $3,
+                        reminder_responded_at = $4, updated_at = NOW()
+                    WHERE organization_id = $1 AND id = $2
+                      AND stato = 'confermata' AND reminder_status = 'sent'
+                    RETURNING *
+                """, organization_id, booking_id, reminder_status, responded_at)
             return dict(row) if row else None
 
     async def mark_reminder_sent(self, organization_id, booking_id):

@@ -253,6 +253,7 @@ async def lifespan(app: FastAPI):
                 while True:
                     try:
                         await retry_worker.process_next_batch()
+                        await app.state.booking_service.process_pending_calendar_sync()
                     except asyncio.CancelledError:
                         break
                     except Exception as e:

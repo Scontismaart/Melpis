@@ -37,6 +37,11 @@ class MessageRepository(TenantScopedRepository):
                               idempotency_key=None, conn=None):
         if conn is None:
             async with self.scoped_conn(organization_id) as conn:
+                if direction == "inbound":
+                    async with conn.transaction():
+                        return await self._upsert_message(conn, id, organization_id, conversation_id,
+                            wam_id, direction, message_type, content, content_text, status,
+                            handling_type, idempotency_key)
                 return await self._upsert_message(conn, id, organization_id, conversation_id,
                     wam_id, direction, message_type, content, content_text, status,
                     handling_type, idempotency_key)
@@ -47,6 +52,17 @@ class MessageRepository(TenantScopedRepository):
     async def _upsert_message(self, conn, id, organization_id, conversation_id, wam_id, direction,
                                message_type, content, content_text, status, handling_type=None,
                                idempotency_key=None):
+        if direction == "inbound":
+            # Shared ordering fence with A05 booking finalization. Callers that
+            # pass a connection must hold an enclosing transaction.
+            if hasattr(conn, "is_in_transaction") and not conn.is_in_transaction():
+                raise RuntimeError("Inbound insertion requires a transaction")
+            locked = await conn.fetchval(
+                "SELECT id FROM conversations WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+                conversation_id, organization_id,
+            )
+            if locked is None:
+                raise ValueError("Inbound conversation does not belong to organization")
         if idempotency_key:
             row = await conn.fetchrow("""
                 INSERT INTO messages (id, organization_id, conversation_id, wam_id,
@@ -279,6 +295,44 @@ class MessageRepository(TenantScopedRepository):
                 RETURNING *
             """, uuid.uuid4(), message_id, next_retry_at)
             return dict(row)
+
+    @system_scope("A05 booking confirmation outbox: enqueue only after canonical reply")
+    async def enqueue_ready_booking_confirmations(self, limit=20):
+        """Schedule durable confirmations after the corresponding AI reply.
+
+        Booking and outbound content were already committed atomically. This
+        short transaction only makes the existing retry worker deliver them.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch("""
+                    SELECT o.id,o.outbound_message_id
+                    FROM booking_confirmation_outbox o
+                    JOIN messages inbound ON inbound.id=o.inbound_message_id
+                      AND inbound.organization_id=o.organization_id
+                    JOIN messages outbound ON outbound.id=o.outbound_message_id
+                      AND outbound.organization_id=o.organization_id
+                    JOIN bookings b ON b.id=o.booking_id
+                      AND b.organization_id=o.organization_id
+                    WHERE o.status='waiting_for_reply'
+                      AND inbound.replied_at IS NOT NULL
+                      AND b.stato='confermata'
+                      AND outbound.status='queued'
+                    ORDER BY o.created_at LIMIT $1
+                    FOR UPDATE OF o SKIP LOCKED
+                """, limit)
+                for row in rows:
+                    await conn.execute("""
+                        INSERT INTO message_delivery_attempts
+                            (id,message_id,next_retry_at)
+                        VALUES ($1,$2,NOW())
+                        ON CONFLICT DO NOTHING
+                    """, uuid.uuid4(), row["outbound_message_id"])
+                    await conn.execute("""
+                        UPDATE booking_confirmation_outbox
+                        SET status='scheduled',scheduled_at=NOW() WHERE id=$1
+                    """, row["id"])
+                return len(rows)
 
     @system_scope("tabella indiretta (via messages), solo worker")
     async def update_delivery_attempt(self, attempt_id, status, error_details=None):

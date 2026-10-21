@@ -341,36 +341,10 @@ class LegacyInboundPipeline:
 
         if (quota_operation is None and pren and pren.data and pren.ora
                 and pren.coperti and not risposta.richiede_umano):
-            if self.booking_service and org_id and msg.get("id"):
-                try:
-                    created = await self.booking_service.create_booking(
-                        org_id=org_id,
-                        nome_cliente=pren.nome_cliente or ("Cliente Instagram" if canale == "instagram" else "Cliente WhatsApp"),
-                        telefono="" if canale == "instagram" else messaggio.telefono_mittente,
-                        data=pren.data,
-                        ora=pren.ora,
-                        coperti=pren.coperti,
-                        note=pren.note,
-                        origine="Instagram" if canale == "instagram" else "WhatsApp",
-                        richiede_intervento=risposta.richiede_umano,
-                        id_conversazione=str(msg.get("conversation_id", "")),
-                        source_message_id=str(msg["id"]),
-                    )
-                    apply_booking_result(risposta, created)
-                    logger.info("Booking %s created from AI response for org %s", created["id"], org_id)
-                except SlotPienoError as e:
-                    booking_failed(risposta)
-                    if e.alternative:
-                        alt_text = " o ".join(e.alternative)
-                        risposta.risposta += f" Mi dispiace, alle {pren.ora} siamo al completo per {pren.coperti} persone. Ti andrebbe bene alle {alt_text}?"
-                    else:
-                        risposta.risposta += f" Mi dispiace, alle {pren.ora} siamo al completo per {pren.coperti} persone. Posso chiedere allo staff una fascia alternativa."
-                    risposta.motivo = "slot_prenotazione_pieno"
-                except Exception as e:
-                    logger.error("Booking creation from AI failed for org %s error_type=%s", org_id, type(e).__name__)
-                    booking_failed(risposta)
-            else:
-                booking_failed(risposta)
+            # Real bookings are authorized only after the canonical A04 commit
+            # in InboundProcessingService. A direct pipeline caller cannot
+            # convert model output into a privileged booking side effect.
+            booking_failed(risposta)
 
         result.response_text = risposta.risposta
         result.richiede_umano = bool(risposta.richiede_umano)

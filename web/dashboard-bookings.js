@@ -458,6 +458,19 @@
         tableBody.innerHTML = prenotazioniGiorno.map((p) => {
           const ora = String(p.ora || "").slice(0, 5);
           const stato = statoNormalizzatoPrenotazione(p);
+          const syncStatus = stato === "confermata" && p.external_sync_provider === "google"
+            ? String(p.external_sync_status || "").toLowerCase()
+            : "";
+          const syncCode = typeof p.external_sync_error_code === "string" && /^[a-z0-9_-]{1,60}$/i.test(p.external_sync_error_code)
+            ? p.external_sync_error_code
+            : "";
+          let syncLabel = "";
+          if (["pending", "pending_retry", "failed"].includes(syncStatus)) {
+            syncLabel = "Confermata in Melpis, sincronizzazione Google in attesa";
+            if (syncCode) syncLabel += ` (${syncCode})`;
+          } else if (syncStatus === "synced") {
+            syncLabel = "Sincronizzata con Google";
+          }
           let badgeClass = "booking-badge-confermata";
           if (stato.includes("attesa")) badgeClass = "booking-badge-in_attesa";
           else if (stato.includes("intervento")) badgeClass = "booking-badge-richiede_intervento";
@@ -471,7 +484,7 @@
               <td>${_escapeHtml(formattaUnitaVerticale(p.coperti || 1))}</td>
               <td><span class="booking-origin-tag">${_escapeHtml(p.origine || "WhatsApp")}</span></td>
               <td>${_escapeHtml(p.note || "—")}</td>
-              <td><span class="booking-badge ${badgeClass}">${_escapeHtml(p.stato || "confermata")}</span></td>
+              <td><span class="booking-badge ${badgeClass}">${_escapeHtml(p.stato || "confermata")}</span>${syncLabel ? `<small class="booking-sync-status">${_escapeHtml(syncLabel)}</small>` : ""}</td>
               <td style="text-align: right;">
                 <button type="button" class="report-refresh" data-open-booking-id="${_escapeHtml(p.id)}" style="padding: 4px 10px; font-size: 0.75rem;">
                   ${_escapeHtml(_tDash("bookings.runtime.details", "Dettagli"))}

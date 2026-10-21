@@ -44,6 +44,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "contact_consent_log": ("parent-derived", "Consent event belongs to a contact; resolve organization through contacts."),
     "whatsapp_templates": ("direct", "Template belongs to one organization."),
     "bookings": ("direct", "Booking carries its organization_id."),
+    "booking_confirmation_outbox": ("direct", "Confirmation send is bound to one organization's booking and messages."),
     "booking_settings": ("direct", "Settings row is keyed by organization_id."),
     "reviews": ("direct", "Review carries its organization_id."),
     "documents": ("direct", "Document metadata carries its organization_id."),

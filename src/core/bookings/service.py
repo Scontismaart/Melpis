@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from datetime import datetime, date, time, timedelta, timezone
 import logging
+import unicodedata
 
 from src.models.schemas import DisponibilitaSlot
 
@@ -483,7 +484,7 @@ class BookingService:
             )
             return True
         except Exception as e:
-            logger.error("WhatsApp send failed for org %s: %s", org_id, e)
+            logger.error("WhatsApp send failed for org %s: %s", org_id, type(e).__name__)
             if raise_on_error:
                 raise
             return False
@@ -617,59 +618,153 @@ class BookingService:
 
     async def aggiorna_impostazioni(self, org_id, capienze_orarie=None,
                                      coperti_massimi=40, fasce_orarie=None, config=None):
-        if capienze_orarie is None and fasce_orarie is None:
-            return await self.repo.upsert_booking_settings_config(org_id, config or {})
-        if config:
-            current = await self.repo.get_booking_settings(org_id)
-            merged = dict(current.get("config") or {}) if current else {}
-            merged.update(config)
-            await self.repo.upsert_booking_settings_config(org_id, merged)
-        if capienze_orarie is not None or fasce_orarie is not None:
-            await self.repo.upsert_booking_settings(
-                org_id,
-                fasce_orarie=fasce_orarie or [f"{h:02d}:00" for h in range(24)],
-                capienze_orarie=capienze_orarie or {f: coperti_massimi for f in SLOT_ORE},
+        from src.core.bookings.auto_policy import validate_auto_booking_configuration
+        if not hasattr(self.repo, "booking_settings_lock"):
+            from src.core.bookings.memory_repo import InMemoryBookingRepo
+            if not isinstance(self.repo, InMemoryBookingRepo):
+                raise RuntimeError("Booking settings require transactional repository")
+            if isinstance(config, dict) and isinstance(config.get("a05"), dict) and config["a05"].get("enabled"):
+                raise ValueError("A05 requires transactional persistence")
+            current = await self.repo.get_booking_settings(org_id) or {}
+            merged = dict(current.get("config") or {})
+            merged.update(config or {})
+            if capienze_orarie is not None or fasce_orarie is not None:
+                await self.repo.upsert_booking_settings(
+                    org_id, fasce_orarie=fasce_orarie or current.get("fasce_orarie") or SLOT_ORE,
+                    capienze_orarie=capienze_orarie or current.get("capienze_orarie")
+                        or {slot: coperti_massimi for slot in SLOT_ORE},
+                )
+            return await self.repo.upsert_booking_settings_config(org_id, merged)
+        async with self.repo.booking_settings_lock(org_id) as organization:
+            current = await self.repo.get_booking_settings(org_id) or {}
+            merged = dict(current.get("config") or {})
+            if config is not None:
+                if not isinstance(config, dict):
+                    raise ValueError("Invalid booking configuration")
+                merged.update(config)
+            capacities = (capienze_orarie if capienze_orarie is not None
+                          else current.get("capienze_orarie") or {})
+            intervals = (fasce_orarie if fasce_orarie is not None
+                         else current.get("fasce_orarie") or SLOT_ORE)
+            profile = organization.get("business_profile") or {}
+            if isinstance(profile, str):
+                import json
+                profile = json.loads(profile)
+            decision = validate_auto_booking_configuration(
+                {"config": merged, "capienze_orarie": capacities},
+                organization.get("timezone"), profile.get("verticale"),
             )
-        return await self.repo.get_booking_settings(org_id)
+            if not decision.valid:
+                raise ValueError(f"Invalid A05 booking policy: {decision.reason.value}")
+            return await self.repo.save_booking_settings_locked(
+                org_id, slot_minutes=current.get("slot_minutes") or 60,
+                fasce_orarie=intervals, capienze_orarie=capacities, config=merged,
+            )
+
+    async def process_pending_calendar_sync(self, limit=10):
+        """Best-effort optional sync; internal booking stays authoritative."""
+        if not self.calendar_service or not hasattr(self.repo, "claim_calendar_sync"):
+            return 0
+        claimed = await self.repo.claim_calendar_sync(limit)
+        for item in claimed:
+            org_id = item["organization_id"]
+            event_id = None
+            error_code = "provider_not_confirmed"
+            try:
+                booking = await self.repo.get_booking(org_id, item["internal_booking_id"])
+                if booking and booking["stato"] == "confermata":
+                    event_id = await self.calendar_service.create_event(booking, org_id)
+                    # A cancellation may race the network call. Reconcile
+                    # against the current local authority after the call.
+                    current = await self.repo.get_booking(org_id, item["internal_booking_id"])
+                    if current and current["stato"] != "confermata" and event_id:
+                        await self.calendar_service.delete_event(current, org_id)
+                        event_id = None
+            except Exception as exc:
+                error_code = "provider_exception"
+                logger.warning(
+                    "calendar=optional_sync_retry org_id=%s booking_id=%s error_type=%s",
+                    org_id, item["internal_booking_id"], type(exc).__name__,
+                )
+            await self.repo.finish_calendar_sync(
+                org_id, item["id"], item["claim_number"],
+                event_id=event_id, success=event_id is not None,
+                error_code=error_code,
+            )
+        return len(claimed)
 
     # ── Reminder ──────────────────────────────────────────────
 
-    REMINDER_CONFIRM_KEYWORDS = {"si", "confermo", "conferma", "ok", "okay", "certo", "sicuro"}
-    REMINDER_REJECT_KEYWORDS = {"no", "annulla", "cancella", "non vengo", "non posso"}
+    REMINDER_CONFIRM_KEYWORDS = {"si", "yes"}
+    REMINDER_REJECT_KEYWORDS = {"no"}
 
     async def handle_reminder_reply(self, org_id, from_number, text):
-        bookings = await self.repo.list_bookings_by_stato(org_id, "confermata")
-        pending = [
-            b for b in bookings
-            if b.get("reminder_status") == "sent"
-               and b.get("telefono", "").strip() == from_number.strip()
-        ]
+        # Replies are accepted only as complete, explicit yes/no messages.
+        normalized = unicodedata.normalize("NFKD", text or "").casefold()
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        # A question mark changes a yes/no into a question; never authorize a
+        # state transition from "si?" or "no?".
+        normalized = normalized.strip().strip(".,!;:")
+        confirmed = normalized in self.REMINDER_CONFIRM_KEYWORDS
+        rejected = normalized in self.REMINDER_REJECT_KEYWORDS
+        phone = (from_number or "").strip()
+        repo = getattr(self.repo, "booking_repo", self.repo)
+        pending = await repo.list_pending_reminders_for_phone(org_id, phone)
         if not pending:
+            # A duplicate delivery after the conditional update is an idempotent replay.
+            if confirmed or rejected:
+                status = "rejected" if rejected else "confirmed"
+                prior = await repo.list_reminder_replies_for_phone(org_id, phone, status)
+                if prior:
+                    await self._send_reminder_result(org_id, phone, prior[0]["id"], status)
+                    return status
             return None
+        if len(pending) != 1:
+            await self._send_whatsapp(
+                org_id, phone,
+                "Non riesco a verificare automaticamente la prenotazione. Un operatore ti ricontattera' per aiutarti.",
+                idempotency_key=self._reminder_handoff_key(org_id, phone, pending),
+            )
+            return "handoff"
+
+        if not confirmed and not rejected:
+            await self._send_whatsapp(
+                org_id, phone,
+                "Non riesco a verificare automaticamente la prenotazione. Un operatore ti ricontattera' per aiutarti.",
+                idempotency_key=self._reminder_handoff_key(org_id, phone, pending),
+            )
+            return "handoff"
+
         b = pending[0]
-        text_lower = text.lower().strip()
-        confirmed = any(kw in text_lower for kw in self.REMINDER_CONFIRM_KEYWORDS)
-        rejected = any(kw in text_lower for kw in self.REMINDER_REJECT_KEYWORDS)
-        if confirmed and not rejected:
-            await self.repo.update_booking_reminder_status(
-                org_id, b["id"], "confirmed", datetime.now(timezone.utc)
-            )
-            await self._send_whatsapp(org_id, from_number,
-                "Grazie, la tua prenotazione e' confermata! Ti aspettiamo.")
+        status = "rejected" if rejected else "confirmed"
+        updated = await repo.apply_reminder_reply(
+            org_id, b["id"], status, datetime.now(timezone.utc)
+        )
+        if not updated:
+            # Another reply won the race. Do not repeat the outbound side effect.
+            return status if await repo.list_reminder_replies_for_phone(
+                org_id, phone, status
+            ) else "handoff"
+        if confirmed:
+            await self._send_reminder_result(org_id, phone, b["id"], "confirmed")
             return "confirmed"
-        elif rejected:
-            await self.repo.update_booking_status(org_id, b["id"], "cancellata")
-            await self.repo.update_booking_reminder_status(
-                org_id, b["id"], "rejected", datetime.now(timezone.utc)
-            )
-            await self._send_whatsapp(org_id, from_number,
-                "Prenotazione cancellata. Per qualsiasi altra richiesta, siamo a disposizione.")
-            return "rejected"
         else:
-            await self.repo.update_booking_reminder_status(
-                org_id, b["id"], "flagged", datetime.now(timezone.utc)
-            )
-            return "flagged"
+            await self._send_reminder_result(org_id, phone, b["id"], "rejected")
+            return "rejected"
+
+    async def _send_reminder_result(self, org_id, phone, booking_id, status):
+        text = ("Grazie, la tua prenotazione e' confermata! Ti aspettiamo."
+                if status == "confirmed" else
+                "Prenotazione cancellata. Per qualsiasi altra richiesta, siamo a disposizione.")
+        return await self._send_whatsapp(
+            org_id, phone, text,
+            idempotency_key=f"reminder-response:{org_id}:{booking_id}:{status}",
+        )
+
+    @staticmethod
+    def _reminder_handoff_key(org_id, phone, bookings):
+        booking_ids = ",".join(sorted(str(booking["id"]) for booking in bookings))
+        return f"reminder-handoff:{org_id}:{phone}:{booking_ids}"
 
     # ── Deposito ───────────────────────────────────────────────
 
