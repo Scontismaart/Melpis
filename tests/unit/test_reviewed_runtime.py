@@ -95,6 +95,31 @@ def test_rejects_missing_or_duplicate_unused_cli_edge(monkeypatch):
             module.repack_wheel(source)
 
 
+@pytest.mark.parametrize('installed_package', ['crewai-cli', 'uv'])
+def test_runtime_rejects_unused_cli_tooling_when_installed(monkeypatch, installed_package):
+    module = load_builder()
+
+    def installed_version(name):
+        if name == installed_package:
+            return '1.0.0'
+        raise module.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(module.metadata, 'version', installed_version)
+    with pytest.raises(ValueError, match=f'must not ship in runtime: {installed_package}'):
+        module.verify_cli_tools_absent()
+
+
+def test_runtime_accepts_absent_cli_tooling(monkeypatch):
+    module = load_builder()
+    monkeypatch.setattr(
+        module.metadata,
+        'version',
+        lambda name: (_ for _ in ()).throw(module.metadata.PackageNotFoundError(name)),
+    )
+
+    module.verify_cli_tools_absent()
+
+
 def test_generated_requirements_keep_extra_and_all_other_requirements():
     module = load_builder()
     original = 'fastapi==0.139.2\ncrewai[litellm]==1.15.4\nmcp==1.30.0\n'
