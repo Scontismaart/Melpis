@@ -13,7 +13,11 @@ from zoneinfo import ZoneInfo
 from typing import Any, Callable
 
 from src.core.security_logger import security_audit
-from src.core.ai_safety import replay_requires_intervention
+from src.core.ai_safety import (
+    BOOKING_FAILURE_REPLY,
+    BOOKING_RECEIVED_REPLY,
+    replay_requires_intervention,
+)
 from src.core.billing.suspension import is_org_suspended
 from src.core.billing.quota_reservations import QuotaLease
 from src.core.channels.base import ChannelOutboundPort
@@ -452,8 +456,10 @@ class InboundProcessingService:
 
         response = RispostaOutput.model_validate(canonical)
         pren = response.prenotazione
-        if response.richiede_umano or not (pren and pren.data and pren.ora and pren.coperti):
+        if response.richiede_umano or pren is None:
             return False
+        if not (pren.data and pren.ora and pren.coperti):
+            return True
         if self.booking_service is None:
             return True
         try:
@@ -1090,6 +1096,20 @@ class InboundProcessingService:
                         org_id, msg["id"], type(exc).__name__,
                     )
                     return ProcessingOutcome(action="error", handling_type="quota_commit_failed")
+                if canonical_response is not None:
+                    proposal = canonical_response.get("prenotazione")
+                    if isinstance(proposal, dict):
+                        needs_staff = await self._apply_committed_booking(
+                            org_id, msg, content, canonical_response,
+                        )
+                        richiede_umano = richiede_umano or needs_staff
+                        risposta_text = (
+                            BOOKING_FAILURE_REPLY if richiede_umano else BOOKING_RECEIVED_REPLY
+                        )
+                        if richiede_umano:
+                            return await self._escalate(
+                                org_id, msg, content, tenant_config, risposta_text,
+                            )
                 from_number = _extract_from(content)
                 nome = (business_profile_raw or {}).get("nome") or "Attivita"
                 decorated = await decorate_with_disclosure(
@@ -1164,6 +1184,12 @@ class InboundProcessingService:
         if canonical_response is not None:
             needs_staff = await self._apply_committed_booking(org_id, msg, content, canonical_response)
             richiede_umano = richiede_umano or needs_staff
+            proposal = canonical_response.get("prenotazione") if isinstance(canonical_response, dict) else None
+            if isinstance(proposal, dict):
+                # The provider's text is not proof of a persisted booking.
+                # Send only server-owned wording; the durable outbox sends the
+                # actual confirmation after the canonical reply is finalized.
+                risposta_text = BOOKING_FAILURE_REPLY if richiede_umano else BOOKING_RECEIVED_REPLY
 
         # ── STEP 12: Consegna Outbound & Finalizzazione ─────────────────────────
         nome_attivita = (business_profile_raw or {}).get("nome") or "Attivita"

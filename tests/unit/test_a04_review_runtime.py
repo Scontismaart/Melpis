@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.core.billing.quota_reservations import QuotaConflict, QuotaLease
+from src.core.ai_safety import BOOKING_FAILURE_REPLY, BOOKING_RECEIVED_REPLY
 from src.core.guardrails.validator import FALLBACK_STAFF_TEXT
 from src.core.inbound.legacy_pipeline import LegacyExecutionResult
 from src.core.inbound.service import (
@@ -58,6 +59,43 @@ async def test_worker_delivers_canonical_commit_not_unvalidated_output(base_conf
     assert canonical["risposta"] in send.await_args.args[4]
     assert out.response_text not in send.await_args.args[4]
     mock_deps["quota"].renew.assert_awaited_once()
+    mock_deps["quota"].commit.assert_awaited_once()
+
+
+@pytest.mark.parametrize("orchestrated", [False, True])
+@pytest.mark.parametrize("needs_staff", [False, True])
+@pytest.mark.asyncio
+async def test_booking_notice_depends_on_persisted_result_not_ai_text(
+    base_config, mock_deps, orchestrated, needs_staff,
+):
+    base_config.use_conversation_orchestrator = orchestrated
+    canonical = _canonical("Prenotazione confermata!")
+    canonical["prenotazione"] = {
+        "nome_cliente": "Test", "data": "2030-06-20", "ora": "20:00", "coperti": 2,
+    }
+    out = OrchestrationOutput(response_text=canonical["risposta"])
+    out._quota_final = SimpleNamespace(serialized=json.dumps(canonical))
+    orchestrator = AsyncMock()
+    orchestrator.orchestrate.return_value = out
+    service = InboundProcessingService(
+        base_config, mock_deps["repo"], mock_deps["service"],
+        mock_deps["booking_service"], orchestrator=orchestrator,
+    )
+    service.legacy_pipeline.execute = AsyncMock(return_value=LegacyExecutionResult(
+        response_text=canonical["risposta"], quota_final=out._quota_final,
+    ))
+    with patch("src.core.inbound.service.load_tenant_config", new=AsyncMock()), \
+         patch("src.core.inbound.service.enqueue_escalation"), \
+         patch("src.core.inbound.service._booking_action_is_fresh", return_value=True), \
+         patch.object(service, "_booking_context", new=AsyncMock(return_value={})), \
+         patch.object(service, "_apply_committed_booking", new=AsyncMock(return_value=needs_staff)), \
+         patch.object(service, "_send_reply", new=AsyncMock(return_value={"wam_id": "notice"})) as send:
+        result = await service.process_message(_message())
+    assert result.action == "handled"
+    assert send.await_args.args[4].endswith(
+        BOOKING_FAILURE_REPLY if needs_staff else BOOKING_RECEIVED_REPLY
+    )
+    assert "Prenotazione confermata!" not in send.await_args.args[4]
     mock_deps["quota"].commit.assert_awaited_once()
 
 
