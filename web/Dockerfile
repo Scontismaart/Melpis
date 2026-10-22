@@ -49,7 +49,7 @@ COPY login.html login.js register.html register.js auth.js auth.css /usr/share/n
 
 # ── Dashboard (sotto /app/) ─────────────────────────────────
 COPY --from=dashboard-builder /tmp/style.css /usr/share/nginx/html/app/style.css
-COPY app.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
+COPY app.js dashboard-auth-transport.js dashboard-ai-settings.js dashboard-settings.js dashboard-integrations.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
 COPY --from=dashboard-builder /tmp/dashboard.html /usr/share/nginx/html/app/index.html
 COPY design-tokens.css /usr/share/nginx/html/app/
 COPY fonts/ /usr/share/nginx/html/app/fonts/
