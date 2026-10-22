@@ -206,3 +206,33 @@ async def test_expired_revoked_and_corrupted_exports_fail_closed(pg_pool, sample
         await exporter.preflight(org, corrupt["export_id"], requester)
     with pytest.raises(OperationUnavailable):
         await export_bytes(exporter, org, corrupt["export_id"], requester)
+
+
+@pytest.mark.asyncio
+async def test_naturally_expired_ready_snapshot_cannot_be_rebuilt_by_same_request_id(pg_pool, sample_org):
+    org, requester, request_id = sample_org['id'], 'owner-expired-retry', uuid.uuid4()
+    exporter = Exporter(pg_pool)
+    snapshot = await exporter.prepare(org, requester, request_id=request_id)
+    oid = uuid.UUID(snapshot['export_id'])
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE gdpr_operations SET expires_at=NOW()-INTERVAL '1 second' WHERE organization_id=$1 AND id=$2",
+            org, oid,
+        )
+        before = await conn.fetchrow(
+            'SELECT status,manifest,expires_at FROM gdpr_operations WHERE organization_id=$1 AND id=$2', org, oid,
+        )
+        chunks = await conn.fetch(
+            'SELECT sequence,digest FROM gdpr_export_chunks WHERE organization_id=$1 AND operation_id=$2 ORDER BY sequence', org, oid,
+        )
+    with pytest.raises(OperationUnavailable):
+        await exporter.prepare(org, requester, request_id=request_id)
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchrow(
+            'SELECT status,manifest,expires_at FROM gdpr_operations WHERE organization_id=$1 AND id=$2', org, oid,
+        ) == before
+        assert await conn.fetch(
+            'SELECT sequence,digest FROM gdpr_export_chunks WHERE organization_id=$1 AND operation_id=$2 ORDER BY sequence', org, oid,
+        ) == chunks
+    fresh = await exporter.prepare(org, requester, request_id=uuid.uuid4())
+    assert fresh['export_id'] != snapshot['export_id']

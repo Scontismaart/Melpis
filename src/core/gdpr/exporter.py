@@ -80,8 +80,10 @@ class Exporter:
                     '''SELECT status,manifest,expires_at FROM gdpr_operations
                        WHERE organization_id=$1 AND id=$2 AND requester=$3 FOR UPDATE''', org, oid, str(requester),
                 )
-                if op['status'] == 'ready' and op['expires_at'] > datetime.now(timezone.utc):
-                    return {'export_id': str(oid), 'manifest': document(op['manifest'])}
+                if op['status'] == 'ready':
+                    if op['expires_at'] > datetime.now(timezone.utc):
+                        return {'export_id': str(oid), 'manifest': document(op['manifest'])}
+                    raise OperationUnavailable('Export requires a new request identifier')
                 if op['status'] in {'expired', 'revoked'}:
                     raise OperationUnavailable('Export requires a new request identifier')
                 if await conn.fetchval(
