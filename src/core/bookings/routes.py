@@ -56,11 +56,14 @@ async def get_settings(request: Request,
 async def update_settings(body: dict, request: Request,
                           user: dict = Depends(require_ruolo("owner", "manager"))):
     service = _get_booking_service(request)
-    return await service.aggiorna_impostazioni(
-        user["organization_id"],
-        capienze_orarie=body.get("capienze_orarie"),
-        config=body.get("config"),
-    )
+    try:
+        return await service.aggiorna_impostazioni(
+            user["organization_id"],
+            capienze_orarie=body.get("capienze_orarie"),
+            config=body.get("config"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("")
@@ -68,6 +71,22 @@ async def list_bookings(request: Request, data: str | None = None,
                         user: dict = Depends(require_ruolo("owner", "manager", "staff"))):
     service = _get_booking_service(request)
     return await service.repo.list_bookings(user["organization_id"], data)
+
+
+@router.post("/{booking_id}/calendar-sync/retry")
+async def retry_calendar_sync(booking_id: str, request: Request,
+                              user: dict = Depends(require_ruolo("owner", "manager"))):
+    service = _get_booking_service(request)
+    try:
+        booking = await service.repo.request_calendar_sync_retry(
+            user["organization_id"], booking_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid booking ID") from exc
+    if booking is None:
+        raise HTTPException(status_code=409, detail="No retryable calendar sync")
+    await _audit_booking(request, user, "calendar_sync_retry", booking)
+    return {"status": "pending"}
 
 
 @router.post("")

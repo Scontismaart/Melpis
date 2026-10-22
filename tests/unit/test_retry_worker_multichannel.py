@@ -1,4 +1,5 @@
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
@@ -77,6 +78,42 @@ async def test_whatsapp_retry_success_via_service(app_config, mock_repo, mock_te
     mock_service.attempt_delivery.assert_called_once()
     assert mock_service.attempt_delivery.call_args.kwargs["organization_id"] == org_id
     mock_repo.update_delivery_attempt.assert_called_once_with(attempt_id, "succeeded")
+
+
+@pytest.mark.parametrize("confirmed", [False, True])
+@pytest.mark.asyncio
+async def test_booking_confirmation_checks_current_state_before_delivery(
+    app_config, mock_repo, mock_tenant, confirmed,
+):
+    msg_id = uuid.uuid4()
+    attempt_id = uuid.uuid4()
+    mock_repo.reconstruct_payload_for_retry.return_value = {
+        "id": msg_id, "organization_id": mock_tenant.organization_id,
+        "handling_type": "booking_confirmation", "channel": "whatsapp",
+        "content": {"to": "39123456789", "text": {"body": "Prenotazione confermata"}},
+    }
+
+    @asynccontextmanager
+    async def guard(org_id, message_id):
+        assert org_id == mock_tenant.organization_id
+        assert message_id == msg_id
+        yield confirmed
+
+    mock_repo.booking_confirmation_delivery_guard = guard
+    service = AsyncMock()
+    service.attempt_delivery.return_value = {"status": "sent", "wam_id": "wamid.123"}
+    worker = MultiChannelRetryWorker(app_config, mock_repo, service=service)
+    attempt = {"id": attempt_id, "message_id": msg_id, "attempt_number": 1}
+    with patch("src.whatsapp.config.load_tenant_config", AsyncMock(return_value=mock_tenant)):
+        await worker._process_one(attempt)
+    if confirmed:
+        service.attempt_delivery.assert_awaited_once()
+        mock_repo.update_delivery_attempt.assert_awaited_with(attempt_id, "succeeded")
+    else:
+        service.attempt_delivery.assert_not_awaited()
+        mock_repo.update_delivery_attempt.assert_awaited_once_with(
+            attempt_id, "failed", {"error": "booking_no_longer_confirmed"},
+        )
 
 
 @pytest.mark.asyncio

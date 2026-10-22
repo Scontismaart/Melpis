@@ -24,6 +24,7 @@ from src.core.bookings.service import BookingService
 from src.core.db.repositories.booking_repo import BookingRepository
 from src.core.documenti.rag_context import ContestoDocumenti
 from src.core.receptionist.conversation_orchestrator import ConversationOrchestrator
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY
 from src.models.schemas import DatiPrenotazione, RispostaOutput
 from tests.core.test_quota_reservation_lifecycle import (
     _auth_member,
@@ -124,6 +125,8 @@ async def test_booking_only_after_successful_canonical_commit_and_replay(pg_pool
     assert case.generate.await_count == 1
     canonical = await _stored(pg_pool, operation)
     assert "**" not in canonical["risposta"]
+    assert canonical["risposta"] == BOOKING_RECEIVED_REPLY
+    assert canonical["prenotazione"] is not None
     for call in case.send.await_args_list:
         assert call.args[4] == canonical["risposta"]
 

@@ -110,6 +110,22 @@ test("Empty bookings show one empty row and an empty-day prompt", async (t) => {
   assert.equal(h.document.getElementById("booking-day-empty").hidden, false);
 });
 
+test("Confirmed Google bookings show safe external sync status", async (t) => {
+  const h = fixture({ bookings: [
+    confirmed({ id: "google-pending", external_sync_provider: "google", external_sync_status: "pending_retry", external_sync_error_code: "temporary_unavailable" }),
+    confirmed({ id: "google-synced", external_sync_provider: "google", external_sync_status: "synced" }),
+    confirmed({ id: "unsafe-code", external_sync_provider: "google", external_sync_status: "failed", external_sync_error_code: "token=secret-value" }),
+    confirmed({ id: "other-provider", external_sync_provider: "apaleo", external_sync_status: "failed" }),
+  ] });
+  t.after(() => h.dispose()); await openBookings(h);
+  const pendingRow = h.document.querySelector('[data-booking-id="google-pending"]');
+  assert.match(pendingRow.textContent, /Confermata in Melpis, sincronizzazione Google in attesa/);
+  assert.match(pendingRow.textContent, /temporary_unavailable/);
+  assert.match(h.document.querySelector('[data-booking-id="google-synced"]').textContent, /Sincronizzata con Google/);
+  assert.doesNotMatch(h.document.querySelector('[data-booking-id="unsafe-code"]').textContent, /token=secret-value/);
+  assert.doesNotMatch(h.document.querySelector('[data-booking-id="other-provider"]').textContent, /sincronizzazione Google|Sincronizzata con Google/);
+});
+
 test("Failed list, availability and settings responses do not invent success content", async (t) => {
   const h = fixture({ overrides: {
     "/api/bookings": () => json({ detail: "Errore sintetico" }, 500),

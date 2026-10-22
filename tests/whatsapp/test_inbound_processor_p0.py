@@ -13,7 +13,7 @@ def _mock_a04_admission_for_business_flow_units(monkeypatch):
     install_mock_a04_admission(monkeypatch)
 
 class TestP0Blockers:
-    async def test_booking_idempotency_on_crash(
+    async def test_booking_requires_explicit_a05_opt_in(
         self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg,
         mock_provider_context_open,
     ):
@@ -68,7 +68,12 @@ class TestP0Blockers:
             yield conn
 
         mock_repo.pool.acquire = acquire
-        mock_repo.get_booking_settings = AsyncMock(return_value={"capienze_orarie": {"12:00": 10}})
+        # Historical tenants with capacity settings but no explicit A05 policy
+        # must keep the manual booking flow; this mock repository is not the
+        # transactional auto-booking implementation.
+        mock_repo.get_booking_settings = AsyncMock(return_value={
+            "config": {}, "capienze_orarie": {"12:00": 10},
+        })
         mock_repo.list_bookings = AsyncMock(return_value=[])
         mock_repo.create_booking = AsyncMock(return_value={"id": uuid.uuid4()})
         mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
@@ -91,9 +96,7 @@ class TestP0Blockers:
             processor = InboundProcessor(app_config, mock_repo, mock_service, booking_service=booking_service)
             await processor.process_next_batch()
 
-        mock_repo.create_booking.assert_awaited_once()
-        kwargs = mock_repo.create_booking.await_args.kwargs
-        assert kwargs["source_message_id"] == str(sample_msg["id"])
+        mock_repo.create_booking.assert_not_awaited()
 
     async def test_message_retained_on_api_failure(
         self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg,
