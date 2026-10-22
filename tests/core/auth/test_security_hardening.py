@@ -4,6 +4,7 @@ import uuid
 
 import httpx
 import pytest
+import asyncpg
 
 from src.core.rate_limit import RedisRateLimiter
 
@@ -165,37 +166,82 @@ async def test_outbound_dedup_rls_is_enabled_and_backend_path_survives(
         )
         assert rls_enabled is True
 
-        # Model the client grants that existed before hardening so this proves
-        # the deny policy itself, not just a missing table privilege.
-        await conn.execute(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON public.outbound_dedup "
-            "TO authenticated"
+        # Grant the client privileges on the target table so the original
+        # assertions exercise RLS, while first proving the erasure-barrier
+        # ACL independently. This explicit transaction is always rolled back
+        # below, so all test-only grants are removed even when assertions pass.
+        outbound_privileges = {privilege: await conn.fetchval(
+            "SELECT has_table_privilege('authenticated','public.outbound_dedup',$1)", privilege,
+        ) for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE")}
+        barrier_select = await conn.fetchval(
+            "SELECT has_table_privilege('authenticated','public.gdpr_erasure_barriers','SELECT')"
         )
-        await conn.execute("GRANT USAGE ON SCHEMA public TO authenticated")
-        await conn.execute("SET ROLE authenticated")
+        test_grants = conn.transaction()
+        await test_grants.start()
         try:
-            visible = await conn.fetch(
-                "SELECT message_id FROM outbound_dedup WHERE organization_id = $1",
-                other_org["id"],
+            await conn.execute(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON public.outbound_dedup "
+                "TO authenticated"
             )
-            assert visible == []
-            assert await conn.execute(
-                "UPDATE outbound_dedup SET response_text = 'stolen' "
-                "WHERE message_id = $1",
-                message_b,
-            ) == "UPDATE 0"
-            assert await conn.execute(
-                "DELETE FROM outbound_dedup WHERE message_id = $1", message_b
-            ) == "DELETE 0"
-            with pytest.raises(Exception, match="row-level security"):
-                await conn.execute(
-                    "INSERT INTO outbound_dedup "
-                    "(message_id, organization_id, response_text) "
-                    "VALUES ($1, $2, 'client-write')",
-                    uuid.uuid4(), sample_org["id"],
+            await conn.execute("GRANT USAGE ON SCHEMA public TO authenticated")
+            await conn.execute("SET ROLE authenticated")
+            try:
+                visible = await conn.fetch(
+                    "SELECT message_id FROM outbound_dedup WHERE organization_id = $1",
+                    other_org["id"],
                 )
+                assert visible == []
+                assert await conn.execute(
+                    "UPDATE outbound_dedup SET response_text = 'stolen' "
+                    "WHERE message_id = $1",
+                    message_b,
+                ) == "UPDATE 0"
+                assert await conn.execute(
+                    "DELETE FROM outbound_dedup WHERE message_id = $1", message_b
+                ) == "DELETE 0"
+
+                with pytest.raises(asyncpg.InsufficientPrivilegeError, match="gdpr_erasure_barriers"):
+                    async with conn.transaction():  # savepoint keeps outer transaction usable
+                        await conn.execute(
+                            "INSERT INTO outbound_dedup "
+                            "(message_id, organization_id, response_text) "
+                            "VALUES ($1, $2, 'client-write')",
+                            uuid.uuid4(), sample_org["id"],
+                        )
+
+                await conn.execute("RESET ROLE")
+                await conn.execute(
+                    "GRANT SELECT ON public.gdpr_erasure_barriers TO authenticated"
+                )
+                rls_enabled = await conn.fetchval(
+                    "SELECT relrowsecurity FROM pg_class "
+                    "WHERE oid = 'public.gdpr_erasure_barriers'::regclass"
+                )
+                assert rls_enabled is True
+                assert await conn.fetchval(
+                    "SELECT count(*) FROM pg_policies WHERE tablename='gdpr_erasure_barriers'"
+                ) == 0
+                await conn.execute("SET ROLE authenticated")
+                with pytest.raises(asyncpg.InsufficientPrivilegeError, match="row-level security"):
+                    async with conn.transaction():  # savepoint isolates expected RLS denial
+                        await conn.execute(
+                            "INSERT INTO outbound_dedup "
+                            "(message_id, organization_id, response_text) "
+                            "VALUES ($1, $2, 'client-write')",
+                            uuid.uuid4(), sample_org["id"],
+                        )
+            finally:
+                await conn.execute("RESET ROLE")
         finally:
             await conn.execute("RESET ROLE")
+            await test_grants.rollback()
+        assert await conn.fetchval(
+            "SELECT has_table_privilege('authenticated','public.gdpr_erasure_barriers','SELECT')"
+        ) is barrier_select
+        for privilege, had_privilege in outbound_privileges.items():
+            assert await conn.fetchval(
+                "SELECT has_table_privilege('authenticated','public.outbound_dedup',$1)", privilege,
+            ) is had_privilege
 
     backend = MessageRepository(pool=pg_pool)
     await backend.save_outbound_dedup(message_a, sample_org["id"], "backend-write")
