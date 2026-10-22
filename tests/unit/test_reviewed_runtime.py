@@ -289,6 +289,54 @@ def test_inventory_accepts_exact_cpu_version_without_normalization():
     module.verify_audit_inventory({'dependencies': [{'name': 'torch', 'version': '2.14.0+cpu', 'vulns': []}]}, {'torch': '2.14.0+cpu'})
 
 
+def test_installed_inventory_ignores_disabled_user_site(tmp_path, monkeypatch):
+    module = load_builder()
+    runtime_site = tmp_path / 'runtime-site'
+    user_site = tmp_path / 'user-site'
+    runtime_site.mkdir()
+    user_site.mkdir()
+    monkeypatch.setattr(module.site, 'getsitepackages', lambda: [str(runtime_site)])
+    monkeypatch.setattr(module.site, 'getusersitepackages', lambda: str(user_site))
+    monkeypatch.setattr(module.site, 'ENABLE_USER_SITE', False)
+    monkeypatch.setattr(
+        module.metadata,
+        'distributions',
+        lambda *, path: [SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')]
+        if path == [str(runtime_site)] else pytest.fail(f'Unexpected distribution paths: {path}'),
+    )
+
+    paths, installed = module.installed_inventory()
+
+    assert paths == [str(runtime_site)]
+    assert installed == {'runtime-package': '1.0'}
+
+
+def test_installed_inventory_includes_enabled_user_site_and_rejects_duplicates(tmp_path, monkeypatch):
+    module = load_builder()
+    runtime_site = tmp_path / 'runtime-site'
+    user_site = tmp_path / 'user-site'
+    runtime_site.mkdir()
+    user_site.mkdir()
+    monkeypatch.setattr(module.site, 'getsitepackages', lambda: [str(runtime_site)])
+    monkeypatch.setattr(module.site, 'getusersitepackages', lambda: str(user_site))
+    monkeypatch.setattr(module.site, 'ENABLE_USER_SITE', True)
+    monkeypatch.setattr(
+        module.metadata,
+        'distributions',
+        lambda *, path: [SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')]
+        if path == [str(runtime_site), str(user_site)] else pytest.fail(f'Unexpected distribution paths: {path}'),
+    )
+
+    paths, installed = module.installed_inventory()
+    assert paths == [str(runtime_site), str(user_site)]
+    assert installed == {'runtime-package': '1.0'}
+
+    duplicate = SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')
+    monkeypatch.setattr(module.metadata, 'distributions', lambda *, path: [duplicate, duplicate])
+    with pytest.raises(ValueError, match='Duplicate installed distribution'):
+        module.installed_inventory()
+
+
 def test_runtime_verifier_rejects_modified_installed_code(tmp_path):
     module = load_builder()
     code = tmp_path / 'crewai/__init__.py'
@@ -372,12 +420,13 @@ socket.getaddrinfo = blocked
 socket.socket.connect = blocked
 
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.trace import TraceState
+from opentelemetry.trace import get_current_span
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 import crewai_core.telemetry as core_module
 import crewai.telemetry.telemetry as framework_module
 
 # Exercise the reviewed OTLP exporter constructor without exporting anything.
-probe = core_module.SafeOTLPSpanExporter(endpoint="http://127.0.0.1:9/v1/traces")
+probe = core_module.SafeOTLPSpanExporter(endpoint="http://127.0.0.1:9/v1/traces", timeout=30)
 probe.shutdown()
 
 exporters = []
@@ -414,10 +463,18 @@ try:
 
     finished = [span for exporter in exporters for span in exporter.get_finished_spans()]
     assert {span.name for span in finished} >= {"Feature Usage", "Flow Execution"}
+    assert all(span.end_time is not None for span in finished)
     assert all(span.status.status_code.name == "OK" for span in finished)
+    assert any(span.attributes.get("feature") == "offline-smoke" for span in finished)
+    assert any(span.attributes.get("flow_name") == "offline-flow" for span in finished)
 
     marker = "SENSITIVE_HEADER_MARKER"
-    state = TraceState.from_header(["vendor=" + marker * 8000])
+    carrier = {
+        "traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01",
+        "tracestate": "vendor=" + marker * 8000,
+    }
+    context = TraceContextTextMapPropagator().extract(carrier)
+    state = get_current_span(context).get_span_context().trace_state
     assert len(state) == 0
     assert marker not in log_stream.getvalue()
     assert attempts == []

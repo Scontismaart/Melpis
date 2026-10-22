@@ -100,6 +100,10 @@ non è copiato nell'immagine finale.
 
 Il wrapper usa OSV (`https://api.osv.dev/v1/query`), `--strict` e tutti i percorsi
 site-packages del runtime. Confronta identità e versioni esatte del report con
+quelle realmente importabili: il sito utente dell'host è incluso soltanto se
+`site.ENABLE_USER_SITE` lo abilita. In un virtualenv isolato non viene incluso
+un percorso utente estraneo; in un runtime con installazione `--user` resta
+incluso e ogni duplicato continua a bloccare l'audit. Confronta quindi
 l'inventario installato prima e dopo l'audit. Nessun pacchetto omesso, aggiunto,
 duplicato o saltato è ammesso; `torch==2.14.0+cpu` non è normalizzato a una
 versione diversa. Controlla poi il manifest e la policy esistente senza nuove

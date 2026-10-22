@@ -244,7 +244,10 @@ def canonical_name(name):
 
 
 def installed_inventory():
-    paths = list(dict.fromkeys(site.getsitepackages() + [site.getusersitepackages()]))
+    # Isolated venvs cannot import the host user-site. Including it would audit
+    # unrelated host packages and report false duplicates rather than runtime.
+    user_paths = [site.getusersitepackages()] if site.ENABLE_USER_SITE else []
+    paths = list(dict.fromkeys(site.getsitepackages() + user_paths))
     paths = [path for path in paths if Path(path).is_dir()]
     installed = {}
     for distribution in metadata.distributions(path=paths):
