@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 import pytest
 from unittest.mock import AsyncMock
 from fastapi import HTTPException
@@ -113,6 +114,7 @@ def _fake_request(repo=None, cookies=None):
         host = "127.0.0.1"
 
     class FakeRequest:
+        url = SimpleNamespace(path='/api/me')
         app = type("App", (), {"state": type("State", (), {"repo": None})()})()
         client = FakeClient()
         headers = {}

@@ -8,6 +8,7 @@ from cryptography.fernet import Fernet
 from src.core.db.repositories.contact_repo import ContactRepository
 from src.core.gdpr.deletion import Deletion
 from src.core.gdpr.guard import ErasureBlocked
+from src.core.gdpr.operations import Operations, refresh_provider_coverage
 
 
 POLICY_CATEGORIES = (
@@ -128,7 +129,9 @@ async def test_approved_org_erasure_is_local_partial_and_preserves_root_billing_
     assert result["manifest"]["external_copies"] == "pending_verified_receipts"
     assert "billing" in result["manifest"]["retained"]
     assert "audit" in result["manifest"]["retained"]
-    assert all(step["status"] == "pending" for step in result["steps"] if step["name"].startswith("provider."))
+    provider_states = {step['name']: step['status'] for step in result['steps'] if step['name'].startswith('provider.')}
+    assert provider_states.pop('provider.inventory_review') == 'held'
+    assert provider_states and all(status == 'pending' for status in provider_states.values())
 
     async with pg_pool.acquire() as conn:
         assert await conn.fetchval("SELECT count(*) FROM organizations WHERE id=$1", org) == 1
@@ -279,3 +282,101 @@ async def test_concurrent_replay_commits_one_local_step(pg_pool, sample_org, mon
             org, results[0]["id"],
         ) == 1
         assert await conn.fetchval("SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1", org) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("inventory", "expected_stage"),
+    [
+        ("instagram", "provider.meta"),
+        ("google_business", "provider.google_business"),
+        ("configured_services", "provider.softr"),
+        ("configured_services", "provider.sentry"),
+        ("configured_services", "provider.smtp"),
+        ("stripe", "provider.stripe_retention_review"),
+    ],
+)
+async def test_inventory_changes_create_pending_provider_stages(
+    pg_pool, sample_org, monkeypatch, inventory, expected_stage,
+):
+    org = sample_org["id"]
+    await approve_policies(pg_pool, org)
+    contact_id, _, _, _ = await seed_contact_data(
+        pg_pool, org, phone="+15550008888",
+    )
+    for setting in ("SOFTR_WEBHOOK_URL", "SENTRY_DSN", "SMTP_HOST"):
+        monkeypatch.delenv(setting, raising=False)
+    if inventory == "instagram":
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO instagram_accounts(id,organization_id,ig_user_id,access_token) "
+                "VALUES($1,$2,'synthetic-ig-user','synthetic-token')",
+                uuid.uuid4(), org,
+            )
+    elif inventory == "google_business":
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO google_business_credentials(organization_id,access_token,refresh_token,
+                       token_expiry,account_name) VALUES($1,'synthetic-access','synthetic-refresh',
+                       NOW()+INTERVAL '1 day','synthetic-account')""",
+                org,
+            )
+    elif inventory == "configured_services":
+        monkeypatch.setenv("SOFTR_WEBHOOK_URL", "https://synthetic.invalid/hook")
+        monkeypatch.setenv("SENTRY_DSN", "https://synthetic.invalid/1")
+        monkeypatch.setenv("SMTP_HOST", "synthetic.invalid")
+    elif inventory == "stripe":
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE organizations SET stripe_customer_id='cus_synthetic_a06' WHERE id=$1", org,
+            )
+
+    result = await request_approved_deletion(
+        pg_pool, monkeypatch, org, "owner-inventory-" + inventory, uuid.uuid4(),
+        scope="contact", subject_id=contact_id,
+    )
+    assert result["status"] == "partial"
+    stages = {step["name"]: step["status"] for step in result["steps"]}
+    assert stages[expected_stage] == "pending"
+    assert stages["provider.inventory_review"] == "held"
+    if inventory == "instagram":
+        assert "provider.google_business" not in stages
+    elif inventory == "google_business":
+        assert "provider.meta" not in stages
+    elif inventory == "configured_services":
+        assert all(stages[f"provider.{name}"] == "pending" for name in ("softr", "sentry", "smtp"))
+
+
+@pytest.mark.asyncio
+async def test_inventory_review_cannot_be_claimed_or_overridden_by_provider_confirmations(
+    pg_pool, sample_org, monkeypatch,
+):
+    org = sample_org["id"]
+    await approve_policies(pg_pool, org)
+    contact_id, _, _, _ = await seed_contact_data(
+        pg_pool, org, phone="+15550009998",
+    )
+    monkeypatch.delenv("SOFTR_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.setenv("SOFTR_WEBHOOK_URL", "https://synthetic.invalid/hook")
+    result = await request_approved_deletion(
+        pg_pool, monkeypatch, org, "owner-inventory-hold", uuid.uuid4(),
+        scope="contact", subject_id=contact_id,
+    )
+    oid = result["id"]
+
+    assert await Operations(pg_pool).claim_provider(org, oid, "provider.inventory_review") is None
+    async with pg_pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            """UPDATE gdpr_operation_steps SET status='confirmed',lease_until=NULL
+               WHERE organization_id=$1 AND operation_id=$2 AND name LIKE 'provider.%'
+                 AND name <> 'provider.inventory_review'""",
+            org, oid,
+        )
+        await refresh_provider_coverage(conn, org, oid)
+
+    final = await Operations(pg_pool).get(org, oid, "owner-inventory-hold")
+    assert final["steps"]
+    assert {step["name"]: step["status"] for step in final["steps"]}["provider.inventory_review"] == "held"
+    assert final["manifest"]["external_copies"] == "pending_verified_receipts"
