@@ -11,9 +11,17 @@ class WebhookInboxRepository(TenantScopedRepository):
         self.pool = pool
 
     async def enqueue(self, organization_id, channel, payload, trace_id):
-        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        key = hashlib.sha256(serialized.encode()).hexdigest()
-        async with self.scoped_conn(organization_id) as conn:
+        from src.core.gdpr.guard import ErasureBlocked, filter_webhook_payload
+
+        async with self.scoped_conn(organization_id) as conn, conn.transaction():
+            try:
+                payload = await filter_webhook_payload(conn, organization_id, payload)
+            except ErasureBlocked:
+                return  # Acknowledge without persisting a suppressed subject.
+            if payload is None:
+                return
+            serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            key = hashlib.sha256(serialized.encode()).hexdigest()
             await conn.execute("""
                 INSERT INTO meta_webhook_inbox
                     (id, organization_id, channel, event_key, payload, trace_id)

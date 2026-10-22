@@ -29,26 +29,28 @@ async def test_propagate_delete_softr_missing_config():
 
 
 @pytest.mark.asyncio
-async def test_propagate_delete_airtable_success(respx_mock):
+async def test_configured_airtable_is_not_called_without_verified_scope_contract(respx_mock):
     from src.core.gdpr.propagation import propagate_delete_to_airtable
     os.environ["AIRTABLE_API_KEY"] = "test_key"
     os.environ["AIRTABLE_BASE_ID"] = "test_base"
     respx_mock.delete("https://api.airtable.com/v0/test_base/organizations/org_123").respond(200)
     result = await propagate_delete_to_airtable("org_123")
-    assert result is True
+    assert result is False
+    assert respx_mock.calls.call_count == 0
 
 
 @pytest.mark.asyncio
-async def test_propagate_delete_softr_success(respx_mock):
+async def test_configured_softr_is_not_called_without_verified_receipt_contract(respx_mock):
     from src.core.gdpr.propagation import propagate_delete_to_softr
     os.environ["SOFTR_WEBHOOK_URL"] = "https://hooks.softr.app/delete"
     respx_mock.post("https://hooks.softr.app/delete").respond(200)
     result = await propagate_delete_to_softr("org_123")
-    assert result is True
+    assert result is False
+    assert respx_mock.calls.call_count == 0
 
 
 @pytest.mark.asyncio
-async def test_propagate_hard_delete_calls_both(respx_mock):
+async def test_legacy_hard_delete_reports_unverified_and_calls_neither_provider(respx_mock):
     from src.core.gdpr.propagation import propagate_hard_delete
     os.environ["AIRTABLE_API_KEY"] = "test_key"
     os.environ["AIRTABLE_BASE_ID"] = "test_base"
@@ -56,4 +58,5 @@ async def test_propagate_hard_delete_calls_both(respx_mock):
     respx_mock.delete("https://api.airtable.com/v0/test_base/organizations/org_123").respond(200)
     respx_mock.post("https://hooks.softr.app/delete").respond(200)
     results = await propagate_hard_delete("org_123")
-    assert results == {"airtable": True, "softr": True}
+    assert results == {"airtable": False, "softr": False}
+    assert respx_mock.calls.call_count == 0

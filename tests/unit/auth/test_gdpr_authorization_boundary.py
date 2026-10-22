@@ -9,11 +9,13 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from src.api.cors import configure_cors
 from src.core.auth import bff, dependencies
 from src.core.auth import routes as auth_routes
+from src.core.auth.csrf import validate_csrf_request
 from src.core.gdpr import routes, token_store
 
 _audit_path = Path(__file__).resolve().parents[3] / "scripts" / "audit_route_contracts.py"
@@ -47,6 +49,23 @@ class SimulatedRedis:
             return 0
 
 
+class FakeExporter:
+    """Unit-only export snapshot descriptor; never emulates tenant queries."""
+
+    def __init__(self, _pool):
+        self.preflight = AsyncMock()
+        self.revoke = AsyncMock()
+
+    async def prepare(self, *_args, **_kwargs):
+        return {
+            "export_id": "00000000-0000-0000-0000-000000000091",
+            "manifest": {"status": "complete_for_catalogue"},
+        }
+
+    async def stream(self, *_args, **_kwargs):
+        yield b'{"organization":"tenant-owned"}'
+
+
 @pytest.fixture
 def gdpr_app(monkeypatch):
     monkeypatch.setenv("API_KEY_SERVICE", "internal-service-secret")
@@ -65,6 +84,14 @@ def gdpr_app(monkeypatch):
     monkeypatch.setattr(token_store, "_get_redis", get_redis)
 
     app = FastAPI()
+
+    @app.middleware("http")
+    async def csrf_middleware(request, call_next):
+        ok, detail = validate_csrf_request(request)
+        if not ok:
+            return JSONResponse(status_code=403, content={"detail": detail})
+        return await call_next(request)
+
     app.include_router(routes.router)
     app.include_router(auth_routes.router)
     app.state.repo = AsyncMock()
@@ -72,8 +99,12 @@ def gdpr_app(monkeypatch):
     app.state.repo.get_memberships_by_auth.return_value = [
         {"organization_id": "tenant-owned", "user_id": "owner-1", "ruolo": "owner"},
     ]
-    export = AsyncMock(return_value={"organization": "tenant-owned"})
+    export = AsyncMock(return_value={
+        "export_id": "00000000-0000-0000-0000-000000000091",
+        "manifest": {"status": "complete_for_catalogue"},
+    })
     monkeypatch.setattr(routes, "_export_tenant_data", export)
+    monkeypatch.setattr(routes, "Exporter", FakeExporter)
     monkeypatch.setattr(routes, "audit_log", AsyncMock())
     monkeypatch.setattr(dependencies, "is_token_revoked", AsyncMock(return_value=False))
     verify = AsyncMock(return_value={
@@ -134,6 +165,45 @@ async def test_export_requires_both_owner_membership_and_mfa(gdpr_app, role, aal
         assert response.headers["x-mfa-required"] == "true"
 
 
+async def test_scoped_export_requires_both_owner_membership_and_mfa(gdpr_app):
+    app, _, verify = gdpr_app
+    body = {"request_id": "00000000-0000-0000-0000-000000000092", "scope": "organization"}
+    for role, aal in (("owner", "aal1"), ("manager", "aal2"), ("staff", "aal2")):
+        app.state.repo.get_memberships_by_auth.return_value[0]["ruolo"] = role
+        verify.return_value = {"sub": "auth-owner-1", "session_id": "session-owner-1", "aal": aal}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+            response = await client.post("/api/gdpr/export", json=body, headers=_auth_headers())
+        assert response.status_code == 403
+        if aal == "aal1":
+            assert response.headers["x-mfa-required"] == "true"
+
+
+async def test_gdpr_export_without_membership_does_not_autoprovision(gdpr_app, client):
+    app, export, _ = gdpr_app
+    app.state.repo.get_memberships_by_auth.return_value = []
+
+    response = await client.get("/api/gdpr/export", headers=_auth_headers())
+
+    assert response.status_code == 403
+    export.assert_not_awaited()
+    app.state.repo.get_or_create_organization_with_owner.assert_not_awaited()
+
+
+async def test_cookie_authenticated_gdpr_mutation_requires_csrf(client, gdpr_app):
+    app, _, _ = gdpr_app
+    client.cookies.set(bff.access_cookie_name(), "signed-user-token")
+
+    response = await client.post(
+        "/api/gdpr/delete",
+        headers={"Origin": "http://test"},
+        json={"request_id": "00000000-0000-0000-0000-000000000093"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "CSRF token non valido"}
+    app.state.repo.get_memberships_by_auth.assert_not_awaited()
+
+
 async def test_export_ignores_unowned_tenant_header_for_single_membership(gdpr_app, client):
     app, export, _ = gdpr_app
     response = await client.get(
@@ -147,7 +217,7 @@ async def test_export_ignores_unowned_tenant_header_for_single_membership(gdpr_a
     assert response.status_code == 200
     assert response.json()["download_url"] == "/api/gdpr/download"
     assert "attacker.example.test" not in response.json()["download_url"]
-    export.assert_awaited_once_with(app.state.repo, "tenant-owned")
+    export.assert_awaited_once_with(app.state.repo, "tenant-owned", "auth-owner-1")
     app.state.repo.get_memberships_by_auth.assert_awaited_once_with("auth-owner-1")
 
 
@@ -327,12 +397,38 @@ async def test_download_success_is_one_time_and_denials_do_not_consume(client):
     assert repeated.status_code == 404
 
 
+async def test_download_rejects_legacy_inline_ticket_without_returning_or_consuming_data(client):
+    token = "legacy-inline-ticket"
+    await token_store.save_token(
+        token,
+        "tenant-owned",
+        {"organization": "tenant-owned", "customer_text": "private inline payload"},
+        auth_user_id="auth-owner-1",
+        session_id="session-owner-1",
+        user_id="owner-1",
+    )
+    client.cookies.set(token_store.DOWNLOAD_COOKIE, token, path="/api/gdpr/download")
+
+    response = await client.get("/api/gdpr/download", headers=_auth_headers())
+
+    assert response.status_code == 404
+    assert "private inline payload" not in response.text
+    assert await token_store.read_token(token) is not None
+
+
 async def test_logout_clears_download_cookie_and_next_download_is_unauthenticated(client):
     token = await _issue_export(client)
     # BFF cookie-backed access uses the same validated JWT path as the export.
+    from src.core.auth.csrf import csrf_cookie_name
+
+    csrf = "csrf-test-token"
     logout = await client.post(
         "/api/auth/logout",
-        headers={"Cookie": f"{bff.access_cookie_name()}=signed-user-token"},
+        headers={
+            "Cookie": f"{bff.access_cookie_name()}=signed-user-token; {csrf_cookie_name()}={csrf}",
+            "Origin": "http://test",
+            "X-CSRF-Token": csrf,
+        },
     )
     assert logout.status_code == 200
     set_cookie_headers = logout.headers.get_list("set-cookie")

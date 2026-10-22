@@ -11,7 +11,10 @@ class ContactRepository(TenantScopedRepository):
         self.pool = pool
 
     async def get_or_create_contact(self, org_id, phone):
-        async with self.pool.acquire() as conn:
+        from src.core.gdpr.guard import check_contact_intake
+
+        async with self.pool.acquire() as conn, conn.transaction():
+            await check_contact_intake(conn, org_id, phone)
             row = await conn.fetchrow("""
                 INSERT INTO contacts (id, organization_id, phone_number)
                 VALUES ($1, $2, $3)

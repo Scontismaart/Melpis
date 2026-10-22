@@ -29,6 +29,12 @@ from typing import NamedTuple
 #   system/root     identity or organization root data, not tenant child data;
 #   platform/infra  platform-wide queue/idempotency data, not tenant reads.
 TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
+    "gdpr_operations": ("direct", "Durable rights request is owned by a single organization."),
+    "gdpr_export_chunks": ("direct", "Encrypted snapshot chunks are bound to the operation and organization."),
+    "gdpr_operation_steps": ("direct", "Provider/local progress is bound to a tenant operation."),
+    "gdpr_operation_events": ("direct", "Append-only rights evidence is tenant scoped."),
+    "gdpr_policies": ("direct", "Versioned controller approvals are bound to one tenant."),
+    "gdpr_erasure_barriers": ("direct", "Erasure tombstones fence data production within a tenant."),
     "organizations": ("system/root", "Tenant root rows; selected by organization primary key."),
     "user_profiles": ("system/root", "User principal profile keyed by auth user, may belong to multiple organizations."),
     "auth_access_lifecycle": ("system/root", "Server-only durable principal access and provisioning history keyed by immutable auth identity."),

@@ -57,6 +57,13 @@ class ConversationStore:
         self._updated_at.pop(id_conv, None)
         self._tentativi_prenotazione.pop(id_conv, None)
 
+    def erase_organization(self, organization_id: str) -> int:
+        """Remove only this tenant's simulator keys; anonymous demo is separate."""
+        keys = [key for key in self._store if key.startswith(organization_id + ':')]
+        for key in keys:
+            self.cancella(key)
+        return len(keys)
+
     def incrementa_tentativi_prenotazione(self, id_conv: str) -> int:
         """Incrementa il contatore di tentativi falliti e restituisce il nuovo valore."""
         now = time.monotonic()

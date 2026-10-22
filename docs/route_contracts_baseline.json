@@ -1678,5 +1678,57 @@
     "has_org_context": false,
     "response_model": null,
     "is_llm_route": false
+  },
+  "/api/gdpr/download/revoke::POST": {
+    "path": "/api/gdpr/download/revoke",
+    "methods": [
+      "POST"
+    ],
+    "endpoint_name": "gdpr_revoke_download",
+    "required_roles": [
+      "owner"
+    ],
+    "has_org_context": true,
+    "response_model": null,
+    "is_llm_route": false
+  },
+  "/api/gdpr/export::POST": {
+    "path": "/api/gdpr/export",
+    "methods": [
+      "POST"
+    ],
+    "endpoint_name": "gdpr_scoped_export",
+    "required_roles": [
+      "owner"
+    ],
+    "has_org_context": false,
+    "response_model": null,
+    "is_llm_route": false
+  },
+  "/api/gdpr/operations/{operation_id}/retry::POST": {
+    "path": "/api/gdpr/operations/{operation_id}/retry",
+    "methods": [
+      "POST"
+    ],
+    "endpoint_name": "gdpr_operation_retry",
+    "required_roles": [
+      "owner"
+    ],
+    "has_org_context": false,
+    "response_model": null,
+    "is_llm_route": false
+  },
+  "/api/gdpr/operations/{operation_id}::GET": {
+    "path": "/api/gdpr/operations/{operation_id}",
+    "methods": [
+      "GET"
+    ],
+    "endpoint_name": "gdpr_operation_status",
+    "required_roles": [
+      "owner"
+    ],
+    "has_org_context": false,
+    "response_model": null,
+    "is_llm_route": false
   }
 }

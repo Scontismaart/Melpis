@@ -42,12 +42,23 @@ DEFAULT_TARGETS = sorted(
 # A query exception is keyed by function and normalized-literal SHA-256.
 # It can never exempt another SQL literal in the same function. The hash is
 # surfaced by the checker when a new exact exception needs review.
-ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {}
+ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/gdpr/exporter.py::prepare", "d0d8e62096589fe82dc9a337a61b98164148449106aa71f93d09e1929b927089"):
+        "bounded row wrapper over frozen catalogue only; runtime catalogue_query proves classified sources and every tenant bind; all variants and rejected mutations tested",
+    ("src/core/gdpr/deletion.py::advance", "f9a258519e3fa406f40097d69d11998cfd74a40e5319170972e11d64c84a1b56"):
+        "parent-derived consent deletion: exact child contact_id=contacts.id join, contacts.organization_id=$1 and optional subject=$2; parser supports derived SELECT only",
+    ("src/core/gdpr/deletion.py::advance", "bb690d4a5d40fbbd2a3bcb80dffd00368028d46b26ed7b9eb2e9ce9a0588440b"):
+        "parent-derived delivery deletion: exact message FK join and both messages/conversations organization_id=$1, optional subject=$2; cross-tenant regression required",
+}
 
 # system_scope is an annotation, not proof that a query is safe. Only these
 # reviewed worker/tenant-resolution functions may omit a tenant bind filter.
 # A new decorator use remains visible to the checker unless explicitly added.
 SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
+    "src/core/retention_job.py::_expired_exports":
+        "enumerates expired snapshot IDs with SKIP LOCKED LIMIT 100; each mutation binds its stored tenant",
+    "src/core/retention_job.py::_retention_policies":
+        "enumerates immutable policy metadata only; all primary-data mutations bind a policy tenant and require explicit approval and execution gate",
     "src/core/db/quota_provenance.py::require_quota_trust_epoch":
         "reads the fixed NULL-organization protocol marker only; no caller-controlled row selector",
     "src/core/db/repositories/message_repo.py::claim_inbound_messages":
@@ -105,6 +116,10 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/retention_job.py::_expired_exports", "78b2481fd729638ce87ca4abc5bc58025e7c1d7c3597c276cf1979cbd9a8d8cb"):
+        "bounded expiration of derived encrypted export artifacts, not source data",
+    ("src/core/retention_job.py::_retention_policies", "e13365bd7b3c0fb5c2722f7601bbb785c8a8cf55d69f3fb7274a0ac9cb08d327"):
+        "trusted policy inventory; no content or credentials are selected",
     ("src/core/db/repositories/booking_repo.py::claim_calendar_sync", "b51862a676b035b96cf9501d89b9c2c21d9d7a69331c148090a71bfdb9edc1bd"): "bounded global claim joins each calendar sync to its booking on organization_id and locks only sync rows",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "36dabbca79e0d1236dcf4361946dc3629066096493ebe13a20f2cec92ab2127b"): "bounded global confirmation claim joins inbound, outbound and booking to the same organization_id",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "810f12dd6ee94b01cec490aa87e2061c03e8912f033fc178d29326a7e20b4330"): "attempt insertion uses only the outbound message id from the locked, tenant-consistent outbox row",

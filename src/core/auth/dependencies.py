@@ -301,6 +301,8 @@ async def get_organization_context(
     repo = get_repo(request)
     memberships = await repo.get_memberships_by_auth(current_user["auth_user_id"])
     if not memberships:
+        if request.url.path.startswith('/api/gdpr/'):
+            raise HTTPException(status_code=403, detail='Membership GDPR non disponibile')
         # Auto-provisioning JIT dell'organizzazione per utenti autenticati
         try:
             email = current_user.get("email") or "La tua attività"
@@ -420,6 +422,9 @@ SENSITIVE_AAL2_PATHS = frozenset({
     "/api/gdpr/export",
     "/api/gdpr/download",
     "/api/gdpr/delete",
+    "/api/gdpr/download/revoke",
+    "/api/gdpr/operations/{operation_id}",
+    "/api/gdpr/operations/{operation_id}/retry",
     "/api/calendar/auth",
     "/api/calendar/disconnect",
     "/api/calendar/settings",
