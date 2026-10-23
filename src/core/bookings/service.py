@@ -523,7 +523,15 @@ class BookingService:
                 await self.calendar_service.sync_booking_state(updated, org_id)
             return await self.repo.get_booking(org_id, booking_id)
         if b["stato"] == "confermata":
-            return updated  # Replay cannot emit a second confirmation or deposit.
+            # Google/A05 confirmations already have a durable notice. A manual
+            # internal/optional confirmation may have crashed after its state
+            # commit but before message persistence: resume its original key.
+            if await self._calendar_mode(org_id) == "google_authoritative":
+                return updated
+            notice_repo = getattr(self.repo, "booking_repo", self.repo)
+            has_notice = getattr(notice_repo, "has_booking_confirmation_notice", None)
+            if has_notice and await has_notice(org_id, booking_id, updated.get("calendar_revision", 0)):
+                return updated
         msg = f"La tua prenotazione del {b['data']} alle {b['ora']} per {b['coperti']} persone e' confermata!"
         await self._send_whatsapp(org_id, b["telefono"], msg,
             idempotency_key=f"booking-confirm-manual:{org_id}:{booking_id}:{updated.get('calendar_revision', 0)}")

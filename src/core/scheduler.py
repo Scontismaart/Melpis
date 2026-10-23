@@ -27,6 +27,9 @@ _scheduler: BackgroundScheduler | None = None
 # quindi un proprio pool effimero, come i worker standalone.
 _JOB_POOL_MIN = 1
 _JOB_POOL_MAX = 2
+# Calendar holds the scheduler lock and a tenant worker lock while I/O and
+# lease renewal each need a connection. Keep the other jobs' pool unchanged.
+_CALENDAR_JOB_POOL_MAX = 4
 _JOB_COMMAND_TIMEOUT = 30  # secondi: niente piu' query appese all'infinito
 
 
@@ -37,7 +40,7 @@ def _dsn() -> str:
     return dsn
 
 
-async def _con_pool_esimero(job_coro, lock_name: str | None = None):
+async def _con_pool_esimero(job_coro, lock_name: str | None = None, *, pool_max_size: int = _JOB_POOL_MAX):
     """Esegue la coroutine del job su un pool creato DENTRO il suo event
     loop e lo chiude sempre. Log di durata per diagnostiche post-incidente.
     Protegge l'esecuzione distribuita multi-istanza con PostgreSQL advisory lock."""
@@ -47,7 +50,7 @@ async def _con_pool_esimero(job_coro, lock_name: str | None = None):
     pool = await asyncpg.create_pool(
         dsn=_dsn(),
         min_size=_JOB_POOL_MIN,
-        max_size=_JOB_POOL_MAX,
+        max_size=pool_max_size,
         command_timeout=_JOB_COMMAND_TIMEOUT,
     )
     try:
@@ -197,7 +200,7 @@ def _run_calendar_sync():
     if not google_calendar_enabled():
         logger.info("calendar=sync_skipped reason=feature_disabled")
         return
-    asyncio.run(_con_pool_esimero(_calendar_sync_job))
+    asyncio.run(_con_pool_esimero(_calendar_sync_job, pool_max_size=_CALENDAR_JOB_POOL_MAX))
 
 
 @system_scope("worker queue: enumerazione org con sync calendar abilitata")

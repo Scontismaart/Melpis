@@ -169,6 +169,15 @@ failure rolls back confirmation/outbox/receipt together and preserves the
 possibly-sent request for reconciliation. Reconnect never clears uncertainty
 on 404 and never re-enables an explicitly paused integration.
 
+The scheduled Calendar job reserves a maximum of four connections: scheduler
+lock, tenant worker lock, database work and heartbeat. Its PostgreSQL regression
+uses that actual bounded pool and the real scheduler wrapper. Other scheduled
+jobs keep their previous two-connection pool. Internal/optional manual
+confirmation retries resume the same durable WhatsApp message key after a
+crash before persistence; delivered or in-flight messages and existing A05
+confirmation notices are not duplicated. This preserves explicit retry recovery
+without claiming a new autonomous manual-booking repair service.
+
 These are synthetic provider tests, not real Google certification. Actual
 target-schema verification, C03 staging certification and cutover gates remain
 unexecuted. No Google network call, remote migration or deployment was made

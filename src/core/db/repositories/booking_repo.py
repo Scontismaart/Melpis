@@ -215,6 +215,12 @@ class BookingRepository(TenantScopedRepository):
                 f"google-booking:{org_uuid}:{booking['id']}", booking["id"])
         return booking
 
+    async def has_booking_confirmation_notice(self, organization_id, booking_id, revision):
+        async with self._connection() as conn:
+            return bool(await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM booking_confirmation_outbox
+                WHERE organization_id=$1 AND booking_id=$2 AND booking_revision=$3)""",
+                uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)), revision))
+
     async def enqueue_calendar_confirmation(self, conn, booking, inbound_message_id, channel):
         """Existing idempotent A05 notification, also used after Calendar proof."""
         org_uuid = booking["organization_id"]
