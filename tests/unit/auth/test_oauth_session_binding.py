@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlencode, urlsplit
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -51,6 +52,38 @@ class NoncePool:
         return self.nonces.pop((nonce, org), None)
 
 
+class CalendarConnectionStub:
+    """Route-level fake matching the new CalendarConnection lifecycle API."""
+
+    def __init__(self, pool, fernet):
+        self.pool, self.fernet = pool, fernet
+        self.generations = {}
+
+    async def begin_oauth(self, org, nonce):
+        generation = uuid4()
+        self.generations[org] = generation
+        self.pool.nonces[(nonce, org)] = {
+            "created_at": datetime.now(timezone.utc),
+            "calendar_generation": generation,
+        }
+
+    async def consume_nonce(self, org, nonce):
+        row = self.pool.nonces.get((nonce, org))
+        if not row or row["calendar_generation"] != self.generations.get(org):
+            return None
+        return self.pool.nonces.pop((nonce, org))
+
+    async def save_oauth(self, org, generation, creds):
+        if generation != self.generations.get(org):
+            return False
+        if not creds.token or not creds.refresh_token or creds.expiry is None:
+            return False
+        access = self.fernet.encrypt(creds.token.encode()).decode()
+        refresh = self.fernet.encrypt(creds.refresh_token.encode()).decode()
+        self.pool.credential_writes.append((org, access, refresh, creds.expiry))
+        return True
+
+
 @pytest.fixture(params=[("calendar", calendar, "/api/calendar"), ("reviews_google", reviews, "/api/reviews/google")])
 async def flow_env(request, monkeypatch):
     channel, module, prefix = request.param
@@ -95,7 +128,8 @@ async def flow_env(request, monkeypatch):
         )),
         fetch_token=MagicMock(),
         oauth2session=SimpleNamespace(token={"scope": module.SCOPES}),
-        credentials=SimpleNamespace(token="synthetic-access", refresh_token="synthetic-refresh", expiry=None),
+        credentials=SimpleNamespace(token="synthetic-access", refresh_token="synthetic-refresh",
+                                     expiry=datetime.now(timezone.utc) + timedelta(hours=1)),
     )
     monkeypatch.setattr(calendar, "_make_flow", lambda: flow)
     monkeypatch.setattr(reviews, "_make_flow", lambda: flow)
@@ -105,6 +139,8 @@ async def flow_env(request, monkeypatch):
     app.include_router(reviews.router)
     app.state.pool = pool
     app.state.repo = repo
+    if channel == "calendar":
+        service.connection = CalendarConnectionStub(pool, fernet)
     app.state.calendar_service = service
     app.state.reviews_service = service
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:

@@ -112,18 +112,39 @@ test("Empty bookings show one empty row and an empty-day prompt", async (t) => {
 
 test("Confirmed Google bookings show safe external sync status", async (t) => {
   const h = fixture({ bookings: [
-    confirmed({ id: "google-pending", external_sync_provider: "google", external_sync_status: "pending_retry", external_sync_error_code: "temporary_unavailable" }),
-    confirmed({ id: "google-synced", external_sync_provider: "google", external_sync_status: "synced" }),
+    confirmed({ id: "google-pending", external_sync_provider: "google", external_sync_status: "pending_retry", external_sync_error_code: "retry_pending" }),
+    confirmed({ id: "google-synced", external_sync_provider: "google", external_sync_status: "succeeded" }),
+    confirmed({ id: "google-failed", external_sync_provider: "google", external_sync_status: "failed", external_sync_error_code: "sync_failed" }),
+    confirmed({ id: "google-blocked", external_sync_provider: "google", external_sync_status: "blocked" }),
+    confirmed({ id: "google-uncertain", external_sync_provider: "google", external_sync_status: "uncertain" }),
     confirmed({ id: "unsafe-code", external_sync_provider: "google", external_sync_status: "failed", external_sync_error_code: "token=secret-value" }),
     confirmed({ id: "other-provider", external_sync_provider: "apaleo", external_sync_status: "failed" }),
   ] });
   t.after(() => h.dispose()); await openBookings(h);
   const pendingRow = h.document.querySelector('[data-booking-id="google-pending"]');
   assert.match(pendingRow.textContent, /Confermata in Melpis, sincronizzazione Google in attesa/);
-  assert.match(pendingRow.textContent, /temporary_unavailable/);
+  assert.match(pendingRow.textContent, /retry_pending/);
   assert.match(h.document.querySelector('[data-booking-id="google-synced"]').textContent, /Sincronizzata con Google/);
+  assert.match(h.document.querySelector('[data-booking-id="google-failed"]').textContent, /Confermata in Melpis, sincronizzazione Google non riuscita/);
+  assert.match(h.document.querySelector('[data-booking-id="google-blocked"]').textContent, /Confermata in Melpis, sincronizzazione Google bloccata/);
+  assert.match(h.document.querySelector('[data-booking-id="google-uncertain"]').textContent, /Confermata in Melpis, esito Google incerto/);
   assert.doesNotMatch(h.document.querySelector('[data-booking-id="unsafe-code"]').textContent, /token=secret-value/);
   assert.doesNotMatch(h.document.querySelector('[data-booking-id="other-provider"]').textContent, /sincronizzazione Google|Sincronizzata con Google/);
+});
+
+test("Authoritative Calendar verification stays explicitly pending and never claims confirmed or synced", async (t) => {
+  const h = fixture({ bookings: [
+    pending({ id: "calendar-confirm-pending", calendar_confirm_pending: true, external_sync_provider: "google", external_sync_status: "processing" }),
+    pending({ id: "calendar-confirm-blocked", calendar_confirm_pending: true, external_sync_provider: "google", external_sync_status: "blocked" }),
+    pending({ id: "calendar-confirm-uncertain", calendar_confirm_pending: true, external_sync_provider: "google", external_sync_status: "uncertain" }),
+  ] });
+  t.after(() => h.dispose()); await openBookings(h);
+  const pendingRow = h.document.querySelector('[data-booking-id="calendar-confirm-pending"]');
+  assert.match(pendingRow.querySelector(".booking-badge").textContent, /in_attesa/);
+  assert.match(pendingRow.textContent, /Prenotazione non confermata: in attesa di nuova verifica Google/);
+  assert.doesNotMatch(pendingRow.textContent, /Sincronizzata con Google|Confermata in Melpis/);
+  assert.match(h.document.querySelector('[data-booking-id="calendar-confirm-blocked"]').textContent, /Prenotazione non confermata: verifica Google bloccata/);
+  assert.match(h.document.querySelector('[data-booking-id="calendar-confirm-uncertain"]').textContent, /esito Google incerto, in attesa di nuova verifica/);
 });
 
 test("Failed list, availability and settings responses do not invent success content", async (t) => {

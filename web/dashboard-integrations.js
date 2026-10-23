@@ -759,8 +759,14 @@ async function caricaStatoCalendar() {
   const calIdMeta = document.getElementById("integ-calendar-id");
   const syncModeMeta = document.getElementById("integ-calendar-sync-mode");
   const btnConnect = document.getElementById("integ-calendar-connect");
-  const btnTest = document.getElementById("integ-calendar-test");
+  const btnCheck = document.getElementById("integ-calendar-check");
   const btnDisconnect = document.getElementById("integ-calendar-disconnect");
+  const btnSave = document.getElementById("integ-calendar-save");
+  const modeInput = document.getElementById("integ-calendar-mode");
+  const calendarIdInput = document.getElementById("integ-calendar-primary-id");
+  const resourceIdsInput = document.getElementById("integ-calendar-resource-ids");
+  const syncInput = document.getElementById("integ-calendar-sync-enabled");
+  const counts = document.getElementById("integ-calendar-counts");
 
   if (!stato || !sub) return;
 
@@ -778,44 +784,161 @@ async function caricaStatoCalendar() {
         _aggiornaBadgeStato(stato, "error");
         sub.textContent = errMsg;
       }
+      if (help) help.textContent = "Lo stato del calendario non è disponibile. Riprova o contatta un amministratore.";
       return;
     }
     const d = await res.json();
     if (!isIntegrationContextCurrent(contextToken)) return;
-    if (d.connected) {
-      _aggiornaBadgeStato(stato, "connected");
-      const calId = d.calendar_id || "Primary (Predefinito)";
-      const sync = d.sync_enabled ? "Sincronizzazione attiva" : "Sincronizzazione in pausa";
-      sub.textContent = `${calId} · ${sync}`;
-      if (calIdMeta) calIdMeta.textContent = calId;
-      if (syncModeMeta) syncModeMeta.textContent = d.sync_enabled ? "Bidirezionale automatica" : "In pausa";
-      if (help) help.textContent = d.last_sync_at
-        ? `Ultima sincronizzazione: ${new Date(d.last_sync_at).toLocaleString(localeCorrente())}`
-        : "Sincronizzazione attiva: le prenotazioni confermate vengono sincronizzate con Google Calendar.";
-      if (btnConnect) btnConnect.hidden = true;
-      if (btnTest) btnTest.hidden = false;
-      if (btnDisconnect) btnDisconnect.hidden = false;
-    } else {
-      _aggiornaBadgeStato(stato, "disconnected");
-      sub.textContent = "Nessun account Google collegato";
-      if (calIdMeta) calIdMeta.textContent = "Nessun calendario";
-      if (syncModeMeta) syncModeMeta.textContent = "Disattivata";
-      if (btnConnect) btnConnect.hidden = false;
-      if (btnTest) btnTest.hidden = true;
-      if (btnDisconnect) btnDisconnect.hidden = true;
-    }
+    mostraStatoCalendar(d, { stato, sub, help, calIdMeta, syncModeMeta, btnConnect, btnCheck, btnDisconnect, counts });
+    // Legacy rows predate explicit mode selection. Treat them as internal
+    // until an owner deliberately saves a different mode.
+    if (modeInput) modeInput.value = ["internal", "internal_calendar_sync", "google_authoritative"].includes(d.mode) ? d.mode : "internal";
+    if (calendarIdInput) calendarIdInput.value = typeof d.calendar_id === "string" ? d.calendar_id : "primary";
+    if (resourceIdsInput) resourceIdsInput.value = Array.isArray(d.resource_calendar_ids) ? d.resource_calendar_ids.join("\n") : "";
+    if (syncInput) syncInput.checked = d.sync_enabled === true;
+    if (btnSave) btnSave.disabled = d.enabled === false;
   } catch {
     if (!isIntegrationContextCurrent(contextToken)) return;
     _aggiornaBadgeStato(stato, "error", "Errore di rete");
     sub.textContent = "Errore di connessione con il server";
+    if (help) help.textContent = "Lo stato del calendario non è disponibile. Riprova più tardi.";
   }
 }
+
+const CALENDAR_MODE_LABELS = Object.freeze({
+  internal: "Solo Melpis",
+  internal_calendar_sync: "Melpis con Google opzionale",
+  google_authoritative: "Google autorevole",
+});
+
+const CALENDAR_STATUS_LABELS = Object.freeze({
+  not_connected: ["not_connected", "Non collegato", "Google Calendar non è collegato."],
+  connected: ["connected", "Connesso", "Google Calendar è collegato."],
+  syncing: ["connecting", "Sincronizzazione in corso", "La verifica è in corso."],
+  sync_failed: ["error", "Sincronizzazione non riuscita", "La sincronizzazione non è riuscita. I dati Melpis restano disponibili."],
+  revoked: ["requires_reauth", "Accesso revocato", "L'accesso Google è stato revocato. Ricollega l'account per continuare."],
+  authoritative_unavailable: ["error", "Google non disponibile", "Google è configurato come fonte autorevole ma non è raggiungibile."],
+  reconnect_required: ["requires_reauth", "Riconnessione necessaria", "Ricollega Google Calendar per ripristinare l'integrazione."],
+  disabled: ["disabled", "Disabilitato", "Google Calendar è disabilitato per questa organizzazione."],
+});
+
+const CALENDAR_ERROR_MESSAGES = Object.freeze({
+  credentials_missing: "Credenziali Google non disponibili.",
+  token_revoked: "L'accesso Google è stato revocato. Ricollega l'account.",
+  provider_unavailable: "Google Calendar non è raggiungibile.",
+  invalid_calendar: "Il calendario selezionato non è accessibile.",
+  availability_unverified: "Non è stato possibile verificare la disponibilità.",
+  configuration_invalid: "La configurazione del calendario non è valida.",
+});
+
+function mostraStatoCalendar(data, elements) {
+  const status = CALENDAR_STATUS_LABELS[data.integration_status]
+    || (data.connected ? CALENDAR_STATUS_LABELS.connected : CALENDAR_STATUS_LABELS.not_connected);
+  _aggiornaBadgeStato(elements.stato, status[0], status[1]);
+  const mode = CALENDAR_MODE_LABELS[data.mode] || CALENDAR_MODE_LABELS.internal;
+  const calendarName = typeof data.calendar_id === "string" && data.calendar_id ? data.calendar_id : "primary";
+  elements.sub.textContent = `${status[2]} Modalità: ${mode}.`;
+  if (elements.calIdMeta) elements.calIdMeta.textContent = calendarName;
+  if (elements.syncModeMeta) elements.syncModeMeta.textContent = mode;
+  if (elements.counts) {
+    elements.counts.textContent = `In attesa: ${Number.isFinite(data.pending_count) ? data.pending_count : 0} · Non riuscite: ${Number.isFinite(data.failed_count) ? data.failed_count : 0} · Esito incerto: ${Number.isFinite(data.uncertain_count) ? data.uncertain_count : 0}`;
+  }
+  if (elements.help) {
+    const lastSync = data.last_sync_at ? new Date(data.last_sync_at) : null;
+    const lastSyncText = lastSync && !Number.isNaN(lastSync.getTime())
+      ? `Ultimo aggiornamento: ${lastSync.toLocaleString(localeCorrente())}. ` : "";
+    const errorText = CALENDAR_ERROR_MESSAGES[data.error_code] || "";
+    elements.help.textContent = `${lastSyncText}${errorText || status[2]}`;
+  }
+  const shouldConnect = data.integration_status === "not_connected"
+    || data.integration_status === "revoked" || data.integration_status === "reconnect_required";
+  if (elements.btnConnect) elements.btnConnect.hidden = !shouldConnect;
+  if (elements.btnCheck) elements.btnCheck.hidden = data.enabled === false || data.connected !== true;
+  if (elements.btnDisconnect) elements.btnDisconnect.hidden = !data.connected;
+}
+
+function calendarResourceIds() {
+  const value = document.getElementById("integ-calendar-resource-ids")?.value || "";
+  return [...new Set(value.split(/\r?\n/).map((id) => id.trim()).filter(Boolean))];
+}
+
+document.getElementById("integ-calendar-save")?.addEventListener("click", async () => {
+  const actionContext = captureIntegrationContext();
+  const releaseAction = claimAction(actionContext, "calendar-settings-save");
+  if (!releaseAction || !isIntegrationContextCurrent(actionContext)) { releaseAction?.(); return; }
+  const button = document.getElementById("integ-calendar-save");
+  button.disabled = true;
+  try {
+    const res = await apiFetch(`${API_BASE}/api/calendar/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: document.getElementById("integ-calendar-mode")?.value || "internal",
+        calendar_id: document.getElementById("integ-calendar-primary-id")?.value.trim() || "primary",
+        resource_calendar_ids: calendarResourceIds(),
+        sync_enabled: document.getElementById("integ-calendar-sync-enabled")?.checked === true,
+      }),
+    });
+    const { body, current } = await readActionResponse(res, actionContext);
+    if (!current) return;
+    if (!res.ok) {
+      const safeMessage = CALENDAR_ERROR_MESSAGES[body?.error_code] || "Impossibile salvare le impostazioni del calendario.";
+      toast(safeMessage, "error");
+      return;
+    }
+    toast("Impostazioni del calendario salvate.", "success");
+    await caricaStatoCalendar();
+  } catch {
+    if (isIntegrationContextCurrent(actionContext)) toast("Errore di connessione durante il salvataggio.", "error");
+  } finally {
+    button.disabled = false;
+    releaseAction();
+  }
+});
+
+document.getElementById("integ-calendar-check")?.addEventListener("click", async () => {
+  const actionContext = captureIntegrationContext();
+  const releaseAction = claimAction(actionContext, "calendar-check");
+  if (!releaseAction || !isIntegrationContextCurrent(actionContext)) { releaseAction?.(); return; }
+  const button = document.getElementById("integ-calendar-check");
+  button.disabled = true;
+  _aggiornaBadgeStato(document.getElementById("integ-calendar-stato"), "connecting", "Sincronizzazione in corso");
+  const statusText = document.getElementById("integ-calendar-sub");
+  if (statusText) statusText.textContent = "Verifica della disponibilità Google in corso…";
+  try {
+    const res = await apiFetch(`${API_BASE}/api/calendar/check`, { method: "POST" });
+    const { body, current } = await readActionResponse(res, actionContext);
+    if (!current) return;
+    if (body && typeof body.integration_status === "string") {
+      mostraStatoCalendar(body, {
+        stato: document.getElementById("integ-calendar-stato"),
+        sub: document.getElementById("integ-calendar-sub"),
+        help: document.getElementById("integ-calendar-help"),
+        calIdMeta: document.getElementById("integ-calendar-id"),
+        syncModeMeta: document.getElementById("integ-calendar-sync-mode"),
+        btnConnect: document.getElementById("integ-calendar-connect"),
+        btnCheck: button,
+        btnDisconnect: document.getElementById("integ-calendar-disconnect"),
+        counts: document.getElementById("integ-calendar-counts"),
+      });
+    }
+    if (!res.ok) toast(CALENDAR_ERROR_MESSAGES[body?.error_code] || "La verifica del calendario non è riuscita.", "error");
+  } catch {
+    if (isIntegrationContextCurrent(actionContext)) {
+      toast("Errore di connessione durante la verifica.", "error");
+      await caricaStatoCalendar();
+    }
+  } finally {
+    button.disabled = false;
+    releaseAction();
+  }
+});
 
 document.getElementById("integ-calendar-connect")?.addEventListener("click", async () => {
   const actionContext = captureIntegrationContext();
   const releaseAction = claimAction(actionContext, "calendar-oauth");
   if (!releaseAction || !isIntegrationContextCurrent(actionContext)) { releaseAction?.(); return; }
-  const url = new URL(`${API_BASE}/api/calendar/auth`, window.location.origin);
+  const url = new URL("/api/calendar/auth", window.location.origin);
   const selectedOrg = localStorage.getItem("melpis_selected_organization");
   if (selectedOrg) url.searchParams.set("organization_id", selectedOrg);
   try {
@@ -2204,13 +2327,26 @@ document.getElementById("airtable-events-refresh-btn")?.addEventListener("click"
           const input = document.getElementById(id);
           if (input) input.value = "";
         }
+        const calendarMode = document.getElementById("integ-calendar-mode");
+        if (calendarMode) calendarMode.value = "internal";
+        const calendarId = document.getElementById("integ-calendar-primary-id");
+        if (calendarId) calendarId.value = "primary";
+        const calendarResources = document.getElementById("integ-calendar-resource-ids");
+        if (calendarResources) calendarResources.value = "";
+        const calendarSync = document.getElementById("integ-calendar-sync-enabled");
+        if (calendarSync) calendarSync.checked = false;
+        const calendarSave = document.getElementById("integ-calendar-save");
+        if (calendarSave) calendarSave.disabled = false;
+        const calendarCheck = document.getElementById("integ-calendar-check");
+        if (calendarCheck) calendarCheck.disabled = false;
         const defaults = {
           "integ-wa-connected-title": "WhatsApp Business", "integ-wa-connected-sub": "",
           "integ-wa-phone-number-display": "—", "integ-wa-reception-status": "",
           "wa-connect-status": "", "wa-wz-test-status": "",
           "integ-wa-test-feedback": "", "integ-instagram-sub": "",
           "integ-ig-id": "—", "integ-instagram-feedback": "",
-          "integ-calendar-sub": "", "integ-calendar-id": "—", "integ-calendar-sync-mode": "",
+          "integ-calendar-sub": "", "integ-calendar-id": "—", "integ-calendar-sync-mode": "Solo Melpis",
+          "integ-calendar-counts": "In attesa: 0 · Non riuscite: 0 · Esito incerto: 0",
           "integ-calendar-feedback": "", "integ-reviews-sub": "",
           "integ-reviews-account": "—", "integ-reviews-location": "—",
           "integ-reviews-feedback": "", "integ-booking-title": "Melpis Interno",
@@ -2228,7 +2364,7 @@ document.getElementById("airtable-events-refresh-btn")?.addEventListener("click"
         for (const [id, hidden] of Object.entries({
           "integ-whatsapp-connected-card": true, "integ-whatsapp-wizard-card": false, "integ-wa-test-box": true,
           "integ-instagram-connected-card": true, "integ-instagram-wizard-card": false,
-          "integ-calendar-connect": true, "integ-calendar-test": true, "integ-calendar-disconnect": true,
+          "integ-calendar-connect": true, "integ-calendar-check": true, "integ-calendar-disconnect": true,
           "integ-reviews-connect": true, "integ-reviews-sync": true, "integ-reviews-disconnect": true,
           "integ-booking-honest-badge-container": true, "integ-booking-warning-banner": true,
           "integ-airtable-connect-card": true, "integ-airtable-validate-card": true, "integ-airtable-webhooks-card": true,

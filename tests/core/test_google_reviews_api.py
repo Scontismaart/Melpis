@@ -266,11 +266,7 @@ async def test_calendar_oauth_reconnect_preserves_disabled_sync_and_fresh_defaul
 
     async def callback_for(org_id):
         nonce = create_bound_oauth_nonce("calendar", str(org_id), callback_user)
-        await pg_pool.execute(
-            "INSERT INTO oauth_nonces (nonce, organization_id, created_at) "
-            "VALUES ($1, $2, NOW())",
-            nonce, org_id,
-        )
+        await service.connection.begin_oauth(org_id, nonce)
         return await client.get(
             "/api/calendar/oauth2callback",
             params={"state": f"{org_id}:{nonce}", "code": "synthetic-code"},

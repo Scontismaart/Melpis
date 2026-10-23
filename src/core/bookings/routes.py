@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from src.core.auth.audit import audit_log
-from src.core.auth.dependencies import require_ruolo
+from src.core.auth.dependencies import require_ruolo, require_mfa
 from src.core.bookings import BookingNotFoundError, SlotPienoError
 from src.models.schemas import DisponibilitaSlot, PrenotazioneModificaInput
 
@@ -75,12 +75,14 @@ async def list_bookings(request: Request, data: str | None = None,
 
 @router.post("/{booking_id}/calendar-sync/retry")
 async def retry_calendar_sync(booking_id: str, request: Request,
-                              user: dict = Depends(require_ruolo("owner", "manager"))):
+                              user: dict = Depends(require_ruolo("owner")),
+                              mfa: dict = Depends(require_mfa())):
     service = _get_booking_service(request)
     try:
-        booking = await service.repo.request_calendar_sync_retry(
-            user["organization_id"], booking_id,
-        )
+        if getattr(service, "calendar_service", None) is None:
+            raise HTTPException(503, "Calendar service unavailable")
+        retried = await service.calendar_service.request_booking_retry(user["organization_id"], booking_id)
+        booking = await service.repo.get_booking(user["organization_id"], booking_id) if retried else None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid booking ID") from exc
     if booking is None:

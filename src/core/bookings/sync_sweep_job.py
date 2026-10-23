@@ -27,6 +27,9 @@ async def sweep_stale_syncs(pool, stale_seconds: int = STALE_SECONDS_DEFAULT,
     rows = await repo.get_pending_syncs(older_than_seconds=stale_seconds, limit=limit)
     swept = 0
     for row in rows:
+        if row.get("provider") == "google":
+            # Calendar has its own fenced GET-only uncertain-outcome recovery.
+            continue
         org_id = row.get("organization_id")
         key = row.get("idempotency_key")
         try:

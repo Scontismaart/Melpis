@@ -35,6 +35,12 @@ async def _configure(pool, service, org_id, authority="internal", capacity=2):
                 ai_accounting_blocked=FALSE
             WHERE id=$1
         """, org_id, json.dumps({"verticale": "ristorante"}))
+        if authority == "internal_calendar_sync":
+            # Fixture seeds an explicit owner-selected Calendar mode. The
+            # booking settings endpoint cannot itself grant this authority.
+            await conn.execute("""INSERT INTO booking_settings(organization_id,config)
+                VALUES($1,$2::jsonb) ON CONFLICT(organization_id) DO UPDATE SET config=EXCLUDED.config""",
+                org_id, json.dumps({"a05": {"enabled": False, "authority": authority}}))
     await service.aggiorna_impostazioni(
         org_id, capienze_orarie={"19:00": capacity}, config=_policy(authority),
     )
@@ -154,7 +160,7 @@ async def test_optional_calendar_failure_preserves_internal_confirmation(
             JOIN external_booking_sync s ON s.internal_booking_id=b.id
              AND s.organization_id=b.organization_id WHERE b.organization_id=$1
         """, org_id)
-    assert dict(row) == {"stato": "confermata", "provider": "google", "sync_status": "pending"}
+    assert dict(row) == {"stato": "confermata", "provider": "google", "sync_status": "blocked"}
 
 
 async def test_external_authority_cannot_fall_back_to_internal(

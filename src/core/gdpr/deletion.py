@@ -42,6 +42,9 @@ class Deletion:
             if prior == 'confirmed':
                 return  # Never rerun committed mutations or provider calls.
             blockers = []
+            if await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM external_booking_sync
+                WHERE organization_id=$1 AND provider='google' AND calendar_dispatch_state='possibly_sent')""", org):
+                blockers.append('calendar_sync_unresolved')
             if os.getenv('GDPR_ERASURE_EXECUTION_ENABLED') != 'true':
                 blockers.append('operational_cutover_not_authorized')
             if op['scope'] == 'account':

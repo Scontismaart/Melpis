@@ -73,7 +73,7 @@ class ConfigurationDecision:
     reason: AutoBookingReason | None = None
 
 
-_AUTHORITIES = {"internal", "internal_calendar_sync", "external_authoritative"}
+_AUTHORITIES = {"internal", "internal_calendar_sync", "external_authoritative", "google_authoritative"}
 _WEEKDAYS = {
     "monday": 0, "mon": 0, "lunedi": 0, "lun": 0,
     "tuesday": 1, "tue": 1, "mar": 1,

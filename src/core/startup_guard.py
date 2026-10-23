@@ -169,9 +169,14 @@ def assert_production_safe() -> None:
     _assert_free_groq_profile()
     _assert_stripe_profile(profile)
 
-    for name in ("GOOGLE_CALENDAR_ENABLED", "GOOGLE_BUSINESS_ENABLED"):
-        if os.getenv(name, "false").strip().lower() != "false":
-            raise RuntimeError(f"AVVIO BLOCCATO: {name} deve restare false al lancio")
+    if os.getenv("GOOGLE_BUSINESS_ENABLED", "false").strip().lower() != "false":
+        raise RuntimeError("AVVIO BLOCCATO: GOOGLE_BUSINESS_ENABLED deve restare false al lancio")
+
+    from src.core.calendar.production_readiness import calendar_production_readiness_errors
+
+    calendar_findings = calendar_production_readiness_errors(os.environ)
+    if calendar_findings:
+        raise RuntimeError("AVVIO BLOCCATO: " + "; ".join(calendar_findings))
 
     key = os.getenv("ENCRYPTION_KEY", "").strip()
     if not key:

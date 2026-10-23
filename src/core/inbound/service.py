@@ -556,6 +556,13 @@ class InboundProcessingService:
                     )
                     if int(used or 0) + pren.coperti > decision.booking.capacity:
                         return BookingApplicationResult(True)
+                    if decision.booking.authority == "google_authoritative":
+                        await booking_repo.insert_google_pending(
+                            org_id, source["conversation_id"], msg["id"], source["booking_source_message_id"],
+                            nome_cliente=customer_name, telefono=phone, data=decision.booking.date,
+                            ora=decision.booking.time, coperti=pren.coperti, channel=channel,
+                        )
+                        return BookingApplicationResult(True)
                     created = await booking_repo.insert_auto_confirmed(
                         org_id, source["conversation_id"], msg["id"],
                         source["booking_source_message_id"],

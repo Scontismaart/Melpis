@@ -27,6 +27,9 @@ _scheduler: BackgroundScheduler | None = None
 # quindi un proprio pool effimero, come i worker standalone.
 _JOB_POOL_MIN = 1
 _JOB_POOL_MAX = 2
+# Calendar holds the scheduler lock and a tenant worker lock while I/O and
+# lease renewal each need a connection. Keep the other jobs' pool unchanged.
+_CALENDAR_JOB_POOL_MAX = 4
 _JOB_COMMAND_TIMEOUT = 30  # secondi: niente piu' query appese all'infinito
 
 
@@ -37,7 +40,7 @@ def _dsn() -> str:
     return dsn
 
 
-async def _con_pool_esimero(job_coro, lock_name: str | None = None):
+async def _con_pool_esimero(job_coro, lock_name: str | None = None, *, pool_max_size: int = _JOB_POOL_MAX):
     """Esegue la coroutine del job su un pool creato DENTRO il suo event
     loop e lo chiude sempre. Log di durata per diagnostiche post-incidente.
     Protegge l'esecuzione distribuita multi-istanza con PostgreSQL advisory lock."""
@@ -47,7 +50,7 @@ async def _con_pool_esimero(job_coro, lock_name: str | None = None):
     pool = await asyncpg.create_pool(
         dsn=_dsn(),
         min_size=_JOB_POOL_MIN,
-        max_size=_JOB_POOL_MAX,
+        max_size=pool_max_size,
         command_timeout=_JOB_COMMAND_TIMEOUT,
     )
     try:
@@ -197,7 +200,7 @@ def _run_calendar_sync():
     if not google_calendar_enabled():
         logger.info("calendar=sync_skipped reason=feature_disabled")
         return
-    asyncio.run(_con_pool_esimero(_calendar_sync_job))
+    asyncio.run(_con_pool_esimero(_calendar_sync_job, pool_max_size=_CALENDAR_JOB_POOL_MAX))
 
 
 @system_scope("worker queue: enumerazione org con sync calendar abilitata")
@@ -213,29 +216,7 @@ async def _calendar_sync_job(pool):
     from src.core.calendar import GoogleCalendarService
     repo = OrganizationRepository(pool)
     calendar_service = GoogleCalendarService(repo, encryption_key)
-    orgs = await pool.fetch("""
-        SELECT organization_id FROM google_calendar_credentials
-        WHERE sync_enabled = true
-    """)
-    created = 0
-    for org in orgs:
-        org_id = org["organization_id"]
-        bookings = await pool.fetch("""
-            SELECT * FROM bookings
-            WHERE organization_id = $1
-              AND stato IN ('in_attesa', 'confermata', 'da_verificare')
-              AND data >= CURRENT_DATE
-              AND google_event_id IS NULL
-        """, org_id)
-        for b in bookings:
-            await calendar_service.sync_booking_state(dict(b), org_id)
-            created += 1
-        await pool.execute(
-            "UPDATE google_calendar_credentials SET last_sync_at = NOW() WHERE organization_id = $1",
-            org_id,
-        )
-    if created:
-        logger.info("calendar=sync_complete created=%d", created)
+    await calendar_service.process_pending(limit=20)
 
 
 def _run_nonce_cleanup():

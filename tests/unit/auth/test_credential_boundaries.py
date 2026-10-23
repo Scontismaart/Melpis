@@ -370,6 +370,21 @@ class _OneShotNoncePool:
         return _AcquireNonceConnection(self.connection)
 
 
+class _CalendarConnectionNonce:
+    """The Calendar callback now consumes OAuth state through its connection service."""
+
+    def __init__(self):
+        from datetime import datetime, timezone
+
+        self.row = {"created_at": datetime.now(timezone.utc)}
+        self.calls = []
+
+    async def consume_nonce(self, organization_id, nonce):
+        self.calls.append((organization_id, nonce))
+        row, self.row = self.row, None
+        return row
+
+
 @pytest.mark.parametrize(
     "callback,channel",
     [
@@ -393,27 +408,40 @@ async def test_oauth_provider_denial_consumes_nonce_once(callback, channel, capl
     monkeypatch.setattr(dependencies, "get_current_user", AsyncMock(return_value=user))
     nonce = create_bound_oauth_nonce(channel, org_id, user)
     pool = _OneShotNoncePool()
+    calendar_connection = _CalendarConnectionNonce()
     request = SimpleNamespace(
         query_params={
             "state": f"{org_id}:{nonce}",
             "error": "private-provider-error",
         },
         cookies={bff.access_cookie_name(): "synthetic-cookie"},
-        app=SimpleNamespace(state=SimpleNamespace(pool=pool, repo=SimpleNamespace(
-            get_membership_by_auth=AsyncMock(return_value={"organization_id": org_id, "ruolo": "owner"}),
-        ))),
+        app=SimpleNamespace(state=SimpleNamespace(
+            pool=pool,
+            calendar_service=SimpleNamespace(connection=calendar_connection),
+            repo=SimpleNamespace(
+                get_membership_by_auth=AsyncMock(return_value={"organization_id": org_id, "ruolo": "owner"}),
+            ),
+        )),
     )
 
     denied = await handler(request)
     assert denied.headers["location"] == f"/app/?{channel}=error&reason=provider_denied"
     assert "private-provider-error" not in caplog.text
-    query, used_nonce, used_org = pool.connection.calls[0]
-    assert "DELETE FROM oauth_nonces" in query
-    assert "RETURNING" in query
-    assert (used_nonce, used_org) == (nonce, org_id)
+    if callback == "calendar":
+        assert calendar_connection.calls == [(org_id, nonce)]
+        assert pool.connection.calls == []
+    else:
+        query, used_nonce, used_org = pool.connection.calls[0]
+        assert "DELETE FROM oauth_nonces" in query
+        assert "RETURNING" in query
+        assert (used_nonce, used_org) == (nonce, org_id)
 
     replay = await handler(request)
     assert replay.headers["location"] == f"/app/?{channel}=error&reason=invalid_nonce"
+    if callback == "calendar":
+        # Replay reaches the one-shot DELETE again, but gets no row back.
+        assert calendar_connection.calls == [(org_id, nonce), (org_id, nonce)]
+        assert calendar_connection.row is None
 
 
 @pytest.mark.parametrize("callback", ["calendar", "reviews"])
