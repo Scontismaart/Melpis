@@ -1,7 +1,7 @@
 # Google Calendar production gate
 
-Google Calendar remains disabled unless `GOOGLE_CALENDAR_ENABLED=false` (the
-release preflight requires this default explicitly). Production may enable it
+Google Calendar is disabled by default (`GOOGLE_CALENDAR_ENABLED=false`; the
+release preflight requires this explicitly). Production may enable it
 only after the operator supplies all of the following assertions and
 configuration:
 
