@@ -79,7 +79,8 @@ provider copies and backup retention require separate approved dispositions.</p>
   <li>Encryption at rest: WhatsApp access tokens encrypted with Fernet (AES-128)</li>
   <li>PII redaction: automatic masking of recognized personal data patterns (international phone numbers, email addresses) via regex in all application logs</li>
   <li>Access control: role-based authentication (owner, manager, staff)</li>
-  <li>Soft-delete: data recoverable within 30-day grace period</li>
+  <li>Erasure and retention: explicit approved policies and recorded exceptions;
+      blocked or partial operations do not certify deletion or recoverability</li>
 </ul>
 <p>Note: log redaction is based on pattern recognition and is a reasonable mitigation, not an absolute guarantee: it does not cover numeric identifiers without an international prefix, nor personal data in free-text fields that do not follow a recognizable format.</p>
 

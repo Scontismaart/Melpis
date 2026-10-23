@@ -53,6 +53,10 @@ def mock_repo():
     # acquire + transaction async context manager per _handle_inbound_message
     mock_conn = MagicMock()
     mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+    # GDPR ingress filtering checks the erased-subject barrier before the
+    # durable inbox insert. The empty result models no barrier for these tests.
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.fetchval = AsyncMock(return_value=False)
     mock_conn.transaction.return_value.__aenter__ = AsyncMock()
     mock_conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)

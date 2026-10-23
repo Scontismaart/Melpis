@@ -129,6 +129,8 @@ class TestDPA:
         assert "No primary-data" in text
         assert "schedule is activated by this template" in text
         assert "message_retention_days" not in text
+        assert "30-day grace period" not in text
+        assert "do not certify deletion or recoverability" in text
 
     async def test_dpa_security_reflects_regex_redaction(self, async_client):
         resp = await async_client.get("/api/gdpr/dpa")

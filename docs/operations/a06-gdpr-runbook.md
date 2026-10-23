@@ -165,18 +165,21 @@ backup deletion is authorized by this runbook.
 
 Record the deployed revision, migration verification, CI result, backup/restore
 drill, isolated local test results, Valkey/Redis behavior, and any provider
-simulation separately. The implementation owner reports 138 focused
-PostgreSQL, Valkey, and authorization tests passed, including snapshot-race
-coverage. This test result does not certify production PostgreSQL, Valkey,
+simulation separately. On the reviewed Python 3.12 runtime, 221 focused
+GDPR, PostgreSQL, Valkey, authorization, MFA, and accounting tests passed
+(one opt-in backup test skipped in that run), followed by 89 A04/A05 and
+multichannel worker regressions. The runtime/provenance suite passed 62
+tests separately. These results do not certify production PostgreSQL, Valkey,
 backup, provider, or legal behavior. The synthetic snapshot and backup/restore
 proof passed separately: one opt-in PostgreSQL test encrypted a synthetic
 `pg_dump` in memory before writing it, restored decrypted bytes through stdin
 into a newly created isolated database, and verified the barrier, billing
 counter/ledger, and decryptable export. No existing backup was deleted.
-Only the temporary files created by that synthetic test were removed; two
-new synthetic restore databases remain. The passing database is
-`melpis_a06_restore_ede0ae2ecd8b4b2e` (the earlier harness run is
-`melpis_a06_restore_4f37335d522b4b61`). This proves a coherent snapshot,
+Only the temporary files created by that synthetic test were removed; three
+new synthetic restore databases remain. The latest passing database on the
+reviewed runtime is `melpis_a06_restore_989767dd93994917`; the previous passing
+database is `melpis_a06_restore_ede0ae2ecd8b4b2e` and the earlier harness run is
+`melpis_a06_restore_4f37335d522b4b61`. This proves a coherent snapshot,
 not restoration of an older backup with a newer erasure journal. That
 quarantine/reconciliation procedure remains a C01 operational gate.
 CI status and final revision belong in the PR evidence. This runbook
