@@ -25,7 +25,7 @@ python-dotenv==1.2.2
 PyJWT[crypto]==2.15.1
 python-multipart==0.0.32
 rapidocr-onnxruntime==1.4.4
-redis==6.4.0
+redis==8.1.0
 respx==0.23.1
 # CPU-only PyTorch prevents multi-GB CUDA wheels in Oracle/GHCR release images.
 --find-links https://download.pytorch.org/whl/cpu/torch/
