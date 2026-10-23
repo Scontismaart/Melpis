@@ -291,3 +291,41 @@ async def test_optional_to_internal_then_cancel_queues_delete_on_same_ledger(
     assert row["calendar_action"] == "delete"
     assert row["calendar_desired_revision"] == row["calendar_revision"]
     assert row["sync_status"] == "pending"
+
+
+async def test_tenant_write_mutex_survives_worker_connection_loss(pg_pool, sample_org):
+    org = sample_org["id"]
+    await _set_authority(pg_pool, org, "internal_calendar_sync")
+    await _connect_calendar(pg_pool, org)
+    first_id, second_id = await _booking(pg_pool, org), await _booking(pg_pool, org)
+    queue = CalendarQueue(pg_pool)
+    [first] = await queue.claim(organization_id=org, booking_id=first_id)
+    [second] = await queue.claim(organization_id=org, booking_id=second_id)
+    results = await asyncio.gather(queue.dispatch(first, "first"), queue.dispatch(second, "second"))
+    assert sorted(results) == [False, True]
+    winner, loser = (first, second) if results[0] else (second, first)
+    # Session locks are intentionally absent: the durable marker alone blocks
+    # another HTTP write until the first outcome has a verified receipt.
+    assert not await queue.dispatch(loser, "still-blocked")
+    assert await queue.verified(winner, "observed-event", "verified-etag")
+    assert await queue.dispatch(loser, "now-safe")
+
+
+async def test_waiting_transaction_cannot_finalize_after_wall_clock_lease_expiry(pg_pool, sample_org):
+    org = sample_org["id"]
+    await _set_authority(pg_pool, org, "internal_calendar_sync")
+    await _connect_calendar(pg_pool, org)
+    booking_id = await _booking(pg_pool, org)
+    queue = CalendarQueue(pg_pool)
+    [claim] = await queue.claim(organization_id=org, booking_id=booking_id)
+    assert await queue.dispatch(claim, "dispatched")
+    async with pg_pool.acquire() as blocker, blocker.transaction():
+        await blocker.fetchrow("SELECT id FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE", org, booking_id)
+        pending = asyncio.create_task(queue.verified(claim, "too-late-event", "etag"))
+        await asyncio.sleep(0.08)
+        assert not pending.done()
+        # Later than the waiting transaction's NOW(), already past on the wall
+        # clock: using transaction time would incorrectly accept this lease.
+        await blocker.execute("""UPDATE external_booking_sync SET calendar_lease_until=clock_timestamp()-INTERVAL '1 millisecond'
+            WHERE organization_id=$1 AND id=$2""", org, claim["id"])
+    assert await asyncio.wait_for(pending, timeout=3) is False

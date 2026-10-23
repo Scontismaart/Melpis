@@ -79,9 +79,10 @@ async def retry_calendar_sync(booking_id: str, request: Request,
                               mfa: dict = Depends(require_mfa())):
     service = _get_booking_service(request)
     try:
-        booking = await service.repo.request_calendar_sync_retry(
-            user["organization_id"], booking_id,
-        )
+        if getattr(service, "calendar_service", None) is None:
+            raise HTTPException(503, "Calendar service unavailable")
+        retried = await service.calendar_service.request_booking_retry(user["organization_id"], booking_id)
+        booking = await service.repo.get_booking(user["organization_id"], booking_id) if retried else None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid booking ID") from exc
     if booking is None:

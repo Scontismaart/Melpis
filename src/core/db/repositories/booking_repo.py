@@ -33,6 +33,7 @@ class BookingRepository(TenantScopedRepository):
         chiave = f"{organization_id}|{canonical_date}|{fascia}"
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(organization_id))
                 await conn.fetchval("SELECT pg_advisory_xact_lock_shared(hashtext($1))", f"booking-capacity|{organization_id}")
                 await conn.fetchval("SELECT pg_advisory_xact_lock(hashtext($1))", chiave)
                 token = self._locked_connection.set((asyncio.current_task(), conn))
@@ -55,6 +56,7 @@ class BookingRepository(TenantScopedRepository):
         canonical_date = date.fromisoformat(data).isoformat() if isinstance(data, str) else data.isoformat()
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(organization_id))
                 locked = await conn.fetchval(
                     "SELECT id FROM conversations WHERE id=$1 AND organization_id=$2 FOR UPDATE",
                     uuid.UUID(str(conversation_id)), uuid.UUID(str(organization_id)),
@@ -86,6 +88,7 @@ class BookingRepository(TenantScopedRepository):
                 )
                 if org is None:
                     raise ValueError("Organization not found")
+                await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(organization_id))
                 await conn.fetchval(
                     "SELECT pg_advisory_xact_lock(hashtext($1))",
                     f"booking-capacity|{organization_id}",
@@ -224,6 +227,8 @@ class BookingRepository(TenantScopedRepository):
             return
         if conversation_uuid is None:
             # Destination was explicitly supplied by staff on this booking.
+            from src.core.gdpr.guard import check_contact_intake
+            await check_contact_intake(conn, org_uuid, telefono)
             await conn.execute("""INSERT INTO contacts(id,organization_id,phone_number)
                 VALUES($1,$2,$3) ON CONFLICT(organization_id,phone_number) DO NOTHING""", uuid.uuid4(), org_uuid, telefono)
             contact_id = await conn.fetchval("SELECT id FROM contacts WHERE organization_id=$1 AND phone_number=$2", org_uuid, telefono)
@@ -290,6 +295,11 @@ class BookingRepository(TenantScopedRepository):
 
     async def request_google_confirmation(self, organization_id, booking_id):
         async with self._connection() as conn:
+            from src.core.gdpr.guard import check_contact_intake
+            phone = await conn.fetchval("SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2",
+                                       uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)))
+            if phone:
+                await check_contact_intake(conn, organization_id, phone)
             row = await conn.fetchrow("""UPDATE bookings SET stato='in_attesa',calendar_confirm_pending=TRUE,
                 richiede_intervento=TRUE,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *""",
                 uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)))

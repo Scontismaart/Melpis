@@ -120,7 +120,7 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
         "bounded expiration of derived encrypted export artifacts, not source data",
     ("src/core/retention_job.py::_retention_policies", "e13365bd7b3c0fb5c2722f7601bbb785c8a8cf55d69f3fb7274a0ac9cb08d327"):
         "trusted policy inventory; no content or credentials are selected",
-    ("src/core/calendar/repository.py::claim", "6485d6379323b171313f32fe9d76c96e9bba7ea0712a90eaaf02b4a8afbd0dde"): "bounded global claim joins credentials by tenant and epoch, locks only queue rows; each downstream operation revalidates tenant/fence",
+    ("src/core/calendar/repository.py::claim", "ca49781fa9e8cc26c388a66f2dbb7256dcd072bed1493150c5c3255bd4693c5e"): "bounded global claim joins credentials by tenant and epoch, locks only queue rows; each downstream operation revalidates tenant/fence; wall-clock lease expiry",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "5639484c3963e6f369b37c9d105964bc2155a57dbdc5de2ab8a98e162e1e85ee"): "bounded claim requires same-tenant outbound and confirmed exact booking revision; optional inbound is only absent for explicit staff confirmation",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "810f12dd6ee94b01cec490aa87e2061c03e8912f033fc178d29326a7e20b4330"): "attempt insertion uses only the outbound message id from the locked, tenant-consistent outbox row",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "10033a45b8df8fa6c14cc2fcd746e5cf6d6c2e7da8bcbd5d8d90e31d0bdca9b4"): "outbox status update uses only the id selected and locked by the same transaction",

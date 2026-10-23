@@ -16,7 +16,7 @@ import httplib2
 
 from src.core.google_feature_flags import google_calendar_enabled
 from src.core.calendar.availability import AvailabilityStatus, CalendarAvailability, aware_utc, local_instant, parse_freebusy
-from src.core.calendar.connection import CalendarConnection, CalendarUnavailable, resources_for
+from src.core.calendar.connection import CalendarConnection, CalendarUnavailable, resources_for, connection_lock
 from src.core.calendar.repository import CalendarQueue
 from src.core.calendar.connection import SCOPES as SCOPES
 
@@ -105,6 +105,8 @@ class GoogleCalendarService:
         if not google_calendar_enabled():
             return CalendarAvailability(AvailabilityStatus.DISABLED, reason_code="disabled")
         try:
+            if starts_at.utcoffset() is None or ends_at.utcoffset() is None or starts_at >= ends_at:
+                raise ValueError("Invalid availability window")
             row = connection or await self.connection.row(org_id)
             if not row or row["connection_status"] != "connected" or not row["sync_enabled"]:
                 return CalendarAvailability(AvailabilityStatus.DISABLED, reason_code="not_connected")
@@ -114,7 +116,7 @@ class GoogleCalendarService:
                     "items": [{"id": resource} for resource in resources]}
             result = parse_freebusy(await self.execute(service.freebusy().query(body=body)), resources,
                                     starts_at, ends_at, connection_epoch=str(row["connection_epoch"]))
-            async with self.repo.pool.acquire() as conn:
+            async with connection_lock(self.repo.pool, org_id) as conn:
                 current = await conn.fetchval("""UPDATE google_calendar_credentials SET last_verified_at=
                     CASE WHEN $3 THEN NOW() ELSE last_verified_at END,last_error_code=$4
                     WHERE organization_id=$1 AND connection_epoch=$2 AND connection_status='connected'
@@ -127,11 +129,14 @@ class GoogleCalendarService:
 
     async def get_busy_intervals(self, org_id, data):
         """Typed result for a local day; never [] on error."""
+        if not google_calendar_enabled():
+            return CalendarAvailability(AvailabilityStatus.DISABLED, reason_code="disabled")
         try:
-            tz = ZoneInfo(await self._get_org_timezone(org_id))
-            start = datetime.fromisoformat(f"{data}T00:00:00").replace(tzinfo=tz)
-            return await self.availability(org_id, start.astimezone(timezone.utc),
-                                           (start + timedelta(days=1)).astimezone(timezone.utc))
+            name = await self._get_org_timezone(org_id)
+            start = local_instant(data, "00:00:00", name)
+            next_day = (datetime.fromisoformat(str(data)).date() + timedelta(days=1)).isoformat()
+            end = local_instant(next_day, "00:00:00", name)
+            return await self.availability(org_id, start, end)
         except Exception:
             return CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="invalid_timezone_or_date")
 
@@ -198,6 +203,10 @@ class GoogleCalendarService:
 
     async def event_body(self, booking, claim):
         tz = await self._get_org_timezone(claim["organization_id"])
+        return self.event_body_for(booking, claim, tz)
+
+    @staticmethod
+    def event_body_for(booking, claim, tz):
         start = local_instant(booking["data"], booking["ora"], tz)
         body = {"id": event_id_for(claim["organization_id"], booking["id"]),
                 "summary": f"{booking['nome_cliente']} — {booking['coperti']} coperti",
@@ -221,7 +230,7 @@ class GoogleCalendarService:
     def matches(cls, event, claim, payload_hash):
         try:
             private = event["extendedProperties"]["private"]
-            return (cls.owned(event, claim) and event.get("status") != "cancelled"
+            return (cls.owned(event, claim) and event.get("status") == "confirmed"
                     and private.get("revision") == str(claim["calendar_claimed_revision"])
                     and private.get("connection_epoch") == str(claim["calendar_connection_epoch"])
                     and private.get("payload_hash") == payload_hash == event_hash(event)
@@ -245,12 +254,41 @@ class GoogleCalendarService:
         return await CalendarLifecycle(self).process(limit, organization_id=organization_id, booking_id=booking_id)
 
     async def sync_booking_state(self, booking, org_id):
+        if not google_calendar_enabled():
+            return None
         if not booking or (booking.get("organization_id") is not None and str(booking["organization_id"]) != str(org_id)):
             return None
         await self.process_pending(1, organization_id=org_id, booking_id=booking["id"])
         async with self.repo.pool.acquire() as conn:
-            return await conn.fetchval("SELECT google_event_id FROM bookings WHERE organization_id=$1 AND id=$2",
+            return await conn.fetchval("""SELECT b.google_event_id FROM bookings b JOIN external_booking_sync s
+                ON s.internal_booking_id=b.id AND s.organization_id=$1
+                WHERE b.organization_id=$1 AND b.id=$2 AND s.provider='google'
+                  AND s.sync_status='succeeded' AND s.calendar_applied_revision=b.calendar_revision""",
                                        UUID(str(org_id)), UUID(str(booking["id"])))
+
+    async def request_booking_retry(self, org_id, booking_id):
+        if not google_calendar_enabled():
+            return False
+        if await self.queue.retry(org_id, booking_id):
+            return True
+        current = await self.connection.row(org_id)
+        if not current or current["connection_status"] != "connected" or not current["sync_enabled"]:
+            return False
+        async with self.repo.pool.acquire() as conn:
+            old = await conn.fetchrow("""SELECT * FROM external_booking_sync WHERE organization_id=$1
+                AND internal_booking_id=$2 AND provider='google'""", UUID(str(org_id)), UUID(str(booking_id)))
+        if (not old or not old["calendar_payload_hash"] or old["calendar_claimed_action"] == "delete"
+                or old["calendar_id"] != current["calendar_id"] or old["calendar_connection_epoch"] == current["connection_epoch"]):
+            return False
+        try:
+            provider = await self._build_service(org_id, current["connection_epoch"])
+            observed = await self.read_event(provider, dict(old))
+        except Exception:
+            logger.warning("calendar=reconnect_receipt_unverified organization_id=%s", org_id)
+            return False
+        if not observed or not self.matches(observed, old, old["calendar_payload_hash"]):
+            return False
+        return await self.queue.reconnect_receipt(dict(old), current["connection_epoch"], observed)
 
     create_event = sync_booking_state
     update_event = sync_booking_state

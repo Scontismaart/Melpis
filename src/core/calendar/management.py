@@ -77,7 +77,7 @@ async def save_calendar_settings(service, org_id, body):
         current = await conn.fetchrow("SELECT * FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE", org)
         if before and (not current or current["connection_epoch"] != before["connection_epoch"]):
             raise HTTPException(409, "Calendar connection changed; retry")
-        organization = await conn.fetchrow("SELECT timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE", org)
+        organization = await conn.fetchrow("SELECT timezone,business_profile FROM organizations WHERE id=$1 FOR KEY SHARE", org)
         if not organization:
             raise HTTPException(404, "Organization not found")
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"booking-capacity|{org}")

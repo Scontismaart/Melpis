@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 from cryptography.fernet import Fernet
 from googleapiclient.errors import HttpError
@@ -98,7 +99,7 @@ class Google:
                                           "items": deepcopy(list(self.rows.values()))})
 
 
-async def setup(pool, org, monkeypatch, mode="internal_calendar_sync"):
+async def setup(pool, org, monkeypatch, mode="internal_calendar_sync", *, create_booking=True):
     monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
     monkeypatch.setenv("GOOGLE_CALENDAR_WORKER_ENABLED", "true")
     key = Fernet.generate_key()
@@ -117,6 +118,8 @@ async def setup(pool, org, monkeypatch, mode="internal_calendar_sync"):
             datetime.now(timezone.utc) + timedelta(hours=1), json.dumps([
                 "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.events.freebusy"]))
     booking_repo = BookingRepository(pool)
+    if not create_booking:
+        return service, google, booking_repo, None
     booking = await booking_repo.create_booking(org, "Synthetic Guest", (date.today() + timedelta(days=5)).isoformat(),
                                                 "19:00", 2, telefono="+393330009999")
     return service, google, booking_repo, booking
@@ -224,3 +227,94 @@ async def test_revoked_access_is_durable_and_never_changes_authority(pg_pool, sa
         assert await conn.fetchval("SELECT config#>>'{a05,authority}' FROM booking_settings WHERE organization_id=$1", org) == "google_authoritative"
     assert await service.process_pending() == 0
     assert "POST" not in google.calls
+
+
+async def test_timezone_change_during_provider_write_invalidates_confirmation(pg_pool, sample_org, monkeypatch):
+    org = sample_org["id"]
+    service, google, repo, booking = await setup(pg_pool, org, monkeypatch, "google_authoritative")
+    execute = service.execute
+    async def change_timezone(request):
+        value = await execute(request)
+        if request.method == "POST":
+            async with pg_pool.acquire() as conn:
+                await conn.execute("UPDATE organizations SET timezone='UTC' WHERE id=$1", org)
+        return value
+    service.execute = change_timezone
+    result = await BookingService(booking_repo=repo, calendar_service=service).confirm(org, booking["id"])
+    assert result["stato"] == "da_verificare"
+    assert not result["calendar_confirm_pending"]
+    await service.process_pending()
+    assert google.calls.count("DELETE") == 1
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
+
+
+async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai(repo, pg_pool, sample_org, monkeypatch):
+    from tests.core.bookings.test_a05_auto_booking import _canonical, _message, _policy, _processor
+    org = sample_org["id"]
+    service, google, booking_repo, _ = await setup(pg_pool, org, monkeypatch, "google_authoritative", create_booking=False)
+    async with pg_pool.acquire() as conn:
+        await conn.execute("UPDATE organizations SET business_profile=$2::jsonb WHERE id=$1", org, json.dumps({"verticale": "ristorante"}))
+        await conn.execute("UPDATE booking_settings SET config=$2::jsonb WHERE organization_id=$1", org,
+                           json.dumps(_policy("google_authoritative")))
+    day = (date.today() + timedelta(days=8)).isoformat()
+    message = await _message(pg_pool, org, day)
+    processor = _processor(repo, BookingService(booking_repo=booking_repo, calendar_service=service))
+    pending = await processor._apply_committed_booking(org, message, {}, _canonical(day))
+    assert pending.requires_staff
+    assert google.calls == []
+    async with pg_pool.acquire() as conn:
+        before = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
+        assert before["stato"] == "in_attesa" and before["calendar_confirm_pending"]
+        assert await conn.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
+    await service.process_pending()
+    async with pg_pool.acquire() as conn:
+        after = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
+        assert after["stato"] == "confermata" and not after["calendar_confirm_pending"]
+        notice = await conn.fetchrow("SELECT * FROM booking_confirmation_outbox WHERE organization_id=$1", org)
+        assert notice["inbound_message_id"] == message["id"]
+        assert await conn.fetchval("SELECT count(*) FROM usage_events WHERE organization_id=$1 AND event_type='system.provider_attempt'", org) == 0
+    replay = await processor._apply_committed_booking(org, message, {}, _canonical(day))
+    assert replay.persisted_state == "confirmed"
+    assert google.calls.count("POST") == 1
+
+
+@pytest.mark.parametrize("lost_response", [False, True])
+async def test_explicit_reconnect_retry_requires_correlated_get_and_reuses_event(pg_pool, sample_org, monkeypatch, lost_response):
+    org = sample_org["id"]
+    service, google, _, booking = await setup(pg_pool, org, monkeypatch)
+    google.timeout = lost_response
+    await service.process_pending()
+    old = await ledger(pg_pool, org, booking)
+    await service.connection.disconnect(org)
+    nonce = uuid4().hex
+    await service.connection.begin_oauth(org, nonce)
+    consumed = await service.connection.consume_nonce(org, nonce)
+    assert await service.connection.save_oauth(org, consumed["calendar_generation"], SimpleNamespace(
+        token="synthetic-new-access", refresh_token="synthetic-new-refresh",
+        expiry=datetime.now(timezone.utc) + timedelta(hours=1)))
+    assert await service.request_booking_retry(org, booking["id"])
+    google.timeout = False
+    await service.process_pending()
+    current = await ledger(pg_pool, org, booking)
+    assert current["calendar_connection_epoch"] != old["calendar_connection_epoch"]
+    assert current["sync_status"] == "succeeded"
+    assert google.calls.count("POST") == google.calls.count("PUT") == 1
+
+
+async def test_reconnect_404_cannot_clear_uncertain_write(pg_pool, sample_org, monkeypatch):
+    org = sample_org["id"]
+    service, google, _, booking = await setup(pg_pool, org, monkeypatch)
+    google.timeout = True
+    await service.process_pending()
+    await service.connection.disconnect(org)
+    nonce = uuid4().hex
+    await service.connection.begin_oauth(org, nonce)
+    consumed = await service.connection.consume_nonce(org, nonce)
+    assert await service.connection.save_oauth(org, consumed["calendar_generation"], SimpleNamespace(
+        token="synthetic-new-access", refresh_token="synthetic-new-refresh",
+        expiry=datetime.now(timezone.utc) + timedelta(hours=1)))
+    google.rows.clear()  # Could mean another account, not proof of no old write.
+    assert not await service.request_booking_retry(org, booking["id"])
+    assert (await ledger(pg_pool, org, booking))["calendar_dispatch_state"] == "possibly_sent"
+    assert google.calls.count("POST") == 1

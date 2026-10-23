@@ -164,6 +164,9 @@ class _Queue:
     async def renew(self, _claim):
         return True
 
+    async def availability_checked(self, _claim, _checked_at):
+        return True
+
 
 class _Service(GoogleCalendarService):
     def __init__(self, claim, *, current=True, dispatch=True, booking=None):
@@ -197,7 +200,7 @@ class _Service(GoogleCalendarService):
         return deepcopy(self.body)
 
     async def _availability(self, *_args, **_kwargs):
-        return self.authority_result or CalendarAvailability(AvailabilityStatus.FREE)
+        return self.authority_result or CalendarAvailability(AvailabilityStatus.FREE, checked_at=datetime.now(timezone.utc))
 
 
 def _event_body(claim):
@@ -298,6 +301,25 @@ async def test_late_lease_or_revision_change_denies_before_provider_read():
     assert service.provider.post_count == 0
     assert service.queue.failures[0]["code"] == "context_changed"
     assert service.queue.failures[0]["blocked"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, "tentative", "unknown"])
+async def test_recovery_requires_explicit_confirmed_provider_status(status):
+    claim = _claim("authoritative", recovery=True)
+    service = _Service(claim)
+    digest = service.body["extendedProperties"]["private"]["payload_hash"]
+    claim["calendar_payload_hash"] = digest
+    event = _owned_event(claim, payload_hash=digest)
+    if status is None:
+        event.pop("status")
+    else:
+        event["status"] = status
+    service.provider.event_store[EVENT_ID] = event
+    await CalendarLifecycle(service).run(claim)
+    assert service.queue.verified_rows == []
+    assert service.provider.post_count == 0
+    assert service.queue.failures[0]["uncertain"] is True
 
 
 @pytest.mark.asyncio

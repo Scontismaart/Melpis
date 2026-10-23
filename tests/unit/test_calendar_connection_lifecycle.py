@@ -108,8 +108,10 @@ async def test_disconnect_is_tenant_bound_invalidates_epoch_and_nonce_preserving
 
     assert returned == previous
     calls = conn.execute.await_args_list
-    lock_call = next(call for call in calls if "pg_advisory_lock" in call.args[0])
-    unlock_call = next(call for call in calls if "pg_advisory_unlock" in call.args[0])
+    lock_call = next(call for call in calls if "pg_advisory_lock(" in call.args[0])
+    unlock_call = next(call for call in calls if "pg_advisory_unlock(" in call.args[0])
+    assert "pg_advisory_lock_shared" in calls[0].args[0]
+    assert calls[0].args[1] == str(ORG_A)
     assert lock_call.args[1] == f"calendar-credentials:{ORG_A}"
     assert unlock_call.args[1] == f"calendar-credentials:{ORG_A}"
 
@@ -225,7 +227,8 @@ async def test_missing_freebusy_scope_requires_reconnect_before_refresh(lifecycl
     assert caught.value.code == "reconnect_required"
     assert refresh_called == []
     assert conn.fetchval.await_count == 0
-    assert conn.execute.await_count == 2  # advisory lock and unlock only
+    assert conn.execute.await_count == 4  # scoped erasure and credential locks/unlocks only
+    assert all("pg_advisory_" in call.args[0] for call in conn.execute.await_args_list)
 
 
 @pytest.mark.asyncio

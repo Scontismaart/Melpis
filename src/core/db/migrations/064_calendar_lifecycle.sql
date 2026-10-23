@@ -28,6 +28,7 @@ ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_claimed_acti
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_payload_hash TEXT;
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_event_etag TEXT;
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_verified_at TIMESTAMPTZ;
+ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_availability_at TIMESTAMPTZ;
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_inbound_message_id UUID;
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_notification_channel TEXT;
 ALTER TABLE external_booking_sync ADD COLUMN IF NOT EXISTS calendar_authoritative BOOLEAN NOT NULL DEFAULT FALSE;
@@ -58,6 +59,7 @@ LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE mode TEXT; link RECORD; action TEXT; verified BOOLEAN := FALSE;
 BEGIN
     SELECT config#>>'{a05,authority}' INTO mode FROM booking_settings WHERE organization_id=NEW.organization_id;
+    IF mode IS DISTINCT FROM 'google_authoritative' THEN NEW.calendar_confirm_pending := FALSE; END IF;
     IF TG_OP='UPDATE' THEN
         -- A pending confirmation authorizes this exact proposal only. Editing
         -- details requires a fresh explicit confirmation, never inherited intent.
@@ -82,7 +84,9 @@ BEGIN
                   AND s.calendar_connection_epoch=c.connection_epoch
                   AND c.connection_status='connected' AND c.sync_enabled
                   AND s.calendar_dispatch_state='verified' AND s.calendar_authoritative
-                  AND s.calendar_verified_at>NOW()-INTERVAL '30 seconds') INTO verified;
+                  AND s.calendar_availability_at>clock_timestamp()-INTERVAL '30 seconds'
+                  AND s.calendar_availability_at<=clock_timestamp()
+                  AND s.calendar_verified_at>clock_timestamp()-INTERVAL '30 seconds') INTO verified;
             IF verified THEN RETURN NEW; END IF;
         END IF;
         NEW.calendar_revision := OLD.calendar_revision+1;

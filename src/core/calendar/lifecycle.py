@@ -114,6 +114,7 @@ class CalendarLifecycle:
             return
         body = await s.event_body(dict(booking), claim)
         digest = body["extendedProperties"]["private"]["payload_hash"]
+        claim["calendar_payload_hash"] = digest
         if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event, body):
             return
         if event and event.get("status") == "cancelled":
@@ -142,11 +143,11 @@ class CalendarLifecycle:
         if not event or not s.matches(event, claim, digest):
             await self.queue.fail(claim, "mutation_unverified", uncertain=claim.get("dispatched", False), blocked=True)
             return
-        if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event, body):
+        if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event, body, allow_superseded=True):
             return
         await self.queue.verified(claim, event["id"], event["etag"], self.finalize)
 
-    async def verify_slot(self, provider, claim, connection, event, body=None):
+    async def verify_slot(self, provider, claim, connection, event, body=None, *, allow_superseded=False):
         candidate = body or event
         start, end = aware_utc(candidate["start"]["dateTime"]), aware_utc(candidate["end"]["dateTime"])
         # A GET recovery can encounter our own event: exclude only that exact owned event.
@@ -154,11 +155,13 @@ class CalendarLifecycle:
             claim["organization_id"], start, end, connection=connection, service=provider,
             event_id=event["id"] if event else None,
         )
-        if result.status != AvailabilityStatus.FREE:
+        if result.status != AvailabilityStatus.FREE or result.checked_at is None:
             await self.queue.fail(claim, "slot_busy" if result.status == AvailabilityStatus.BUSY else "availability_unknown",
                                   uncertain=claim["recovery"], blocked=not claim["recovery"])
             return False
-        return await self.queue.current(claim, require_revision=not claim["recovery"])
+        if not await self.queue.availability_checked(claim, result.checked_at):
+            return False
+        return await self.queue.current(claim, require_revision=not (claim["recovery"] or allow_superseded))
 
     async def finalize(self, conn, booking, sync):
         """No network: atomically revalidate intent, local capacity, policy and proof."""
@@ -177,16 +180,21 @@ class CalendarLifecycle:
             AND data=$2 AND EXTRACT(HOUR FROM ora)=$3 AND id<>$4
             AND stato IN ('in_attesa','confermata','da_verificare','completata')""", org, booking["data"], booking["ora"].hour, booking["id"])
         valid = type(capacity) is int and int(used) + booking["coperti"] <= capacity
+        organization = await conn.fetchrow("SELECT timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE", org)
+        expected = self.service.event_body_for(booking, sync, organization["timezone"])
+        valid = valid and expected["extendedProperties"]["private"]["payload_hash"] == sync["calendar_payload_hash"]
         if sync["calendar_inbound_message_id"]:
             latest = await conn.fetchval("""SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2
                 AND direction='inbound' ORDER BY created_at DESC,id DESC LIMIT 1""", org, UUID(str(booking["id_conversazione"])))
             from src.core.bookings.auto_policy import parse_and_validate_auto_booking
-            organization = await conn.fetchrow("SELECT timezone,business_profile FROM organizations WHERE id=$1", org)
             root = json.loads(config["config"]) if isinstance(config["config"], str) else config["config"]
+            profile = organization["business_profile"] or {}
+            if isinstance(profile, str):
+                profile = json.loads(profile)
             decision = parse_and_validate_auto_booking({"config": root, "capienze_orarie": capacities}, organization["timezone"],
                 {"service": "ristorante/tavolo", "date": booking["data"].isoformat(), "time": booking["ora"].strftime("%H:%M"),
                  "party_size": booking["coperti"], "duration_minutes": 60})
-            valid = valid and latest == sync["calendar_inbound_message_id"] and decision.accepted
+            valid = valid and latest == sync["calendar_inbound_message_id"] and decision.accepted and profile.get("verticale") == "ristorante"
         if not valid:
             # Remove an event obtained for a superseded intent. Never confirm it.
             await conn.execute("""UPDATE bookings SET stato='da_verificare',calendar_confirm_pending=FALSE,

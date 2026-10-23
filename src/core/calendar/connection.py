@@ -47,12 +47,17 @@ async def connection_lock(pool, org_id):
     """Cross-worker serialization. Never an application-wide credential lock."""
     async with pool.acquire() as conn:
         key = f"calendar-credentials:{org_id}"
-        await conn.execute("SELECT pg_advisory_lock(hashtextextended($1,604))", key)
+        await conn.execute("SELECT pg_advisory_lock_shared(hashtextextended($1::text,606))", str(org_id))
         try:
-            yield conn
+            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1,604))", key)
+            try:
+                yield conn
+            finally:
+                if not conn.is_closed():
+                    await asyncio.shield(conn.execute("SELECT pg_advisory_unlock(hashtextextended($1,604))", key))
         finally:
             if not conn.is_closed():
-                await asyncio.shield(conn.execute("SELECT pg_advisory_unlock(hashtextextended($1,604))", key))
+                await asyncio.shield(conn.execute("SELECT pg_advisory_unlock_shared(hashtextextended($1::text,606))", str(org_id)))
 
 
 class CalendarConnection:
@@ -125,7 +130,7 @@ class CalendarConnection:
             return dict(previous) if previous else None
 
     async def mark_error(self, org_id, epoch, code, *, revoked=False, reconnect=False):
-        async with self.pool.acquire() as conn:
+        async with connection_lock(self.pool, org_id) as conn:
             await conn.execute("""UPDATE google_calendar_credentials SET last_error_code=$3,
                 connection_status=CASE WHEN $4 THEN 'revoked' WHEN $5 THEN 'reconnect_required' ELSE connection_status END,
                 updated_at=NOW() WHERE organization_id=$1 AND connection_epoch=$2""",
