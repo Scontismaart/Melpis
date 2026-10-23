@@ -1,6 +1,6 @@
 import os
-import re
 import uuid
+from datetime import datetime
 from unittest.mock import patch
 import httpx
 import pytest
@@ -10,7 +10,7 @@ from src.core.onboarding import save_profile
 from src.core.receptionist.conversation_orchestrator import ConversationOrchestrator
 from src.core.receptionist.models import OrchestrationInput
 from src.core.guardrails.intent_classifier import IntentResult
-from src.models.schemas import OnboardingProfileInput, RispostaOutput
+from src.models.schemas import MessaggioInput, OnboardingProfileInput, RispostaOutput
 from src.agents.responder_agent import crea_responder_agent
 from src.agents.prompts import serializza_dati_non_fidati
 
@@ -225,6 +225,13 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
     async_client, repo, sample_org, monkeypatch, mock_provider_context_open,
 ):
     """Build the real CrewAI prompts from DB profile/RAG data with runtime mocked."""
+    # Compare configuration changes with identical message metadata. Real
+    # wall-clock timestamps can cross a second/day boundary between requests.
+    received_at = datetime(2026, 10, 23, 12, 0, 0)
+    monkeypatch.setattr(
+        "src.core.receptionist.conversation_orchestrator.MessaggioInput",
+        lambda **values: MessaggioInput(timestamp=received_at, **values),
+    )
     question = "Quanto costa il Massaggio Relax?"
     document = await repo.create_document(
         str(sample_org["id"]), "listino.txt", tipo="upload", fonte="listino.txt"
@@ -337,10 +344,7 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
     old_fact = "Massaggio Relax: 25 euro, durata 50 minuti."
     new_fact = "Massaggio Relax: 40 euro, durata 50 minuti."
     assert old_fact in first["task"] and new_fact not in first["task"]
-    def without_live_clock(prompt: str) -> str:
-        return re.sub(r"\bore \d{2}:\d{2}\b", "ore <time>", prompt)
-
-    assert without_live_clock(second["task"]) == without_live_clock(first["task"])
+    assert second["task"] == first["task"]
     assert new_fact in third["task"] and old_fact not in third["task"]
     assert first["role"] == "Assistente clienti di Oasi del Benessere SPA"
     assert second["role"] == "Assistente clienti di Oasi SPA Milano"
