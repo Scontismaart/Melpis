@@ -16,7 +16,7 @@ google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
 httpx==0.28.1
 Pillow==13.0.0
-pyairtable==2.3.7
+pyairtable==3.5.0.post1
 pymupdf==1.28.0
 pypdf==6.21.2
 pytest==9.1.1
