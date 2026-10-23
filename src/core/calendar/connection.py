@@ -79,9 +79,11 @@ class CalendarConnection:
         async with connection_lock(self.pool, org_id) as conn, conn.transaction():
             generation = uuid4()
             await conn.execute("""INSERT INTO google_calendar_credentials
-                (organization_id,connection_status,sync_enabled,oauth_generation)
-                VALUES($1,'disconnected',FALSE,$2)
-                ON CONFLICT(organization_id) DO UPDATE SET oauth_generation=$2,updated_at=NOW()""", org_id, generation)
+                (organization_id,connection_status,sync_enabled,oauth_generation,oauth_sync_enabled)
+                VALUES($1,'disconnected',FALSE,$2,TRUE)
+                ON CONFLICT(organization_id) DO UPDATE SET oauth_generation=$2,
+                    oauth_sync_enabled=CASE WHEN google_calendar_credentials.connection_status='disconnected'
+                        THEN TRUE ELSE google_calendar_credentials.sync_enabled END,updated_at=NOW()""", org_id, generation)
             await conn.execute("DELETE FROM oauth_nonces WHERE organization_id=$1 AND purpose='calendar'", org_id)
             await conn.execute("""INSERT INTO oauth_nonces(nonce,organization_id,created_at,purpose,calendar_generation)
                 VALUES($1,$2,NOW(),'calendar',$3)""", nonce, org_id, generation)
@@ -105,7 +107,7 @@ class CalendarConnection:
             return bool(await conn.fetchval("""UPDATE google_calendar_credentials
                 SET access_token=$3,refresh_token=$4,token_expiry=$5,connection_epoch=$6,
                     connection_status='connected',granted_scopes=$7::jsonb,credential_version=credential_version+1,
-                    sync_enabled=TRUE,last_error_code=NULL,last_verified_at=NULL,updated_at=NOW()
+                    sync_enabled=oauth_sync_enabled,last_error_code=NULL,last_verified_at=NULL,updated_at=NOW()
                 WHERE organization_id=$1 AND oauth_generation=$2 RETURNING TRUE""",
                 UUID(str(org_id)), generation,
                 self.fernet.encrypt(creds.token.encode()).decode(),

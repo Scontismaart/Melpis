@@ -108,7 +108,7 @@ async def save_calendar_settings(service, org_id, body):
             ON CONFLICT(organization_id) DO UPDATE SET config=EXCLUDED.config,updated_at=NOW()""", org, json.dumps(config))
         if current:
             await conn.execute("""UPDATE google_calendar_credentials SET calendar_id=$2,
-                resource_calendar_ids=$3::jsonb,sync_enabled=$4,updated_at=NOW() WHERE organization_id=$1""",
+                resource_calendar_ids=$3::jsonb,sync_enabled=$4,oauth_sync_enabled=$4,updated_at=NOW() WHERE organization_id=$1""",
                 org, candidate["calendar_id"], json.dumps(list(resources_for(candidate))[1:]), candidate.get("sync_enabled", True))
         # Mode changes do not opt historical bookings in. Existing jobs are frozen,
         # with uncertainty preserved, until explicitly reconciled or cancelled.

@@ -4,6 +4,7 @@ ALTER TABLE google_calendar_credentials ALTER COLUMN refresh_token DROP NOT NULL
 ALTER TABLE google_calendar_credentials ALTER COLUMN token_expiry DROP NOT NULL;
 ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS connection_epoch UUID NOT NULL DEFAULT gen_random_uuid();
 ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS oauth_generation UUID NOT NULL DEFAULT gen_random_uuid();
+ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS oauth_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS credential_version BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS connection_status TEXT NOT NULL DEFAULT 'reconnect_required';
 ALTER TABLE google_calendar_credentials ADD COLUMN IF NOT EXISTS granted_scopes JSONB NOT NULL DEFAULT '[]';

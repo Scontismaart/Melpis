@@ -64,6 +64,9 @@ class GoogleCalendarService:
     def encrypt_secret(self, value):
         return self.fernet.encrypt(value.encode()).decode()
 
+    def _decrypt(self, value):
+        return self.fernet.decrypt(value.encode()).decode()
+
     def _get_client_config(self):
         if not google_calendar_enabled():
             raise CalendarUnavailable("disabled")
