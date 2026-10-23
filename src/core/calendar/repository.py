@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 from contextlib import asynccontextmanager
 
 from src.core.db.scoping import system_scope
+from src.core.calendar.connection import CalendarUnavailable
 
 
 class CalendarQueue:
@@ -109,7 +110,7 @@ class CalendarQueue:
         async with self._write(claim["organization_id"], lock_organization=True) as conn:
             # Disconnect/refresh/settings take the credential row before queue
             # rows. Share that order, then follow A05's conversation/capacity locks.
-            await conn.fetchrow("SELECT organization_id FROM google_calendar_credentials WHERE organization_id=$1 FOR SHARE",
+            await conn.fetchrow("SELECT organization_id FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE",
                                 claim["organization_id"])
             before = await conn.fetchrow("SELECT id_conversazione,data,ora FROM bookings WHERE organization_id=$1 AND id=$2",
                                         claim["organization_id"], claim["internal_booking_id"])
@@ -147,11 +148,23 @@ class CalendarQueue:
                                None if claim["calendar_claimed_action"] == "delete" else event_id)
             if finalize and row["sync_status"] == "succeeded" and claim["calendar_claimed_action"] == "authoritative":
                 await finalize(conn, dict(booking), dict(row))
-            await conn.execute("""UPDATE external_booking_sync SET calendar_lease_token=NULL,calendar_lease_until=NULL
-                WHERE organization_id=$1 AND id=$2 AND calendar_lease_token=$3 AND calendar_fence=$4""",
-                claim["organization_id"], claim["id"], claim["calendar_lease_token"], claim["calendar_fence"])
             await conn.execute("""UPDATE google_calendar_credentials SET last_sync_at=NOW(),last_error_code=NULL
                 WHERE organization_id=$1 AND connection_epoch=$2""", claim["organization_id"], claim["calendar_connection_epoch"])
+            # Last statement before COMMIT: notification/FK locks may have
+            # delayed us after the first proof check. Roll back every local
+            # confirmation/outbox write if ownership or freshness expired.
+            finished = await conn.fetchval("""UPDATE external_booking_sync s
+                SET calendar_lease_token=NULL,calendar_lease_until=NULL
+                WHERE s.organization_id=$1 AND s.id=$2 AND s.calendar_lease_token=$3 AND s.calendar_fence=$4
+                  AND s.calendar_lease_until>clock_timestamp()
+                  AND (s.calendar_claimed_action<>'authoritative'
+                    OR NOT EXISTS(SELECT 1 FROM bookings b WHERE b.organization_id=$1 AND b.id=s.internal_booking_id
+                        AND b.stato='confermata' AND b.calendar_revision=s.calendar_claimed_revision)
+                    OR (s.calendar_availability_at>clock_timestamp()-INTERVAL '30 seconds'
+                        AND s.calendar_availability_at<=clock_timestamp())) RETURNING TRUE""",
+                claim["organization_id"], claim["id"], claim["calendar_lease_token"], claim["calendar_fence"])
+            if not finished:
+                raise CalendarUnavailable("lease_or_proof_expired")
             return True
 
     async def renew(self, claim):

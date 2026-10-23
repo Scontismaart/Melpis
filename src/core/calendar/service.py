@@ -107,6 +107,7 @@ class GoogleCalendarService:
     async def availability(self, org_id, starts_at, ends_at, *, connection=None, service=None):
         if not google_calendar_enabled():
             return CalendarAvailability(AvailabilityStatus.DISABLED, reason_code="disabled")
+        row = None
         try:
             if starts_at.utcoffset() is None or ends_at.utcoffset() is None or starts_at >= ends_at:
                 raise ValueError("Invalid availability window")
@@ -128,6 +129,11 @@ class GoogleCalendarService:
             return result if current else CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="connection_changed")
         except Exception:
             logger.warning("calendar=availability_unknown organization_id=%s", org_id)
+            if row and row.get("connection_epoch"):
+                try:
+                    await self.connection.mark_error(org_id, row["connection_epoch"], "provider_unavailable")
+                except Exception:
+                    pass  # No success claim when health persistence is also unavailable.
             return CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="provider_unavailable")
 
     async def get_busy_intervals(self, org_id, data):

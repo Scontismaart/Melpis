@@ -254,7 +254,10 @@ async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai
     org = sample_org["id"]
     service, google, booking_repo, _ = await setup(pg_pool, org, monkeypatch, "google_authoritative", create_booking=False)
     async with pg_pool.acquire() as conn:
-        await conn.execute("UPDATE organizations SET business_profile=$2::jsonb WHERE id=$1", org, json.dumps({"verticale": "ristorante"}))
+        await conn.execute("""UPDATE organizations SET business_profile=$2::jsonb,
+            subscription_status='trialing',trial_start=NOW()-INTERVAL '1 hour',
+            trial_end=NOW()+INTERVAL '6 days',ai_accounting_blocked=FALSE WHERE id=$1""",
+            org, json.dumps({"verticale": "ristorante"}))
         await conn.execute("UPDATE booking_settings SET config=$2::jsonb WHERE organization_id=$1", org,
                            json.dumps(_policy("google_authoritative")))
     day = (date.today() + timedelta(days=8)).isoformat()

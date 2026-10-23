@@ -146,13 +146,30 @@ The broader local backup/restore and migration gates in
 
 ## Review evidence status
 
-The scoped local Calendar availability, queue lifecycle, entry-point, and
-scheduler unit run completed with **44 passed**. After the booking UI update,
-`node --test tests/frontend/dashboard-bookings-module.test.cjs` completed with
-**54 passed**, and ESLint completed successfully for
-`web/dashboard-bookings.js`. These are observed local checks, not CI and not
-proof of PostgreSQL migration behavior or provider readiness. CI, PostgreSQL
-tests against an approved disposable database, runtime schema verification,
-C03 staging certification, and the cutover gates remain pending root
-confirmation and execution. No Google network call or remote operation was
-made as part of this review.
+PR [#131](https://github.com/Scontismaart/Melpis/pull/131) records the final head
+SHA and its exact CI receipts; earlier successful checks do not certify a newer
+head. Local snapshots include the full unit suite (**1,477 passed**, before the
+last two health regressions), the full frontend suite (**405 passed, 3 skipped**),
+and **74 passed** in the final targeted OAuth/MFA/availability/lifecycle run.
+Ruff, frontend lint and tenant-scoping checks passed locally.
+
+The unchanged CI runs the complete application suite against disposable
+PostgreSQL/Valkey, the migration check through 064, installed-dependency audit,
+frontend checks, and four API/web Docker builds. The audit retains only the
+existing explicitly reviewed baseline findings; no security exception was
+added for B01. PR builds do not publish GHCR images or deploy services.
+
+PostgreSQL regressions cover authoritative deferred confirmation, optional
+provider failure, create/update/delete, concurrent claims, durable per-tenant
+dispatch exclusion, timeout/GET-only recovery, reconnect receipts, cancellation
+during creation, revoked authorization, timezone changes, GDPR blocking and
+lease expiry during final notification insertion. The final transaction CAS
+checks wall-clock lease and fresh availability after all notification/FK waits;
+failure rolls back confirmation/outbox/receipt together and preserves the
+possibly-sent request for reconciliation. Reconnect never clears uncertainty
+on 404 and never re-enables an explicitly paused integration.
+
+These are synthetic provider tests, not real Google certification. Actual
+target-schema verification, C03 staging certification and cutover gates remain
+unexecuted. No Google network call, remote migration or deployment was made
+as part of this review.

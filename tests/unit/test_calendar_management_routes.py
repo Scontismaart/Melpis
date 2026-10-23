@@ -260,6 +260,25 @@ async def test_unknown_availability_probe_blocks_authority_change_without_databa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode, expected", [
+    ("internal_calendar_sync", "sync_failed"),
+    ("google_authoritative", "authoritative_unavailable"),
+])
+async def test_manual_check_cannot_report_old_success_when_current_probe_is_unknown(monkeypatch, mode, expected):
+    from src.core.calendar.availability import AvailabilityStatus, CalendarAvailability
+
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    pool = _Pool(_credential_row(), {"a05": {"enabled": False, "authority": mode}})
+    service = SimpleNamespace(availability=AsyncMock(return_value=CalendarAvailability(
+        AvailabilityStatus.UNKNOWN, reason_code="provider_unavailable")))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pool, calendar_service=service)))
+    payload = await routes.calendar_check(request, {"organization_id": ORG})
+    assert payload["integration_status"] == expected
+    assert payload["error_code"] == "provider_unavailable"
+    assert payload["mode"] == mode
+
+
+@pytest.mark.asyncio
 async def test_authority_mode_change_does_not_auto_enable_a05(monkeypatch):
     monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
     pool = _Pool(config={"a05": {"enabled": False, "authority": "google_authoritative"}})

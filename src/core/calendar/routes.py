@@ -219,5 +219,10 @@ async def calendar_check(request: Request, user: dict = Depends(require_ruolo("o
     from src.core.calendar.management import calendar_status_payload
     _require_calendar_enabled()
     now = datetime.now(timezone.utc)
-    await _service(request).availability(user["organization_id"], now, now + timedelta(minutes=1))
-    return await calendar_status_payload(request.app.state.pool, user["organization_id"])
+    result = await _service(request).availability(user["organization_id"], now, now + timedelta(minutes=1))
+    payload = await calendar_status_payload(request.app.state.pool, user["organization_id"])
+    from src.core.calendar.availability import CalendarAvailability
+    if not isinstance(result, CalendarAvailability) or not result.verified:
+        payload["integration_status"] = "authoritative_unavailable" if payload["mode"] == "google_authoritative" else "sync_failed"
+        payload["error_code"] = "provider_unavailable"
+    return payload
