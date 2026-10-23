@@ -33,7 +33,15 @@ def postgres_container():
 @pytest.fixture
 async def pg_pool(postgres_container):
     dsn = postgres_container.get_connection_url().replace("+psycopg2", "")
-    pool = await asyncpg.create_pool(dsn=dsn, min_size=2, max_size=10)
+    # Other integration tests may install pgvector in Supabase's extensions
+    # schema. Match core's connection contract so the real vector type remains
+    # visible when this fixture recreates public and applies the full schema.
+    pool = await asyncpg.create_pool(
+        dsn=dsn,
+        min_size=2,
+        max_size=10,
+        server_settings={"search_path": "public, extensions"},
+    )
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE SCHEMA IF NOT EXISTS auth;
