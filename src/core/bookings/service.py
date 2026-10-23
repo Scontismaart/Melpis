@@ -522,8 +522,11 @@ class BookingService:
             if self.calendar_service:
                 await self.calendar_service.sync_booking_state(updated, org_id)
             return await self.repo.get_booking(org_id, booking_id)
+        if b["stato"] == "confermata":
+            return updated  # Replay cannot emit a second confirmation or deposit.
         msg = f"La tua prenotazione del {b['data']} alle {b['ora']} per {b['coperti']} persone e' confermata!"
-        await self._send_whatsapp(org_id, b["telefono"], msg)
+        await self._send_whatsapp(org_id, b["telefono"], msg,
+            idempotency_key=f"booking-confirm-manual:{org_id}:{booking_id}:{updated.get('calendar_revision', 0)}")
         if b.get("richiede_deposito"):
             cfg = await self._get_deposito_config(org_id)
             importo = (cfg or {}).get("importo_default", 10.0)

@@ -10,6 +10,11 @@ from src.core.calendar.service import GoogleCalendarService
 FERNET_KEY = "GT4pFJ9wm5vlxRS2MSmSF3tjbThnKnon-sgG5TVYILE="
 
 
+@pytest.fixture(autouse=True)
+def calendar_enabled(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+
+
 def _svc():
     return GoogleCalendarService(repo=MagicMock(), encryption_key=FERNET_KEY)
 
@@ -69,3 +74,13 @@ async def test_get_busy_intervals_invalid_timezone_is_unknown_not_verified_free(
     assert result.reason_code == "invalid_timezone_or_date"
     assert result.intervals == ()
     svc.availability.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_disabled_calendar_does_not_read_timezone_or_database(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "false")
+    svc = _svc()
+    svc._get_org_timezone = AsyncMock(side_effect=AssertionError("disabled integration accessed DB"))
+    result = await svc.get_busy_intervals("org-1", "2026-09-02")
+    assert result.status is AvailabilityStatus.DISABLED
+    svc._get_org_timezone.assert_not_awaited()
