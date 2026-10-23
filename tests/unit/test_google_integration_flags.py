@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -42,13 +43,21 @@ class _ConfiguredPool:
         self.acquire_calls = 0
         self.fetch = AsyncMock(return_value=[{"id": "org-1"}])
         self.execute = AsyncMock()
+        self.read_queries = []
 
     def acquire(self):
         self.acquire_calls += 1
-        connection = SimpleNamespace(
-            fetchrow=AsyncMock(return_value=self.row),
-            execute=AsyncMock(),
-        )
+        async def fetchrow(query, *_args):
+            self.read_queries.append(query)
+            if "external_booking_sync" in query:
+                return {"pending_count": 0, "failed_count": 0, "uncertain_count": 0}
+            return self.row
+        async def fetchval(query, *_args):
+            if "SELECT timezone" in query:
+                return "UTC"
+            return None
+        connection = SimpleNamespace(fetchrow=AsyncMock(side_effect=fetchrow),
+                                     fetchval=AsyncMock(side_effect=fetchval), execute=AsyncMock())
         return _Acquire(connection)
 
 
@@ -70,28 +79,35 @@ async def test_calendar_routes_block_oauth_status_and_activation(
     _set_disabled(monkeypatch, "GOOGLE_CALENDAR_ENABLED", flag_value)
     pool = _ConfiguredPool()
     request = _request(pool)
-    user = {"organization_id": "org-1"}
+    user = {"organization_id": "11111111-1111-1111-1111-111111111111"}
     make_flow = MagicMock(side_effect=AssertionError("OAuth must not start"))
     monkeypatch.setattr(calendar_routes, "_make_flow", make_flow)
 
     for operation in (
-        calendar_routes.calendar_auth(request, user=user, mfa={}),
-        calendar_routes.calendar_status(request, user=user),
-        calendar_routes.calendar_settings(
-            calendar_routes.CalendarSettingsInput(sync_enabled=True),
+        lambda: calendar_routes.calendar_auth(request, user=user, mfa={}),
+        lambda: calendar_routes.calendar_settings(
+            calendar_routes.CalendarSettingsInput(mode="google_authoritative"),
             request,
             user=user,
             mfa={},
         ),
     ):
         with pytest.raises(HTTPException) as exc:
-            await operation
+            await operation()
         assert exc.value.status_code == 503
+
+    # Read-only GET remains available while the feature is off so the UI can
+    # report a disabled integration state without attempting provider traffic.
+    status = await calendar_routes.calendar_status(request, user=user)
+    assert status["enabled"] is False
+    assert status["integration_status"] == "disabled"
 
     callback = await calendar_routes.calendar_oauth2callback(request)
     assert callback.headers["location"].endswith("calendar=error&reason=disabled")
     make_flow.assert_not_called()
-    assert pool.acquire_calls == 0
+    assert pool.acquire_calls == 1
+    assert len(pool.read_queries) == 3
+    assert pool.execute.await_count == 0
 
 
 @pytest.mark.asyncio
@@ -151,16 +167,16 @@ async def test_calendar_service_blocks_refresh_and_all_google_operations(
     monkeypatch.setattr(service, "_build_service", build_service)
 
     assert await service._get_credentials("org-1") is None
-    assert await service.create_event({}, "org-1") is None
-    assert await service.update_event({}, "org-1") is None
-    assert await service.delete_event({}, "org-1") is None
-    assert await service.get_busy_intervals("org-1", "2026-09-15") == []
+    booking = {"id": UUID("22222222-2222-2222-2222-222222222222"), "organization_id": UUID("11111111-1111-1111-1111-111111111111")}
+    assert await service.create_event(booking, booking["organization_id"]) is None
+    assert await service.update_event(booking, booking["organization_id"]) is None
+    assert await service.delete_event(booking, booking["organization_id"]) is None
+    assert (await service.get_busy_intervals(booking["organization_id"], "2026-09-15")).status.value == "disabled_or_unconfigured"
 
     create_event = AsyncMock(side_effect=AssertionError("event must not sync"))
     monkeypatch.setattr(service, "create_event", create_event)
-    await service.sync_booking_state({"stato": "confermata"}, "org-1")
+    await service.sync_booking_state(booking, booking["organization_id"])
 
-    assert pool.acquire_calls == 0
     build_service.assert_not_awaited()
     create_event.assert_not_awaited()
 

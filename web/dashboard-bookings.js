@@ -3,6 +3,7 @@
   if (root) root.MelpisDashboardBookings = api;
 })(typeof window !== "undefined" ? window : globalThis, function createDashboardBookings(root) {
   "use strict";
+  const SAFE_CALENDAR_SYNC_ERROR_CODES = new Set(["sync_failed", "retry_pending"]);
   return Object.freeze({
     create(deps) {
       const { API_BASE, apiFetch, _escapeHtml, _toDateKey, _tDash,
@@ -458,18 +459,38 @@
         tableBody.innerHTML = prenotazioniGiorno.map((p) => {
           const ora = String(p.ora || "").slice(0, 5);
           const stato = statoNormalizzatoPrenotazione(p);
-          const syncStatus = stato === "confermata" && p.external_sync_provider === "google"
+          const syncStatus = p.external_sync_provider === "google"
             ? String(p.external_sync_status || "").toLowerCase()
             : "";
-          const syncCode = typeof p.external_sync_error_code === "string" && /^[a-z0-9_-]{1,60}$/i.test(p.external_sync_error_code)
+          const syncCode = typeof p.external_sync_error_code === "string" && SAFE_CALENDAR_SYNC_ERROR_CODES.has(p.external_sync_error_code)
             ? p.external_sync_error_code
             : "";
           let syncLabel = "";
-          if (["pending", "pending_retry", "failed"].includes(syncStatus)) {
-            syncLabel = "Confermata in Melpis, sincronizzazione Google in attesa";
+          if (p.calendar_confirm_pending === true) {
+            if (syncStatus === "uncertain") {
+              syncLabel = "Prenotazione non confermata: esito Google incerto, in attesa di nuova verifica";
+            } else if (["blocked", "failed"].includes(syncStatus)) {
+              syncLabel = "Prenotazione non confermata: verifica Google bloccata";
+            } else {
+              syncLabel = "Prenotazione non confermata: in attesa di nuova verifica Google";
+            }
             if (syncCode) syncLabel += ` (${syncCode})`;
-          } else if (syncStatus === "synced") {
-            syncLabel = "Sincronizzata con Google";
+          } else if (stato === "confermata") {
+            if (["pending", "pending_retry", "processing"].includes(syncStatus)) {
+              syncLabel = "Confermata in Melpis, sincronizzazione Google in attesa";
+              if (syncCode) syncLabel += ` (${syncCode})`;
+            } else if (syncStatus === "failed") {
+              syncLabel = "Confermata in Melpis, sincronizzazione Google non riuscita";
+              if (syncCode) syncLabel += ` (${syncCode})`;
+            } else if (syncStatus === "blocked") {
+              syncLabel = "Confermata in Melpis, sincronizzazione Google bloccata";
+              if (syncCode) syncLabel += ` (${syncCode})`;
+            } else if (syncStatus === "uncertain") {
+              syncLabel = "Confermata in Melpis, esito Google incerto";
+              if (syncCode) syncLabel += ` (${syncCode})`;
+            } else if (["succeeded", "synced"].includes(syncStatus)) {
+              syncLabel = "Sincronizzata con Google";
+            }
           }
           let badgeClass = "booking-badge-confermata";
           if (stato.includes("attesa")) badgeClass = "booking-badge-in_attesa";

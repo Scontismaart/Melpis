@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.core.release_config import network_config_errors
+from src.core.calendar.production_readiness import calendar_production_readiness_errors
 
 
 COMMERCIAL_BOOTSTRAP_PROFILE = "commercial_bootstrap"
@@ -180,12 +181,16 @@ def validate(config):
         "LLM_COST_POLICY": "free_only",
         "AUTH_COOKIE_SECURE": "true",
         "RATE_LIMIT_BACKEND": "redis",
-        "GOOGLE_CALENDAR_ENABLED": "false",
         "GOOGLE_BUSINESS_ENABLED": "false",
     }
     for name, expected_value in expected.items():
         if config.get(name) != expected_value:
             errors.append(f"{name}: must be {expected_value}")
+    errors.extend(
+        calendar_production_readiness_errors(
+            config, require_explicit_disabled=True
+        )
+    )
     if provider == "groq":
         for name in ("GROQ_FREE_ACCOUNT_CONFIRMED", "GROQ_ZDR_CONFIRMED"):
             if config.get(name) != "true":

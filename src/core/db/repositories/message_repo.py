@@ -309,15 +309,16 @@ class MessageRepository(TenantScopedRepository):
                 rows = await conn.fetch("""
                     SELECT o.id,o.outbound_message_id
                     FROM booking_confirmation_outbox o
-                    JOIN messages inbound ON inbound.id=o.inbound_message_id
+                    LEFT JOIN messages inbound ON inbound.id=o.inbound_message_id
                       AND inbound.organization_id=o.organization_id
                     JOIN messages outbound ON outbound.id=o.outbound_message_id
                       AND outbound.organization_id=o.organization_id
                     JOIN bookings b ON b.id=o.booking_id
                       AND b.organization_id=o.organization_id
                     WHERE o.status='waiting_for_reply'
-                      AND inbound.replied_at IS NOT NULL
+                      AND (o.inbound_message_id IS NULL OR inbound.replied_at IS NOT NULL)
                       AND b.stato='confermata'
+                      AND b.calendar_revision=o.booking_revision
                       AND outbound.status='queued'
                     ORDER BY o.created_at LIMIT $1
                     FOR UPDATE OF o SKIP LOCKED
@@ -349,7 +350,8 @@ class MessageRepository(TenantScopedRepository):
                     SELECT b.stato FROM booking_confirmation_outbox o
                     JOIN bookings b ON b.id=o.booking_id
                       AND b.organization_id=o.organization_id
-                    WHERE o.organization_id=$1 AND o.outbound_message_id=$2
+                    WHERE o.organization_id=$1 AND b.organization_id=$1 AND o.outbound_message_id=$2
+                      AND b.calendar_revision=o.booking_revision
                     FOR UPDATE OF b
                 """, uuid.UUID(str(organization_id)), uuid.UUID(str(message_id)))
                 yield state == "confermata"

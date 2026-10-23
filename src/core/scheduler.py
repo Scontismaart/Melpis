@@ -213,29 +213,7 @@ async def _calendar_sync_job(pool):
     from src.core.calendar import GoogleCalendarService
     repo = OrganizationRepository(pool)
     calendar_service = GoogleCalendarService(repo, encryption_key)
-    orgs = await pool.fetch("""
-        SELECT organization_id FROM google_calendar_credentials
-        WHERE sync_enabled = true
-    """)
-    created = 0
-    for org in orgs:
-        org_id = org["organization_id"]
-        bookings = await pool.fetch("""
-            SELECT * FROM bookings
-            WHERE organization_id = $1
-              AND stato IN ('in_attesa', 'confermata', 'da_verificare')
-              AND data >= CURRENT_DATE
-              AND google_event_id IS NULL
-        """, org_id)
-        for b in bookings:
-            await calendar_service.sync_booking_state(dict(b), org_id)
-            created += 1
-        await pool.execute(
-            "UPDATE google_calendar_credentials SET last_sync_at = NOW() WHERE organization_id = $1",
-            org_id,
-        )
-    if created:
-        logger.info("calendar=sync_complete created=%d", created)
+    await calendar_service.process_pending(limit=20)
 
 
 def _run_nonce_cleanup():

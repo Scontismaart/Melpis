@@ -133,6 +133,121 @@ test("OAuth authorization does not redirect after its original integration scope
   assert.equal(harness.window.location.pathname, "/app/overview");
 });
 
+test("calendar settings display the server readiness state and honest mode without implying bidirectional sync", async (t) => {
+  const harness = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=calendar",
+    overrides: {
+      "/api/calendar/status": {
+        enabled: true,
+        connected: true,
+        mode: "google_authoritative",
+        integration_status: "authoritative_unavailable",
+        error_code: "availability_unverified",
+        calendar_id: "primary-team",
+        resource_calendar_ids: ["room-a"],
+        sync_enabled: true,
+        last_sync_at: null,
+        pending_count: 2,
+        failed_count: 1,
+        uncertain_count: 3,
+      },
+    },
+  });
+  t.after(harness.dispose);
+  await harness.ready();
+  await harness.settle();
+  assert.equal(harness.document.querySelector("#integ-calendar-stato .badge-status-label").textContent, "Google non disponibile");
+  assert.match(harness.document.getElementById("integ-calendar-sub").textContent, /Google autorevole/);
+  assert.equal(harness.document.getElementById("integ-calendar-mode").value, "google_authoritative");
+  assert.equal(harness.document.getElementById("integ-calendar-primary-id").value, "primary-team");
+  assert.equal(harness.document.getElementById("integ-calendar-resource-ids").value, "room-a");
+  assert.equal(harness.document.getElementById("integ-calendar-sync-enabled").checked, true);
+  assert.match(harness.document.getElementById("integ-calendar-counts").textContent, /In attesa: 2 · Non riuscite: 1 · Esito incerto: 3/);
+  assert.match(harness.document.getElementById("integ-calendar-help").textContent, /Non è stato possibile verificare la disponibilità/);
+  assert.equal(harness.document.body.textContent.includes("Bidirezionale automatica"), false);
+  assert.equal(harness.requests.some((request) => request.pathname === "/api/calendar/settings"), false);
+});
+
+test("calendar mode defaults to internal for a legacy status without a mode", async (t) => {
+  const harness = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=calendar",
+    overrides: { "/api/calendar/status": { enabled: true, connected: false, integration_status: "not_connected" } },
+  });
+  t.after(harness.dispose);
+  await harness.ready();
+  await harness.settle();
+  assert.equal(harness.document.getElementById("integ-calendar-mode").value, "internal");
+  assert.equal(harness.document.getElementById("integ-calendar-connect").hidden, false);
+});
+
+test("calendar settings save is explicit, sends the fixed contract, and does not auto-switch mode", async (t) => {
+  let savedMode = "google_authoritative";
+  const harness = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=calendar",
+    overrides: {
+      "/api/calendar/status": (_request, jsonResponse) => jsonResponse({
+        enabled: true, connected: true, mode: savedMode, integration_status: "sync_failed",
+        error_code: "provider_unavailable", calendar_id: "primary", resource_calendar_ids: [], sync_enabled: false,
+      }),
+      "PATCH /api/calendar/settings": (request, jsonResponse) => {
+        savedMode = JSON.parse(request.options.body).mode;
+        return jsonResponse({ saved: true });
+      },
+    },
+  });
+  t.after(harness.dispose);
+  await harness.ready();
+  await harness.settle();
+  assert.equal(harness.requests.some((request) => request.method === "PATCH" && request.pathname === "/api/calendar/settings"), false);
+  harness.document.getElementById("integ-calendar-mode").value = "internal_calendar_sync";
+  harness.document.getElementById("integ-calendar-primary-id").value = "main-calendar";
+  harness.document.getElementById("integ-calendar-resource-ids").value = "room-a\n room-b \nroom-a";
+  harness.document.getElementById("integ-calendar-sync-enabled").checked = true;
+  harness.document.getElementById("integ-calendar-save").click();
+  await harness.settle();
+  const request = harness.requests.find((item) => item.method === "PATCH" && item.pathname === "/api/calendar/settings");
+  assert.ok(request);
+  assert.deepEqual(JSON.parse(request.options.body), {
+    mode: "internal_calendar_sync",
+    calendar_id: "main-calendar",
+    resource_calendar_ids: ["room-a", "room-b"],
+    sync_enabled: true,
+  });
+  assert.equal(harness.document.getElementById("integ-calendar-mode").value, "internal_calendar_sync");
+});
+
+test("calendar check uses the readiness endpoint and ignores a response after organization switch", async (t) => {
+  let resolveCheck;
+  const pending = new Promise((resolve) => { resolveCheck = resolve; });
+  const harness = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=calendar",
+    overrides: {
+      "/api/calendar/status": {
+        enabled: true, connected: true, mode: "google_authoritative", integration_status: "connected",
+        error_code: null, calendar_id: "primary", resource_calendar_ids: [], sync_enabled: true,
+      },
+      "POST /api/calendar/check": () => pending,
+    },
+  });
+  t.after(harness.dispose);
+  await harness.ready();
+  await harness.settle();
+  harness.document.getElementById("integ-calendar-check").click();
+  await harness.settle();
+  assert.equal(harness.document.getElementById("integ-calendar-stato").classList.contains("connecting"), true);
+  harness.window.localStorage.setItem("melpis_selected_organization", "org-2");
+  harness.window.dispatchEvent(new harness.window.StorageEvent("storage", { key: "melpis_selected_organization", newValue: "org-2" }));
+  resolveCheck({
+    status: 200, ok: true, async json() { return {
+      enabled: true, connected: true, mode: "google_authoritative", integration_status: "connected",
+      calendar_id: "other-org-calendar", resource_calendar_ids: [], sync_enabled: true,
+    }; }, async text() { return "{}"; }, clone() { return this; },
+  });
+  await harness.settle();
+  assert.notEqual(harness.document.getElementById("integ-calendar-id").textContent, "other-org-calendar");
+  assert.equal(harness.requests.some((request) => request.pathname === "/api/integrazioni/test/calendar"), false);
+});
+
 test("WhatsApp connect discards a response after an organization switch", async (t) => {
   const response = deferred();
   const harness = createDashboardHarness({

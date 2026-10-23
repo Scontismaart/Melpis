@@ -1,7 +1,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from src.core.auth.audit import audit_log
-from src.core.auth.dependencies import require_ruolo
+from src.core.auth.dependencies import require_ruolo, require_mfa
 from src.core.bookings import BookingNotFoundError, SlotPienoError
 from src.models.schemas import DisponibilitaSlot, PrenotazioneModificaInput
 
@@ -75,7 +75,8 @@ async def list_bookings(request: Request, data: str | None = None,
 
 @router.post("/{booking_id}/calendar-sync/retry")
 async def retry_calendar_sync(booking_id: str, request: Request,
-                              user: dict = Depends(require_ruolo("owner", "manager"))):
+                              user: dict = Depends(require_ruolo("owner")),
+                              mfa: dict = Depends(require_mfa())):
     service = _get_booking_service(request)
     try:
         booking = await service.repo.request_calendar_sync_retry(

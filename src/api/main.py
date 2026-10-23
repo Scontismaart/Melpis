@@ -82,6 +82,7 @@ from src.core.rate_limit import close_rate_limiter, get_rate_limiter, reset_memo
 from src.core.security.docs import is_production, require_docs_access
 from src.core.db.repository import CoreRepository
 from src.core.calendar import GoogleCalendarService
+from src.core.google_feature_flags import google_calendar_enabled
 from src.core.calendar.routes import router as calendar_router
 from src.core.auth.audit import audit_log
 from src.core.billing.routes import router as billing_router
@@ -194,6 +195,8 @@ async def lifespan(app: FastAPI):
                 encryption_key=os.getenv("ENCRYPTION_KEY", ""),
             )
             app.state.calendar_service = calendar_service
+            if google_calendar_enabled():
+                await calendar_service.assert_schema()
             from src.core.db.repositories.booking_repo import BookingRepository
             from src.core.db.repositories.organization_repo import OrganizationRepository
             app.state.booking_service = BookingService(
@@ -279,6 +282,8 @@ async def lifespan(app: FastAPI):
                 app.state.retry_task = asyncio.create_task(_retry_loop())
                 app.state.governance_task = asyncio.create_task(_governance_loop())
         except Exception as e:
+            if google_calendar_enabled():
+                raise RuntimeError("Calendar enabled requires verified database and worker readiness") from None
             logger.warning("[startup] Database connection failed: %s. Running without pool.", e)
             app.state.repo = None
             app.state.pool = None

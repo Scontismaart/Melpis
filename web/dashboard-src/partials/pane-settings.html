@@ -548,7 +548,7 @@
           <div class="settings-panel" data-settings-panel="calendar" hidden>
             <header class="settings-panel-header">
               <h2 class="settings-panel-title">Google Calendar</h2>
-              <p class="settings-panel-subtitle">Sincronizzazione automatica e bidirezionale delle prenotazioni con la tua agenda Google.</p>
+              <p class="settings-panel-subtitle">Scegli in modo esplicito se usare solo Melpis, aggiungere Google Calendar come integrazione o renderlo autorevole per la disponibilità.</p>
             </header>
 
             <div class="dash-card integrazione-card" id="integ-calendar">
@@ -568,17 +568,36 @@
                   <span class="integrazione-meta-val" id="integ-calendar-id">Predefinito (Primary)</span>
                 </div>
                 <div class="integrazione-meta-item">
-                  <span class="integrazione-meta-label">Modalità sync</span>
-                  <span class="integrazione-meta-val" id="integ-calendar-sync-mode">Bidirezionale automatica</span>
+                  <span class="integrazione-meta-label">Modalità prenotazioni</span>
+                  <span class="integrazione-meta-val" id="integ-calendar-sync-mode">Solo Melpis</span>
                 </div>
               </div>
-              <p class="settings-help" id="integ-calendar-help">Sincronizza le prenotazioni confermate con Google Calendar con 1 solo click senza configurazioni complesse.</p>
+              <p class="settings-help" id="integ-calendar-help">Google è opzionale. Le impostazioni si applicano solo dopo aver premuto Salva.</p>
+              <p class="settings-help-sm" id="integ-calendar-counts">In attesa: 0 · Non riuscite: 0 · Esito incerto: 0</p>
+              <div class="wizard-two">
+                <div>
+                  <label class="wizard-label" for="integ-calendar-mode">Modalità prenotazioni</label>
+                  <select class="wizard-input" id="integ-calendar-mode">
+                    <option value="internal">Solo Melpis</option>
+                    <option value="internal_calendar_sync">Melpis con Google opzionale</option>
+                    <option value="google_authoritative">Google autorevole</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="wizard-label" for="integ-calendar-primary-id">Calendario principale</label>
+                  <input class="wizard-input" id="integ-calendar-primary-id" type="text" value="primary" autocomplete="off">
+                </div>
+              </div>
+              <label class="wizard-label" for="integ-calendar-resource-ids">Altri calendari (un ID per riga)</label>
+              <textarea class="wizard-input" id="integ-calendar-resource-ids" rows="3" autocomplete="off"></textarea>
+              <label class="wizard-check strong"><input type="checkbox" id="integ-calendar-sync-enabled"> Abilita la sincronizzazione Google dopo il salvataggio</label>
               <div class="integrazione-actions" id="integ-calendar-actions">
                 <button type="button" class="review-analyze" id="integ-calendar-connect" hidden>Connetti Google Calendar</button>
-                <button type="button" class="btn-test-conn" id="integ-calendar-test" data-canale="calendar" hidden>
+                <button type="button" class="btn-test-conn" id="integ-calendar-check" hidden>
                   <svg viewBox="0 0 24 24" fill="none" width="15" height="15"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  Testa sincronizzazione
+                  Verifica disponibilità Google
                 </button>
+                <button type="button" class="review-analyze" id="integ-calendar-save">Salva impostazioni</button>
                 <button type="button" class="btn-danger-outline" id="integ-calendar-disconnect" hidden>Disconnetti agenda</button>
               </div>
               <div class="integ-test-feedback" id="integ-calendar-feedback" hidden></div>

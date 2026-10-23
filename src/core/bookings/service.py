@@ -57,32 +57,15 @@ class BookingService:
                 return ctx
         return nullcontext()
 
+    async def _calendar_mode(self, org_id):
+        from src.core.calendar.connection import authority_from
+        settings = await self.repo.get_booking_settings(org_id)
+        return authority_from(settings)
+
     async def _google_slot_occupato(self, org_id, data, ora) -> bool:
-        """True se un evento Google Calendar copre lo slot [ora, ora+60min).
-        Best-effort e fail-open: senza calendar service, su errore o con
-        metodo assente (repo fake nei test) la risposta è False — la
-        capacità DB resta la fonte autorevole della disponibilità."""
-        if not self.calendar_service:
-            return False
-        if not hasattr(self.calendar_service, "get_busy_intervals"):
-            return False
-        try:
-            busy = await self.calendar_service.get_busy_intervals(org_id, data)
-        except Exception:
-            logger.warning("calendar=freebusy_check_fail org_id=%s data=%s", org_id, data)
-            return False
-        ora_str = ora if isinstance(ora, str) else ora.strftime("%H:%M")
-        slot_start = datetime.fromisoformat(f"{data}T{ora_str}:00")
-        slot_end = slot_start + timedelta(minutes=DEFAULT_SLOT_MINUTES)
-        try:
-            for bs, be in busy:
-                if slot_start < be and bs < slot_end:
-                    return True
-        except TypeError:
-            # Intervallo con tzinfo inatteso da un'implementazione del
-            # servizio calendar: fail-open, non bloccare la prenotazione.
-            logger.warning("calendar=freebusy_interval_type org_id=%s", org_id)
-            return False
+        # Admission here is internal capacity only. Google authority is checked
+        # freshly by the durable worker before confirmation; optional Google
+        # never vetoes an internally authorized booking.
         return False
 
     # ── Disponibilità ──────────────────────────────────────────
@@ -172,7 +155,6 @@ class BookingService:
         return slots
 
     async def prossimi_giorni_semaforo(self, org_id, giorni=7):
-        from datetime import timedelta
         oggi = datetime.now().date()
         slots = []
         for offset in range(giorni):
@@ -370,7 +352,8 @@ class BookingService:
             values[key] != self._format_booking_value(key, current.get(key))
             for key in ("data", "ora", "coperti")
         )
-        new_status = "in_attesa" if schedule_changed else current["stato"]
+        google_authoritative = await self._calendar_mode(org_id) == "google_authoritative"
+        new_status = "in_attesa" if schedule_changed or google_authoritative else current["stato"]
         # Check Google PRIMA del lock: chiamata di rete fuori dalla sezione
         # critica (come in create_booking). Piccola finestra TOCTOU con
         # eventi Google aggiunti nel frattempo: stesso livello best-effort.
@@ -519,7 +502,11 @@ class BookingService:
                     latest["coperti"], exclude_booking_id=booking_id)
                 if latest["coperti"] > disp.coperti_liberi:
                     raise SlotPienoError(f"slot pieno per {latest['coperti']} coperti alle {latest['ora']}", disp.alternative)
-            if stato == "completata":
+            if stato == "confermata" and await self._calendar_mode(org_id) == "google_authoritative":
+                if latest["stato"] == "confermata":
+                    return latest, latest
+                updated = await self.repo.request_google_confirmation(org_id, booking_id)
+            elif stato == "completata":
                 updated = await self.repo.mark_booking_completed(org_id, booking_id, latest)
             else:
                 updated = await self.repo.update_booking_status(
@@ -530,6 +517,11 @@ class BookingService:
 
     async def confirm(self, org_id, booking_id):
         b, updated = await self._transition_to_occupied(org_id, booking_id, "confermata")
+        if updated.get("calendar_confirm_pending"):
+            # Asynchronous authority: no confirmation/deposit before verified proof.
+            if self.calendar_service:
+                await self.calendar_service.sync_booking_state(updated, org_id)
+            return await self.repo.get_booking(org_id, booking_id)
         msg = f"La tua prenotazione del {b['data']} alle {b['ora']} per {b['coperti']} persone e' confermata!"
         await self._send_whatsapp(org_id, b["telefono"], msg)
         if b.get("richiede_deposito"):
@@ -637,11 +629,16 @@ class BookingService:
             return await self.repo.upsert_booking_settings_config(org_id, merged)
         async with self.repo.booking_settings_lock(org_id) as organization:
             current = await self.repo.get_booking_settings(org_id) or {}
+            from src.core.calendar.connection import authority_from
+            previous_mode = authority_from(current)
             merged = dict(current.get("config") or {})
             if config is not None:
                 if not isinstance(config, dict):
                     raise ValueError("Invalid booking configuration")
                 merged.update(config)
+            proposed_mode = authority_from({"config": merged})
+            if proposed_mode != previous_mode and ({previous_mode, proposed_mode} & {"google_authoritative", "internal_calendar_sync"}):
+                raise ValueError("Change Calendar authority through the owner/MFA Calendar settings endpoint")
             capacities = (capienze_orarie if capienze_orarie is not None
                           else current.get("capienze_orarie") or {})
             intervals = (fasce_orarie if fasce_orarie is not None
@@ -662,36 +659,9 @@ class BookingService:
             )
 
     async def process_pending_calendar_sync(self, limit=10):
-        """Best-effort optional sync; internal booking stays authoritative."""
-        if not self.calendar_service or not hasattr(self.repo, "claim_calendar_sync"):
+        if not self.calendar_service:
             return 0
-        claimed = await self.repo.claim_calendar_sync(limit)
-        for item in claimed:
-            org_id = item["organization_id"]
-            event_id = None
-            error_code = "provider_not_confirmed"
-            try:
-                booking = await self.repo.get_booking(org_id, item["internal_booking_id"])
-                if booking and booking["stato"] == "confermata":
-                    event_id = await self.calendar_service.create_event(booking, org_id)
-                    # A cancellation may race the network call. Reconcile
-                    # against the current local authority after the call.
-                    current = await self.repo.get_booking(org_id, item["internal_booking_id"])
-                    if current and current["stato"] != "confermata" and event_id:
-                        await self.calendar_service.delete_event(current, org_id)
-                        event_id = None
-            except Exception as exc:
-                error_code = "provider_exception"
-                logger.warning(
-                    "calendar=optional_sync_retry org_id=%s booking_id=%s error_type=%s",
-                    org_id, item["internal_booking_id"], type(exc).__name__,
-                )
-            await self.repo.finish_calendar_sync(
-                org_id, item["id"], item["claim_number"],
-                event_id=event_id, success=event_id is not None,
-                error_code=error_code,
-            )
-        return len(claimed)
+        return await self.calendar_service.process_pending(limit)
 
     # ── Reminder ──────────────────────────────────────────────
 

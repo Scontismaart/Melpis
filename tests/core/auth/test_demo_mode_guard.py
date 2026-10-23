@@ -224,5 +224,43 @@ def test_commercial_bootstrap_rejects_short_placeholder_key(monkeypatch):
 def test_launch_profiles_keep_google_integrations_disabled(monkeypatch, name):
     _configure_commercial(monkeypatch)
     monkeypatch.setenv(name, "true")
-    with pytest.raises(RuntimeError, match=name):
+    expected = (
+        "GOOGLE_CALENDAR_OPERATIONAL_APPROVED"
+        if name == "GOOGLE_CALENDAR_ENABLED"
+        else "GOOGLE_BUSINESS_ENABLED"
+    )
+    with pytest.raises(RuntimeError, match=expected):
+        assert_production_safe()
+
+
+def test_calendar_can_be_enabled_only_with_complete_operator_readiness(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CALENDAR_OPERATIONAL_APPROVED", "true")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CERTIFICATION_REF", "C03-calendar-cert-2026-10")
+    monkeypatch.setenv("GOOGLE_CALENDAR_SCHEMA_VERSION", "064")
+    monkeypatch.setenv("GOOGLE_CALENDAR_WORKER_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "calendar-client.apps.googleusercontent.test")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "synthetic-calendar-secret-value")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI",
+        "https://app.example.test/api/calendar/oauth2callback",
+    )
+    assert_production_safe()
+
+
+def test_calendar_enablement_requires_redirect_on_public_app_origin(monkeypatch):
+    _configure_commercial(monkeypatch)
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CALENDAR_OPERATIONAL_APPROVED", "true")
+    monkeypatch.setenv("GOOGLE_CALENDAR_CERTIFICATION_REF", "C03-calendar-cert-2026-10")
+    monkeypatch.setenv("GOOGLE_CALENDAR_SCHEMA_VERSION", "064")
+    monkeypatch.setenv("GOOGLE_CALENDAR_WORKER_ENABLED", "true")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "calendar-client.apps.googleusercontent.test")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "synthetic-calendar-secret-value")
+    monkeypatch.setenv(
+        "GOOGLE_REDIRECT_URI",
+        "https://other.example.test/api/calendar/oauth2callback",
+    )
+    with pytest.raises(RuntimeError, match="GOOGLE_REDIRECT_URI"):
         assert_production_safe()

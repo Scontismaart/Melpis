@@ -313,11 +313,31 @@ def test_placeholder_database_credentials_are_blocked():
     assert "DATABASE_URL: missing or placeholder" in validate(config)
 
 
-@pytest.mark.parametrize("name", ("GOOGLE_CALENDAR_ENABLED", "GOOGLE_BUSINESS_ENABLED"))
-def test_google_integrations_must_be_explicitly_disabled(name):
+def test_google_business_must_remain_explicitly_disabled():
     config = commercial_config()
-    config[name] = "true"
-    assert f"{name}: must be false" in validate(config)
+    config["GOOGLE_BUSINESS_ENABLED"] = "true"
+    assert "GOOGLE_BUSINESS_ENABLED: must be false" in validate(config)
+
+
+def test_calendar_stays_explicitly_disabled_by_default():
+    config = commercial_config()
+    del config["GOOGLE_CALENDAR_ENABLED"]
+    assert "GOOGLE_CALENDAR_ENABLED: must be explicitly false by default" in validate(config)
+
+
+def test_calendar_can_be_enabled_with_complete_operator_readiness():
+    config = commercial_config()
+    config.update({
+        "GOOGLE_CALENDAR_ENABLED": "true",
+        "GOOGLE_CALENDAR_OPERATIONAL_APPROVED": "true",
+        "GOOGLE_CALENDAR_CERTIFICATION_REF": "C03-calendar-cert-2026-10",
+        "GOOGLE_CALENDAR_SCHEMA_VERSION": "064",
+        "GOOGLE_CALENDAR_WORKER_ENABLED": "true",
+        "GOOGLE_CLIENT_ID": "calendar-client.apps.googleusercontent.test",
+        "GOOGLE_CLIENT_SECRET": "synthetic-calendar-secret-value",
+        "GOOGLE_REDIRECT_URI": "https://melpis.it/api/calendar/oauth2callback",
+    })
+    assert validate(config) == []
 
 
 def test_unknown_or_implicit_profile_is_blocked():

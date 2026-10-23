@@ -3,6 +3,8 @@ from types import SimpleNamespace
 import time
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
+from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
 from fastapi import Request
@@ -46,15 +48,36 @@ async def test_separate_sdk_instances_preserve_pkce(monkeypatch,module,channel,s
         monkeypatch.setattr(module,'google_business_enabled',lambda:True)
         monkeypatch.setattr(module,'check_feature_blocked_by_plan',AsyncMock(return_value=None))
     class Pool:
-        def __init__(self): self.credential_writes = []
+        def __init__(self): self.credential_writes = []; self.nonces = {}
         def acquire(self): return self
         async def __aenter__(self): return self
         async def __aexit__(self,*args): pass
         async def execute(self,query,*args):
             if 'INSERT INTO google_' in query: self.credential_writes.append(args)
         async def fetchrow(self,*args): return {'created_at':None}
+    pool = Pool()
     service = SimpleNamespace(encrypt_secret=lambda value:'encrypted')
-    app=SimpleNamespace(state=SimpleNamespace(pool=Pool(),repo=object(),calendar_service=service,reviews_service=service))
+    if module is calendar:
+        class CalendarConnection:
+            def __init__(self): self.generations = {}
+            async def begin_oauth(self, org, nonce):
+                generation = uuid4()
+                self.generations[org] = generation
+                pool.nonces[(org, nonce)] = {
+                    'created_at': datetime.now(timezone.utc),
+                    'calendar_generation': generation,
+                }
+            async def consume_nonce(self, org, nonce):
+                row = pool.nonces.get((org, nonce))
+                if not row or row['calendar_generation'] != self.generations.get(org):
+                    return None
+                return pool.nonces.pop((org, nonce))
+            async def save_oauth(self, org, generation, creds):
+                if generation != self.generations.get(org): return False
+                pool.credential_writes.append((org, 'encrypted-access', 'encrypted-refresh', creds.expiry))
+                return True
+        service.connection = CalendarConnection()
+    app=SimpleNamespace(state=SimpleNamespace(pool=pool,repo=object(),calendar_service=service,reviews_service=service))
     request=Request({'type':'http','app':app,'headers':[], 'query_string':b''})
     user={'organization_id':ORG}
     start = module.calendar_auth if module is calendar else module.google_reviews_auth
