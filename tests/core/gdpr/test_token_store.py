@@ -17,7 +17,9 @@ class FakeRedis:
         self.d = {}
         self._lock = asyncio.Lock()
 
-    async def set(self, key, value, ex=None):
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.d:
+            return None
         self.d[key] = value
         return True
 
@@ -39,7 +41,6 @@ class FakeRedis:
 
 @pytest.fixture(autouse=True)
 def _reset_store(monkeypatch):
-    monkeypatch.setattr(token_store, "_memory", {})
     monkeypatch.setattr(token_store, "_redis", None)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("REDIS_URL", "")
@@ -91,15 +92,15 @@ async def test_redis_contiene_solo_ciphertext_e_chiave_hashata(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_memoria_contiene_solo_ciphertext_e_chiave_hashata(monkeypatch):
-    await _save("secret-memory-token", data={"email": "private@example.test"})
-    key, encrypted = next(iter(token_store._memory.items()))
+async def test_repr_does_not_expose_data_or_cas_payload(monkeypatch):
+    fake = FakeRedis()
+    _use(fake, monkeypatch)
+    await _save("hidden-payload-token", data={"email": "private@example.test"})
+    pending = await token_store.read_token("hidden-payload-token")
 
-    assert key == token_store._storage_key("secret-memory-token")
-    assert isinstance(encrypted, str)
-    assert "secret-memory-token" not in key + encrypted
-    assert "private@example.test" not in encrypted
-    assert "auth-user-1" not in encrypted
+    rendered = repr(pending)
+    assert "private@example.test" not in rendered
+    assert pending.payload not in rendered
 
 
 @pytest.mark.asyncio
@@ -117,7 +118,9 @@ async def test_errore_chiave_non_consuma_token_redis(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cifratura_invalida_non_consuma_token_in_memoria(monkeypatch):
+async def test_cifratura_invalida_non_consuma_token(monkeypatch):
+    fake = FakeRedis()
+    _use(fake, monkeypatch)
     await _save("key-rotation-memory-token")
     stored_key = token_store._storage_key("key-rotation-memory-token")
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
@@ -125,7 +128,7 @@ async def test_cifratura_invalida_non_consuma_token_in_memoria(monkeypatch):
     with pytest.raises(token_store.TokenStoreUnavailable):
         await token_store.read_token("key-rotation-memory-token")
 
-    assert stored_key in token_store._memory
+    assert stored_key in fake.d
 
 
 @pytest.mark.asyncio
@@ -135,9 +138,12 @@ async def test_token_sconosciuto(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fallback_memory_senza_redis(monkeypatch):
-    await _save("t2", "org-2", {})
-    assert (await token_store.pop_token("t2"))["org_id"] == "org-2"
+async def test_redis_required_in_all_environments(monkeypatch):
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await _save("t2", "org-2", {})
+
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await token_store.read_token("t2")
 
 
 @pytest.mark.asyncio
@@ -147,7 +153,6 @@ async def test_production_requires_shared_redis(monkeypatch):
     with pytest.raises(token_store.TokenStoreUnavailable):
         await _save("prod-token", "org-3", {})
 
-    assert token_store._storage_key("prod-token") not in token_store._memory
 
 
 @pytest.mark.asyncio
@@ -160,30 +165,29 @@ async def test_production_redis_write_failure_does_not_fall_back_to_memory(monke
     with pytest.raises(token_store.TokenStoreUnavailable):
         await _save("prod-token", "org-3", {})
 
-    assert token_store._storage_key("prod-token") not in token_store._memory
 
 
 @pytest.mark.asyncio
-async def test_production_redis_read_failure_does_not_use_memory_fallback(monkeypatch):
+async def test_redis_read_failure_fails_closed_without_fallback(monkeypatch):
     class FailingRedis:
         async def get(self, _key):
             raise OSError("synthetic Redis outage")
 
-    token_store._memory[token_store._storage_key("prod-token")] = "ciphertext"
     _use(FailingRedis(), monkeypatch)
-    monkeypatch.setattr(token_store, "_is_production", lambda: True)
 
     with pytest.raises(token_store.TokenStoreUnavailable):
         await token_store.read_token("prod-token")
 
-    assert token_store._storage_key("prod-token") in token_store._memory
 
 
 @pytest.mark.asyncio
 async def test_expired_token_is_not_consumed_during_read():
-    await _save("expired-token", "org-3", {})
+    fake = FakeRedis()
+    async def _get():
+        return fake
+    token_store._get_redis = _get
     cipher = Fernet(os.environ["ENCRYPTION_KEY"].encode())
-    token_store._memory[token_store._storage_key("expired-token")] = cipher.encrypt(json.dumps({
+    fake.d[token_store._storage_key("expired-token")] = cipher.encrypt(json.dumps({
         "org_id": "org-3",
         "auth_user_id": "auth-user-1",
         "session_id": "session-1",
@@ -194,7 +198,30 @@ async def test_expired_token_is_not_consumed_during_read():
     }).encode()).decode()
 
     assert await token_store.read_token("expired-token") is None
-    assert token_store._storage_key("expired-token") in token_store._memory
+    assert token_store._storage_key("expired-token") in fake.d
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expires", [float("nan"), float("inf"), float("-inf"), True])
+async def test_non_finite_or_boolean_expiry_is_rejected(expires, monkeypatch):
+    fake = FakeRedis()
+    _use(fake, monkeypatch)
+    cipher = Fernet(os.environ["ENCRYPTION_KEY"].encode())
+    document = {
+        "org_id": "org-1",
+        "auth_user_id": "auth-user-1",
+        "session_id": "session-1",
+        "user_id": "profile-1",
+        "role": "owner",
+        "data": {},
+        "expires": expires,
+    }
+    fake.d[token_store._storage_key("bad-expiry")] = cipher.encrypt(
+        json.dumps(document).encode()
+    ).decode()
+
+    with pytest.raises(token_store.TokenStoreUnavailable):
+        await token_store.read_token("bad-expiry")
 
 
 @pytest.mark.asyncio

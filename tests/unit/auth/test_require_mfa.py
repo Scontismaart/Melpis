@@ -151,7 +151,10 @@ class TestSensitivePathList:
             "/api/billing/provider-attempts/{attempt_id}/recover",
             "/api/gdpr/export",
             "/api/gdpr/download",
+            "/api/gdpr/download/revoke",
             "/api/gdpr/delete",
+            "/api/gdpr/operations/{operation_id}",
+            "/api/gdpr/operations/{operation_id}/retry",
             "/api/calendar/auth",
             "/api/calendar/disconnect",
             "/api/calendar/settings",
@@ -286,3 +289,44 @@ class TestMfaGateOnRoute:
         )
         assert response.status_code == 503, response.text
         billing_repo.approve_provider_reconciliation.assert_not_awaited()
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("post", "/api/gdpr/download/revoke"),
+            ("get", "/api/gdpr/operations/{operation_id}"),
+            ("post", "/api/gdpr/operations/{operation_id}/retry"),
+        ],
+    )
+    def test_new_gdpr_operations_reject_aal1_before_repository_access(
+        self, monkeypatch, method, path,
+    ):
+        from src.core.gdpr.routes import router as gdpr_router
+
+        class PoisonRepository:
+            @property
+            def pool(self):
+                raise AssertionError("AAL1 request accessed repository before MFA rejection")
+
+        app = FastAPI()
+        app.state.repo = PoisonRepository()
+        app.include_router(gdpr_router)
+        actor_id = str(uuid.uuid4())
+        org_id = str(uuid.uuid4())
+        user = {
+            "source": "jwt",
+            "auth_user_id": actor_id,
+            "organization_id": org_id,
+            "user_id": str(uuid.uuid4()),
+            "session_id": str(uuid.uuid4()),
+            "ruolo": "owner",
+            "aal": "aal1",
+        }
+        app.dependency_overrides[deps.get_current_user] = lambda: user
+        app.dependency_overrides[deps.get_organization_context] = lambda: user
+        operation_id = str(uuid.uuid4())
+        request_path = path.format(operation_id=operation_id)
+
+        response = getattr(TestClient(app), method)(request_path)
+        assert response.status_code == 403, response.text
+        assert response.headers.get("x-mfa-required") == "true"

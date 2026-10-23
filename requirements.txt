@@ -2,8 +2,13 @@ alembic==1.18.5
 APScheduler==3.11.3
 asyncpg==0.31.0
 crewai[litellm]==1.15.4
+crewai-core==1.15.4
 # Exact security-fixed SDK; install through scripts/reviewed_runtime.py.
 mcp==1.30.0
+# CVE-2026-114603: align the official fixed OTel family through the reviewed builder.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
 cryptography==50.0.1
 fastapi==0.139.2
 google-api-python-client==2.198.0

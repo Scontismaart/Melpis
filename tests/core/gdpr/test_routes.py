@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException
+from tests.gdpr_token_fakes import FakeRedis
 
 pytestmark = pytest.mark.usefixtures("reset_db")
 
@@ -23,7 +24,7 @@ def set_env():
     # Export payloads must use the same encryption contract as non-test runs.
     from cryptography.fernet import Fernet
     os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
-    os.environ["REDIS_URL"] = ""
+    os.environ["REDIS_URL"] = "redis://gdpr-test.invalid/0"
     os.environ.pop("AIRTABLE_API_KEY", None)
     os.environ.pop("AIRTABLE_BASE_ID", None)
     os.environ.pop("SOFTR_WEBHOOK_URL", None)
@@ -31,7 +32,17 @@ def set_env():
 
 
 @pytest.fixture
-async def async_client(repo, org_id):
+def fake_redis(monkeypatch):
+    from src.core.gdpr import token_store
+
+    redis = FakeRedis()
+    monkeypatch.setattr(token_store, "_redis", None)
+    monkeypatch.setattr(token_store, "_get_redis", AsyncMock(return_value=redis))
+    return redis
+
+
+@pytest.fixture
+async def async_client(repo, org_id, fake_redis):
     from src.api.main import app
     from src.core.auth.dependencies import (
         get_current_user,
@@ -114,9 +125,12 @@ class TestDPA:
         resp = await async_client.get("/api/gdpr/dpa")
         assert resp.status_code == 200
         text = resp.text
-        assert "fixed for all tenants" in text
-        assert "not yet configurable per tenant" in text
+        assert "versioned, per-tenant policy" in text
+        assert "No primary-data" in text
+        assert "schedule is activated by this template" in text
         assert "message_retention_days" not in text
+        assert "30-day grace period" not in text
+        assert "do not certify deletion or recoverability" in text
 
     async def test_dpa_security_reflects_regex_redaction(self, async_client):
         resp = await async_client.get("/api/gdpr/dpa")
@@ -223,18 +237,7 @@ class TestDataRights:
     async def test_export_cookie_is_secure_in_production(
         self, async_client, org_id, monkeypatch
     ):
-        from unittest.mock import AsyncMock
-
-        from src.core.gdpr import token_store
-
-        class FakeRedis:
-            async def set(self, *_args, **_kwargs):
-                return True
-
         monkeypatch.setenv("AUTH_COOKIE_SECURE", "true")
-        monkeypatch.setattr(
-            token_store, "_get_redis", AsyncMock(return_value=FakeRedis())
-        )
 
         resp = await async_client.get("/api/gdpr/export", headers=_headers(org_id))
 
@@ -252,7 +255,7 @@ class TestDataRights:
 
         download_resp = await async_client.get(download_url, headers=_headers(org_id))
         assert download_resp.status_code == 200
-        data = download_resp.json()
+        data = json.loads(download_resp.content)
         assert data["organization_id"] == str(org_id)
         assert len(data["contacts"]) >= 1
         assert download_resp.headers["cache-control"] == "no-store"
@@ -261,11 +264,9 @@ class TestDataRights:
         # The download token is consumed once and the browser cookie is cleared.
         assert (await async_client.get(download_url, headers=_headers(org_id))).status_code == 404
 
-    async def test_download_expired_token_returns_404(self, async_client, org_id, monkeypatch):
-        monkeypatch.setenv("REDIS_URL", "")
+    async def test_download_expired_token_returns_404(self, async_client, org_id, fake_redis):
         from src.core.gdpr import token_store
 
-        monkeypatch.setattr(token_store, "_redis", None)
         payload = {
             "org_id": str(org_id),
             "auth_user_id": "gdpr-test-owner",
@@ -276,22 +277,20 @@ class TestDataRights:
             "expires": 0,
         }
         token = "expired_test_token"
-        token_store._memory[token_store._storage_key(token)] = Fernet(
+        fake_redis.values[token_store._storage_key(token)] = Fernet(
             os.environ["ENCRYPTION_KEY"].encode("ascii")
         ).encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
         async_client.cookies.set(token_store.DOWNLOAD_COOKIE, "expired_test_token")
         resp = await async_client.get("/api/gdpr/download", headers=_headers())
         assert resp.status_code == 404
-        assert token_store._storage_key(token) in token_store._memory
+        assert token_store._storage_key(token) in fake_redis.values
 
     async def test_download_rejects_corrupt_ciphertext_without_leaking_details(
-        self, async_client, monkeypatch
+        self, async_client, fake_redis
     ):
         from src.core.gdpr import token_store
 
-        monkeypatch.setenv("REDIS_URL", "")
-        monkeypatch.setattr(token_store, "_redis", None)
-        token_store._memory[token_store._storage_key("tampered-token")] = "corrupt-ciphertext"
+        fake_redis.values[token_store._storage_key("tampered-token")] = "corrupt-ciphertext"
         async_client.cookies.set(token_store.DOWNLOAD_COOKIE, "tampered-token")
 
         resp = await async_client.get("/api/gdpr/download", headers=_headers())
@@ -299,7 +298,7 @@ class TestDataRights:
         assert resp.status_code == 503
         assert resp.json() == {"detail": "Export temporaneamente non disponibile"}
         assert "corrupt-ciphertext" not in resp.text
-        assert token_store._storage_key("tampered-token") in token_store._memory
+        assert token_store._storage_key("tampered-token") in fake_redis.values
 
     async def test_download_nonexistent_token_returns_404(self, async_client):
         resp = await async_client.get("/api/gdpr/download", headers=_headers())
@@ -309,18 +308,42 @@ class TestDataRights:
         resp = await async_client.post("/api/gdpr/delete")
         assert resp.status_code == 401
 
-    async def test_delete_hard_deletes_org(self, async_client, org_id, repo):
-        resp = await async_client.post("/api/gdpr/delete", headers=_headers(org_id))
-        assert resp.status_code == 200
+    async def test_delete_without_approved_policy_is_durably_blocked(self, async_client, org_id, repo):
+        resp = await async_client.post("/api/gdpr/delete", headers=_headers(org_id),
+                                       json={"request_id": str(uuid.uuid4())})
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["status"] == "deleted"
+        assert data["status"] == "blocked"
+        assert data["id"]
+        assert any(reason.startswith("policy_required.") for reason in data["manifest"]["blockers"])
         async with repo.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT id FROM organizations WHERE id = $1", org_id)
-        assert row is None
+            operation = await conn.fetchrow(
+                "SELECT status FROM gdpr_operations WHERE id=$1 AND organization_id=$2",
+                uuid.UUID(data["id"]), org_id,
+            )
+            event = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM gdpr_operation_events WHERE operation_id=$1 AND event_type='erase.blocked')",
+                uuid.UUID(data["id"]),
+            )
+        assert row is not None
+        assert operation["status"] == "blocked"
+        assert event is True
+
+    async def test_delete_requires_explicit_idempotent_request(self, async_client, org_id, repo, monkeypatch):
+        monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
+        resp = await async_client.post("/api/gdpr/delete", headers=_headers(org_id))
+        assert resp.status_code == 422
+        async with repo.pool.acquire() as conn:
+            assert not await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM gdpr_operations WHERE organization_id=$1 AND kind='erase')", org_id,
+            )
 
     async def test_retention_policy_endpoint(self, async_client, org_id):
         resp = await async_client.get("/api/gdpr/retention-policy", headers=_headers(org_id))
         assert resp.status_code == 200
         data = resp.json()
-        assert data["retention_days"] == 60
-        assert data["purge_after_days"] == 30
+        assert data["retention_days"] is None
+        assert data["purge_after_days"] is None
+        assert data["automatic_erasure_enabled"] is False
+        assert data["policy_version"] == "tenant-approval-required"

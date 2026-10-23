@@ -6,12 +6,29 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import zipfile
 from types import SimpleNamespace
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+OTEL_OLD = (
+    b'Requires-Dist: opentelemetry-api~=1.42.0\n'
+    b'Requires-Dist: opentelemetry-sdk~=1.42.0\n'
+    b'Requires-Dist: opentelemetry-exporter-otlp-proto-http~=1.42.0\n'
+)
+OTEL_NEW = (
+    b'Requires-Dist: opentelemetry-api<1.46,>=1.45.1\n'
+    b'Requires-Dist: opentelemetry-sdk<1.46,>=1.45.1\n'
+    b'Requires-Dist: opentelemetry-exporter-otlp-proto-http<1.46,>=1.45.1\n'
+)
+OTEL_PINS = (
+    'opentelemetry-api==1.45.1',
+    'opentelemetry-sdk==1.45.1',
+    'opentelemetry-exporter-otlp-proto-http==1.45.1',
+)
 
 
 def load_builder():
@@ -24,7 +41,8 @@ def load_builder():
 
 
 def synthetic_wheel(*, requirement=(b'Requires-Dist: mcp~=1.28.1\n'
-                                       b'Requires-Dist: crewai-cli==1.15.4\n')):
+                                       b'Requires-Dist: crewai-cli==1.15.4\n'
+                                       + OTEL_OLD)):
     files = {
         'crewai/__init__.py': b'__version__="1.15.4"\n',
         'crewai-1.15.4.dist-info/METADATA': b'Name: crewai\nVersion: 1.15.4\n' + requirement,
@@ -32,6 +50,28 @@ def synthetic_wheel(*, requirement=(b'Requires-Dist: mcp~=1.28.1\n'
         'crewai-1.15.4.dist-info/WHEEL': b'Wheel-Version: 1.0\nTag: py3-none-any\n',
     }
     record = 'crewai-1.15.4.dist-info/RECORD'
+    lines = io.StringIO(newline='')
+    writer = csv.writer(lines, lineterminator='\n')
+    for name, data in files.items():
+        digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).decode().rstrip('=')
+        writer.writerow((name, 'sha256=' + digest, str(len(data))))
+    writer.writerow((record, '', ''))
+    files[record] = lines.getvalue().encode()
+    result = io.BytesIO()
+    with zipfile.ZipFile(result, 'w') as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    return result.getvalue()
+
+
+def synthetic_core_wheel(*, requirement=OTEL_OLD):
+    files = {
+        'crewai_core/__init__.py': b'__version__="1.15.4"\n',
+        'crewai_core-1.15.4.dist-info/METADATA': b'Name: crewai-core\nVersion: 1.15.4\n' + requirement,
+        'crewai_core-1.15.4.dist-info/LICENSE': b'Synthetic core license\n',
+        'crewai_core-1.15.4.dist-info/WHEEL': b'Wheel-Version: 1.0\nTag: py3-none-any\n',
+    }
+    record = 'crewai_core-1.15.4.dist-info/RECORD'
     lines = io.StringIO(newline='')
     writer = csv.writer(lines, lineterminator='\n')
     for name, data in files.items():
@@ -64,6 +104,8 @@ def test_patch_changes_only_constraint_and_record_preserving_license(monkeypatch
         metadata_bytes = b.read(changed[0])
         assert b'Requires-Dist: mcp<1.31,>=1.30.0\n' in metadata_bytes
         assert b'Requires-Dist: crewai-cli==1.15.4\n' not in metadata_bytes
+        assert OTEL_NEW in metadata_bytes
+        assert OTEL_OLD not in metadata_bytes
         assert b.read('crewai-1.15.4.dist-info/LICENSE') == b'Synthetic fixture license\n'
         for name, digest, size in csv.reader(io.StringIO(b.read('crewai-1.15.4.dist-info/RECORD').decode())):
             if not digest:
@@ -81,6 +123,54 @@ def test_rejects_missing_or_duplicate_target_constraint(monkeypatch):
         monkeypatch.setattr(module, 'SOURCE_SHA256', hashlib.sha256(source).hexdigest())
         with pytest.raises(ValueError, match='constraint'):
             module.repack_wheel(source)
+
+
+@pytest.mark.parametrize('constraint', OTEL_OLD.splitlines(keepends=True))
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_rejects_missing_or_duplicate_otel_metadata_constraint(monkeypatch, constraint, duplicate):
+    module = load_builder()
+    requirement = b'Requires-Dist: mcp~=1.28.1\nRequires-Dist: crewai-cli==1.15.4\n'
+    if duplicate:
+        requirement += OTEL_OLD + constraint
+    else:
+        requirement += OTEL_OLD.replace(constraint, b'')
+    source = synthetic_wheel(requirement=requirement)
+    monkeypatch.setattr(module, 'SOURCE_SHA256', hashlib.sha256(source).hexdigest())
+    with pytest.raises(ValueError, match='telemetry|OpenTelemetry|constraint'):
+        module.repack_wheel(source)
+
+
+def test_repack_core_wheel_changes_only_otel_metadata_and_record(monkeypatch):
+    module = load_builder()
+    source = synthetic_core_wheel()
+    monkeypatch.setattr(module, 'CORE_SOURCE_SHA256', hashlib.sha256(source).hexdigest())
+    derived = module.repack_wheel(source, core=True)
+    assert derived == module.repack_wheel(source, core=True)
+    with zipfile.ZipFile(io.BytesIO(source)) as original, zipfile.ZipFile(io.BytesIO(derived)) as patched:
+        changed = [name for name in original.namelist() if original.read(name) != patched.read(name)]
+        assert set(changed) == {module.CORE_METADATA_NAME, module.CORE_RECORD_NAME}
+        metadata_bytes = patched.read(module.CORE_METADATA_NAME)
+        assert OTEL_NEW in metadata_bytes
+        assert OTEL_OLD not in metadata_bytes
+        assert patched.read('crewai_core-1.15.4.dist-info/LICENSE') == b'Synthetic core license\n'
+        module.verify_record(derived, record_name=module.CORE_RECORD_NAME)
+
+
+def test_rejects_untrusted_core_wheel_bytes():
+    module = load_builder()
+    with pytest.raises(ValueError, match='source SHA'):
+        module.repack_wheel(b'untrusted core bytes', core=True)
+
+
+@pytest.mark.parametrize('constraint', OTEL_OLD.splitlines(keepends=True))
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_rejects_missing_or_duplicate_core_otel_constraint(monkeypatch, constraint, duplicate):
+    module = load_builder()
+    requirement = OTEL_OLD + constraint if duplicate else OTEL_OLD.replace(constraint, b'')
+    source = synthetic_core_wheel(requirement=requirement)
+    monkeypatch.setattr(module, 'CORE_SOURCE_SHA256', hashlib.sha256(source).hexdigest())
+    with pytest.raises(ValueError, match='OpenTelemetry constraint'):
+        module.repack_wheel(source, core=True)
 
 
 def test_rejects_missing_or_duplicate_unused_cli_edge(monkeypatch):
@@ -122,23 +212,63 @@ def test_runtime_accepts_absent_cli_tooling(monkeypatch):
 
 def test_generated_requirements_keep_extra_and_all_other_requirements():
     module = load_builder()
-    original = 'fastapi==0.139.2\ncrewai[litellm]==1.15.4\nmcp==1.30.0\n'
-    generated = module.render_requirements(original, Path('/isolated/crewai.whl'))
+    original = (
+        'fastapi==0.139.2\ncrewai[litellm]==1.15.4\ncrewai-core==1.15.4\nmcp==1.30.0\n'
+        + '\n'.join(OTEL_PINS) + '\n'
+    )
+    generated = module.render_requirements(
+        original, Path('/isolated/crewai.whl'), Path('/isolated/crewai_core.whl'),
+    )
     assert 'crewai[litellm] @ ' in generated
+    assert 'crewai-core @ ' in generated
     assert 'fastapi==0.139.2\n' in generated
     assert 'mcp==1.30.0\n' in generated
-    assert len(generated.splitlines()) == 3
+    for pin in OTEL_PINS:
+        assert generated.count(pin) == 1
+    assert len(generated.splitlines()) == 7
 
 
 @pytest.mark.parametrize('original', [
-    'crewai==1.15.4\nmcp==1.30.0\n',
-    'crewai[litellm]==1.15.4\nmcp>=1.30.0\n',
-    'crewai[litellm]==1.15.4\nmcp==1.30.0\nmcp==1.28.1\n',
+    'crewai==1.15.4\ncrewai-core==1.15.4\nmcp==1.30.0\n' + '\n'.join(OTEL_PINS) + '\n',
+    'crewai[litellm]==1.15.4\ncrewai-core==1.15.4\nmcp>=1.30.0\n' + '\n'.join(OTEL_PINS) + '\n',
+    'crewai[litellm]==1.15.4\ncrewai-core==1.15.4\nmcp==1.30.0\nmcp==1.28.1\n' + '\n'.join(OTEL_PINS) + '\n',
 ])
 def test_requirements_fail_closed_on_unreviewed_contract(original):
     module = load_builder()
     with pytest.raises(ValueError):
-        module.render_requirements(original, Path('/isolated/crewai.whl'))
+        module.render_requirements(original, Path('/isolated/crewai.whl'), Path('/isolated/crewai_core.whl'))
+
+
+@pytest.mark.parametrize(('pin', 'mutation'), [
+    (pin, mutation)
+    for pin in OTEL_PINS
+    for mutation in ('missing', 'wrong', 'duplicate')
+])
+def test_requirements_reject_missing_wrong_or_duplicate_otel_pins(pin, mutation):
+    module = load_builder()
+    original = 'crewai[litellm]==1.15.4\ncrewai-core==1.15.4\nmcp==1.30.0\n' + '\n'.join(OTEL_PINS) + '\n'
+    if mutation == 'missing':
+        original = original.replace(pin + '\n', '')
+    elif mutation == 'wrong':
+        original = original.replace(pin, pin.rsplit('==', 1)[0] + '==1.45.0')
+    else:
+        original += pin + '\n'
+    with pytest.raises(ValueError):
+        module.render_requirements(original, Path('/isolated/crewai.whl'), Path('/isolated/crewai_core.whl'))
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'wrong', 'duplicate'])
+def test_requirements_reject_missing_wrong_or_duplicate_core_pin(mutation):
+    module = load_builder()
+    original = 'crewai[litellm]==1.15.4\ncrewai-core==1.15.4\nmcp==1.30.0\n' + '\n'.join(OTEL_PINS) + '\n'
+    if mutation == 'missing':
+        original = original.replace('crewai-core==1.15.4\n', '')
+    elif mutation == 'wrong':
+        original = original.replace('crewai-core==1.15.4', 'crewai-core==1.15.3')
+    else:
+        original += 'crewai-core==1.15.4\n'
+    with pytest.raises(ValueError):
+        module.render_requirements(original, Path('/isolated/crewai.whl'), Path('/isolated/crewai_core.whl'))
 
 
 @pytest.mark.parametrize('entries', [
@@ -159,6 +289,54 @@ def test_inventory_accepts_exact_cpu_version_without_normalization():
     module.verify_audit_inventory({'dependencies': [{'name': 'torch', 'version': '2.14.0+cpu', 'vulns': []}]}, {'torch': '2.14.0+cpu'})
 
 
+def test_installed_inventory_ignores_disabled_user_site(tmp_path, monkeypatch):
+    module = load_builder()
+    runtime_site = tmp_path / 'runtime-site'
+    user_site = tmp_path / 'user-site'
+    runtime_site.mkdir()
+    user_site.mkdir()
+    monkeypatch.setattr(module.site, 'getsitepackages', lambda: [str(runtime_site)])
+    monkeypatch.setattr(module.site, 'getusersitepackages', lambda: str(user_site))
+    monkeypatch.setattr(module.site, 'ENABLE_USER_SITE', False)
+    monkeypatch.setattr(
+        module.metadata,
+        'distributions',
+        lambda *, path: [SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')]
+        if path == [str(runtime_site)] else pytest.fail(f'Unexpected distribution paths: {path}'),
+    )
+
+    paths, installed = module.installed_inventory()
+
+    assert paths == [str(runtime_site)]
+    assert installed == {'runtime-package': '1.0'}
+
+
+def test_installed_inventory_includes_enabled_user_site_and_rejects_duplicates(tmp_path, monkeypatch):
+    module = load_builder()
+    runtime_site = tmp_path / 'runtime-site'
+    user_site = tmp_path / 'user-site'
+    runtime_site.mkdir()
+    user_site.mkdir()
+    monkeypatch.setattr(module.site, 'getsitepackages', lambda: [str(runtime_site)])
+    monkeypatch.setattr(module.site, 'getusersitepackages', lambda: str(user_site))
+    monkeypatch.setattr(module.site, 'ENABLE_USER_SITE', True)
+    monkeypatch.setattr(
+        module.metadata,
+        'distributions',
+        lambda *, path: [SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')]
+        if path == [str(runtime_site), str(user_site)] else pytest.fail(f'Unexpected distribution paths: {path}'),
+    )
+
+    paths, installed = module.installed_inventory()
+    assert paths == [str(runtime_site), str(user_site)]
+    assert installed == {'runtime-package': '1.0'}
+
+    duplicate = SimpleNamespace(metadata={'Name': 'runtime-package'}, version='1.0')
+    monkeypatch.setattr(module.metadata, 'distributions', lambda *, path: [duplicate, duplicate])
+    with pytest.raises(ValueError, match='Duplicate installed distribution'):
+        module.installed_inventory()
+
+
 def test_runtime_verifier_rejects_modified_installed_code(tmp_path):
     module = load_builder()
     code = tmp_path / 'crewai/__init__.py'
@@ -167,6 +345,152 @@ def test_runtime_verifier_rejects_modified_installed_code(tmp_path):
     manifest = {'installed_files': {'crewai/__init__.py': hashlib.sha256(b'original code').hexdigest()}}
     with pytest.raises(ValueError, match='installed file'):
         module.verify_installed_files(manifest, tmp_path)
+
+
+@pytest.mark.parametrize('package', [
+    'opentelemetry-api',
+    'opentelemetry-sdk',
+    'opentelemetry-exporter-otlp-proto-http',
+])
+def test_runtime_verifier_requires_exact_otel_versions(tmp_path, monkeypatch, package):
+    module = load_builder()
+    manifest_path = tmp_path / 'manifest.json'
+    manifest_path.write_bytes(b'{}')
+    monkeypatch.setattr(module, 'PROVENANCE_SHA256', hashlib.sha256(b'{}').hexdigest())
+    versions = {
+        'crewai': '1.15.4',
+        'crewai-core': '1.15.4',
+        'mcp': '1.30.0',
+        **{name: '1.45.1' for name in module.TELEMETRY_PACKAGES},
+    }
+    versions[package] = '1.45.0'
+    monkeypatch.setattr(module.metadata, 'version', lambda name: versions[name])
+    with pytest.raises(ValueError, match='Unreviewed installed dependency version'):
+        module.verify_runtime(manifest_path)
+
+
+def test_runtime_verifier_accepts_exact_reviewed_otel_versions(tmp_path, monkeypatch):
+    module = load_builder()
+    manifest_path = tmp_path / 'manifest.json'
+    manifest_path.write_bytes(b'{"core": {}}')
+    monkeypatch.setattr(module, 'PROVENANCE_SHA256', hashlib.sha256(b'{"core": {}}').hexdigest())
+    versions = {
+        'crewai': '1.15.4',
+        'crewai-core': '1.15.4',
+        'mcp': '1.30.0',
+        **{name: '1.45.1' for name in module.TELEMETRY_PACKAGES},
+    }
+    monkeypatch.setattr(module.metadata, 'version', lambda name: versions[name])
+    monkeypatch.setattr(module.metadata, 'distribution', lambda _name: SimpleNamespace(locate_file=lambda _path: tmp_path))
+    monkeypatch.setattr(module, 'verify_cli_tools_absent', lambda: None)
+    monkeypatch.setattr(module, 'verify_installed_files', lambda *_args: None)
+
+    module.verify_runtime(manifest_path)
+
+
+def test_reviewed_otel_and_crewai_telemetry_run_offline_without_sensitive_header_logs():
+    script = r'''
+import logging
+import os
+import socket
+from importlib.metadata import version
+from io import StringIO
+from types import SimpleNamespace
+
+expected = {
+    "opentelemetry-api": "1.45.1",
+    "opentelemetry-sdk": "1.45.1",
+    "opentelemetry-exporter-otlp-proto-http": "1.45.1",
+    "crewai": "1.15.4",
+    "crewai-core": "1.15.4",
+}
+for package, wanted in expected.items():
+    assert version(package) == wanted, (package, version(package))
+
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+os.environ["CREWAI_DISABLE_TRACKING"] = "true"
+
+attempts = []
+def blocked(*args, **kwargs):
+    attempts.append((args, kwargs))
+    raise AssertionError("telemetry attempted network access")
+socket.create_connection = blocked
+socket.getaddrinfo = blocked
+socket.socket.connect = blocked
+
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import get_current_span
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+import crewai_core.telemetry as core_module
+import crewai.telemetry.telemetry as framework_module
+
+# Exercise the reviewed OTLP exporter constructor without exporting anything.
+probe = core_module.SafeOTLPSpanExporter(endpoint="http://127.0.0.1:9/v1/traces", timeout=30)
+probe.shutdown()
+
+exporters = []
+def memory_exporter(**kwargs):
+    exporter = InMemorySpanExporter()
+    exporters.append(exporter)
+    return exporter
+core_module.SafeOTLPSpanExporter = memory_exporter
+framework_module.SafeOTLPSpanExporter = memory_exporter
+core_module.Telemetry._instance = None
+framework_module.Telemetry._instance = None
+core_module.Telemetry._register_shutdown_handlers = lambda self: None
+framework_module.Telemetry._register_shutdown_handlers = lambda self: None
+os.environ.pop("OTEL_SDK_DISABLED")
+os.environ.pop("CREWAI_DISABLE_TELEMETRY")
+os.environ.pop("CREWAI_DISABLE_TRACKING")
+
+log_stream = StringIO()
+handler = logging.StreamHandler(log_stream)
+root_logger = logging.getLogger()
+root_logger.addHandler(handler)
+root_logger.setLevel(logging.DEBUG)
+core = core_module.Telemetry()
+framework = framework_module.Telemetry()
+assert core.ready and framework.ready
+core_module.trace = SimpleNamespace(get_tracer=core.provider.get_tracer)
+framework_module.trace = SimpleNamespace(get_tracer=framework.provider.get_tracer)
+try:
+    core.feature_usage_span("offline-smoke")
+    framework.flow_execution_span("offline-flow", ["node-a"])
+    framework.feature_usage_span("offline-feature")
+    assert core.provider.force_flush(timeout_millis=5000)
+    assert framework.provider.force_flush(timeout_millis=5000)
+
+    finished = [span for exporter in exporters for span in exporter.get_finished_spans()]
+    assert {span.name for span in finished} >= {"Feature Usage", "Flow Execution"}
+    assert all(span.end_time is not None for span in finished)
+    assert all(span.status.status_code.name == "OK" for span in finished)
+    assert any(span.attributes.get("feature") == "offline-smoke" for span in finished)
+    assert any(span.attributes.get("flow_name") == "offline-flow" for span in finished)
+
+    marker = "SENSITIVE_HEADER_MARKER"
+    carrier = {
+        "traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01",
+        "tracestate": "vendor=" + marker * 8000,
+    }
+    context = TraceContextTextMapPropagator().extract(carrier)
+    state = get_current_span(context).get_span_context().trace_state
+    assert len(state) == 0
+    assert marker not in log_stream.getvalue()
+    assert attempts == []
+finally:
+    core.provider.shutdown()
+    framework.provider.shutdown()
+    root_logger.removeHandler(handler)
+'''
+    result = subprocess.run(
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'SENSITIVE_HEADER_MARKER' not in result.stdout + result.stderr
 
 
 def test_release_paths_use_same_reviewed_installer_and_strict_audit():
@@ -263,6 +587,7 @@ def test_incomplete_fresh_report_is_preserved_as_failed_evidence(tmp_path, monke
 
 def test_install_verifies_new_user_site_in_a_fresh_interpreter(monkeypatch):
     module = load_builder()
+    monkeypatch.setattr(module.sys, 'version_info', (3, 12, 0))
     monkeypatch.setattr(module.sys, 'argv', ['reviewed_runtime.py', 'install', '--user'])
     monkeypatch.setattr(module, 'prepare', lambda *args: Path('generated-requirements.txt'))
     monkeypatch.setattr(module, 'verify_runtime', lambda *args: pytest.fail('Parent cannot see newly created user site'))

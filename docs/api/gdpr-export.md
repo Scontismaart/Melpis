@@ -9,6 +9,15 @@ The response is `application/json` and includes a relative `download_url` and
 bound to the authenticated user, current authentication session, owner
 membership, and organization selected when the export was created.
 
+`POST /api/gdpr/export` uses the same authorization and cookie contract and
+accepts an explicit UUID `request_id`, `scope` (`organization`, `contact`, or
+`account`), and a tenant-bound `subject_id` for contact scope. Replays return
+the same unexpired encrypted PostgreSQL snapshot. Its manifest distinguishes
+included, excluded, oversized and partial categories; subject/account exports
+do not infer ownership of unstructured third-party content. Redis contains a
+small encrypted descriptor, not the full export. See the
+[A06 runbook](../operations/a06-gdpr-runbook.md) for scope and legal gates.
+
 ## Download
 
 Call the returned path with the same authenticated session. For a user with
@@ -36,6 +45,11 @@ The Redis consume is an atomic compare-and-delete. If a connection drops after
 Redis executes the script but before the client receives its reply, the result
 is inherently ambiguous: no export is returned by that request, and the owner
 may need to request a new export.
+
+`POST /api/gdpr/download/revoke` revokes the bound ticket and snapshot under
+the same identity/session/owner/MFA checks. Legacy inline export tickets are
+rejected. Snapshot validation happens before token consumption; an interrupted
+stream after consumption requires a new authorized ticket, never token replay.
 
 ## Browser and proxy requirements
 

@@ -1,3 +1,4 @@
+import base64
 import importlib.util
 from pathlib import Path
 
@@ -51,7 +52,10 @@ def common_config():
         "DATABASE_URL": "postgresql://u:p@db/x?sslmode=require",
         "SUPABASE_URL": "https://project.supabase.co",
         "SUPABASE_ANON_KEY": "anon-unit-safe-value",
-        "ENCRYPTION_KEY": Fernet.generate_key().decode(),
+        # Public synthetic fixture, never a deployment key. Random base64 can
+        # contain placeholder markers (for example xxx), correctly rejected
+        # by preflight and causing unrelated configuration tests to flake.
+        "ENCRYPTION_KEY": base64.urlsafe_b64encode(bytes(range(32))).decode("ascii"),
         "PUBLIC_APP_URL": "https://melpis.it",
         "CORS_ORIGINS": "https://melpis.it,https://app.melpis.it",
         "META_APP_SECRET": "meta-unit-safe-value",
@@ -121,6 +125,14 @@ def test_valid_commercial_bootstrap_configuration_passes():
 
 def test_valid_sandbox_configuration_passes():
     assert validate(sandbox_config()) == []
+
+
+def test_valid_fernet_format_does_not_bypass_placeholder_rejection():
+    config = sandbox_config()
+    synthetic_key = "XXX" + "A" * 40 + "="
+    Fernet(synthetic_key.encode("ascii"))
+    config["ENCRYPTION_KEY"] = synthetic_key
+    assert "ENCRYPTION_KEY: missing or placeholder" in validate(config)
 
 
 @pytest.mark.parametrize(

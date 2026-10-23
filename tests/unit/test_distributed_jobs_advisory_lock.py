@@ -103,8 +103,21 @@ async def test_purge_webhook_idempotency():
 
 
 @pytest.mark.asyncio
-async def test_run_retention_includes_webhook_purge():
+async def test_run_retention_expires_exports_without_unapproved_primary_purges(monkeypatch):
+    monkeypatch.delenv("GDPR_RETENTION_EXECUTION_ENABLED", raising=False)
     mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.execute = AsyncMock(return_value="UPDATE 0")
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=mock_conn)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    mock_conn.transaction = MagicMock(return_value=tx)
+    acquired = MagicMock()
+    acquired.__aenter__ = AsyncMock(return_value=mock_conn)
+    acquired.__aexit__ = AsyncMock(return_value=False)
+    mock_pool.acquire = MagicMock(return_value=acquired)
+
     with patch("src.whatsapp.repository.Repository") as mock_repo_cls, \
          patch("src.whatsapp.idempotency.purge_webhook_idempotency", new_callable=AsyncMock) as mock_purge:
         mock_repo = MagicMock()
@@ -113,11 +126,17 @@ async def test_run_retention_includes_webhook_purge():
         mock_repo.cleanup_empty_conversations = AsyncMock(return_value=1)
         mock_repo.purge_simulation_requests = AsyncMock(return_value=0)
         mock_repo_cls.return_value = mock_repo
-        mock_purge.return_value = 10
+        result = await run_retention(mock_pool)
 
-        await run_retention(mock_pool)
-
-        mock_purge.assert_called_once_with(mock_pool, days=7)
-        mock_repo.delete_expired_messages.assert_called_once()
-        mock_repo.purge_soft_deleted_messages.assert_called_once()
-        mock_repo.cleanup_empty_conversations.assert_called_once()
+        assert result == {
+            "exports_expired": 0,
+            "messages_redacted": 0,
+            "simulator_purged": 0,
+        }
+        mock_conn.fetch.assert_awaited_once()
+        assert "FROM gdpr_operations WHERE kind='export'" in mock_conn.fetch.await_args.args[0]
+        mock_purge.assert_not_awaited()
+        mock_repo_cls.assert_not_called()
+        mock_repo.delete_expired_messages.assert_not_awaited()
+        mock_repo.purge_soft_deleted_messages.assert_not_awaited()
+        mock_repo.cleanup_empty_conversations.assert_not_awaited()

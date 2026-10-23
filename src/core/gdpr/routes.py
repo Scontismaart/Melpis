@@ -1,9 +1,11 @@
 import logging
+import os
 import secrets
-from datetime import datetime, timezone
+from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 
 from src.core.auth import bff
@@ -16,6 +18,9 @@ from src.core.auth.dependencies import (
 )
 from src.core.db.repository import CoreRepository
 from src.core.gdpr import token_store
+from src.core.gdpr.exporter import Exporter
+from src.core.gdpr.operations import Operations, OperationUnavailable, RequestConflict
+from src.core.gdpr.deletion import Deletion
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,8 @@ DPA_HTML = """<!DOCTYPE html>
 <head><meta charset="UTF-8"><title>Data Processing Agreement</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:2em auto;line-height:1.6">
 <h1>Data Processing Agreement (DPA)</h1>
+<p><strong>Technical template pending legal approval under C05 #100.</strong>
+This page does not approve a retention schedule or certify external deletion.</p>
 <p><strong>Last updated:</strong> July 2026</p>
 
 <h2>1. Parties</h2>
@@ -62,19 +69,18 @@ DPA_HTML = """<!DOCTYPE html>
 <p>Transfer mechanisms (Standard Contractual Clauses and/or applicable adequacy decisions such as the EU-U.S. Data Privacy Framework) apply where data is transferred outside the EEA, as available for each provider at the time of signing.</p>
 
 <h2>5. Data Retention</h2>
-<p>Messages and conversation data are retained for a maximum of 90 days:</p>
-<ul>
-  <li>Day 60: automatic soft-delete (data invisible to the application)</li>
-  <li>Day 90: permanent physical deletion</li>
-</ul>
-<p>This policy is currently fixed for all tenants and is not yet configurable per tenant.</p>
+<p>Primary-data retention requires an explicit, versioned, per-tenant policy
+approved by the Controller and an authorized operational cutover. No primary-data
+schedule is activated by this template. Billing records, security evidence,
+provider copies and backup retention require separate approved dispositions.</p>
 
 <h2>6. Security Measures</h2>
 <ul>
   <li>Encryption at rest: WhatsApp access tokens encrypted with Fernet (AES-128)</li>
   <li>PII redaction: automatic masking of recognized personal data patterns (international phone numbers, email addresses) via regex in all application logs</li>
   <li>Access control: role-based authentication (owner, manager, staff)</li>
-  <li>Soft-delete: data recoverable within 30-day grace period</li>
+  <li>Erasure and retention: explicit approved policies and recorded exceptions;
+      blocked or partial operations do not certify deletion or recoverability</li>
 </ul>
 <p>Note: log redaction is based on pattern recognition and is a reasonable mitigation, not an absolute guarantee: it does not cover numeric identifiers without an international prefix, nor personal data in free-text fields that do not follow a recognizable format.</p>
 
@@ -82,7 +88,8 @@ DPA_HTML = """<!DOCTYPE html>
 <p>Controllers may exercise data subject rights via the GDPR API:</p>
 <ul>
   <li><strong>Export:</strong> <code>GET /api/gdpr/export</code> — owner-only JSON export; download uses a 15-minute, session-bound HttpOnly cookie at <code>GET /api/gdpr/download</code></li>
-  <li><strong>Deletion:</strong> <code>POST /api/gdpr/delete</code> — hard-delete with external service propagation</li>
+  <li><strong>Deletion:</strong> <code>POST /api/gdpr/delete</code> — durable scoped erasure request;
+      blocked or partial requests are not completed deletions. External completion requires verified receipts.</li>
   <li><strong>Consent:</strong> <code>GET/PUT /api/gdpr/consent-prefs</code> — manage consent preferences</li>
   <li><strong>AI Transparency:</strong> the first automated reply to each new
       customer is preceded by a disclosure that the user is interacting with
@@ -184,7 +191,10 @@ async def gdpr_export(
     user_id = user.get("user_id")
     if not all(isinstance(value, str) and value for value in (auth_user_id, session_id, user_id)):
         raise HTTPException(status_code=403, detail="Sessione autenticata aggiornata richiesta")
-    data = await _export_tenant_data(repo, org_id)
+    try:
+        data = await _export_tenant_data(repo, org_id, auth_user_id)
+    except Exception:
+        raise HTTPException(503, 'Export temporaneamente non disponibile') from None
     token = secrets.token_urlsafe(32)
     try:
         await token_store.save_token(
@@ -205,7 +215,8 @@ async def gdpr_export(
                     auth_user_id=user.get("auth_user_id"),
                     details={"expires_in_minutes": 15})
 
-    response = JSONResponse({"download_url": download_url, "expires_in_minutes": 15})
+    response = JSONResponse({"download_url": download_url, "expires_in_minutes": 15,
+                             "export_id": data.get('export_id'), "manifest": data.get('manifest')})
     response.set_cookie(
         token_store.DOWNLOAD_COOKIE,
         token,
@@ -290,14 +301,29 @@ async def gdpr_download(
         return response
 
     token, pending = authorization
+    if not pending.data.get('export_id'):
+        raise HTTPException(404, 'Export scaduto o revocato')
+    exporter = Exporter(get_repo(request).pool)
+    if pending.data.get('export_id'):
+        try:
+            await exporter.preflight(pending.org_id, pending.data['export_id'], pending.auth_user_id)
+        except LookupError:
+            raise HTTPException(404, 'Export scaduto o revocato') from None
+        except Exception:
+            raise HTTPException(503, 'Export temporaneamente non disponibile') from None
     try:
         data = await token_store.consume_token(token, pending)
     except token_store.TokenStoreUnavailable as exc:
         raise HTTPException(status_code=503, detail="Export temporaneamente non disponibile") from exc
     if data is None:
         response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
-    else:
-        response = JSONResponse(content=data)
+    elif data.get('export_id'):
+        response = StreamingResponse(
+            exporter.stream(pending.org_id, data['export_id'], pending.auth_user_id),
+            media_type='application/json',
+            headers={'Content-Disposition': 'attachment; filename="melpis-gdpr-export.json"',
+                     'X-Content-Type-Options': 'nosniff'},
+        )
     _clear_download_cookie(response)
     _set_download_response_headers(response)
     return response
@@ -318,79 +344,111 @@ def _set_download_response_headers(response: JSONResponse) -> None:
     response.headers["Referrer-Policy"] = "no-referrer"
 
 
-@router.post("/delete")
+class RightsRequest(BaseModel):
+    request_id: UUID
+    scope: Literal['organization', 'contact', 'account'] = 'organization'
+    subject_id: UUID | None = None
+
+
+@router.post('/export')
+async def gdpr_scoped_export(
+    body: RightsRequest,
+    request: Request,
+    user: dict = Depends(require_ruolo('owner')),
+    _mfa: dict = Depends(require_mfa()),
+):
+    if not all(user.get(k) for k in ('auth_user_id', 'user_id', 'session_id')):
+        raise HTTPException(403, 'Sessione autenticata aggiornata richiesta')
+    try:
+        descriptor = await Exporter(get_repo(request).pool).prepare(
+            user['organization_id'], user['auth_user_id'], scope=body.scope,
+            subject_id=body.subject_id, request_id=body.request_id,
+        )
+        token = secrets.token_urlsafe(32)
+        await token_store.save_token(token, str(user['organization_id']), descriptor,
+                                     auth_user_id=user['auth_user_id'], session_id=user['session_id'], user_id=user['user_id'])
+    except RequestConflict:
+        raise HTTPException(409, 'Identificativo richiesta già utilizzato') from None
+    except (ValueError, LookupError):
+        raise HTTPException(404, 'Soggetto o richiesta non disponibile') from None
+    except Exception:
+        raise HTTPException(503, 'Export temporaneamente non disponibile') from None
+    response = JSONResponse({'download_url': '/api/gdpr/download', 'expires_in_minutes': 15, **descriptor})
+    response.set_cookie(token_store.DOWNLOAD_COOKIE, token, max_age=token_store.TOKEN_TTL_SECONDS,
+                        path='/api/gdpr/download', secure=bff.cookie_secure(), httponly=True, samesite='strict')
+    _set_download_response_headers(response)
+    return response
+
+
+@router.post('/download/revoke')
+async def gdpr_revoke_download(request: Request, authorization=Depends(require_gdpr_download_authorization)):
+    if authorization is not None:
+        token, pending = authorization
+        if pending.data.get('export_id'):
+            await Exporter(get_repo(request).pool).revoke(pending.org_id, pending.data['export_id'], pending.auth_user_id)
+        try:
+            await token_store.revoke_token(token, pending)
+        except token_store.TokenStoreUnavailable:
+            raise HTTPException(503, 'Export temporaneamente non disponibile') from None
+    response = JSONResponse({'status': 'revoked'})
+    _clear_download_cookie(response)
+    _set_download_response_headers(response)
+    return response
+
+
+@router.post("/delete", status_code=202)
 async def gdpr_delete(
     request: Request,
+    body: RightsRequest,
     user: dict = Depends(require_ruolo("owner")),
     _mfa: dict = Depends(require_mfa()),
 ):
-    from src.core.gdpr.propagation import propagate_hard_delete
+    try:
+        return await Deletion(get_repo(request).pool).request(
+            user['organization_id'], user['auth_user_id'], body.request_id,
+            scope=body.scope, subject_id=body.subject_id,
+        )
+    except RequestConflict:
+        raise HTTPException(409, 'Identificativo richiesta già utilizzato') from None
+    except (ValueError, LookupError):
+        raise HTTPException(404, 'Soggetto o richiesta non disponibile') from None
+    except Exception:
+        raise HTTPException(503, 'Richiesta GDPR temporaneamente non disponibile') from None
 
-    repo: CoreRepository = request.app.state.repo
-    org_id = user["organization_id"]
 
-    propagation_results = await propagate_hard_delete(str(org_id))
+@router.get('/operations/{operation_id}')
+async def gdpr_operation_status(operation_id: UUID, request: Request,
+                                user: dict = Depends(require_ruolo('owner')),
+                                _mfa: dict = Depends(require_mfa())):
+    try:
+        return await Operations(get_repo(request).pool).get(user['organization_id'], operation_id, user['auth_user_id'])
+    except LookupError:
+        raise HTTPException(404, 'Richiesta non disponibile') from None
 
-    await audit_log(repo, organization_id=org_id, action="gdpr.hard_delete",
-                    auth_user_id=user.get("auth_user_id"),
-                    details={"propagation": propagation_results})
 
-    await repo.delete_organization(org_id)
-
-    return {
-        "status": "deleted",
-        "propagation": propagation_results,
-        "message": "All data permanently removed. External services notified.",
-    }
+@router.post('/operations/{operation_id}/retry')
+async def gdpr_operation_retry(operation_id: UUID, request: Request,
+                               user: dict = Depends(require_ruolo('owner')),
+                               _mfa: dict = Depends(require_mfa())):
+    try:
+        await Deletion(get_repo(request).pool).advance(user['organization_id'], operation_id, user['auth_user_id'])
+        return await Operations(get_repo(request).pool).get(user['organization_id'], operation_id, user['auth_user_id'])
+    except LookupError:
+        raise HTTPException(404, 'Richiesta non disponibile') from None
 
 
 @router.get("/retention-policy")
 async def retention_policy():
     return {
-        "retention_days": 60,
-        "purge_after_days": 30,
-        "simulator_response_days": 30,
+        "policy_version": "tenant-approval-required",
+        "automatic_erasure_enabled": os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') == 'true',
+        "approval_gate": "C05 #100: versioned per-tenant policy and operational cutover required",
+        "retention_days": None,
+        "purge_after_days": None,
+        "simulator_response_days": None,
         "simulator_history_idle_hours": 24,
     }
 
 
-async def _export_tenant_data(repo: CoreRepository, org_id: str) -> dict:
-    contacts = await repo.get_contacts_by_org(org_id)
-    conversations = await repo.get_conversations_by_org(org_id)
-    messages = await repo.get_messages_by_org(org_id)
-    simulation_requests = await repo.get_simulation_requests_by_org(org_id)
-
-    return {
-        "organization_id": str(org_id),
-        "exported_at": datetime.now(timezone.utc).isoformat(),
-        "contacts": [
-            {"id": str(c["id"]), "phone": c.get("phone_number"), "consent_status": c.get("consent_status")}
-            for c in contacts
-        ],
-        "conversations": [
-            {"id": str(c["id"]), "created_at": c.get("created_at").isoformat() if c.get("created_at") else None}
-            for c in conversations
-        ],
-        "messages": [
-            {
-                "id": str(m["id"]),
-                "direction": m.get("direction"),
-                "message_type": m.get("message_type"),
-                "content_text": m.get("content_text"),
-                "created_at": m.get("created_at").isoformat() if m.get("created_at") else None,
-            }
-            for m in messages
-        ],
-        "simulator_responses": [
-            {
-                "request_id": str(item["request_id"]),
-                "user_id": str(item["auth_user_id"]),
-                "payload_hash": item.get("payload_hash"),
-                "status": item.get("status"),
-                "response": item.get("response"),
-                "created_at": item.get("created_at").isoformat() if item.get("created_at") else None,
-                "completed_at": item.get("completed_at").isoformat() if item.get("completed_at") else None,
-            }
-            for item in simulation_requests
-        ],
-    }
+async def _export_tenant_data(repo: CoreRepository, org_id: str, requester: str) -> dict:
+    return await Exporter(repo.pool).prepare(org_id, requester)

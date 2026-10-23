@@ -1,13 +1,13 @@
 """Encrypted, identity-bound, one-time storage for GDPR exports.
 
-Redis/Valkey is shared in production and uses a 15-minute TTL. Local test/dev
-may use encrypted process memory. Production fails closed if Redis or the
-application encryption key is unavailable.
+Redis/Valkey is required in every environment and uses a 15-minute TTL.
+Downloads fail closed if the registry or application encryption key is absent.
 """
 import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -44,7 +44,7 @@ class ExportToken:
     session_id: str
     user_id: str
     role: str
-    data: dict
+    data: dict = field(repr=False)
     expires: float
     payload: str = field(repr=False)
 
@@ -79,6 +79,7 @@ def _decode_payload(payload: str | bytes) -> dict:
             or not isinstance(document.get("data"), dict)
             or isinstance(expires, bool)
             or not isinstance(expires, (int, float))
+            or not math.isfinite(expires)
         ):
             raise ValueError("Invalid GDPR export payload")
         return document
@@ -98,9 +99,7 @@ async def _get_redis():
     global _redis
     url = os.getenv("REDIS_URL", "").strip()
     if not url:
-        if _is_production():
-            raise TokenStoreUnavailable("REDIS_URL is required for production export tokens")
-        return None
+        raise TokenStoreUnavailable("REDIS_URL is required for export tokens")
 
     try:
         current_loop = asyncio.get_running_loop()
@@ -163,7 +162,7 @@ async def save_token(
         except Exception as exc:
             logger.warning("token_store: Redis write failed")
             raise TokenStoreUnavailable("Redis export-token write failed") from exc
-    _memory[key] = payload
+    raise TokenStoreUnavailable("Shared export-token registry is required")
 
 
 async def read_token(token: str) -> ExportToken | None:
@@ -177,12 +176,12 @@ async def read_token(token: str) -> ExportToken | None:
             logger.warning("token_store: Redis read failed")
             raise TokenStoreUnavailable("Redis export-token read failed") from exc
     else:
-        payload = _memory.get(key)
+        raise TokenStoreUnavailable("Shared export-token registry is required")
 
     if payload is None:
         return None
     document = _decode_payload(payload)
-    if document["expires"] < time.time():
+    if document["expires"] <= time.time():
         return None
     return ExportToken(
         org_id=document["org_id"],
@@ -198,7 +197,7 @@ async def read_token(token: str) -> ExportToken | None:
 
 async def consume_token(token: str, expected: ExportToken) -> dict | None:
     """Compare-and-delete atomically; only the winner receives the export."""
-    if expected.expires < time.time():
+    if expected.expires <= time.time():
         return None
     key = _storage_key(token)
     r = await _get_redis()
@@ -213,12 +212,12 @@ async def consume_token(token: str, expected: ExportToken) -> dict | None:
             raise TokenStoreUnavailable("Redis export-token consume failed") from exc
         return expected.data if int(consumed or 0) == 1 else None
 
-    # There is no await between the check and deletion, so this section is
-    # atomic among coroutines using the process-local fallback.
-    if _memory.get(key) != expected.payload:
-        return None
-    del _memory[key]
-    return expected.data
+    raise TokenStoreUnavailable("Shared export-token registry is required")
+
+
+async def revoke_token(token: str, expected: ExportToken) -> bool:
+    """Use the same CAS as consume; do not expose the associated export."""
+    return await consume_token(token, expected) is not None
 
 
 async def pop_token(token: str) -> dict | None:

@@ -11,6 +11,19 @@ from src.whatsapp.router import create_router
 from src.whatsapp.config import AppConfig
 
 
+def _assert_ingress_writes(mock_repo, *, events):
+    """Each ACK fences its tenant before one idempotent durable inbox write."""
+    conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
+    calls = conn.execute.await_args_list
+    assert len(calls) == events * 2
+    for lock, insert in zip(calls[::2], calls[1::2]):
+        assert "pg_advisory_xact_lock_shared" in lock.args[0]
+        assert "INSERT INTO meta_webhook_inbox" in insert.args[0]
+        assert "ON CONFLICT (organization_id, channel, event_key) DO NOTHING" in insert.args[0]
+        assert str(lock.args[1]) == str(insert.args[2])
+        assert insert.args[3] == "whatsapp"
+
+
 @pytest.fixture
 def app_config():
     return AppConfig(
@@ -53,6 +66,10 @@ def mock_repo():
     # acquire + transaction async context manager per _handle_inbound_message
     mock_conn = MagicMock()
     mock_conn.execute = AsyncMock(return_value="INSERT 0 1")
+    # GDPR ingress filtering checks the erased-subject barrier before the
+    # durable inbox insert. The empty result models no barrier for these tests.
+    mock_conn.fetch = AsyncMock(return_value=[])
+    mock_conn.fetchval = AsyncMock(return_value=False)
     mock_conn.transaction.return_value.__aenter__ = AsyncMock()
     mock_conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -267,9 +284,7 @@ class TestRouter:
         # event. Status validation/reconciliation belongs to the inbox worker.
         mock_repo.update_message_status_by_wam_id.assert_not_awaited()
         mock_repo.update_message_status.assert_not_awaited()
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 1
-        assert conn.execute.await_args.args[3] == "whatsapp"
+        _assert_ingress_writes(mock_repo, events=1)
 
     def test_post_status_idempotent_skip(self, client, app_config, mock_repo, monkeypatch):
         call_count = [0]
@@ -298,8 +313,7 @@ class TestRouter:
         assert resp1.status_code == 200
         resp2 = client.post("/webhooks/whatsapp", content=body, headers=headers)
         assert resp2.status_code == 200
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 2
+        _assert_ingress_writes(mock_repo, events=2)
         mock_repo.update_message_status_by_wam_id.assert_not_awaited()
 
     def test_post_inbound_idempotent_skip(self, client, app_config, mock_repo, monkeypatch):
@@ -330,8 +344,7 @@ class TestRouter:
         assert resp1.status_code == 200
         resp2 = client.post("/webhooks/whatsapp", content=body, headers=headers)
         assert resp2.status_code == 200
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 2
+        _assert_ingress_writes(mock_repo, events=2)
         mock_repo.upsert_message.assert_not_awaited()
 
     def test_post_batch_db_down_500(self, app, app_config, mock_repo):
@@ -382,8 +395,7 @@ class TestRouter:
         # Contacts are interpreted only after durable acceptance.
         assert not any("event=contacts_empty" in r.message for r in caplog.records)
         mock_repo.upsert_message.assert_not_awaited()
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 1
+        _assert_ingress_writes(mock_repo, events=1)
 
     def test_post_status_sequence_dedup_correct(self, client, app_config, mock_repo):
         payload = {
@@ -409,8 +421,7 @@ class TestRouter:
         resp = client.post("/webhooks/whatsapp", content=body, headers={"Content-Type": "application/json", "X-Hub-Signature-256": sig})
         assert resp.status_code == 200
         mock_repo.update_message_status_by_wam_id.assert_not_awaited()
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 1
+        _assert_ingress_writes(mock_repo, events=1)
 
     def test_post_batch_mixed_valid_invalid(self, client, app_config, mock_repo, caplog):
         caplog.set_level("WARNING")
@@ -435,8 +446,7 @@ class TestRouter:
         assert resp.status_code == 200
         assert not any("webhook_invalid_callback_data" in r.message for r in caplog.records)
         mock_repo.upsert_message.assert_not_awaited()
-        conn = mock_repo.pool.acquire.return_value.__aenter__.return_value
-        assert conn.execute.await_count == 1
+        _assert_ingress_writes(mock_repo, events=1)
 
     def test_post_template_status(self, client, app_config):
         payload = {
