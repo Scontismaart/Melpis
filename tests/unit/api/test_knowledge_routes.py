@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
@@ -53,26 +54,45 @@ def test_ui_summary_authorized(client):
     app.dependency_overrides.pop(get_organization_context, None)
 
 
-def test_chiedi_documenti_rag_blocked_by_plan(client):
+def test_chiedi_documenti_starter_rag_not_blocked_by_file_quota(client):
     mock_org_id = str(uuid.uuid4())
     mock_user = {
         "source": "jwt",
         "user_id": str(uuid.uuid4()),
+        "auth_user_id": str(uuid.uuid4()),
         "organization_id": mock_org_id,
         "ruolo": "owner",
         "email": "owner@example.com",
     }
     mock_repo = AsyncMock()
-    # Plan 'starter' does not have RAG
+    # RAG is available on every active plan; the file-byte budget is separate.
     mock_repo.get_organization_billing.return_value = {
         "plan": "starter", "subscription_status": "active"
     }
 
+    class ReservedWithoutSources:
+        def __init__(self, _pool):
+            pass
+
+        async def reserve(self, _operation):
+            return {"status": "reserved", "ticket": object()}
+
+        async def release(self, _operation, _ticket):
+            return True
+
     app.dependency_overrides[get_organization_context] = lambda: mock_user
-    with patch.object(app.state, "repo", mock_repo, create=True):
-        res = client.post("/api/documenti/chiedi", json={"domanda": "Quali sono i vostri orari?", "k": 3})
-        assert res.status_code == 403
-        assert "non include la Knowledge Base AI" in res.json()["detail"]
+    with patch.object(app.state, "repo", mock_repo, create=True), \
+         patch("src.api.routes.knowledge.QuotaReservations", ReservedWithoutSources), \
+         patch("src.api.routes.knowledge.rispondi", new_callable=AsyncMock, return_value={
+             "risposta": "Non ho fonti indicizzate per rispondere.", "fonti": [],
+         }):
+        res = client.post(
+            "/api/documenti/chiedi",
+            json={"domanda": "Quali sono i vostri orari?", "k": 3},
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+        )
+        assert res.status_code == 200
+        assert res.json()["fonti"] == []
     app.dependency_overrides.pop(get_organization_context, None)
 
 
@@ -103,13 +123,14 @@ def test_carica_file_documento_success(client):
     }
     mock_repo = AsyncMock()
     mock_repo.get_organization_billing.return_value = {"plan": "business", "subscription_status": "active"}
-    mock_repo.create_document.return_value = {"id": mock_doc_id}
-    mock_repo.add_chunk.return_value = {"id": str(uuid.uuid4())}
     mock_repo.faq_cache_invalidate.return_value = None
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
+    published_document = {"id": mock_doc_id, "stato": "indicizzata", "index_verified": True}
     with patch.object(app.state, "repo", mock_repo, create=True), \
-         patch("src.api.routes.knowledge.resolve_vettorizza", return_value=lambda chunks, **kw: [[0.1] * 384 for _ in chunks]):
+         patch("src.api.routes.knowledge.index_content", new_callable=AsyncMock, return_value={
+             "status": "indexed", "document": published_document, "indexed": 2,
+         }) as publish:
         res = client.post(
             "/api/documenti/carica-file",
             files={"file": ("listino_speciale.txt", b"Il prezzo segreto del corso VIP e' 499 euro.\nInclude tutoraggio.", "text/plain")},
@@ -119,9 +140,63 @@ def test_carica_file_documento_success(client):
         assert "Indicizzati" in data["detail"]
         assert data["nome"] == "listino_speciale.txt"
         assert data["id"] == mock_doc_id
-        mock_repo.create_document.assert_awaited_once()
-        mock_repo.add_chunk.assert_awaited()
-        mock_repo.faq_cache_invalidate.assert_awaited_once_with(mock_org_id)
+        publish.assert_awaited_once()
+        args, kwargs = publish.await_args
+        assert args[:3] == (mock_repo, mock_org_id, "listino_speciale.txt")
+        assert kwargs["file_content"].startswith(b"Il prezzo segreto")
+        assert kwargs["tipo"] == "documento"
+        assert kwargs["fonte"] == "listino_speciale.txt"
+        assert kwargs["request_key"] is None
+        assert kwargs["embedding_fn"] is not None
+        # Cache publication/invalidation belongs to the canonical indexing service.
+        mock_repo.faq_cache_invalidate.assert_not_awaited()
+    app.dependency_overrides.pop(get_organization_context, None)
+
+
+@pytest.mark.parametrize("operation", ["upload", "replace"])
+def test_file_quota_rejects_before_extraction_and_uses_server_evidence(client, operation):
+    from src.core.documenti.file_quota import FileQuotaError
+
+    mock_org_id = str(uuid.uuid4())
+    document_id = str(uuid.uuid4())
+    payload = b"server measured original file"
+    captured = {}
+    mock_user = {
+        "source": "jwt", "user_id": str(uuid.uuid4()),
+        "organization_id": mock_org_id, "ruolo": "owner",
+        "email": "owner@example.com",
+    }
+    mock_repo = AsyncMock()
+    mock_repo.get_organization_billing.return_value = {
+        "plan": "starter", "subscription_status": "active",
+    }
+    mock_repo.get_document.return_value = {
+        "id": document_id, "nome": "original.pdf", "tipo": "documento",
+        "fonte": "original.pdf", "metadata": {},
+    }
+
+    class QuotaDocumentRepo:
+        async def begin_index(self, *args, **kwargs):
+            captured.update(kwargs)
+            raise FileQuotaError("file_quota_not_configured")
+
+    mock_repo.doc_repo = QuotaDocumentRepo()
+    app.dependency_overrides[get_organization_context] = lambda: mock_user
+    path = ("/api/documenti/carica-file" if operation == "upload" else
+            f"/api/documenti/{document_id}/reindicizza")
+    with patch.object(app.state, "repo", mock_repo, create=True), \
+         patch("src.api.routes.knowledge.enforce_org_rate_limit", new_callable=AsyncMock), \
+         patch("src.core.documenti.indexing.rag_access", new_callable=AsyncMock, return_value=True), \
+         patch("src.core.documenti.indexing.extract_local", new_callable=AsyncMock) as extract:
+        response = client.post(
+            path,
+            files={"file": ("original.pdf", payload, "application/pdf")},
+        )
+
+    assert response.status_code == 503
+    assert captured["file_bytes"] == len(payload)
+    assert captured["file_sha256"] == hashlib.sha256(payload).hexdigest()
+    extract.assert_not_awaited()
     app.dependency_overrides.pop(get_organization_context, None)
 
 
@@ -185,7 +260,7 @@ async def test_carica_file_documento_caps_read_before_size_check():
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
-            await carica_file_documento(mock_request, mock_file, user)
+            await carica_file_documento(mock_request, mock_file, None, user)
 
     assert exc.value.status_code == 413
     mock_file.read.assert_awaited_once_with(20 * 1024 * 1024 + 1)

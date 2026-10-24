@@ -15,10 +15,9 @@ class FakeRepo:
 
 
 @pytest.mark.asyncio
-async def test_blocca_rag_su_piano_starter():
+async def test_consentire_rag_su_piano_starter():
     repo = FakeRepo({"plan": "starter", "subscription_status": "active"})
-    msg = await api_main._piano_blocca_feature(repo, "org-1", "rag")
-    assert msg and "Knowledge Base" in msg
+    assert await api_main._piano_blocca_feature(repo, "org-1", "rag") is None
 
 
 @pytest.mark.asyncio
@@ -37,12 +36,9 @@ async def test_blocca_recensioni_su_starter_non_su_pro():
 
 @pytest.mark.asyncio
 async def test_trial_senza_piano_accesso_pro():
-    # In prova gratuita l'utente beneficia delle feature del piano Pro (Crescita):
-    # recensioni abilitate, ma RAG knowledge base bloccata (richiede Scala).
+    # Trial e piani paid hanno RAG; il budget originale file ha policy separata.
     repo = FakeRepo({"plan": None, "subscription_status": "trialing", "trial_end": datetime.now(timezone.utc) + timedelta(days=3)})
-    rag_blocked = await api_main._piano_blocca_feature(repo, "org-1", "rag")
-    assert rag_blocked is not None
-    assert "Knowledge Base AI" in rag_blocked
+    assert await api_main._piano_blocca_feature(repo, "org-1", "rag") is None
     assert await api_main._piano_blocca_feature(repo, "org-1", "recensioni") is None
 
 
@@ -109,15 +105,13 @@ async def test_active_trial_allows_pro_features():
 
 @pytest.mark.asyncio
 async def test_new_registration_null_status_is_blocked():
-    # Scenario: appena creata o snapshot con campi billing nulli (plan=None, status=None, trial_end=None)
-    # Deve operare con le feature del piano Pro (recensioni concesse, RAG bloccata che richiede Scala)
-    # e non deve mai lanciare erroneamente "Abbonamento sospeso o scaduto".
+    # No billing state still fails closed, despite RAG being present on every plan.
     repo = FakeRepo({"plan": None, "subscription_status": None, "trial_end": None})
     rag_msg = await api_main._piano_blocca_feature(repo, "org-1", "rag")
     assert rag_msg is not None
     assert "sospeso" in rag_msg.lower()
 
-    # Recensioni devono essere permesse (Pro feature)
+    # Reviews remain plan-gated independently.
     reviews_msg = await api_main._piano_blocca_feature(repo, "org-1", "recensioni")
     assert reviews_msg is not None
 

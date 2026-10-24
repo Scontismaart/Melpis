@@ -130,14 +130,19 @@ async def test_preview_rag_org_scoped_no_leak(repo, sample_org, other_org):
     """Il contesto RAG della preview e' org-scoped: una preview dell'org B
     NON deve mai ricevere i documenti dell'org A (nemmeno un chunk). E'
     il controllo di isolamento multi-tenant piu' importante del wizard."""
-    doc = await repo.create_document(
-        str(sample_org["id"]), "menu-segreto.txt", tipo="upload", fonte="menu-segreto.txt"
+    await repo.pool.execute(
+        """UPDATE organizations SET subscription_status='active', plan='business',
+           subscription_id=CASE WHEN id=$1 THEN 'sub_previewA' ELSE 'sub_previewB' END,
+           current_period_start=now()-interval '1 day',
+           current_period_end=now()+interval '29 days' WHERE id=ANY($2::uuid[])""",
+        sample_org["id"], [sample_org["id"], other_org["id"]],
     )
-    await repo.add_chunk(
-        str(sample_org["id"]), str(doc["id"]), 0,
-        "Ingrediente segreto dell'org A: tartufo nero. Solo i clienti dell'org A lo vedono.",
-        [0.1] * 384,
-        {"fonte": "menu-segreto.txt"},
+    from src.core.documenti.indexing import index_content
+    await index_content(
+        repo, str(sample_org["id"]), "menu-segreto.txt",
+        text="Ingrediente segreto dell'org A: tartufo nero. Solo i clienti dell'org A lo vedono.",
+        tipo="upload", fonte="menu-segreto.txt",
+        embedding_fn=lambda chunks, **kwargs: [[0.1] * 384 for _ in chunks],
     )
 
     captured: dict[str, str] = {"contesto": ""}

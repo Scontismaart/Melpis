@@ -138,7 +138,7 @@ async def check_feature_blocked_by_plan(repo, org_id: str | None, feature: str) 
         return "Funzionalità non riconosciuta."
     # 4. Verifica capabilities del piano
     if feature == "rag" and not plan.has_rag:
-        return f"Il piano {plan.name} non include la Knowledge Base AI. Effettua l'upgrade al piano Scala per caricare documenti."
+        return "Knowledge Base AI non disponibile con l'abbonamento corrente."
     if feature == "recensioni" and not plan.has_reviews:
         return f"Il piano {plan.name} non include la gestione delle recensioni. Effettua l'upgrade per abilitarla."
     return None

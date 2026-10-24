@@ -58,7 +58,9 @@
     "ai_details_aria": "AI handled details",
     "human_details_aria": "Human handoff details"
   },
-  "shell": { "skip_link": "Skip to content" },
+  "shell": {
+    "skip_link": "Skip to content"
+  },
   "overview": {
     "attention_title": "Needs your attention",
     "go_to_inbox": "Go to Inbox",
@@ -288,7 +290,7 @@
     "empty_faq": "No FAQs configured.",
     "upload_title": "Upload files",
     "dropzone_title": "Drag your documents here or click to browse",
-    "dropzone_hint": "PDF, DOCX, CSV, TXT, MD, images up to 20 MB",
+    "dropzone_hint": "PDF/RAG included; file quota to be defined. PDF, DOCX, CSV, TXT, MD, and images; technical limit 20 MiB per file.",
     "paste_text": "Or paste unformatted text",
     "text_placeholder": "Paste text, menus, notes, or additional descriptions here...",
     "text_name_placeholder": "Text name (e.g. holiday_hours.txt)",
@@ -303,7 +305,19 @@
       "empty_web": "No web pages imported. Add a link above to import pricing or information from your website.",
       "faq_count": "{{active}} active FAQs out of {{total}} (all indexed)",
       "last_update": "Last updated: {{date}}",
-      "web_count": "{{active}} active web pages out of {{total}}"
+      "web_count": "{{active}} active web pages out of {{total}}",
+      "rag_available": "PDF/RAG included",
+      "rag_unavailable": "Knowledge Base unavailable for the current subscription or account status",
+      "file_quota_not_configured": "PDF/RAG included; file quota to be defined",
+      "file_quota_historical_unknown": "Historical file usage needs review",
+      "file_quota_available": "File quota: {{occupied}} MB used of {{limit}} MB ({{committed}} MB committed, {{reserved}} MB reserved; {{remaining}} MB remaining)",
+      "file_quota_full": "File quota full: {{occupied}} MB used of {{limit}} MB",
+      "file_quota_over_limit": "File usage exceeds quota: {{occupied}} MB of {{limit}} MB",
+      "file_quota_unknown": "File quota unavailable",
+      "file_uploads_blocked": "New file uploads are unavailable in the current account state.",
+      "file_replacements_blocked": "File replacements are unavailable in the current account state.",
+      "file_too_large": "The file exceeds the technical limit of {{max}}.",
+      "file_limit_unknown": "The technical file limit is unavailable; try again later."
     }
   },
   "modals": {

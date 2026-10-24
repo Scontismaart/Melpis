@@ -1266,6 +1266,7 @@ class InboundProcessingService:
                         self.repo,
                         q_emb=q_emb,
                         prompt_variant=variante_prompt,
+                        expected_epoch=getattr(legacy_res, "knowledge_epoch", None),
                     )
                 except Exception as e:
                     logger.warning("FAQ cache store failed for org %s msg %s: %s", org_id, msg["id"], e)

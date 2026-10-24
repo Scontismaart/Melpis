@@ -8,6 +8,19 @@ import uuid
 from src.core.rate_limit import reset_memory_rate_limiter
 
 
+@pytest.fixture(autouse=True)
+def synthetic_file_quota_policy(monkeypatch):
+    """Test-only capacity for existing file fixtures; never a product default.
+
+    Quota boundary tests override these synthetic values, including None.
+    Runtime plan and trial budgets remain unconfigured pending approval.
+    """
+    from src.core.billing import plans
+    for plan in plans.PLANS.values():
+        monkeypatch.setattr(plan, "rag_file_bytes_limit", 1024 ** 3)
+    monkeypatch.setattr(plans, "TRIAL_RAG_FILE_BYTES_LIMIT", 1024 ** 3)
+
+
 # Local, ignored browser-QA helpers are executable scripts: importing them
 # launches Playwright immediately.  Keep them available for manual visual
 # checks without allowing pytest's filename discovery to execute them during

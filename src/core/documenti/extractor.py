@@ -1,4 +1,5 @@
 import io
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image
@@ -11,13 +12,18 @@ ESTENSIONI_IMMAGINE = {".png", ".jpg", ".jpeg", ".webp"}
 ESTENSIONI_DOCX = {".docx"}
 
 
-def _ocr_immagine(immagine) -> str:
+@lru_cache(maxsize=1)
+def _ocr_engine():
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError as exc:
         raise ValueError("OCR locale non installato. Esegui pip install -r requirements.txt.") from exc
 
-    risultato, _ = RapidOCR()(immagine)
+    return RapidOCR(intra_op_num_threads=2, inter_op_num_threads=2)
+
+
+def _ocr_immagine(immagine) -> str:
+    risultato, _ = _ocr_engine()(immagine)
     testo = "\n".join(riga[1] for riga in (risultato or []) if len(riga) > 1 and riga[1])
     return testo.strip()
 

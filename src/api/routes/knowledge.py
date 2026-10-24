@@ -12,21 +12,22 @@ Gestisce:
 
 import logging
 import hashlib
+import asyncio
 import json
 import uuid
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from src.api.dependencies import get_repo, require_ruolo
 from src.api.routes.common import (
     audit_event,
     check_feature_blocked_by_plan,
     enforce_org_rate_limit,
-    get_billing_snapshot,
     resolve_estrai_da_url,
     resolve_vettorizza,
 )
 from src.core.documenti.chunking import chunk_testo
-from src.core.documenti.extractor import estrai_testo
+from src.core.documenti.indexing import index_content, knowledge_limits
 from src.core.documenti.priorita import rileva_conflitti_prezzo
 from src.core.documenti.qa_agent import rispondi
 from src.core.billing.quota_reservations import QuotaConflict, QuotaLease, QuotaOperation, QuotaReservations
@@ -42,6 +43,31 @@ from src.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["knowledge"])
+
+
+def _index_in_progress(result: dict, *, name: str, include_name: bool = True):
+    """Return the shared accepted response when indexing is not yet verified."""
+    if result.get("status") != "in_progress":
+        return None
+    document = result.get("document") or {}
+    payload = {
+        "detail": "Contenuto ricevuto; indicizzazione in corso.",
+        "id": str(document.get("id") or result.get("id") or ""),
+        "indicizzati": 0,
+        "stato": "in_elaborazione",
+    }
+    if include_name:
+        payload["nome"] = name
+    return JSONResponse(status_code=202, content=payload)
+
+
+def _indexed_count(result: dict) -> int:
+    if result.get("status") not in {"indexed", "replay"}:
+        raise HTTPException(status_code=503, detail="Indicizzazione non disponibile.")
+    try:
+        return max(0, int(result.get("indexed", 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ── RAG Q&A ──────────────────────────────────────────────────────────
@@ -95,6 +121,9 @@ async def _chiedi_documenti(domanda, request, idempotency_key, user, lease):
         cached = reservation.get("response")
         if not isinstance(cached, dict):
             raise HTTPException(status_code=503, detail="Risposta memorizzata non disponibile")
+        from src.core.documenti.sources import authorized_sources
+        if not await authorized_sources(repo, org_id, cached.get("fonti")):
+            raise HTTPException(409, "Le fonti della risposta precedente non sono piu autorizzate o disponibili.")
         return cached
     if state == "quota_exceeded":
         raise HTTPException(status_code=429, detail="Quota risposte AI esaurita")
@@ -150,6 +179,16 @@ async def conteggio_documenti(
     return {"chunk_indicizzati": await repo.count_chunks(user["organization_id"])}
 
 
+@router.get("/api/documenti/limiti")
+async def limiti_documenti(
+    request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager", "staff")),
+):
+    """Limiti tecnici e commerciali e uso della KB per l'organizzazione attiva."""
+    repo = get_repo(request)
+    return await knowledge_limits(repo, user["organization_id"])
+
+
 @router.get("/api/documenti/elenco")
 async def elenco_documenti(
     request: Request,
@@ -176,7 +215,11 @@ async def toggle_documento_api(
         await repo.faq_cache_invalidate(user["organization_id"])
     except Exception as exc:
         logger.warning("faq_cache invalidation failed org=%s: %s", user["organization_id"], exc)
-    return {"detail": "Stato fonte aggiornato.", "documento": doc}
+    public = {key: value for key, value in doc.items() if key in {
+        "id", "organization_id", "nome", "tipo", "fonte", "is_active", "stato",
+        "metadata", "caricato_il", "updated_at", "index_verified", "revision",
+    }}
+    return {"detail": "Stato fonte aggiornato.", "documento": public}
 
 
 # ── UI Summary Polling ────────────────────────────────────────────────
@@ -197,6 +240,7 @@ async def ui_summary(
 async def crea_faq(
     faq: FAQInput,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager")),
 ):
     """Aggiunge una nuova FAQ indicizzata alla knowledge base."""
@@ -206,34 +250,19 @@ async def crea_faq(
     if blocco:
         raise HTTPException(status_code=403, detail=blocco)
 
-    chunk_testo_singolo = f"Domanda: {faq.domanda}\nRisposta: {faq.risposta}"
-    record = await repo.create_document(
-        org_id,
-        nome=faq.domanda,
-        tipo="faq",
-        fonte="faq",
-        is_active=True,
-        stato="indicizzata",
+    text = f"Domanda: {faq.domanda}\nRisposta: {faq.risposta}"
+    result = await index_content(
+        repo, org_id, faq.domanda,
+        request_key=idempotency_key, text=text, tipo="faq", fonte="faq",
         metadata={"domanda": faq.domanda, "risposta": faq.risposta},
+        embedding_fn=resolve_vettorizza(),
     )
-
-    vettorizza = resolve_vettorizza()
-    embeds = vettorizza([chunk_testo_singolo], tipo="passage")
-    await repo.add_chunk(
-        org_id,
-        record["id"],
-        0,
-        chunk_testo_singolo,
-        embeds[0],
-        {"domanda": faq.domanda, "risposta": faq.risposta, "tipo": "faq", "document_id": str(record["id"])},
-    )
-
-    try:
-        await repo.faq_cache_invalidate(org_id)
-    except Exception as exc:
-        logger.warning("faq_cache invalidation failed org=%s: %s", org_id, exc)
-
-    return {"detail": "FAQ aggiunta alla knowledge base.", "id": str(record["id"])}
+    pending = _index_in_progress(result, name=faq.domanda, include_name=False)
+    if pending:
+        return pending
+    _indexed_count(result)
+    document = result.get("document") or {}
+    return {"detail": "FAQ aggiunta alla knowledge base.", "id": str(document.get("id") or result.get("id") or "")}
 
 
 @router.put("/api/conoscenza/faq/{faq_id}")
@@ -241,6 +270,7 @@ async def aggiorna_faq(
     faq_id: str,
     faq: FAQInput,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager")),
 ):
     """Aggiorna il contenuto e i vettori di una FAQ esistente."""
@@ -253,33 +283,17 @@ async def aggiorna_faq(
     if not esistente or esistente.get("tipo") != "faq":
         raise HTTPException(status_code=404, detail="FAQ non trovata.")
 
-    chunk_testo_singolo = f"Domanda: {faq.domanda}\nRisposta: {faq.risposta}"
-    await repo.update_document(
-        org_id,
-        faq_id,
-        nome=faq.domanda,
-        metadata={"domanda": faq.domanda, "risposta": faq.risposta},
-        stato="indicizzata",
-        errore="",
+    text = f"Domanda: {faq.domanda}\nRisposta: {faq.risposta}"
+    result = await index_content(
+        repo, org_id, faq.domanda,
+        request_key=idempotency_key, text=text, tipo="faq", fonte="faq",
+        document_id=faq_id, metadata={"domanda": faq.domanda, "risposta": faq.risposta},
+        embedding_fn=resolve_vettorizza(),
     )
-
-    await repo.delete_document_chunks(org_id, faq_id)
-    vettorizza = resolve_vettorizza()
-    embeds = vettorizza([chunk_testo_singolo], tipo="passage")
-    await repo.add_chunk(
-        org_id,
-        faq_id,
-        0,
-        chunk_testo_singolo,
-        embeds[0],
-        {"domanda": faq.domanda, "risposta": faq.risposta, "tipo": "faq", "document_id": faq_id},
-    )
-
-    try:
-        await repo.faq_cache_invalidate(org_id)
-    except Exception as exc:
-        logger.warning("faq_cache invalidation failed org=%s: %s", org_id, exc)
-
+    pending = _index_in_progress(result, name=faq.domanda, include_name=False)
+    if pending:
+        return pending
+    _indexed_count(result)
     return {"detail": "FAQ aggiornata con successo.", "id": faq_id}
 
 
@@ -308,6 +322,7 @@ async def elimina_faq(
 async def importa_pagina_web(
     web: WebImportInput,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager")),
 ):
     """Importa il contenuto testuale di una pagina web e la indicizza nel vector store."""
@@ -322,58 +337,27 @@ async def importa_pagina_web(
     try:
         dati_web = await estrai_da_url(web.url)
     except ValueError as exc:
-        # Registra la fonte in stato di errore per visibilità in UI
-        try:
-            await repo.create_document(
-                org_id,
-                nome=web.url,
-                tipo="web",
-                fonte=web.url,
-                is_active=False,
-                stato="errore",
-                errore=str(exc),
-            )
-        except Exception as db_err:
-            logger.warning("Errore salvataggio stato fallimento web: %s", db_err)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    chunks = chunk_testo(dati_web["testo"])
-    if not chunks:
+    if not dati_web["testo"].strip():
         raise HTTPException(status_code=400, detail="Nessun testo indicizzabile estratto dalla pagina web.")
 
     titolo = dati_web["titolo"] or web.url
-    record = await repo.create_document(
-        org_id,
-        nome=titolo,
-        tipo="web",
-        fonte=web.url,
-        is_active=True,
-        stato="indicizzata",
-        metadata={"url": web.url, "titolo": titolo},
+    result = await index_content(
+        repo, org_id, titolo,
+        request_key=idempotency_key, text=dati_web["testo"], tipo="web", fonte=web.url,
+        metadata={"url": web.url, "titolo": titolo}, embedding_fn=resolve_vettorizza(),
     )
-
-    vettorizza = resolve_vettorizza()
-    embeds = vettorizza(chunks, tipo="passage")
-    for i, (chunk, emb) in enumerate(zip(chunks, embeds)):
-        await repo.add_chunk(
-            org_id,
-            record["id"],
-            i,
-            chunk,
-            emb,
-            {"fonte": web.url, "tipo": "web", "document_id": str(record["id"])},
-        )
-
-    try:
-        await repo.faq_cache_invalidate(org_id)
-    except Exception as exc:
-        logger.warning("faq_cache invalidation failed org=%s: %s", org_id, exc)
-
+    pending = _index_in_progress(result, name=titolo)
+    if pending:
+        return pending
+    indexed = _indexed_count(result)
+    document = result.get("document") or {}
     return {
-        "detail": f"Indicizzati {len(chunks)} chunk dalla pagina '{titolo}'.",
-        "indicizzati": len(chunks),
+        "detail": f"Indicizzati {indexed} chunk dalla pagina '{titolo}'.",
+        "indicizzati": indexed,
         "nome": titolo,
-        "id": str(record["id"]),
+        "id": str(document.get("id") or result.get("id") or ""),
     }
 
 
@@ -438,12 +422,25 @@ async def salva_dati_struttura(
         servizi_dicts=servizi_dicts,
     )
 
-    return {
-        "detail": "Dati struttura e listino servizi aggiornati e indicizzati.",
+    response_data = {
         "servizi": servizi_dicts,
         "orari": data.orari,
         "id": res["doc_id"],
+        "index_status": res["index_status"],
+        "index_verified": res["index_verified"],
     }
+    if res["index_status"] == "in_progress":
+        return JSONResponse(
+            status_code=202,
+            content={**response_data, "detail": "Dati struttura salvati; indicizzazione in corso."},
+        )
+    detail = (
+        "Dati struttura e listino servizi aggiornati e indicizzati."
+        if res["index_verified"] is True
+        else "Dati struttura salvati; indicizzazione non verificata."
+    )
+
+    return {**response_data, "detail": detail}
 
 
 # ── Conoscenza: Rilevamento Conflitti e Riepilogo ─────────────────────
@@ -459,8 +456,10 @@ async def verifica_conflitti_api(
     bp = await repo.get_org_business_profile(org_id) or {}
     servizi_strutturati = bp.get("servizi_strutturati") or []
     all_chunks = await repo.list_all_active_chunks(org_id)
-    conflitti = rileva_conflitti_prezzo(servizi_strutturati, all_chunks)
-    return {"conflitti": conflitti, "totale": len(conflitti)}
+    complete = len(all_chunks) <= 4000 and not any(c.get("content_truncated") for c in all_chunks)
+    conflitti = await asyncio.to_thread(rileva_conflitti_prezzo, servizi_strutturati, all_chunks[:4000])
+    return {"conflitti": conflitti, "totale": len(conflitti), "complete": complete,
+            "operational_limit": None if complete else "conflict_scan_chunks"}
 
 
 @router.get("/api/conoscenza/summary")
@@ -477,7 +476,7 @@ async def knowledge_summary(
         items = [d for d in tutti if d.get("tipo") == tipo_val or (tipo_val == "documento" and d.get("tipo") == "upload")]
         totale = len(items)
         attive = sum(1 for d in items if d.get("is_active", True))
-        indicizzate = sum(1 for d in items if d.get("stato") == "indicizzata" and d.get("is_active", True))
+        indicizzate = sum(1 for d in items if d.get("stato") == "indicizzata" and d.get("index_verified") is True and d.get("is_active", True))
         errori = sum(1 for d in items if d.get("stato") == "errore")
         ultimi = [d.get("updated_at") or d.get("caricato_il") for d in items if d.get("updated_at") or d.get("caricato_il")]
         ultimo_aggiornamento = max(ultimi).isoformat() if ultimi else None
@@ -492,7 +491,8 @@ async def knowledge_summary(
     bp = await repo.get_org_business_profile(org_id) or {}
     servizi_strutturati = bp.get("servizi_strutturati") or []
     all_chunks = await repo.list_all_active_chunks(org_id)
-    conflitti = rileva_conflitti_prezzo(servizi_strutturati, all_chunks)
+    complete = len(all_chunks) <= 4000 and not any(c.get("content_truncated") for c in all_chunks)
+    conflitti = await asyncio.to_thread(rileva_conflitti_prezzo, servizi_strutturati, all_chunks[:4000])
 
     return {
         "faq": _stats_tipo("faq"),
@@ -500,6 +500,7 @@ async def knowledge_summary(
         "web": _stats_tipo("web"),
         "dati_struttura": _stats_tipo("dati_struttura"),
         "conflitti_totali": len(conflitti),
+        "conflitti_completi": complete,
         "chunk_indicizzati": await repo.count_chunks(org_id),
     }
 
@@ -510,6 +511,7 @@ async def knowledge_summary(
 async def carica_documento(
     doc: CaricaDocumentoInput,
     request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager")),
 ):
     """Carica testo manuale e lo indicizza nella knowledge base."""
@@ -522,43 +524,31 @@ async def carica_documento(
     if blocco:
         raise HTTPException(status_code=403, detail=blocco)
     await enforce_org_rate_limit(org_id, "knowledge-index", 20, 600)
-    chunks = chunk_testo(doc.testo)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Testo senza contenuto indicizzabile.")
-
-    record = await repo.create_document(
-        org_id,
-        doc.nome,
-        tipo="upload",
-        fonte="dashboard",
-        is_active=True,
-        stato="indicizzata",
+    result = await index_content(
+        repo, org_id, doc.nome,
+        request_key=idempotency_key, text=doc.testo, tipo="upload", fonte="dashboard",
+        embedding_fn=resolve_vettorizza(),
     )
-    vettorizza = resolve_vettorizza()
-    embeds = vettorizza(chunks, tipo="passage")
-    for i, (chunk, emb) in enumerate(zip(chunks, embeds)):
-        await repo.add_chunk(
-            org_id,
-            record["id"],
-            i,
-            chunk,
-            emb,
-            {"fonte": doc.nome, "tipo": "upload", "document_id": str(record["id"])},
-        )
-    try:
-        await repo.faq_cache_invalidate(org_id)
-    except Exception as exc:
-        logger.warning("faq_cache invalidation failed org=%s: %s", org_id, exc)
-    return {"detail": f"Indicizzati {len(chunks)} chunk da '{doc.nome}'.", "indicizzati": len(chunks), "id": str(record["id"])}
+    pending = _index_in_progress(result, name=doc.nome)
+    if pending:
+        return pending
+    indexed = _indexed_count(result)
+    document = result.get("document") or {}
+    return {
+        "detail": f"Indicizzati {indexed} chunk da '{doc.nome}'.",
+        "indicizzati": indexed,
+        "id": str(document.get("id") or result.get("id") or ""),
+    }
 
 
 @router.post("/api/documenti/carica-file")
 async def carica_file_documento(
     request: Request,
     file: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     user: dict = Depends(require_ruolo("owner", "manager")),
 ):
-    """Carica un file (PDF, TXT, DOCX) ed estrae il testo per l'indicizzazione."""
+    """Carica un file ed estrae il testo per l'indicizzazione."""
     nome = file.filename or "documento"
     repo = get_repo(request)
     org_id = user.get("organization_id")
@@ -572,51 +562,75 @@ async def carica_file_documento(
         raise HTTPException(status_code=400, detail="Il file è vuoto.")
     if len(contenuto) > max_file_size:
         raise HTTPException(status_code=413, detail="Il file supera il limite di 20 MB.")
-    try:
-        testo = estrai_testo(contenuto, nome, file.content_type or "")
-        chunks = chunk_testo(testo)
-        if not chunks:
-            raise ValueError("Nessun testo indicizzabile estratto dal file.")
-    except ValueError as exc:
-        # Salva record in stato errore per visibilità immediata in UI
-        try:
-            await repo.create_document(
-                org_id,
-                nome,
-                tipo="documento",
-                fonte=nome,
-                is_active=False,
-                stato="errore",
-                errore=str(exc),
-            )
-        except Exception as db_err:
-            logger.warning("Errore salvataggio fallimento file: %s", db_err)
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    record = await repo.create_document(
-        org_id,
-        nome,
-        tipo="documento",
-        fonte=nome,
-        is_active=True,
-        stato="indicizzata",
-    )
-    vettorizza = resolve_vettorizza()
-    embeds = vettorizza(chunks, tipo="passage")
-    for i, (chunk, emb) in enumerate(zip(chunks, embeds)):
-        await repo.add_chunk(
-            org_id,
-            record["id"],
-            i,
-            chunk,
-            emb,
-            {"fonte": nome, "tipo": "documento", "document_id": str(record["id"])},
-        )
     try:
-        await repo.faq_cache_invalidate(org_id)
-    except Exception as exc:
-        logger.warning("faq_cache invalidation failed org=%s: %s", org_id, exc)
-    return {"detail": f"Indicizzati {len(chunks)} chunk da '{nome}'.", "indicizzati": len(chunks), "nome": nome, "id": str(record["id"])}
+        result = await index_content(
+            repo, org_id, nome,
+            request_key=idempotency_key, file_content=contenuto,
+            content_type=file.content_type or "", tipo="documento", fonte=nome,
+            embedding_fn=resolve_vettorizza(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    pending = _index_in_progress(result, name=nome)
+    if pending:
+        return pending
+    indexed = _indexed_count(result)
+    document = result.get("document") or {}
+    return {
+        "detail": f"Indicizzati {indexed} chunk da '{nome}'.",
+        "indicizzati": indexed,
+        "nome": nome,
+        "id": str(document.get("id") or result.get("id") or ""),
+    }
+
+
+@router.post("/api/documenti/{documento_id}/reindicizza")
+async def reindicizza_file_documento(
+    documento_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    user: dict = Depends(require_ruolo("owner", "manager")),
+):
+    """Sostituisce in modo atomico l'indice usando il file originale selezionato."""
+    repo = get_repo(request)
+    org_id = user.get("organization_id")
+    blocco = await check_feature_blocked_by_plan(repo, org_id, "rag")
+    if blocco:
+        raise HTTPException(status_code=403, detail=blocco)
+    await enforce_org_rate_limit(org_id, "knowledge-index", 20, 600)
+    existing = await repo.get_document(org_id, documento_id)
+    if not existing or existing.get("tipo") not in {"documento", "upload"}:
+        raise HTTPException(status_code=404, detail="Documento non trovato.")
+
+    max_file_size = 20 * 1024 * 1024
+    contenuto = await file.read(max_file_size + 1)
+    if not contenuto:
+        raise HTTPException(status_code=400, detail="Il file è vuoto.")
+    if len(contenuto) > max_file_size:
+        raise HTTPException(status_code=413, detail="Il file supera il limite di 20 MB.")
+    nome = existing.get("nome") or file.filename or "documento"
+    try:
+        result = await index_content(
+            repo, org_id, nome,
+            request_key=idempotency_key, file_content=contenuto,
+            content_type=file.content_type or "", tipo=existing["tipo"],
+            fonte=existing.get("fonte") or nome, document_id=documento_id,
+            metadata=existing.get("metadata") or None, embedding_fn=resolve_vettorizza(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    pending = _index_in_progress(result, name=nome)
+    if pending:
+        return pending
+    indexed = _indexed_count(result)
+    return {
+        "detail": f"Indicizzati {indexed} chunk da '{nome}'.",
+        "indicizzati": indexed,
+        "nome": nome,
+        "id": documento_id,
+    }
 
 
 @router.delete("/api/documenti/{documento_id}")

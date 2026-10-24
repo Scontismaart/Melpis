@@ -1,6 +1,6 @@
 import os
-import uuid
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+
 import httpx
 import pytest
 
@@ -18,7 +18,10 @@ def set_env():
 async def async_client(repo, pg_pool, install_test_identity, sample_org):
     from src.api.main import app
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = $1",
+        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
+        "subscription_id='sub_knowledgeTest', current_period_start=now()-interval '1 day', "
+        "current_period_end=now()+interval '29 days', messages_limit=500, "
+        "messages_used_this_period=0 WHERE id = $1",
         sample_org["id"],
     )
     install_test_identity(app, API_KEY)
@@ -38,7 +41,7 @@ def _headers(org_id):
 
 async def test_faq_lifecycle_crud(async_client, sample_org):
     """Verifica creazione, lettura, aggiornamento ed eliminazione di una FAQ."""
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         # 1. Crea FAQ
         res = await async_client.post(
             "/api/conoscenza/faq",
@@ -105,7 +108,7 @@ async def test_web_import_success_and_error(async_client, sample_org):
         "titolo": "Listino Trattamenti Salone",
         "testo": "Taglio e Piega: 35 euro. Trattamento cheratina: 50 euro.",
         "url": "https://www.saloneesempio.it/listino",
-    })), patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    })), patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         res = await async_client.post(
             "/api/conoscenza/web",
             json={"url": "https://www.saloneesempio.it/listino"},
@@ -133,20 +136,24 @@ async def test_web_import_success_and_error(async_client, sample_org):
             headers=_headers(sample_org["id"]),
         )
         assert err_res.status_code == 422
-        # La fonte fallita deve comunque essere salvata come record con stato 'errore' per la UI
+        # Fetch validation fails before publication is claimed. Report the
+        # HTTP error to the UI without manufacturing an indexed/failed source.
         list_all = await async_client.get(
             "/api/documenti/elenco?tipo=web",
             headers=_headers(sample_org["id"]),
         )
-        error_items = [d for d in list_all.json()["documenti"] if d["stato"] == "errore"]
-        assert len(error_items) == 1
-        assert "404" in error_items[0]["errore"]
-        assert error_items[0]["is_active"] is False
+        assert "404" in err_res.json()["detail"]
+        remaining = list_all.json()["documenti"]
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == web_id
+        assert remaining[0]["stato"] == "indicizzata"
+        assert remaining[0]["index_verified"] is True
+        assert remaining[0]["is_active"] is True
 
 
 async def test_dati_struttura_sync_and_conflict_detection(async_client, repo, sample_org):
     """Verifica salvataggio dati struttura, sincronizzazione profilo e rilevamento conflitti."""
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         # 1. Salva Dati struttura (Priorità 1) con Taglio a 25€
         put_res = await async_client.put(
             "/api/conoscenza/dati-struttura",
@@ -211,8 +218,8 @@ async def test_knowledge_summary(async_client, sample_org):
 
 async def test_docx_upload_and_extraction(async_client, sample_org):
     """Verifica upload ed estrazione testo da file .docx."""
-    import zipfile
     import io
+    import zipfile
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
@@ -225,7 +232,7 @@ async def test_docx_upload_and_extraction(async_client, sample_org):
         z.writestr("word/document.xml", xml.encode("utf-8"))
     docx_bytes = buf.getvalue()
 
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post(
             "/api/documenti/carica-file",
             files={"file": ("listino.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
@@ -240,6 +247,7 @@ async def test_docx_upload_and_extraction(async_client, sample_org):
 async def test_web_import_ssrf_protection():
     """Verifica che estrai_da_url rifiuti indirizzi privati o loopback (SSRF)."""
     import pytest
+
     from src.core.documenti.web_extractor import estrai_da_url
 
     with pytest.raises(ValueError, match="Accesso a indirizzi locali o privati non consentito"):

@@ -306,6 +306,7 @@ async def test_concurrent_caller_lease_contexts_do_not_mix_tenants():
 async def test_document_embedding_runs_off_loop_so_lease_can_renew(monkeypatch):
     import threading
     from src.core.documenti import qa_agent
+    from src.core.documenti import rag_context
 
     started, ticked = threading.Event(), threading.Event()
 
@@ -319,10 +320,13 @@ async def test_document_embedding_runs_off_loop_so_lease_can_renew(monkeypatch):
             await asyncio.sleep(0)
         ticked.set()
 
-    monkeypatch.setattr(qa_agent, "vettorizza", slow_embedding)
+    monkeypatch.setattr(rag_context, "vettorizza", slow_embedding)
+    monkeypatch.setattr(rag_context, "rag_access", AsyncMock(return_value=True))
     repo = AsyncMock()
+    repo.doc_repo = repo
+    repo.knowledge_version.return_value = 7
     repo.search_similar.return_value = []
-    result, _ = await asyncio.gather(
+    result, _ = await asyncio.wait_for(asyncio.gather(
         qa_agent.rispondi(str(uuid.uuid4()), "Domanda sintetica", repo), heartbeat(),
-    )
+    ), timeout=3)
     assert result["fonti"] == []

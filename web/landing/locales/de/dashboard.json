@@ -58,7 +58,9 @@
     "ai_details_aria": "Details zur KI-Bearbeitung",
     "human_details_aria": "Details zur Übergabe"
   },
-  "shell": { "skip_link": "Zum Inhalt springen" },
+  "shell": {
+    "skip_link": "Zum Inhalt springen"
+  },
   "overview": {
     "attention_title": "Erfordert Ihre Aufmerksamkeit",
     "go_to_inbox": "Zum Posteingang",
@@ -82,7 +84,21 @@
     "empty_report": "Für heute wurde noch kein Bericht erstellt.",
     "chart_aria": "Nachrichtenaktivität",
     "insights_aria": "Wichtige Erkenntnisse",
-    "runtime": {"error_title":"Etwas ist schiefgelaufen","retry":"Erneut versuchen","priority_error":"Dringende Anfragen konnten nicht geladen werden.","priority_count":"{{count}} Einträge","no_messages_title":"Heute keine Nachrichten","no_messages_desc":"Der Assistent ist eingerichtet und kann Ihren Kunden automatisch antworten.","activity_error":"Letzte Aktivitäten konnten nicht geladen werden.","waiting_title":"Warten auf Unterhaltungen","waiting_desc":"Kundennachrichten und Antworten des Assistenten erscheinen hier in Echtzeit.","try_simulator":"Simulator ausprobieren","review_kind":"Bewertung","message_kind":"Nachricht","open_review":"Ansehen"}
+    "runtime": {
+      "error_title": "Etwas ist schiefgelaufen",
+      "retry": "Erneut versuchen",
+      "priority_error": "Dringende Anfragen konnten nicht geladen werden.",
+      "priority_count": "{{count}} Einträge",
+      "no_messages_title": "Heute keine Nachrichten",
+      "no_messages_desc": "Der Assistent ist eingerichtet und kann Ihren Kunden automatisch antworten.",
+      "activity_error": "Letzte Aktivitäten konnten nicht geladen werden.",
+      "waiting_title": "Warten auf Unterhaltungen",
+      "waiting_desc": "Kundennachrichten und Antworten des Assistenten erscheinen hier in Echtzeit.",
+      "try_simulator": "Simulator ausprobieren",
+      "review_kind": "Bewertung",
+      "message_kind": "Nachricht",
+      "open_review": "Ansehen"
+    }
   },
   "views": {
     "simulator_intro": "Simulieren Sie ein echtes Kundengespräch, um die Antworten und das Verhalten Ihres KI-Assistenten zu prüfen.",
@@ -136,7 +152,12 @@
     "save_availability": "Verfügbarkeit speichern",
     "capacity_status": "Verfügbarkeitsstatus",
     "export_csv": "CSV exportieren",
-    "runtime": {"count":"{{count}} Buchungen","day_title":"Buchungen am {{date}}","details":"Details","empty_day":"Keine Buchungen an diesem Datum"}
+    "runtime": {
+      "count": "{{count}} Buchungen",
+      "day_title": "Buchungen am {{date}}",
+      "details": "Details",
+      "empty_day": "Keine Buchungen an diesem Datum"
+    }
   },
   "team": {
     "add_title": "Teammitglied einladen",
@@ -174,7 +195,20 @@
     "resend_success": "Einladung erneut gesendet.",
     "revoke_success": "Einladung widerrufen.",
     "loading_members": "Teammitglieder werden geladen...",
-    "runtime": {"load_error":"Teammitglieder konnten nicht geladen werden: {{detail}}","member_count":"{{count}} Mitglieder","unlimited_accounts":"{{count}} aktive Konten (unbegrenzt)","essential_account":"1 / 1 Konto (Essential-Tarif, nur Inhaber)","account_capacity":"{{used}} / {{limit}} Konten ({{operators}} von {{max}} Teammitgliedern)","plan_essential":"Essential","plan_growth":"Wachstum (Pro)","plan_scale":"Skalierung","essential_limit_title":"Der Essential-Tarif umfasst keine weiteren Teammitglieder","limit_title":"Das Teamlimit des aktuellen Tarifs ist erreicht","essential_limit_banner":"Der Essential-Tarif umfasst nur den Inhaber","limit_banner":"Kontolimit erreicht ({{used}}/{{limit}})"}
+    "runtime": {
+      "load_error": "Teammitglieder konnten nicht geladen werden: {{detail}}",
+      "member_count": "{{count}} Mitglieder",
+      "unlimited_accounts": "{{count}} aktive Konten (unbegrenzt)",
+      "essential_account": "1 / 1 Konto (Essential-Tarif, nur Inhaber)",
+      "account_capacity": "{{used}} / {{limit}} Konten ({{operators}} von {{max}} Teammitgliedern)",
+      "plan_essential": "Essential",
+      "plan_growth": "Wachstum (Pro)",
+      "plan_scale": "Skalierung",
+      "essential_limit_title": "Der Essential-Tarif umfasst keine weiteren Teammitglieder",
+      "limit_title": "Das Teamlimit des aktuellen Tarifs ist erreicht",
+      "essential_limit_banner": "Der Essential-Tarif umfasst nur den Inhaber",
+      "limit_banner": "Kontolimit erreicht ({{used}}/{{limit}})"
+    }
   },
   "reviews": {
     "compose_title": "Neue Bewertung analysieren",
@@ -221,7 +255,22 @@
     "import_replies": "Import und Antworten",
     "manual": "Manuell",
     "draft_placeholder": "Der Antwortentwurf wird hier angezeigt...",
-    "runtime": {"ai_reply_label":"Vorgeschlagener Antwortentwurf:","copied_toast":"Entwurf in die Zwischenablage kopiert!","empty_cta":"Bewertung einfügen","empty_desc":"Fügen Sie oben eine Bewertung ein: Die KI bewertet die Stimmung und erstellt einen professionellen Antwortentwurf.","empty_title":"Noch keine Bewertungen","filtered_desc":"Keine Bewertung entspricht den ausgewählten Filtern oder Suchkriterien.","filtered_title":"Keine Ergebnisse mit den aktuellen Filtern","rating_total":"Basierend auf {{count}} Bewertungen","reset_filters":"Filter zurücksetzen","review_count":"{{count}} Bewertungen","review_draft":"Entwurf prüfen","status_approved":"Freigegeben","status_draft":"Entwurf bereit","status_urgent":"Erfordert Aufmerksamkeit"}
+    "runtime": {
+      "ai_reply_label": "Vorgeschlagener Antwortentwurf:",
+      "copied_toast": "Entwurf in die Zwischenablage kopiert!",
+      "empty_cta": "Bewertung einfügen",
+      "empty_desc": "Fügen Sie oben eine Bewertung ein: Die KI bewertet die Stimmung und erstellt einen professionellen Antwortentwurf.",
+      "empty_title": "Noch keine Bewertungen",
+      "filtered_desc": "Keine Bewertung entspricht den ausgewählten Filtern oder Suchkriterien.",
+      "filtered_title": "Keine Ergebnisse mit den aktuellen Filtern",
+      "rating_total": "Basierend auf {{count}} Bewertungen",
+      "reset_filters": "Filter zurücksetzen",
+      "review_count": "{{count}} Bewertungen",
+      "review_draft": "Entwurf prüfen",
+      "status_approved": "Freigegeben",
+      "status_draft": "Entwurf bereit",
+      "status_urgent": "Erfordert Aufmerksamkeit"
+    }
   },
   "knowledge": {
     "tabs_aria": "Wissensdatenbank-Kategorien",
@@ -241,15 +290,35 @@
     "empty_faq": "Keine FAQs eingerichtet.",
     "upload_title": "Dateien hochladen",
     "dropzone_title": "Dokumente hier ablegen oder zum Durchsuchen klicken",
-    "dropzone_hint": "PDF, DOCX, CSV, TXT, MD, Bilder bis 20 MB",
+    "dropzone_hint": "PDF/RAG inklusive; Dateikontingent noch festzulegen. PDF, DOCX, CSV, TXT, MD und Bilder; technisches Limit 20 MiB pro Datei.",
     "paste_text": "Oder unformatierten Text einfügen",
     "text_placeholder": "Hier Texte, Menüs, Notizen oder zusätzliche Beschreibungen einfügen...",
     "text_name_placeholder": "Textname (z. B. feiertagszeiten.txt)",
     "save_text": "Text speichern",
     "uploaded_documents": "Hochgeladene Dokumente",
     "empty_documents": "Keine Dokumente hochgeladen.",
-    "ask_placeholder":"Z. B. „Was kostet ein Herrenhaarschnitt?“ oder „Wie sind Ihre Öffnungszeiten?“",
-    "runtime": {"documents_count":"{{active}} aktive Dokumente von {{total}}","empty_documents":"Keine Dateien hochgeladen. Verwenden Sie den gestrichelten Bereich oben, um PDF-, DOCX-Dateien oder Bilder hochzuladen.","empty_faq":"Keine FAQs eingerichtet. Klicken Sie auf „+ Neue FAQ“, um eine hinzuzufügen.","empty_web":"Keine Webseiten importiert. Fügen Sie oben einen Link hinzu, um Preise oder Informationen von Ihrer Website zu importieren.","faq_count":"{{active}} aktive FAQs von {{total}} (alle indexiert)","last_update":"Zuletzt aktualisiert: {{date}}","web_count":"{{active}} aktive Webseiten von {{total}}"}
+    "ask_placeholder": "Z. B. „Was kostet ein Herrenhaarschnitt?“ oder „Wie sind Ihre Öffnungszeiten?“",
+    "runtime": {
+      "documents_count": "{{active}} aktive Dokumente von {{total}}",
+      "empty_documents": "Keine Dateien hochgeladen. Verwenden Sie den gestrichelten Bereich oben, um PDF-, DOCX-Dateien oder Bilder hochzuladen.",
+      "empty_faq": "Keine FAQs eingerichtet. Klicken Sie auf „+ Neue FAQ“, um eine hinzuzufügen.",
+      "empty_web": "Keine Webseiten importiert. Fügen Sie oben einen Link hinzu, um Preise oder Informationen von Ihrer Website zu importieren.",
+      "faq_count": "{{active}} aktive FAQs von {{total}} (alle indexiert)",
+      "last_update": "Zuletzt aktualisiert: {{date}}",
+      "web_count": "{{active}} aktive Webseiten von {{total}}",
+      "rag_available": "PDF/RAG inklusive",
+      "rag_unavailable": "Knowledge Base ist mit dem aktuellen Abo oder Kontostatus nicht verfügbar",
+      "file_quota_not_configured": "PDF/RAG inklusive; Dateikontingent noch festzulegen",
+      "file_quota_historical_unknown": "Historische Dateinutzung muss geprüft werden",
+      "file_quota_available": "Dateikontingent: {{occupied}} MB von {{limit}} MB belegt ({{committed}} MB übernommen, {{reserved}} MB reserviert; {{remaining}} MB verfügbar)",
+      "file_quota_full": "Dateikontingent voll: {{occupied}} MB von {{limit}} MB belegt",
+      "file_quota_over_limit": "Dateinutzung über dem Kontingent: {{occupied}} MB von {{limit}} MB",
+      "file_quota_unknown": "Dateikontingent nicht verfügbar",
+      "file_uploads_blocked": "Neue Datei-Uploads sind im aktuellen Kontostatus nicht verfügbar.",
+      "file_replacements_blocked": "Dateiersetzungen sind im aktuellen Kontostatus nicht verfügbar.",
+      "file_too_large": "Die Datei überschreitet das technische Limit von {{max}}.",
+      "file_limit_unknown": "Das technische Dateilimit ist nicht verfügbar. Bitte später erneut versuchen."
+    }
   },
   "modals": {
     "confirm_action": "Aktion bestätigen",
