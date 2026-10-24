@@ -1107,6 +1107,9 @@
           <div class="kb-conflict-note">L'assistente utilizzerà in priorità il dato autoritativo dei Dati struttura.</div>
         </div>
       </div>
+      <div class="kb-conflict-banner" id="kb-conflitti-parziali" role="status" hidden>
+        Verifica conflitti parziale: la scansione non ha coperto tutte le fonti. L'assenza di conflitti non è confermata.
+      </div>
 
       <!-- Barra di stato aggregata Knowledge Base -->
       <div class="kb-summary-bar" id="kb-summary-bar">
@@ -1206,9 +1209,10 @@
               <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             </div>
             <div class="kb-dropzone-title" data-i18n="dashboard:knowledge.dropzone_title">Trascina i tuoi documenti qui o clicca per sfogliare</div>
-            <div class="kb-dropzone-hint" data-i18n="dashboard:knowledge.dropzone_hint">PDF, DOCX, CSV, TXT, MD, immagini fino a 20 MB</div>
+            <div class="kb-dropzone-hint" data-i18n="dashboard:knowledge.dropzone_hint">PDF, DOCX, CSV, TXT, MD e immagini. I file scansionati o le immagini richiedono OCR locale disponibile.</div>
             <input class="doc-file-input is-d0466aa33fa8" id="doc-file" type="file" accept=".pdf,.docx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp, application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/plain, image/png, image/jpeg, image/webp">
           </div>
+          <div id="kb-doc-limits" class="kb-panel-status-bar" aria-live="polite">Caricamento limiti…</div>
 
           <!-- Inserimento testo libero opzionale -->
           <details class="is-b77ec8bf8e06">
@@ -1222,6 +1226,7 @@
             </div>
           </details>
           <p class="doc-config-status" id="doc-carica-status"></p>
+          <button type="button" id="kb-doc-upload-retry" class="report-refresh" hidden>Riprova</button>
 
           <h3 class="is-a26673541eef" data-i18n="dashboard:knowledge.uploaded_documents">Documenti caricati</h3>
           <div class="kb-list" id="doc-library">

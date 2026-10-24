@@ -1,5 +1,6 @@
 from datetime import datetime
 from inspect import signature
+import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -74,14 +75,22 @@ def test_report_scheduler_uses_deterministic_summary_without_tenant_context():
 @pytest.mark.asyncio
 async def test_document_qa_without_authenticated_context_never_calls_llm():
     from src.core.documenti.qa_agent import rispondi
+    from src.core.documenti.rag_context import ContestoDocumenti
 
     repo = AsyncMock()
     repo.pool = None
-    repo.search_similar.return_value = [{
+    source = {
         "content": "Fonte test", "document_name": "manuale.pdf",
-        "metadata": {"fonte": "manuale.pdf"}, "distance": 0.1,
-    }]
-    with patch("src.core.documenti.qa_agent.vettorizza", return_value=[[0.0] * 384]), \
+        "document_id": str(uuid.uuid4()), "revision": 1,
+        "metadata": {"fonte": "manuale.pdf", "tipo": "upload"}, "distance": 0.1,
+    }
+    canonical_context = ContestoDocumenti(
+        testo="Fonte test", chunks=[source], knowledge_epoch=1, reason="verified",
+    )
+    with patch("src.core.documenti.rag_context.recupera_contesto_documenti",
+               new_callable=AsyncMock, return_value=canonical_context), \
+         patch("src.core.documenti.sources.authorized_sources",
+               new_callable=AsyncMock, return_value=True), \
          patch("src.core.documenti.qa_agent.crea_llm") as make_llm:
         result = await rispondi(
             "00000000-0000-0000-0000-000000000001", "domanda", repo,

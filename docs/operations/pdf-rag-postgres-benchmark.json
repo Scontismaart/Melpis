@@ -1,0 +1,85 @@
+{
+  "benchmark": "B02_PG_BENCHMARK",
+  "complete_index_search_similar": {
+    "k": 10,
+    "measurement_scope": "search_similar method wall time; includes entitlement lookup and vector SQL, not DB-only CPU",
+    "organization_scope_verified": true,
+    "p50_seconds": 0.01239690000511473,
+    "p95_seconds": 0.015587300003971905,
+    "result_count": 10,
+    "samples": 20
+  },
+  "database_cpu_seconds": null,
+  "database_rss_bytes": null,
+  "model_cpu_seconds": null,
+  "not_measured": [
+    "model CPU (fixed deterministic vectors used)",
+    "database server CPU and RSS (not observable from the test client)",
+    "commercial tenant storage billing (shared relation size is not tenant billable)"
+  ],
+  "source": "disposable PostgreSQL fixture; synthetic rows only",
+  "tiers": [
+    {
+      "chunks_published": 90,
+      "chunks_requested": 90,
+      "claim_plus_publish_parent_process_cpu_seconds": 0.078125,
+      "claim_plus_publish_wall_seconds": 0.29066579999926034,
+      "publish_parent_process_cpu_seconds": 0.078125,
+      "publish_wall_seconds": 0.27187640000192914,
+      "shared_document_chunks_relation_total_bytes_all_tenants_not_tenant_billable": 466944,
+      "tenant_scoped_chunk_count": 90,
+      "tenant_scoped_content_embedding_metadata_bytes": 171900
+    },
+    {
+      "chunks_published": 900,
+      "chunks_requested": 900,
+      "claim_plus_publish_parent_process_cpu_seconds": 0.828125,
+      "claim_plus_publish_wall_seconds": 2.9988598999916576,
+      "publish_parent_process_cpu_seconds": 0.828125,
+      "publish_wall_seconds": 2.9874893999949563,
+      "shared_document_chunks_relation_total_bytes_all_tenants_not_tenant_billable": 4005888,
+      "tenant_scoped_chunk_count": 900,
+      "tenant_scoped_content_embedding_metadata_bytes": 1720800
+    },
+    {
+      "chunks_published": 3600,
+      "chunks_requested": 3600,
+      "claim_plus_publish_parent_process_cpu_seconds": 3.484375,
+      "claim_plus_publish_wall_seconds": 13.799190200006706,
+      "publish_parent_process_cpu_seconds": 3.484375,
+      "publish_wall_seconds": 13.78360199999588,
+      "shared_document_chunks_relation_total_bytes_all_tenants_not_tenant_billable": 17768448,
+      "tenant_scoped_chunk_count": 3600,
+      "tenant_scoped_content_embedding_metadata_bytes": 6886800
+    }
+  ],
+  "two_tenant_concurrent_reads_and_small_publications": {
+    "cross_tenant_result_count": 0,
+    "parent_process_cpu_seconds": 0.171875,
+    "small_publication_chunks_per_tenant": 3,
+    "tenant_a": {
+      "combined_parent_process_cpu_seconds": 0.171875,
+      "combined_tenant_read_and_publication_wall_seconds": 0.2314365999918664,
+      "document_id": "9f301282-7ad3-4317-b77e-73b436ab6026",
+      "query_wall_seconds": 0.14512159999867436,
+      "result_count": 10,
+      "small_publication_chunks": 3,
+      "small_publication_state": "indicizzata",
+      "tenant_scope_verified": true
+    },
+    "tenant_b": {
+      "combined_parent_process_cpu_seconds": 0.171875,
+      "combined_tenant_read_and_publication_wall_seconds": 0.23782009999558795,
+      "document_id": "968625a5-a013-4a86-927d-888f5c220907",
+      "query_wall_seconds": 0.20147980000183452,
+      "result_count": 10,
+      "small_publication_chunks": 3,
+      "small_publication_state": "indicizzata",
+      "tenant_scope_verified": true
+    },
+    "tenant_count": 2,
+    "tenant_scope_assertions_passed": true,
+    "wall_seconds": 0.23798959999112412
+  },
+  "measurement_environment": "Local disposable Docker PostgreSQL 16, pgvector 0.7.4; container limit 2 CPUs / 1 GiB; Python 3.12.5 Windows client; synthetic vectors, not model inference."
+}

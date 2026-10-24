@@ -58,8 +58,12 @@ async def rispondi(
     quota_operation=None,
     quota_ticket=None,
 ) -> dict:
-    q_emb = (await asyncio.to_thread(vettorizza, [domanda], tipo="query"))[0]
-    risultati = await repo.search_similar(organization_id, q_emb, k, only_active=True)
+    from src.core.documenti.rag_context import recupera_contesto_documenti
+    from src.core.documenti.sources import authorized_sources
+    # Use the same bounded, entitled retrieval as inbound/simulator. The
+    # provider cannot supply or authorize its own source identities.
+    context = await recupera_contesto_documenti(organization_id, domanda, repo, k=k)
+    risultati = context.chunks
 
     if not risultati:
         return {
@@ -84,14 +88,17 @@ async def rispondi(
         score = round(r["distance"], 4)
         stato = r.get("stato") or meta.get("stato") or "indicizzata"
         is_active = r.get("is_active", True)
-        if nome not in fonti_dict or score < fonti_dict[nome]["score"]:
-            fonti_dict[nome] = {
+        identity = str(r.get("document_id") or "")
+        if identity not in fonti_dict or score < fonti_dict[identity]["score"]:
+            fonti_dict[identity] = {
                 "documento": nome,
                 "score": score,
                 "tipo": tipo,
                 "stato": stato,
                 "is_active": is_active,
                 "priorita": get_priorita_num(tipo),
+                "document_id": identity,
+                "revision": r.get("revision"),
             }
     fonti = sorted(fonti_dict.values(), key=lambda f: (f["priorita"], f["score"]))
 
@@ -122,6 +129,8 @@ async def rispondi(
     provider_context = None
     provider_completed = False
     try:
+        if not await authorized_sources(repo, organization_id, fonti):
+            return {"risposta": "Le fonti non sono piu disponibili o autorizzate. Riprova.", "fonti": []}
         provider_context = await ProviderAccountingContext.open(
             getattr(repo, "pool", None),
             organization_id,
@@ -159,6 +168,10 @@ async def rispondi(
         if provider_context is not None:
             await provider_context.close()
 
+    if not provider_completed:
+        return {"risposta": risposta, "fonti": []}
+    if not await authorized_sources(repo, organization_id, fonti):
+        return {"risposta": "Le fonti sono cambiate durante la richiesta. Riprova.", "fonti": []}
     output = {"risposta": risposta, "fonti": fonti}
     if (provider_completed and quota_operation is not None
             and quota_ticket is not None):

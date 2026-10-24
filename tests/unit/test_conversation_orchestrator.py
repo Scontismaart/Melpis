@@ -32,6 +32,15 @@ def _mock_embeddings():
 
 
 @pytest.fixture(autouse=True)
+def _allow_rag_at_entitlement_boundary():
+    """Keep orchestrator unit tests focused; entitlement policy has DB-backed tests."""
+    with patch("src.core.documenti.access.rag_access", new_callable=AsyncMock, return_value=True), \
+         patch("src.core.documenti.rag_context.rag_access", new_callable=AsyncMock, return_value=True), \
+         patch("src.core.guardrails.faq_cache.rag_access", new_callable=AsyncMock, return_value=True):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _mock_provider_accounting_context(monkeypatch):
     from src.core.provider_accounting import ProviderAccountingContext
 
@@ -105,7 +114,8 @@ async def test_faq_cache_hit(mock_dependencies):
     orchestrator = ConversationOrchestrator(**mock_dependencies)
     org_id = uuid.uuid4()
 
-    with patch("src.core.guardrails.faq_cache.cache_enabled", return_value=True), \
+    with patch("src.core.documenti.access.rag_access", new_callable=AsyncMock, return_value=True), \
+         patch("src.core.guardrails.faq_cache.cache_enabled", return_value=True), \
          patch("src.core.receptionist.conversation_orchestrator.classifica_intent") as mock_intent, \
          patch("src.core.guardrails.faq_cache.cerca_in_cache", return_value="Il nostro menu comprende opzioni senza glutine."):
 

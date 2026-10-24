@@ -28,6 +28,26 @@ function fixture(transport = async (url) => {
 }, confirm = async () => true) {
   const dom = new JSDOM(html, { url: "https://melpis.test/app/knowledge", runScripts: "outside-only" });
   const { window } = dom;
+  // Dashboard source partials are intentionally not composed into web/index.html in this task.
+  const documentsPanel = window.document.getElementById("kb-panel-documenti");
+  if (documentsPanel && !window.document.getElementById("kb-doc-limits")) {
+    const limits = window.document.createElement("div");
+    limits.id = "kb-doc-limits";
+    documentsPanel.appendChild(limits);
+  }
+  if (documentsPanel && !window.document.getElementById("kb-doc-upload-retry")) {
+    const retry = window.document.createElement("button");
+    retry.id = "kb-doc-upload-retry";
+    retry.hidden = true;
+    window.document.getElementById("doc-carica-status")?.after(retry);
+  }
+  const knowledgePanel = window.document.querySelector('[data-view-panel="conoscenza"]');
+  if (knowledgePanel && !window.document.getElementById("kb-conflitti-parziali")) {
+    const partialWarning = window.document.createElement("div");
+    partialWarning.id = "kb-conflitti-parziali";
+    partialWarning.hidden = true;
+    knowledgePanel.prepend(partialWarning);
+  }
   const context = { userId: "user-1", sessionOrganizationId: "org-1",
     selectedOrganizationId: "org-1", view: "conoscenza", transition: 1, epoch: 1 };
   const calls = [];
@@ -96,6 +116,20 @@ test("stale list and summary cannot render after organization or view change", a
   h.context.transition += 1;
   await h.module.aggiornaConoscenzaCompleta();
   assert.equal(h.calls.length, 1);
+});
+
+test("incomplete conflict scan warns that zero conflicts are not certified", async (t) => {
+  const summary = { ...emptySummary, conflitti_totali: 0, conflitti_completi: false };
+  const h = fixture((url) => response(200, url.endsWith("/summary") ? summary : { documenti: [] }));
+  t.after(() => h.dom.window.close());
+
+  await h.module.aggiornaConoscenzaCompleta();
+
+  const warning = h.document.getElementById("kb-conflitti-parziali");
+  assert.equal(warning.hidden, false);
+  assert.match(warning.textContent, /Verifica conflitti parziale/);
+  assert.match(warning.textContent, /assenza di conflitti non è confermata/);
+  assert.equal(h.calls.some((call) => call.url.endsWith("/api/conoscenza/conflitti")), false);
 });
 
 test("logout while a FAQ read is pending leaves no private content", async (t) => {
@@ -198,9 +232,14 @@ test("file upload rejection and retry retain the original input listener", async
 test("file upload double dispatch makes one request while pending", async (t) => {
   const delayed = deferred();
   let uploads = 0;
+  let uploaded = false;
   const h = fixture((url, options) => {
     if (options?.method === "POST") { uploads += 1; return delayed.promise; }
-    return response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] });
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/elenco") && uploaded) return response(200, { documenti: [
+      { id: "uploaded-1", nome: "menu.txt", tipo: "documento", stato: "indicizzata", index_verified: true, is_active: true },
+    ] });
+    return response(200, { documenti: [] });
   });
   t.after(() => h.dom.window.close());
   h.document.querySelector('[data-kb-tab="documenti"]').click();
@@ -210,9 +249,154 @@ test("file upload double dispatch makes one request while pending", async (t) =>
   input.dispatchEvent(new h.window.Event("change"));
   input.dispatchEvent(new h.window.Event("change"));
   assert.equal(uploads, 1);
-  delayed.resolve(response(200, { detail: "File indexed" }));
+  uploaded = true;
+  delayed.resolve(response(200, { detail: "Accepted", id: "uploaded-1" }));
   await settle();
-  assert.match(h.document.getElementById("doc-carica-status").textContent, /File indexed/);
+  assert.match(h.document.getElementById("doc-carica-status").textContent, /indicizzato con successo/);
+});
+
+test("document limits render backend values and keep missing values unavailable", async (t) => {
+  const h = fixture(async (url) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, {
+      rag_enabled: true, plan: "scala",
+      technical_limits: { upload_bytes: 8 * 1024 * 1024, pages_per_document: 42, chunks_per_document: 90 },
+      commercial_limits: { documents: null, pages: null, status: "not_configured" },
+      usage: { documents: 2, pages: 9, chunks: 12 },
+    });
+    return response(200, { documenti: [] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  const limits = h.document.getElementById("kb-doc-limits");
+  assert.match(limits.textContent, /Piano scala/);
+  assert.match(limits.textContent, /8 MB, 42 pagine, 90 segmenti/);
+  assert.match(limits.textContent, /2 documenti, 9 pagine, 12 segmenti/);
+  assert.match(limits.textContent, /Limiti commerciali non configurati/);
+  assert.equal(limits.textContent.includes("100 documenti"), false);
+
+  const unknown = fixture(async (url) => url.endsWith("/limiti")
+    ? response(200, { rag_enabled: true, plan: "scala", technical_limits: {}, usage: {}, commercial_limits: { status: "not_configured" } })
+    : response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] }));
+  t.after(() => unknown.dom.window.close());
+  unknown.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  assert.match(unknown.document.getElementById("kb-doc-limits").textContent, /Limiti tecnici non disponibili/);
+  assert.match(unknown.document.getElementById("kb-doc-limits").textContent, /Utilizzo non disponibile/);
+});
+
+test("plan-blocked Knowledge disables upload controls from the limits response", async (t) => {
+  const h = fixture(async (url) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, {
+      rag_enabled: false, plan: "starter", technical_limits: {}, usage: {},
+      commercial_limits: { documents: null, pages: null, status: "not_configured" },
+    });
+    return response(200, { documenti: [] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  assert.equal(h.document.getElementById("doc-file").disabled, true);
+  assert.equal(h.document.getElementById("doc-carica-btn").disabled, true);
+  assert.match(h.document.getElementById("kb-doc-limits").textContent, /Knowledge Base non inclusa nel piano/);
+});
+
+test("a document list response from a previous organization cannot replace the selected organization's list", async (t) => {
+  const oldList = deferred();
+  const h = fixture((url) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    return oldList.promise;
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.context.selectedOrganizationId = "org-2";
+  h.module.onEnter();
+  oldList.resolve(response(200, { documenti: [{ id: "private", nome: "Private.pdf", tipo: "documento", stato: "indicizzata", index_verified: true, is_active: true }] }));
+  await settle();
+  assert.equal(h.document.getElementById("doc-library").textContent.includes("Private.pdf"), false);
+});
+
+test("document lifecycle does not imply readiness for pending, failed, or unverified rows", async (t) => {
+  const rows = [
+    { id: "pending", nome: "Pending.pdf", tipo: "documento", stato: "caricato", is_active: false },
+    { id: "working", nome: "Working.pdf", tipo: "documento", stato: "in_elaborazione", is_active: false },
+    { id: "failed", nome: "Failed.pdf", tipo: "documento", stato: "errore", errore: "SECRET RAW DETAILS", is_active: false },
+    { id: "old", nome: "Old.pdf", tipo: "documento", stato: "indicizzata", is_active: true },
+    { id: "unverified", nome: "Unverified.pdf", tipo: "documento", stato: "indicizzata", index_verified: false, is_active: true },
+  ];
+  const h = fixture(async (url) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    return response(200, { documenti: rows });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  const list = h.document.getElementById("doc-library");
+  assert.match(list.textContent, /Caricato/);
+  assert.match(list.textContent, /In elaborazione/);
+  assert.match(list.textContent, /Da reindicizzare/);
+  assert.match(list.textContent, /Stato non disponibile/);
+  assert.equal(list.textContent.includes("Indicizzato"), false);
+  assert.equal(list.textContent.includes("SECRET RAW DETAILS"), false);
+  assert.equal(list.querySelectorAll(".kb-item-card .kb-switch").length, 0);
+  assert.equal(list.querySelectorAll(".kb-item-card button").length, 7, "errored/unverified rows offer reindex and every row can be deleted");
+});
+
+test("network retry reuses the upload idempotency key", async (t) => {
+  const keys = [];
+  let uploads = 0;
+  const h = fixture(async (url, options) => {
+    if (options?.method === "POST") {
+      keys.push(options.headers["Idempotency-Key"]);
+      return response(++uploads === 1 ? 503 : 200, { detail: "Retry" });
+    }
+    return response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  const input = h.document.getElementById("doc-file");
+  Object.defineProperty(input, "files", { configurable: true,
+    value: [new h.window.File(["hello"], "retry.pdf", { type: "application/pdf" })] });
+  input.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  const retry = h.document.getElementById("kb-doc-upload-retry");
+  assert.equal(retry.hidden, false);
+  retry.click();
+  await settle();
+  assert.equal(keys.length, 2);
+  assert.ok(keys[0]);
+  assert.equal(keys[0], keys[1]);
+});
+
+test("reindex uploads the selected original file with a fresh idempotency key", async (t) => {
+  const rows = [{ id: "old-doc", nome: "Old.pdf", tipo: "documento", stato: "indicizzata", index_verified: false, is_active: true }];
+  let submitted;
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      submitted = { url, options };
+      return response(200, { detail: "Accepted" });
+    }
+    return response(200, { documenti: rows });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  const file = new h.window.File(["original"], "Old.pdf", { type: "application/pdf" });
+  Object.defineProperty(picker, "files", { configurable: true, value: [file] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  assert.match(submitted.url, /\/api\/documenti\/old-doc\/reindicizza$/);
+  assert.ok(submitted.options.headers["Idempotency-Key"]);
+  assert.equal(submitted.options.body.get("file").name, "Old.pdf");
 });
 
 test("detached FAQ action cannot mutate a newly selected organization", async (t) => {

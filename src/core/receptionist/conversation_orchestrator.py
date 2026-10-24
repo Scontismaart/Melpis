@@ -161,8 +161,11 @@ class ConversationOrchestrator:
 
         # 4. FAQ Cache semantica vettoriale
         q_emb = None
-        if faq_cache.cache_enabled() and intent_result.intent == "faq" and org_id and self.doc_repo:
+        from src.core.documenti.access import rag_access
+        rag_enabled = bool(org_id and self.doc_repo and await rag_access(self.doc_repo, org_id))
+        if rag_enabled and faq_cache.cache_enabled() and intent_result.intent == "faq":
             try:
+                cache_epoch = await getattr(self.doc_repo, "doc_repo", self.doc_repo).knowledge_version(org_id)
                 q_emb = await faq_cache.embedding_query(req.text)
                 cached_answer = await faq_cache.cerca_in_cache(str(org_id), req.text, self.doc_repo, q_emb=q_emb)
             except Exception as e:
@@ -210,6 +213,7 @@ class ConversationOrchestrator:
                         req.quota_ticket,
                         cached_response,
                         profile=profilo,
+                        knowledge_epoch=cache_epoch,
                     )
                 return output
 
@@ -269,6 +273,8 @@ class ConversationOrchestrator:
             except Exception as e:
                 logger.warning("Airtable tools usage logging failed for org %s: %s", org_id,type(e).__name__)
 
+        from src.core.documenti.rag_context import require_current_context
+        await require_current_context(contesto, self.doc_repo, org_id)
         provider_context = await ProviderAccountingContext.open(
             getattr(self.billing_repo, "pool", None),
             org_id,
@@ -316,6 +322,8 @@ class ConversationOrchestrator:
             )
         finally:
             await provider_context.close()
+
+        await require_current_context(contesto, self.doc_repo, org_id)
 
         # 9. Guardrail Pipeline & Filtering
         esito = valida_risposta(risposta, contesto.chunks, profilo)
@@ -391,6 +399,7 @@ class ConversationOrchestrator:
                     self.doc_repo,
                     q_emb=q_emb,
                     prompt_variant=variante_prompt,
+                    expected_epoch=contesto.knowledge_epoch,
                 )
             except Exception as e:
                 logger.warning("FAQ cache store failed for org %s: %s", org_id,type(e).__name__)
@@ -418,14 +427,14 @@ class ConversationOrchestrator:
             # pending wording. A rejected response cannot authorize a booking.
             output._quota_final = validate_final_response(
                 req.quota_operation, req.quota_ticket, risposta,
-                context_chunks=contesto.chunks, profile=profilo,
+                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
             )
             if not req.is_simulation and pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
                 risposta.risposta = BOOKING_RECEIVED_REPLY
                 output.response_text = risposta.risposta
                 output._quota_final = validate_final_response(
                     req.quota_operation, req.quota_ticket, risposta,
-                    context_chunks=contesto.chunks, profile=profilo,
+                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
                 )
         return output
 

@@ -1,12 +1,11 @@
 from functools import lru_cache
 
-from sentence_transformers import SentenceTransformer
-
 _MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 
 @lru_cache(maxsize=1)
-def _modello() -> SentenceTransformer:
+def _modello():
+    from sentence_transformers import SentenceTransformer
     return SentenceTransformer(_MODEL_NAME)
 
 

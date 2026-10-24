@@ -34,9 +34,9 @@ async def async_client(repo, pg_pool, install_test_identity, sample_org, other_o
         sample_org["id"], profile_id,
     )
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
-        "subscription_id = 'sub_documentQAtest', current_period_start = now() - interval '1 day', "
-        "current_period_end = now() + interval '29 days', messages_limit = 500, "
+        "UPDATE organizations SET subscription_status = 'trialing', plan = 'business', "
+        "trial_start = now() - interval '1 hour', trial_end = now() + interval '6 days', "
+        "messages_limit = 500, "
         "messages_used_this_period = 0 WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
@@ -106,7 +106,7 @@ async def test_carica_e_chiedi_org_scoped(async_client, sample_org, other_org, p
     request_key = str(uuid.uuid4())
     qa_headers = {**_headers(sample_org["id"]), "Idempotency-Key": request_key}
     _FakeLLM.calls = 0
-    with patch("src.core.documenti.qa_agent.vettorizza", return_value=[[0.1] * 384]), \
+    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
          patch("src.core.documenti.qa_agent.crea_llm", return_value=_FakeLLM()):
         r = await async_client.post("/api/documenti/chiedi", json={"domanda": "quanto costa la pizza?"},
                                     headers=qa_headers)

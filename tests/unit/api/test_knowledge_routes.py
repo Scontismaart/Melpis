@@ -103,13 +103,14 @@ def test_carica_file_documento_success(client):
     }
     mock_repo = AsyncMock()
     mock_repo.get_organization_billing.return_value = {"plan": "business", "subscription_status": "active"}
-    mock_repo.create_document.return_value = {"id": mock_doc_id}
-    mock_repo.add_chunk.return_value = {"id": str(uuid.uuid4())}
     mock_repo.faq_cache_invalidate.return_value = None
 
     app.dependency_overrides[get_organization_context] = lambda: mock_user
+    published_document = {"id": mock_doc_id, "stato": "indicizzata", "index_verified": True}
     with patch.object(app.state, "repo", mock_repo, create=True), \
-         patch("src.api.routes.knowledge.resolve_vettorizza", return_value=lambda chunks, **kw: [[0.1] * 384 for _ in chunks]):
+         patch("src.api.routes.knowledge.index_content", new_callable=AsyncMock, return_value={
+             "status": "indexed", "document": published_document, "indexed": 2,
+         }) as publish:
         res = client.post(
             "/api/documenti/carica-file",
             files={"file": ("listino_speciale.txt", b"Il prezzo segreto del corso VIP e' 499 euro.\nInclude tutoraggio.", "text/plain")},
@@ -119,9 +120,16 @@ def test_carica_file_documento_success(client):
         assert "Indicizzati" in data["detail"]
         assert data["nome"] == "listino_speciale.txt"
         assert data["id"] == mock_doc_id
-        mock_repo.create_document.assert_awaited_once()
-        mock_repo.add_chunk.assert_awaited()
-        mock_repo.faq_cache_invalidate.assert_awaited_once_with(mock_org_id)
+        publish.assert_awaited_once()
+        args, kwargs = publish.await_args
+        assert args[:3] == (mock_repo, mock_org_id, "listino_speciale.txt")
+        assert kwargs["file_content"].startswith(b"Il prezzo segreto")
+        assert kwargs["tipo"] == "documento"
+        assert kwargs["fonte"] == "listino_speciale.txt"
+        assert kwargs["request_key"] is None
+        assert kwargs["embedding_fn"] is not None
+        # Cache publication/invalidation belongs to the canonical indexing service.
+        mock_repo.faq_cache_invalidate.assert_not_awaited()
     app.dependency_overrides.pop(get_organization_context, None)
 
 
@@ -185,7 +193,7 @@ async def test_carica_file_documento_caps_read_before_size_check():
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc:
-            await carica_file_documento(mock_request, mock_file, user)
+            await carica_file_documento(mock_request, mock_file, None, user)
 
     assert exc.value.status_code == 413
     mock_file.read.assert_awaited_once_with(20 * 1024 * 1024 + 1)

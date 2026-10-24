@@ -54,6 +54,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "booking_settings": ("direct", "Settings row is keyed by organization_id."),
     "reviews": ("direct", "Review carries its organization_id."),
     "documents": ("direct", "Document metadata carries its organization_id."),
+    "document_index_requests": ("direct", "Index request identities and deletion tombstones belong to one organization."),
     "document_chunks": ("direct", "Chunk carries organization_id and has a consistency trigger against its document."),
     "email_configs": ("direct", "Email configuration belongs to one organization."),
     "usage_events": ("direct", "Usage event is attributed to one organization."),

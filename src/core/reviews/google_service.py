@@ -408,6 +408,8 @@ class GoogleBusinessService:
                     output = generic_review_fallback(m["testo"])
                 else:
                     from src.core.provider_accounting import ProviderAccountingContext
+                    from src.core.documenti.rag_context import require_current_context
+                    await require_current_context(contesto, self.repo, org_id)
                     provider_context = await ProviderAccountingContext.open(
                         getattr(self.repo, "pool", None),
                         org_id,
@@ -426,6 +428,7 @@ class GoogleBusinessService:
                         )
                     finally:
                         await provider_context.close()
+                    await require_current_context(contesto, self.repo, org_id)
                 validate_review_draft(output.bozza_risposta, m["testo"], contesto.testo)
                 await self.repo.create_review(
                     organization_id=org_id,

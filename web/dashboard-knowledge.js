@@ -118,7 +118,8 @@
           kbWebUrlInput, kbOrariInput, docQuery, docFile].forEach((node) => { if (node) node.value = ""; });
         [kbFAQFormStatus, docCaricaStatus, kbWebImportStatus, kbDatiSaveStatus,
           docRispostaText].forEach((node) => { if (node) node.textContent = ""; });
-        [docRisposta, docFonti, document.getElementById("kb-conflitti-banner")]
+        [docRisposta, docFonti, document.getElementById("kb-conflitti-banner"),
+          document.getElementById("kb-conflitti-parziali")]
           .forEach((node) => { if (node) node.hidden = true; });
         if (kbFAQFormCard) kbFAQFormCard.style.display = "none";
         document.querySelectorAll("[id^='kb-badge-'], [id^='kb-stat-'], [id^='kb-'][id$='-status-text'], [id^='kb-'][id$='-updated-text']")
@@ -182,7 +183,7 @@
 
         // Carica i dati specifici del tab
         if (tabName === "faq") caricaFAQ();
-        else if (tabName === "documenti") caricaDocumenti();
+        else if (tabName === "documenti") { loadDocumentLimits(); caricaDocumenti(); }
         else if (tabName === "web") caricaPagineWeb();
         else if (tabName === "dati-struttura") caricaDatiStruttura();
       }
@@ -248,14 +249,21 @@
 
           // Verifica e visualizzazione banner conflitti
           const bannerConflitti = document.getElementById("kb-conflitti-banner");
+          const avvisoConflittiParziali = document.getElementById("kb-conflitti-parziali");
           const dettagliConflitti = document.getElementById("kb-conflitti-dettagli");
+          if (avvisoConflittiParziali) {
+            avvisoConflittiParziali.hidden = data.conflitti_completi !== false;
+          }
           if (data.conflitti_totali > 0) {
             const confRes = await apiFetch(`${API_BASE}/api/conoscenza/conflitti`);
             if (!valid()) return;
             if (!authorized(confRes, valid)) return;
             if (confRes.ok) {
               const confData = await confRes.json();
-          if (!valid()) return;
+              if (!valid()) return;
+              if (avvisoConflittiParziali && confData.complete === false) {
+                avvisoConflittiParziali.hidden = false;
+              }
               if (confData.conflitti?.length && bannerConflitti && dettagliConflitti) {
                 dettagliConflitti.innerHTML = "";
                 confData.conflitti.forEach((c) => {
@@ -537,6 +545,115 @@
       const docCaricaNome = document.getElementById("doc-carica-nome");
       const docCaricaBtn = document.getElementById("doc-carica-btn");
       const docCaricaStatus = document.getElementById("doc-carica-status");
+      const docLimits = document.getElementById("kb-doc-limits");
+      let pendingFileAction = null;
+      let documentPollTimer = null;
+      let lastDocumentList = [];
+      let ragEnabled = null;
+
+      function newIdempotencyKey() {
+        if (root.crypto?.randomUUID) return root.crypto.randomUUID();
+        const bytes = new Uint8Array(16);
+        if (root.crypto?.getRandomValues) root.crypto.getRandomValues(bytes);
+        else bytes.forEach((_, index) => { bytes[index] = Math.random() * 256; });
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+      }
+      function formatLimitBytes(value) {
+        if (!Number.isFinite(value) || value <= 0) return null;
+        return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toLocaleString(localeCorrente())} MB`
+          : `${Math.ceil(value / 1024).toLocaleString(localeCorrente())} KB`;
+      }
+      function displayDocumentLimits(data) {
+        if (!docLimits) return;
+        const technical = data?.technical_limits;
+        const usage = data?.usage;
+        const values = [technical?.upload_bytes, technical?.pages_per_document, technical?.chunks_per_document];
+        const usageValues = [usage?.documents, usage?.pages, usage?.chunks];
+        const supported = values.every(Number.isFinite);
+        const usageKnown = usageValues.every(Number.isFinite);
+        const plan = typeof data?.plan === "string" && data.plan ? `Piano ${data.plan}` : "Piano non disponibile";
+        const commercial = data?.commercial_limits;
+        const commercialConfigured = commercial?.status !== "not_configured" && commercial
+          && [commercial.documents, commercial.pages].some(Number.isFinite);
+        const parts = [plan, data?.rag_enabled === true ? "Knowledge Base attiva" : data?.rag_enabled === false
+          ? "Knowledge Base non inclusa nel piano" : "Disponibilità Knowledge Base non disponibile"];
+        if (supported) parts.push(`Limiti tecnici per file: ${formatLimitBytes(values[0]) || "non disponibili"}, ${values[1]} pagine, ${values[2]} segmenti`);
+        else parts.push("Limiti tecnici non disponibili");
+        if (usageKnown) parts.push(`Utilizzo: ${usageValues[0]} documenti, ${usageValues[1]} pagine, ${usageValues[2]} segmenti`);
+        else parts.push("Utilizzo non disponibile");
+        parts.push(commercialConfigured ? "Limiti del piano disponibili" : "Limiti commerciali non configurati");
+        docLimits.textContent = parts.join(" · ");
+        ragEnabled = data?.rag_enabled === true ? true : data?.rag_enabled === false ? false : null;
+        if (docFile) docFile.disabled = data?.rag_enabled !== true;
+        if (docCaricaBtn) docCaricaBtn.disabled = data?.rag_enabled !== true;
+        if (kbDocDropzone) kbDocDropzone.setAttribute("aria-disabled", String(data?.rag_enabled !== true));
+      }
+      async function loadDocumentLimits() {
+        if (!docLimits) return;
+        const token = capture();
+        if (!current(token)) return;
+        docLimits.textContent = "Caricamento limiti…";
+        try {
+          const res = await apiFetch(`${API_BASE}/api/documenti/limiti`);
+          if (!current(token)) return;
+          if (res.status === 401 || res.status === 403) { authorized(res, () => current(token)); return; }
+          if (!res.ok) throw new Error("Limiti non disponibili");
+          const data = await res.json();
+          if (current(token)) displayDocumentLimits(data);
+        } catch {
+          if (current(token)) displayDocumentLimits(null);
+        }
+      }
+      function setUploadStatus(message, kind = "neutral") {
+        if (!docCaricaStatus) return;
+        docCaricaStatus.textContent = message;
+        docCaricaStatus.style.color = kind === "error" ? "var(--red)" : kind === "success" ? "var(--green)" : "var(--ink)";
+      }
+      function stopDocumentPolling() {
+        if (documentPollTimer) root.clearTimeout(documentPollTimer);
+        documentPollTimer = null;
+      }
+      function hasPendingDocuments(items) {
+        return items.some((doc) => doc.stato === "caricato" || doc.stato === "in_elaborazione");
+      }
+      function scheduleDocumentPoll() {
+        stopDocumentPolling();
+        if (!active || !hasPendingDocuments(lastDocumentList)) return;
+        documentPollTimer = root.setTimeout(async () => {
+          documentPollTimer = null;
+          if (!current(capture(), true)) return;
+          await refresh("documenti", caricaDocumenti);
+          if (pendingFileAction) {
+            const matching = lastDocumentList.find((item) => item.id && pendingFileAction.documentId === item.id)
+              || lastDocumentList.find((item) => item.nome === pendingFileAction.file.name);
+            if (matching?.index_verified === true && matching.stato === "indicizzata") {
+              setUploadStatus(`File "${pendingFileAction.file.name}" indicizzato con successo.`, "success");
+              pendingFileAction = null;
+            } else if (matching?.stato === "errore") {
+              setUploadStatus("Non è stato possibile indicizzare il file. Controlla i requisiti del formato e riprova.", "error");
+              pendingFileAction = null;
+            } else if (matching?.index_verified === false) {
+              setUploadStatus("Documento salvato; l'indice deve essere verificato e reindicizzato.", "error");
+              pendingFileAction = null;
+            }
+          }
+          scheduleDocumentPoll();
+        }, 2500);
+      }
+      async function submitFile(file, url, key, label) {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await apiFetch(url, { method: "POST", body: form, headers: { "Idempotency-Key": key } });
+        if (res.status === 401 || res.status === 403) authorized(res, () => current(capture()));
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `Errore durante ${label}`);
+        }
+        return res.json();
+      }
 
       // Setup drag and drop
       if (kbDocDropzone && docFile) {
@@ -564,47 +681,65 @@
         });
       }
 
-      async function eseguiUploadFile(file) {
+      async function eseguiUploadFile(file, action = null) {
         const token = beginMutation("file-upload");
         if (!token) return;
         if (!docCaricaStatus) { endMutation("file-upload"); return; }
-        docCaricaStatus.textContent = `Caricamento e indicizzazione di "${file.name}"…`;
-        docCaricaStatus.style.color = "var(--ink)";
+        if (ragEnabled === false) {
+          setUploadStatus("La Knowledge Base non è inclusa nel piano.", "error");
+          endMutation("file-upload");
+          return;
+        }
+        const currentAction = action || { file, key: newIdempotencyKey(), endpoint: `${API_BASE}/api/documenti/carica-file` };
+        pendingFileAction = currentAction;
+        setUploadStatus(`Caricamento di "${file.name}" e indicizzazione in corso…`);
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (retryButton) retryButton.hidden = true;
         try {
-          const form = new FormData();
-          form.append("file", file);
-          const res = await apiFetch(`${API_BASE}/api/documenti/carica-file`, { method: "POST", body: form });
+          const result = await submitFile(file, currentAction.endpoint, currentAction.key, "il caricamento del file");
           if (!current(token)) return;
-          if (!authorized(res, () => current(token))) return;
-          if (!res.ok) {
-            const err = await res.json().catch(() => null);
-            if (!current(token)) return;
-            throw new Error(err?.detail || "Errore durante il caricamento del file");
-          }
-          const data = await res.json();
-          if (!current(token)) return;
-          docCaricaStatus.textContent = data.detail || `File "${file.name}" indicizzato con successo!`;
-          docCaricaStatus.style.color = "var(--green)";
+          setUploadStatus(`File "${file.name}" ricevuto; verifica dell'indicizzazione in corso…`);
           if (docFile) docFile.value = "";
           await refresh("documenti", caricaDocumenti);
           if (!current(token)) return;
           await refresh("summary", caricaKBSummary);
+          if (!current(token)) return;
+          const matching = lastDocumentList.find((item) => result?.id && item.id === result.id)
+            || lastDocumentList.find((item) => item.nome === file.name);
+          if (result?.id) currentAction.documentId = result.id;
+          if (matching?.stato === "indicizzata" && matching.index_verified === true) {
+            setUploadStatus(`File "${file.name}" indicizzato con successo.`, "success");
+            pendingFileAction = null;
+          } else if (matching?.index_verified === false) {
+            setUploadStatus("Documento salvato; l'indice deve essere verificato e reindicizzato.", "error");
+          } else if (matching?.stato === "indicizzata") {
+            setUploadStatus("Documento salvato; stato di verifica dell'indice non disponibile.");
+          } else if (matching?.stato === "errore") {
+            setUploadStatus("Non è stato possibile indicizzare il file. Controlla i requisiti del formato e riprova.", "error");
+          } else {
+            setUploadStatus(`File "${file.name}" ricevuto; indicizzazione in corso.`);
+          }
         } catch (err) {
           if (!current(token)) return;
-          docCaricaStatus.textContent = err.message || "Errore durante l'estrazione del file.";
-          docCaricaStatus.style.color = "var(--red)";
-          await refresh("documenti", caricaDocumenti);
-          if (!current(token)) return;
-          await refresh("summary", caricaKBSummary);
+          setUploadStatus(err.message || "Errore durante il caricamento del file.", "error");
+          if (retryButton) retryButton.hidden = false;
         } finally {
           endMutation("file-upload");
         }
       }
+      document.getElementById("kb-doc-upload-retry")?.addEventListener("click", () => {
+        if (pendingFileAction?.file) eseguiUploadFile(pendingFileAction.file, pendingFileAction);
+      });
 
       // Upload testo libero
       docCaricaBtn?.addEventListener("click", async () => {
         const token = beginMutation("text-upload", docCaricaBtn);
         if (!token) return;
+        if (ragEnabled === false) {
+          setUploadStatus("La Knowledge Base non è inclusa nel piano.", "error");
+          endMutation("text-upload", docCaricaBtn);
+          return;
+        }
         const testo = docCaricaTesto.value.trim();
         const nome = docCaricaNome.value.trim() || "documento.txt";
         if (!testo) {
@@ -657,11 +792,13 @@
           const data = await res.json();
           if (!valid()) return;
           const items = (data.documenti || []).filter((d) => d.tipo === "documento" || d.tipo === "upload");
+          lastDocumentList = items;
+          scheduleDocumentPoll();
           const renderToken = capture();
 
           const statusBarText = document.getElementById("kb-doc-status-text");
           const statusUpdatedText = document.getElementById("kb-doc-updated-text");
-          const attivi = items.filter((d) => d.is_active && d.stato !== "errore").length;
+          const attivi = items.filter((d) => d.is_active && d.stato === "indicizzata" && d.index_verified === true).length;
           if (statusBarText) {
             statusBarText.textContent = _tDash("knowledge.runtime.documents_count", "{{active}} documenti attivi su {{total}} totali", { active: attivi, total: items.length });
           }
@@ -676,7 +813,7 @@
           }
 
           items.forEach((doc) => {
-            const isActive = doc.is_active !== false && doc.stato !== "errore";
+            const isActive = doc.is_active !== false && doc.stato === "indicizzata" && doc.index_verified === true;
             const card = document.createElement("div");
             card.className = `kb-item-card ${isActive ? "" : "is-inactive"}`;
 
@@ -691,32 +828,47 @@
             metaRow.className = "kb-item-meta";
 
             const badgeStato = document.createElement("span");
-            if (doc.stato === "errore") {
+            if (doc.index_verified === false) {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "Da reindicizzare";
+            } else if (doc.stato === "caricato") {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "Caricato";
+            } else if (doc.stato === "in_elaborazione") {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "In elaborazione";
+            } else if (doc.stato === "errore") {
               badgeStato.className = "kb-badge kb-badge-danger";
-              badgeStato.textContent = "Errore estrazione";
-              badgeStato.title = doc.errore || "File illeggibile o corrotto";
-            } else if (isActive) {
+              badgeStato.textContent = "Errore";
+            } else if (doc.stato === "indicizzata" && doc.index_verified === true && isActive) {
               badgeStato.className = "kb-badge kb-badge-success";
               badgeStato.textContent = "Indicizzato";
-            } else {
+            } else if (doc.stato === "indicizzata" && doc.index_verified === true) {
               badgeStato.className = "kb-badge kb-badge-neutral";
               badgeStato.textContent = "Disattivato";
+            } else {
+              badgeStato.className = "kb-badge kb-badge-neutral";
+              badgeStato.textContent = "Stato non disponibile";
             }
 
             const chunkMeta = document.createElement("span");
-            chunkMeta.textContent = `${doc.chunk || 0} chunk`;
+            chunkMeta.textContent = Number.isFinite(doc.chunk) ? `${doc.chunk} segmenti` : "Segmenti n/d";
+
+            const pageMeta = document.createElement("span");
+            const pageCount = doc.pages ?? doc.metadata?.pages;
+            pageMeta.textContent = Number.isFinite(pageCount) ? `${pageCount} pagine` : "Pagine n/d";
 
             const dateMeta = document.createElement("span");
             dateMeta.textContent = `Caricato: ${_formatDataOra(doc.caricato_il)}`;
 
-            metaRow.append(badgeStato, chunkMeta, dateMeta);
+            metaRow.append(badgeStato, chunkMeta, pageMeta, dateMeta);
             main.append(title, metaRow);
 
             const actions = document.createElement("div");
             actions.className = "kb-item-actions";
 
             // Toggle switch
-            if (doc.stato !== "errore") {
+            if (doc.stato === "indicizzata" && doc.index_verified === true) {
               const switchLabel = document.createElement("label");
               switchLabel.className = "kb-switch";
               switchLabel.title = isActive ? "Disattiva documento" : "Attiva documento";
@@ -749,6 +901,32 @@
               switchSlider.className = "kb-switch-slider";
               switchLabel.append(switchInput, switchSlider);
               actions.appendChild(switchLabel);
+            }
+
+            if (doc.stato === "errore" || doc.index_verified === false) {
+              const reindexButton = document.createElement("button");
+              reindexButton.type = "button";
+              reindexButton.className = "report-refresh";
+              reindexButton.textContent = "Reindicizza documento";
+              reindexButton.addEventListener("click", () => {
+                if (!card.isConnected || !current(renderToken, true)) return;
+                const picker = document.createElement("input");
+                picker.type = "file";
+                picker.dataset.reindexFilePicker = "true";
+                picker.accept = docFile?.accept || ".pdf,.docx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp";
+                picker.hidden = true;
+                document.body.appendChild(picker);
+                picker.addEventListener("change", async () => {
+                  const original = picker.files?.[0];
+                  picker.remove();
+                  if (!original || !current(renderToken, true)) return;
+                  const action = { file: original, key: newIdempotencyKey(), endpoint:
+                    `${API_BASE}/api/documenti/${encodeURIComponent(doc.id)}/reindicizza` };
+                  await eseguiUploadFile(original, action);
+                }, { once: true });
+                picker.click();
+              });
+              actions.appendChild(reindexButton);
             }
 
             // Delete button
@@ -1319,7 +1497,7 @@
           entryScope = scope;
           active = true;
         },
-        onExit() { active = false; clearWork(); },
+        onExit() { active = false; stopDocumentPolling(); clearWork(); },
         invalidate() { active = false; destroyed = true; clearWork(); clearPrivateDOM(); },
         aggiornaConoscenzaCompleta,
       });

@@ -402,6 +402,8 @@ async def _ricevi_recensione_impl(
         output = generic_review_fallback(recensione.testo)
     else:
         genera_risposta_recensione = resolve_genera_risposta_recensione()
+        from src.core.documenti.rag_context import require_current_context
+        await require_current_context(contesto, repo, org_id)
         from src.core.provider_accounting import ProviderAccountingContext
         provider_context = None
         try:
@@ -432,6 +434,7 @@ async def _ricevi_recensione_impl(
         finally:
             if provider_context is not None:
                 await provider_context.close()
+        await require_current_context(contesto, repo, org_id)
     try:
         validate_review_draft(output.bozza_risposta, recensione.testo, contesto.testo)
     except Exception:

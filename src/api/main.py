@@ -300,11 +300,6 @@ async def lifespan(app: FastAPI):
             )
             if background_jobs_enabled:
                 _imposta_fonte_dati_per_scheduler()
-                try:
-                    from src.core.documenti.embeddings import _modello
-                    asyncio.create_task(asyncio.to_thread(_modello))
-                except Exception as e:
-                    logger.warning("[startup] Embedding model warmup warning: %s", e)
     else:
         app.state.repo = None
         app.state.pool = None
@@ -340,6 +335,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*background_tasks, return_exceptions=True)
     if app.state.pool:
         await app.state.pool.close()
+    from src.core.documenti.isolated import shutdown_local_workers
+    await shutdown_local_workers()
     await close_http_client()
     await close_rate_limiter()
 

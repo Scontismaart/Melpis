@@ -189,6 +189,7 @@ class FinalQuotaResponse:
     period_id: UUID
     serialized: str
     _capability: object
+    knowledge_epoch: int | None = None
 
     def __repr__(self):
         return "FinalQuotaResponse(<internal>)"
@@ -200,6 +201,7 @@ class FinalQuotaResponse:
 def validate_final_response(
     operation: QuotaOperation, ticket: QuotaTicket, response: RispostaOutput, *,
     context_chunks: list[dict] | None = None, profile: ProfiloAttivita | None = None,
+    knowledge_epoch: int | None = None,
 ) -> FinalQuotaResponse:
     """Run the real deterministic guardrail; JSON approval flags have no effect.
 
@@ -218,7 +220,7 @@ def validate_final_response(
     guarded = applica_guardrail(response.model_copy(deep=True), verdict)
     return FinalQuotaResponse(operation.id, operation.payload_hash,
                               ticket.claim_id, ticket.epoch, ticket.period_id,
-                              _json(guarded.model_dump(mode="json")), _CAPABILITY)
+                              _json(guarded.model_dump(mode="json")), _CAPABILITY, knowledge_epoch)
 
 
 def validate_qa_final_response(
@@ -252,6 +254,15 @@ def validate_qa_final_response(
             "documento": name.strip(), "tipo": kind, "score": float(score),
             "stato": status, "is_active": True, "priorita": priority,
         })
+        if "document_id" in source or "revision" in source:
+            try:
+                document_id = UUID(str(source["document_id"]))
+                revision = source["revision"]
+                if type(revision) is not int or revision < 1:
+                    _deny()
+            except (KeyError, ValueError, TypeError):
+                _deny()
+            safe_sources[-1].update(document_id=str(document_id), revision=revision)
     validated = validate_final_response(
         operation, ticket,
         RispostaOutput(risposta=response["risposta"], richiede_umano=False,
@@ -314,10 +325,12 @@ def _decode(row, operation):
     if not row or row["event_type"] != _EVENT or row["quantity"] != 0:
         _deny()
     value = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
-    if not isinstance(value, dict) or set(value) != {
+    if not isinstance(value, dict) or set(value) - {"knowledge_epoch"} != {
         "version", "epoch", "period_id", "payload_hash", "channel", "state",
         "claim_id", "lease_start", "lease_end", "period_end", "response_hash",
     }:
+        _deny()
+    if "knowledge_epoch" in value and (type(value["knowledge_epoch"]) is not int or value["knowledge_epoch"] < 0):
         _deny()
     if (type(value["version"]) is not int or value["version"] != 1
             or value["payload_hash"] != operation.payload_hash or value["channel"] != operation.channel
@@ -347,6 +360,15 @@ class QuotaReservations:
 
     def __init__(self, pool):
         self.pool = pool
+
+    async def _verify_knowledge(self, conn, operation, knowledge_epoch):
+        if knowledge_epoch is None:
+            return
+        from src.core.documenti.access import snapshot_allows_rag
+        current = await conn.fetchrow("SELECT *,clock_timestamp() AS verified_now FROM organizations WHERE id=$1", operation.organization_id)
+        if (type(knowledge_epoch) is not int or not current or current["knowledge_epoch"] != knowledge_epoch
+                or not snapshot_allows_rag(dict(current), operation.organization_id)):
+            _deny()
 
     async def _lock(self, conn, operation, *, for_release=False):
         if type(operation) is not QuotaOperation:
@@ -480,6 +502,11 @@ class QuotaReservations:
                     if (response["payload_hash"].strip() != operation.payload_hash
                             or _hash(payload) != metadata["response_hash"]):
                         _deny()
+                    await self._verify_knowledge(conn, operation, metadata.get("knowledge_epoch"))
+                    if operation.channel == "qa":
+                        from src.core.documenti.sources import sources_current
+                        if not await sources_current(conn, operation.organization_id, payload.get("fonti")):
+                            _deny()
                     return {"status": "replay", "response": payload}
                 expected = "reserved" if metadata["state"] == "reserved" else "failed"
                 if response["status"] != expected or response["response"] is not None:
@@ -548,6 +575,19 @@ class QuotaReservations:
         async with self.pool.acquire() as conn, conn.transaction():
             epoch, billing, row, response, now = await self._lock(conn, operation)
             metadata = _decode(row, operation)
+            await self._verify_knowledge(conn, operation,
+                metadata.get("knowledge_epoch") if metadata["state"] == "committed" else final.knowledge_epoch)
+            if operation.channel == "qa":
+                from src.core.documenti.sources import sources_current
+                from src.core.documenti.access import snapshot_allows_rag
+                current = await conn.fetchrow("SELECT *,clock_timestamp() AS verified_now FROM organizations WHERE id=$1", operation.organization_id)
+                if not snapshot_allows_rag(dict(current) if current else None, operation.organization_id):
+                    _deny()
+                evidence = payload
+                if metadata["state"] == "committed" and response:
+                    evidence = json.loads(response["response"]) if isinstance(response["response"], str) else response["response"]
+                if not isinstance(evidence, dict) or not await sources_current(conn, operation.organization_id, evidence.get("fonti")):
+                    _deny()
             if metadata["state"] == "committed":
                 # Idempotent persistence; never overwrite the first response.
                 if (metadata["claim_id"] != str(ticket.claim_id) or metadata["epoch"] != str(epoch)
@@ -583,6 +623,8 @@ class QuotaReservations:
                     WHERE id=$1""", operation.organization_id,
             )
             metadata.update(state="committed", response_hash=_hash(payload))
+            if final.knowledge_epoch is not None:
+                metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
             return payload
 

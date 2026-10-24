@@ -82,6 +82,7 @@ class LegacyExecutionResult:
     variante_prompt: str = "control"
     quota_final: Any = None
     quota_exempt: bool = False
+    knowledge_epoch: int | None = None
 
 
 class LegacyInboundPipeline:
@@ -141,8 +142,10 @@ class LegacyInboundPipeline:
 
         q_emb = None
         faq_cache_mod = _get_proc_symbol("faq_cache", faq_cache)
-        if faq_cache_mod.cache_enabled() and intent_result.intent == "faq":
+        from src.core.documenti.access import rag_access
+        if faq_cache_mod.cache_enabled() and intent_result.intent == "faq" and await rag_access(self.repo, org_id):
             try:
+                cache_epoch = await self.repo.doc_repo.knowledge_version(org_id)
                 q_emb = await faq_cache_mod.embedding_query(text)
                 cached_answer = await faq_cache_mod.cerca_in_cache(str(org_id), text, self.repo, q_emb=q_emb)
             except Exception as e:
@@ -188,6 +191,7 @@ class LegacyInboundPipeline:
                         quota_operation, quota_ticket,
                         cached_response,
                         profile=profilo,
+                        knowledge_epoch=cache_epoch,
                     )
                 return result
 
@@ -241,6 +245,7 @@ class LegacyInboundPipeline:
             )
             recupera_doc_fn = _get_proc_symbol("recupera_contesto_documenti", recupera_contesto_documenti)
             contesto = await recupera_doc_fn(str(org_id), text, self.repo, q_emb=q_emb)
+            result.knowledge_epoch = getattr(contesto, "knowledge_epoch", None)
 
             # Recupera cronologia recente per mantenere il contesto multi-turn
             cronologia: list[tuple[str, str]] = []
@@ -295,6 +300,8 @@ class LegacyInboundPipeline:
                     logger.warning("Semaforo pre-fetch failed for org %s: %s", org_id,type(e).__name__)
 
             genera_risp_fn = _get_proc_symbol("genera_risposta_async", genera_risposta_async)
+            from src.core.documenti.rag_context import require_current_context
+            await require_current_context(contesto, self.repo, org_id)
             risposta = await genera_risp_fn(
                 messaggio,
                 profilo,
@@ -311,6 +318,8 @@ class LegacyInboundPipeline:
                 heartbeat_task.cancel()
             if "provider_context" in locals():
                 await provider_context.close()
+
+        await require_current_context(contesto, self.repo, org_id)
 
         valida_fn = _get_proc_symbol("valida_risposta", valida_risposta)
         applica_guard_fn = _get_proc_symbol("applica_guardrail", applica_guardrail)
@@ -356,13 +365,13 @@ class LegacyInboundPipeline:
                 return result
             result.quota_final = validate_final_response(
                 quota_operation, quota_ticket, risposta,
-                context_chunks=contesto.chunks, profile=profilo,
+                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
             )
             if pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
                 risposta.risposta = BOOKING_RECEIVED_REPLY
                 result.response_text = risposta.risposta
                 result.quota_final = validate_final_response(
                     quota_operation, quota_ticket, risposta,
-                    context_chunks=contesto.chunks, profile=profilo,
+                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
                 )
         return result

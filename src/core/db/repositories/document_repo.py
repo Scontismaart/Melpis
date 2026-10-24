@@ -3,9 +3,10 @@ import json
 import uuid
 
 from src.core.db.scoping import TenantScopedRepository
+from src.core.db.repositories.document_publication import DocumentPublication
 
 
-class DocumentRepository(TenantScopedRepository):
+class DocumentRepository(DocumentPublication, TenantScopedRepository):
     """Repository specializzato per Documenti (RAG pgvector), Chunks e Cache Semantica FAQ."""
 
     def __init__(self, pool):
@@ -18,7 +19,7 @@ class DocumentRepository(TenantScopedRepository):
     async def create_document(self, organization_id, nome, tipo="upload",
                                 fonte="", caricato_il=None, is_active=True,
                                 stato="indicizzata", errore="", metadata=None):
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             row = await conn.fetchrow("""
                 INSERT INTO documents (
                     id, organization_id, nome, tipo, fonte,
@@ -69,7 +70,7 @@ class DocumentRepository(TenantScopedRepository):
             WHERE id = $1 AND organization_id = $2
             RETURNING *
         """
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             row = await conn.fetchrow(sql, *vals)
             if not row:
                 return None
@@ -79,7 +80,7 @@ class DocumentRepository(TenantScopedRepository):
             return res
 
     async def toggle_document_active(self, organization_id, document_id):
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             row = await conn.fetchrow("""
                 UPDATE documents
                 SET is_active = NOT is_active, updated_at = NOW()
@@ -94,7 +95,7 @@ class DocumentRepository(TenantScopedRepository):
             return res
 
     async def delete_document_chunks(self, organization_id, document_id):
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             res = await conn.execute("""
                 DELETE FROM document_chunks
                 WHERE document_id = $1 AND organization_id = $2
@@ -103,7 +104,7 @@ class DocumentRepository(TenantScopedRepository):
 
     async def add_chunk(self, organization_id, document_id, chunk_index,
                          content, embedding, metadata=None):
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             vec_str = self._vec_str(embedding)
             row = await conn.fetchrow("""
                 INSERT INTO document_chunks (id, organization_id, document_id,
@@ -120,21 +121,27 @@ class DocumentRepository(TenantScopedRepository):
 
     async def search_similar(self, organization_id, embedding, k=5, only_active=True):
         """Ricerca semantica vettoriale su document_chunks. Implementazione canonica unificata."""
+        from src.core.documenti.access import rag_access
+        if type(k) is not int or not 1 <= k <= 20:
+            raise ValueError("invalid_retrieval_limit")
+        if not await rag_access(self, organization_id):
+            return []
         async with self.pool.acquire() as conn:
             vec_str = self._vec_str(embedding)
             sql = """
                 SELECT dc.id, dc.content, dc.metadata, dc.chunk_index,
-                       dc.document_id, d.nome as document_name, d.tipo, d.stato, d.is_active,
+                       dc.document_id, d.nome as document_name, d.tipo, d.stato, d.is_active, d.revision,
                        dc.embedding <=> $2::vector AS distance
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                               AND d.organization_id = $1
                 WHERE dc.organization_id = $1
-                  AND (NOT $4::boolean OR (d.is_active = TRUE AND d.stato = 'indicizzata'))
+                  AND d.index_verified = TRUE AND d.stato = 'indicizzata'
+                  AND d.is_active = TRUE
                 ORDER BY dc.embedding <=> $2::vector
                 LIMIT $3
             """
-            rows = await conn.fetch(sql, organization_id, vec_str, k, only_active)
+            rows = await conn.fetch(sql, organization_id, vec_str, k)
             results = [dict(r) for r in rows]
             for r in results:
                 if isinstance(r.get("metadata"), str):
@@ -176,7 +183,10 @@ class DocumentRepository(TenantScopedRepository):
     async def count_chunks(self, organization_id):
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT COUNT(*) AS n FROM document_chunks WHERE organization_id = $1",
+                """SELECT COUNT(*) AS n FROM document_chunks c JOIN documents d
+                    ON d.id=c.document_id AND d.organization_id=$1
+                    WHERE c.organization_id=$1 AND d.is_active AND d.index_verified
+                      AND d.stato='indicizzata'""",
                 organization_id,
             )
             return row["n"]
@@ -186,7 +196,7 @@ class DocumentRepository(TenantScopedRepository):
             if tipo:
                 rows = await conn.fetch("""
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
-                           d.metadata, d.caricato_il, d.updated_at,
+                           d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
@@ -198,7 +208,7 @@ class DocumentRepository(TenantScopedRepository):
             else:
                 rows = await conn.fetch("""
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
-                           d.metadata, d.caricato_il, d.updated_at,
+                           d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
@@ -211,18 +221,27 @@ class DocumentRepository(TenantScopedRepository):
             for r in results:
                 if isinstance(r.get("metadata"), str):
                     r["metadata"] = json.loads(r["metadata"])
+                if r.get("errore"):
+                    r["errore"] = "indexing_failed"
             return results
 
     async def list_all_active_chunks(self, organization_id):
+        from src.core.documenti.access import rag_access
+        if not await rag_access(self, organization_id):
+            return []
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT dc.id, dc.content, dc.metadata, dc.chunk_index,
+                SELECT dc.id, left(dc.content,500) AS content,
+                       length(dc.content)>500 AS content_truncated,
+                       jsonb_build_object('tipo',d.tipo,'fonte',d.fonte) AS metadata, dc.chunk_index,
                        dc.document_id, d.nome as document_name, d.tipo, d.stato, d.is_active
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                               AND d.organization_id = $1
                 WHERE dc.organization_id = $1 AND d.is_active = TRUE
+                  AND d.index_verified = TRUE AND d.stato = 'indicizzata'
                 ORDER BY d.caricato_il DESC
+                LIMIT 4001
             """, organization_id)
             results = [dict(r) for r in rows]
             for r in results:
@@ -231,7 +250,7 @@ class DocumentRepository(TenantScopedRepository):
             return results
 
     async def delete_document(self, organization_id, document_id):
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
             async with conn.transaction():
                 await conn.execute("""
                     DELETE FROM document_chunks WHERE document_id = $1 AND organization_id = $2
@@ -244,14 +263,19 @@ class DocumentRepository(TenantScopedRepository):
 
     # ── Guardrails: Cache FAQ Semantica ───────────────────────────
 
+    async def knowledge_version(self, organization_id):
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval("SELECT knowledge_epoch FROM organizations WHERE id=$1", uuid.UUID(str(organization_id)))
+
     async def faq_cache_lookup(self, organization_id: str, embedding: list,
                                max_distance: float = 0.08) -> dict | None:
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id, require_entitlement=True) as (conn, _org):
             row = await conn.fetchrow("""
                 UPDATE faq_cache SET hit_count = hit_count + 1, last_used_at = NOW()
                 WHERE id = (
                     SELECT id FROM faq_cache
                     WHERE organization_id = $1::uuid
+                      AND knowledge_epoch = (SELECT knowledge_epoch FROM organizations WHERE id=$1::uuid)
                       AND expires_at > NOW()
                       AND (question_embedding <=> $2::vector) <= $3
                     ORDER BY question_embedding <=> $2::vector
@@ -265,29 +289,36 @@ class DocumentRepository(TenantScopedRepository):
     async def faq_cache_store(self, organization_id: str, question_text: str,
                               answer_text: str, embedding: list,
                               prompt_variant: str = "control",
-                              ttl_hours: int = 72) -> dict:
+                              ttl_hours: int = 72, expected_epoch: int | None = None) -> dict | None:
+        if type(expected_epoch) is not int:
+            return None
         normalized = " ".join(question_text.lower().split())
         question_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id, require_entitlement=True) as (conn, _org):
+            current = await conn.fetchval("SELECT knowledge_epoch FROM organizations WHERE id=$1", uuid.UUID(str(organization_id)))
+            if current != expected_epoch:
+                return None
             row = await conn.fetchrow("""
                 INSERT INTO faq_cache (id, organization_id, question_text, question_hash,
-                                       question_embedding, answer_text, prompt_variant, expires_at)
+                                       question_embedding, answer_text, prompt_variant, expires_at, knowledge_epoch)
                 VALUES ($1, $2::uuid, $3, $4, $5::vector, $6, $7,
-                        NOW() + ($8 || ' hours')::interval)
+                        NOW() + ($8 || ' hours')::interval, $9)
                 ON CONFLICT (organization_id, question_hash)
                     DO UPDATE SET
                         answer_text = EXCLUDED.answer_text,
                         question_embedding = EXCLUDED.question_embedding,
                         prompt_variant = EXCLUDED.prompt_variant,
-                        expires_at = EXCLUDED.expires_at
+                        expires_at = EXCLUDED.expires_at,
+                        knowledge_epoch = EXCLUDED.knowledge_epoch
                 RETURNING *
             """, uuid.uuid4(), organization_id, question_text, question_hash,
-                self._vec_str(embedding), answer_text, prompt_variant, str(ttl_hours))
+                self._vec_str(embedding), answer_text, prompt_variant, str(ttl_hours), expected_epoch)
             return dict(row)
 
     async def faq_cache_invalidate(self, organization_id: str) -> int:
         """Svuota la cache FAQ dell'org. Implementazione canonica unificata."""
-        async with self.pool.acquire() as conn:
+        async with self._publication(organization_id) as (conn, _org):
+            await conn.execute("UPDATE organizations SET knowledge_epoch=knowledge_epoch+1 WHERE id=$1", uuid.UUID(str(organization_id)))
             result = await conn.execute(
                 "DELETE FROM faq_cache WHERE organization_id = $1::uuid",
                 organization_id,

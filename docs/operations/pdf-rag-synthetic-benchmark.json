@@ -1,0 +1,126 @@
+{
+  "benchmark": "synthetic-pdf-rag-local-cpu",
+  "network_access": false,
+  "database_access": false,
+  "model_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "model_snapshot_directory": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+  "python": "3.12.5",
+  "platform": "win32",
+  "tiers": {
+    "5": {
+      "pdf_bytes": 17679,
+      "pages": 5,
+      "extracted_characters": 14888,
+      "chunks": 90,
+      "embedding_dimensions": 384,
+      "extraction_seconds": 0.013036,
+      "extraction_cpu_seconds": 0.015625,
+      "chunking_seconds": 0.00063,
+      "chunking_cpu_seconds": 0.0,
+      "model_load_seconds": 3.491435,
+      "model_load_cpu_seconds": 3.21875,
+      "embedding_seconds": 7.421935,
+      "embedding_cpu_seconds": 14.71875,
+      "embedding_chunks_per_second": 12.126,
+      "warm_query_runs": 10,
+      "warm_query_p50_seconds": 0.028153,
+      "warm_query_p95_seconds": 0.045803,
+      "peak_rss_bytes": 1530433536
+    },
+    "50": {
+      "pdf_bytes": 173797,
+      "pages": 50,
+      "extracted_characters": 148989,
+      "chunks": 900,
+      "embedding_dimensions": 384,
+      "extraction_seconds": 0.137385,
+      "extraction_cpu_seconds": 0.109375,
+      "chunking_seconds": 0.005839,
+      "chunking_cpu_seconds": 0.015625,
+      "model_load_seconds": 4.210644,
+      "model_load_cpu_seconds": 3.984375,
+      "embedding_seconds": 39.682667,
+      "embedding_cpu_seconds": 76.25,
+      "embedding_chunks_per_second": 22.68,
+      "warm_query_runs": 10,
+      "warm_query_p50_seconds": 0.017399,
+      "warm_query_p95_seconds": 0.031173,
+      "peak_rss_bytes": 1528832000
+    },
+    "200": {
+      "pdf_bytes": 695049,
+      "pages": 200,
+      "extracted_characters": 596290,
+      "chunks": 3600,
+      "embedding_dimensions": 384,
+      "extraction_seconds": 0.659483,
+      "extraction_cpu_seconds": 0.65625,
+      "chunking_seconds": 0.031651,
+      "chunking_cpu_seconds": 0.03125,
+      "model_load_seconds": 2.013345,
+      "model_load_cpu_seconds": 1.9375,
+      "embedding_seconds": 186.628547,
+      "embedding_cpu_seconds": 362.09375,
+      "embedding_chunks_per_second": 19.29,
+      "warm_query_runs": 10,
+      "warm_query_p50_seconds": 0.039918,
+      "warm_query_p95_seconds": 0.049686,
+      "peak_rss_bytes": 1531793408
+    }
+  },
+  "concurrency": {
+    "1": {
+      "workers": 1,
+      "wall_seconds": 39.621845,
+      "runs": [
+        {
+          "pdf_bytes": 17679,
+          "pages": 5,
+          "extracted_characters": 14888,
+          "chunks": 90,
+          "embedding_dimensions": 384,
+          "extraction_seconds": 0.027085,
+          "extraction_cpu_seconds": 0.03125,
+          "chunking_seconds": 0.00179,
+          "chunking_cpu_seconds": 0.0,
+          "model_load_seconds": 3.361684,
+          "model_load_cpu_seconds": 3.234375,
+          "embedding_seconds": 5.414614,
+          "embedding_cpu_seconds": 10.484375,
+          "embedding_chunks_per_second": 16.622,
+          "warm_query_runs": 10,
+          "warm_query_p50_seconds": 0.01727,
+          "warm_query_p95_seconds": 0.038648,
+          "peak_rss_bytes": 1530834944
+        }
+      ],
+      "source_scope": "Working tree at concurrency sample time; source was updated after the baseline tier runs.",
+      "chunker_worktree_git_blob": "f8c42559c1a9b306cd0d4ab31ff55d20fe216090",
+      "embeddings_worktree_git_blob": "11fde86d32f07b79c6737f5f5c99fc49b3af23f8"
+    },
+    "2": {
+      "workers": 2,
+      "skipped": true,
+      "reason": "Skipped: two observed ~1.53 GB model workers plus 1 GiB headroom require about 4.13 GB physical memory; only 2.76 GB was free at the preflight sample.",
+      "observed_worker_peak_rss_bytes": 1531793408,
+      "available_physical_memory_bytes": 2755964928,
+      "required_physical_memory_bytes": 4137328640
+    }
+  },
+  "limitations": [
+    "No database/index/storage/search benchmark is performed."
+  ],
+  "baseline_source_commit": "a7f09f2d4155dade5f93a6512fb2f5bdd4a9a5ea",
+  "baseline_extractor_git_blob": "285ef29ed3b6ec755a0ec7c72929bcd8bb9a9818",
+  "baseline_chunker_git_blob": "f2ac0ad2ef4d835be53bcc01b831dd0e59dd714e",
+  "ocr_scanned_1_page": {
+    "pdf_bytes": 9603568,
+    "pages": 1,
+    "extracted_characters": 108,
+    "recognized_text": "SYNTHETICCAFEMENU\nEspresso and tea\nOpening hours: 08:00 to 18:00\nCall the reception desk to reserve a table.",
+    "extraction_seconds": 4.36897,
+    "extraction_cpu_seconds": 37.6875,
+    "peak_rss_bytes": 472498176
+  },
+  "baseline_embeddings_git_blob": "1b54243c46eb38476c8d63911379850247a25766"
+}

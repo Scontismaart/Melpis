@@ -17,7 +17,10 @@ def set_env():
 async def async_client(repo, pg_pool, install_test_identity, sample_org):
     from src.api.main import app
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = $1",
+        """UPDATE organizations SET subscription_status='active', plan='business',
+           subscription_id='sub_onboardingSync',
+           current_period_start=now()-interval '1 day',
+           current_period_end=now()+interval '29 days' WHERE id=$1""",
         sample_org["id"],
     )
     install_test_identity(app, API_KEY, default_org_id=sample_org["id"])
@@ -57,7 +60,13 @@ async def test_save_profile_syncs_rag_struttura(async_client, repo, sample_org):
         )
     assert resp.status_code == 200
 
-    # Verifica che nei chunk attivi ci siano i nuovi orari con Priorità 1 (dati_struttura)
+    documents = await repo.list_sources(sample_org["id"], tipo="dati_struttura")
+    assert len(documents) == 1
+    assert documents[0]["stato"] == "indicizzata"
+    assert documents[0]["index_verified"] is True
+    assert documents[0]["revision"] >= 1
+
+    # Verifica che solo la pubblicazione verificata esponga i nuovi orari come fonte prioritaria.
     chunks = await repo.list_all_active_chunks(sample_org["id"])
     orari_chunks = [c for c in chunks if "Lun-Ven 09:00-19:00" in c["content"]]
     assert len(orari_chunks) >= 1
