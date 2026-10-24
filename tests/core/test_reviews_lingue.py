@@ -52,7 +52,7 @@ async def async_client(repo, pg_pool, sample_org, monkeypatch):
     app.state.reviews_service = service
     await pg_pool.execute(
         "UPDATE organizations SET subscription_status = 'active', plan = 'business', "
-        "subscription_id = 'sub_reviews_language_test', "
+        "subscription_id = 'sub_reviewsLanguageTest', "
         "current_period_start = now() - interval '1 day', "
         "current_period_end = now() + interval '29 days', "
         "messages_limit = 500, messages_used_this_period = 0 WHERE id = $1",
@@ -137,7 +137,8 @@ async def test_api_recensione_propaga_le_lingue_dell_org(async_client, repo, sam
 
     from types import SimpleNamespace
     async def knowledge(*_args, **_kwargs):
-        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}])
+        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}],
+                               knowledge_epoch=await repo.doc_repo.knowledge_version(sample_org["id"]))
     monkeypatch.setattr("src.core.documenti.rag_context.recupera_contesto_documenti", knowledge)
 
     def fake_genera(**kwargs):
@@ -162,7 +163,8 @@ async def test_api_recensione_senza_profilo_usa_default(async_client, repo, samp
     captured = {}
     from types import SimpleNamespace
     async def knowledge(*_args, **_kwargs):
-        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}])
+        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}],
+                               knowledge_epoch=await repo.doc_repo.knowledge_version(sample_org["id"]))
     monkeypatch.setattr("src.core.documenti.rag_context.recupera_contesto_documenti", knowledge)
 
     def fake_genera(**kwargs):
@@ -214,7 +216,8 @@ async def test_sync_google_propaga_le_lingue_dell_org(async_client, pg_pool, sam
 
     from types import SimpleNamespace
     async def knowledge(*_args, **_kwargs):
-        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}])
+        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}],
+                               knowledge_epoch=await repo.doc_repo.knowledge_version(sample_org["id"]))
     monkeypatch.setattr("src.core.documenti.rag_context.recupera_contesto_documenti", knowledge)
     service._build_service = AsyncMock(return_value=MagicMock())
     service._list_reviews = AsyncMock(
@@ -240,7 +243,7 @@ async def test_sync_google_propaga_le_lingue_dell_org(async_client, pg_pool, sam
     assert captured["lingua_default"] == "en"
 
 
-async def test_sync_google_senza_profilo_usa_default(async_client, pg_pool, sample_org, monkeypatch):
+async def test_sync_google_senza_profilo_usa_default(async_client, pg_pool, sample_org, repo, monkeypatch):
     client, service = async_client
     await _inserisci_credenziali(pg_pool, sample_org["id"])
 
@@ -258,7 +261,8 @@ async def test_sync_google_senza_profilo_usa_default(async_client, pg_pool, samp
     captured = {}
     from types import SimpleNamespace
     async def knowledge(*_args, **_kwargs):
-        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}])
+        return SimpleNamespace(testo="Knowledge verificata", chunks=[{}],
+                               knowledge_epoch=await repo.doc_repo.knowledge_version(sample_org["id"]))
     monkeypatch.setattr("src.core.documenti.rag_context.recupera_contesto_documenti", knowledge)
     service._genera_bozza = AsyncMock(
         side_effect=lambda *a, **kw: (captured.update(kw) or _FakeBozza())

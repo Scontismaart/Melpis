@@ -1,6 +1,6 @@
+import json
 import os
 import uuid
-import json
 from unittest.mock import patch
 
 import httpx
@@ -88,7 +88,7 @@ async def test_carica_e_chiedi_org_scoped(async_client, sample_org, other_org, p
         "SELECT count(*) FROM auth_access_lifecycle WHERE auth_user_id=$1 AND disabled_at IS NULL",
         auth_user_id,
     ) == 1
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post("/api/documenti/carica", json={
             "testo": "Pizza margherita: 8 euro. Pizza diavola: 9 euro.",
             "nome": "menu.pdf",
@@ -106,7 +106,7 @@ async def test_carica_e_chiedi_org_scoped(async_client, sample_org, other_org, p
     request_key = str(uuid.uuid4())
     qa_headers = {**_headers(sample_org["id"]), "Idempotency-Key": request_key}
     _FakeLLM.calls = 0
-    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
+    with patch("src.core.documenti.rag_context.vettorizza", side_effect=lambda texts, tipo="query": [[0.1] * 384 for _ in texts]), \
          patch("src.core.documenti.qa_agent.crea_llm", return_value=_FakeLLM()):
         r = await async_client.post("/api/documenti/chiedi", json={"domanda": "quanto costa la pizza?"},
                                     headers=qa_headers)
@@ -223,7 +223,7 @@ async def test_simulator_route_reuses_guardrailed_response_after_commit(
 
 
 async def test_delete_cross_tenant_non_tocca_org_altrui(async_client, sample_org, other_org):
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post("/api/documenti/carica", json={
             "testo": "Documento segreto dell'org A",
             "nome": "segreti.txt",
@@ -239,7 +239,7 @@ async def test_delete_cross_tenant_non_tocca_org_altrui(async_client, sample_org
 
 
 async def test_carica_file_org_scoped(async_client, sample_org, other_org):
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post(
             "/api/documenti/carica-file",
             files={"file": ("menu.txt", b"Antipasto della casa: 12 euro", "text/plain")},
@@ -258,9 +258,18 @@ async def test_upload_documento_invalida_cache_faq(async_client, repo, pg_pool, 
     from src.whatsapp.repository import Repository as WhatsAppRepository
 
     wrepo = WhatsAppRepository(pool=pg_pool)
-    await wrepo.faq_cache_store(str(sample_org["id"]), "quanto costa?", "8 euro", [0.1] * 384)
+    organization_id = str(sample_org["id"])
+    epoch = await wrepo.knowledge_version(organization_id)
+    stored = await wrepo.faq_cache_store(
+        organization_id, "quanto costa?", "8 euro", [0.1] * 384,
+        expected_epoch=epoch,
+    )
+    assert stored is not None
+    cached_before_upload = await wrepo.faq_cache_lookup(organization_id, [0.1] * 384)
+    assert cached_before_upload is not None
+    assert cached_before_upload["answer_text"] == "8 euro"
 
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post("/api/documenti/carica", json={
             "testo": "Nuovo listino: tutto a 10 euro.",
             "nome": "nuovo-menu.txt",
