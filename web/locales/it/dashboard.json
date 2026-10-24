@@ -316,6 +316,16 @@
       "file_quota_unknown": "Quota file non disponibile",
       "file_uploads_blocked": "Il caricamento di nuovi file non è disponibile nello stato corrente.",
       "file_replacements_blocked": "La sostituzione dei file non è disponibile nello stato corrente.",
+      "document_previous_version_available": "La versione precedente resta disponibile.",
+      "document_index_update_badge": "Aggiornamento in corso",
+      "document_index_failed_badge": "Aggiornamento non riuscito",
+      "document_index_interrupted_badge": "Aggiornamento interrotto",
+      "document_index_update_in_progress": "Aggiornamento dell'indice in corso.",
+      "document_index_update_failed": "Aggiornamento dell'indice non riuscito. Puoi riprovare.",
+      "document_index_update_interrupted": "Aggiornamento dell'indice interrotto. Puoi riprovare.",
+      "document_index_request_failed": "Richiesta di aggiornamento non confermata. Puoi riprovare in sicurezza.",
+      "file_index_published": "File indicizzato con successo.",
+      "file_index_status_unknown": "Stato dell'indicizzazione non confermato. Puoi riprovare in sicurezza.",
       "file_too_large": "Il file supera il limite tecnico di {{max}}.",
       "file_limit_unknown": "Limite tecnico del file non disponibile; riprova più tardi."
     }

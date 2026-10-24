@@ -43,10 +43,7 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
             """, document_id, organization_id)
             if not row:
                 return None
-            res = dict(row)
-            if isinstance(res.get("metadata"), str):
-                res["metadata"] = json.loads(res["metadata"])
-            return res
+            return self._document(row)
 
     async def update_document(self, organization_id, document_id, **fields):
         if not fields:
@@ -67,6 +64,8 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                 errore = CASE WHEN $13 THEN $14 ELSE errore END,
                 metadata = CASE WHEN $15 THEN $16::jsonb ELSE metadata END,
                 index_verified = CASE WHEN $3 OR $5 OR $7 OR $11 OR $13 OR $15 THEN FALSE ELSE index_verified END,
+                index_token=NULL,index_lease_until=NULL,index_intent=NULL,
+                index_file_bytes=NULL,index_file_sha256=NULL,index_fence=index_fence+1,
                 updated_at = NOW()
             WHERE id = $1 AND organization_id = $2
             RETURNING *
@@ -84,7 +83,9 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
         async with self._publication(organization_id) as (conn, _org):
             row = await conn.fetchrow("""
                 UPDATE documents
-                SET is_active = NOT is_active, updated_at = NOW()
+                SET is_active = NOT is_active, updated_at = NOW(),
+                    index_token=NULL,index_lease_until=NULL,index_intent=NULL,
+                    index_file_bytes=NULL,index_file_sha256=NULL,index_fence=index_fence+1
                 WHERE id = $1 AND organization_id = $2
                 RETURNING *
             """, document_id, organization_id)
@@ -199,6 +200,10 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
                            d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
                            d.file_bytes, d.index_file_bytes,
+                           (d.index_token IS NOT NULL) AS _index_pending,
+                           COALESCE(d.index_lease_until>clock_timestamp(),FALSE) AS _index_live,
+                           d.index_intent->>'request_key' AS index_request_id,
+                           d.index_key AS published_request_id,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
@@ -212,6 +217,10 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
                            d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
                            d.file_bytes, d.index_file_bytes,
+                           (d.index_token IS NOT NULL) AS _index_pending,
+                           COALESCE(d.index_lease_until>clock_timestamp(),FALSE) AS _index_live,
+                           d.index_intent->>'request_key' AS index_request_id,
+                           d.index_key AS published_request_id,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
@@ -220,7 +229,7 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                     GROUP BY d.id
                     ORDER BY d.caricato_il DESC, d.nome
                 """, organization_id)
-            results = [dict(r) for r in rows]
+            results = [self._document(r) for r in rows]
             for r in results:
                 if isinstance(r.get("metadata"), str):
                     r["metadata"] = json.loads(r["metadata"])

@@ -18,6 +18,21 @@ function deferred() {
 function response(status, body) {
   return { status, ok: status >= 200 && status < 300, async json() { return body; } };
 }
+function controlledTimers(window) {
+  let nextId = 0;
+  const callbacks = new Map();
+  window.setTimeout = (callback) => { const id = ++nextId; callbacks.set(id, callback); return id; };
+  window.clearTimeout = (id) => callbacks.delete(id);
+  return async function runNext() {
+    const entry = callbacks.entries().next().value;
+    if (!entry) return false;
+    const [id, callback] = entry;
+    callbacks.delete(id);
+    await callback();
+    await settle();
+    return true;
+  };
+}
 const emptySummary = { faq: {}, documenti: {}, web: {}, dati_struttura: {}, conflitti_totali: 0 };
 const faq = { id: "faq-1", nome: "Orari", metadata: { domanda: "Orari?", risposta: "9–18" }, is_active: true };
 const availableLimits = (overrides = {}) => ({
@@ -34,9 +49,10 @@ function fixture(transport = async (url) => {
   if (url.endsWith("/summary")) return response(200, emptySummary);
   if (url.includes("/dati-struttura")) return response(200, { servizi: [], orari: "" });
   return response(200, { documenti: [] });
-}, confirm = async () => true) {
+}, confirm = async () => true, configureWindow = null) {
   const dom = new JSDOM(html, { url: "https://melpis.test/app/knowledge", runScripts: "outside-only" });
   const { window } = dom;
+  configureWindow?.(window);
   // Dashboard source partials are intentionally not composed into web/index.html in this task.
   const documentsPanel = window.document.getElementById("kb-panel-documenti");
   if (documentsPanel && !window.document.getElementById("kb-doc-limits")) {
@@ -246,12 +262,14 @@ test("file upload double dispatch makes one request while pending", async (t) =>
   const delayed = deferred();
   let uploads = 0;
   let uploaded = false;
+  let uploadedKey;
   const h = fixture((url, options) => {
-    if (options?.method === "POST") { uploads += 1; return delayed.promise; }
+    if (options?.method === "POST") { uploads += 1; uploadedKey = options.headers["Idempotency-Key"]; return delayed.promise; }
     if (url.endsWith("/summary")) return response(200, emptySummary);
     if (url.endsWith("/limiti")) return response(200, availableLimits());
     if (url.endsWith("/elenco") && uploaded) return response(200, { documenti: [
-      { id: "uploaded-1", nome: "menu.txt", tipo: "documento", stato: "indicizzata", index_verified: true, is_active: true },
+      { id: "uploaded-1", nome: "menu.txt", tipo: "documento", stato: "indicizzata", index_verified: true,
+        index_status: "idle", index_request_id: uploadedKey, published_request_id: uploadedKey, is_active: true },
     ] });
     return response(200, { documenti: [] });
   });
@@ -265,7 +283,7 @@ test("file upload double dispatch makes one request while pending", async (t) =>
   input.dispatchEvent(new h.window.Event("change"));
   assert.equal(uploads, 1);
   uploaded = true;
-  delayed.resolve(response(200, { detail: "Accepted", id: "uploaded-1" }));
+  delayed.resolve(response(200, { detail: "Accepted", id: "uploaded-1", index_request_id: uploadedKey }));
   await settle();
   assert.match(h.document.getElementById("doc-carica-status").textContent, /indicizzato con successo/);
 });
@@ -446,6 +464,215 @@ test("reindex uploads the selected original file with a fresh idempotency key", 
   assert.match(submitted.url, /\/api\/documenti\/old-doc\/reindicizza$/);
   assert.ok(submitted.options.headers["Idempotency-Key"]);
   assert.equal(submitted.options.body.get("file").name, "Old.pdf");
+});
+
+test("replacement polling never treats the previous verified publication as the new index", async (t) => {
+  let requestKey;
+  let replacementStarted = false;
+  let runNextTimer;
+  const row = () => ({ id: "old-doc", nome: "Old.pdf", tipo: "documento", stato: "indicizzata",
+    index_verified: true, is_active: true, index_status: replacementStarted ? "in_progress" : "failed",
+    index_request_id: replacementStarted ? requestKey : "old-request",
+    published_request_id: "old-published" });
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      requestKey = options.headers["Idempotency-Key"];
+      replacementStarted = true;
+      return response(202, { id: "old-doc" });
+    }
+    return response(200, { documenti: [row()] });
+  }, async () => true, (window) => { runNextTimer = controlledTimers(window); });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Old.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+
+  assert.match(h.document.getElementById("doc-carica-status").textContent, /Aggiornamento dell'indice in corso/);
+  assert.equal(h.document.querySelector("#doc-library .kb-switch input").checked, true,
+    "the previously published version remains active during replacement");
+  assert.match(h.document.querySelector("#doc-library .kb-document-index-update-notice").textContent,
+    /versione precedente resta disponibile/);
+  assert.equal(await runNextTimer(), true, "the pending replacement is polled");
+  assert.match(h.document.getElementById("doc-carica-status").textContent, /Aggiornamento dell'indice in corso/);
+  assert.doesNotMatch(h.document.getElementById("doc-carica-status").textContent, /indicizzato con successo/);
+});
+
+test("failed replacement keeps the published version, offers retry, and reuses its idempotency key", async (t) => {
+  let requestKey;
+  let requestCount = 0;
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits({ file_quota: {
+      ...availableLimits().file_quota, replacements_allowed: requestCount === 0,
+    } }));
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      requestCount += 1;
+      requestKey ||= options.headers["Idempotency-Key"];
+      assert.equal(options.headers["Idempotency-Key"], requestKey);
+      return response(202, { id: "old-doc" });
+    }
+    return response(200, { documenti: [{ id: "old-doc", nome: "Old.pdf", tipo: "documento",
+      stato: "indicizzata", index_verified: true, is_active: true, index_status: "failed",
+      index_request_id: requestKey, published_request_id: "old-published", error: "indexing_failed" }] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Old.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+
+  const status = h.document.getElementById("doc-carica-status");
+  assert.match(status.textContent, /Aggiornamento dell'indice non riuscito/);
+  assert.doesNotMatch(status.textContent, /indexing_failed/);
+  assert.equal(h.document.querySelector("#doc-library .kb-switch input").checked, true);
+  assert.match(h.document.querySelector("#doc-library .kb-document-index-update-notice").textContent,
+    /versione precedente resta disponibile/);
+  const reindexButton = h.document.querySelector("#doc-library button[data-document-reindex]");
+  assert.ok(reindexButton, "a failed replacement with an existing publication keeps the reindex action visible");
+  assert.equal(reindexButton.disabled, true, "a fresh replacement follows the updated quota policy");
+  const retry = h.document.getElementById("kb-doc-upload-retry");
+  assert.equal(retry.hidden, false);
+  retry.click();
+  await settle();
+  assert.equal(requestCount, 2);
+  assert.equal(requestKey.length > 0, true);
+  assert.equal(h.document.getElementById("doc-file").disabled, false,
+    "a failed replacement must not disable text upload or revoke normal quota controls");
+});
+
+test("replacement succeeds only after the matching request is published", async (t) => {
+  let requestKey;
+  let submitted = false;
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      requestKey = options.headers["Idempotency-Key"];
+      submitted = true;
+      return response(202, { id: "old-doc" });
+    }
+    return response(200, { documenti: [{ id: "old-doc", nome: "Old.pdf", tipo: "documento",
+      stato: "indicizzata", index_verified: true, is_active: true, index_status: submitted ? "idle" : "failed",
+      index_request_id: submitted ? requestKey : "old-request",
+      published_request_id: submitted ? requestKey : "old-published" }] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Old.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  assert.match(h.document.getElementById("doc-carica-status").textContent, /indicizzato con successo/);
+});
+
+test("unknown replacement response stays unconfirmed and retries with the same key", async (t) => {
+  let requestCount = 0;
+  const requestKeys = [];
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      requestCount += 1;
+      requestKeys.push(options.headers["Idempotency-Key"]);
+      if (requestCount === 1) throw new Error("connection interrupted");
+      return response(202, { id: "old-doc" });
+    }
+    return response(200, { documenti: [{ id: "old-doc", nome: "Old.pdf", tipo: "documento",
+      stato: "indicizzata", index_verified: true, is_active: true, index_status: "failed",
+      index_request_id: "old-request", published_request_id: "old-published" }] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Old.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  const status = h.document.getElementById("doc-carica-status");
+  assert.match(status.textContent, /Richiesta di aggiornamento non confermata/);
+  assert.doesNotMatch(status.textContent, /indicizzato con successo/);
+  assert.equal(h.document.getElementById("kb-doc-upload-retry").hidden, false);
+  h.document.getElementById("kb-doc-upload-retry").click();
+  await settle();
+  assert.equal(requestCount, 2);
+  assert.ok(requestKeys[0]);
+  assert.equal(requestKeys[1], requestKeys[0]);
+  assert.doesNotMatch(status.textContent, /indicizzato con successo/);
+});
+
+test("replacement response from a previous tenant cannot update the current dashboard", async (t) => {
+  const delayed = deferred();
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    if (url.endsWith("/reindicizza") && options?.method === "POST") return delayed.promise;
+    return response(200, { documenti: [{ id: "old-doc", nome: "Old.pdf", tipo: "documento",
+      stato: "indicizzata", index_verified: true, is_active: true, index_status: "failed",
+      index_request_id: "old-request", published_request_id: "old-published" }] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  h.document.querySelector("#doc-library button.report-refresh").click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Old.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  h.context.selectedOrganizationId = "org-2";
+  h.module.onEnter();
+  delayed.resolve(response(202, { id: "old-doc" }));
+  await settle();
+  assert.doesNotMatch(h.document.getElementById("doc-carica-status").textContent, /Old\.pdf|indicizzato con successo/);
+});
+
+test("failed reindex never claims an inactive publication is available or reactivates it", async (t) => {
+  let requestKey = "old-request";
+  const h = fixture(async (url, options) => {
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    if (url.endsWith("/reindicizza") && options?.method === "POST") {
+      requestKey = options.headers["Idempotency-Key"];
+      return response(202, { id: "inactive-doc" });
+    }
+    return response(200, { documenti: [{ id: "inactive-doc", nome: "Inactive.pdf", tipo: "documento",
+      stato: "indicizzata", index_verified: true, is_active: false, index_status: "failed",
+      index_request_id: requestKey, published_request_id: "old-published" }] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  const card = h.document.querySelector("#doc-library .kb-item-card");
+  assert.equal(card.querySelector(".kb-switch input").checked, false);
+  assert.equal(card.querySelector(".kb-document-index-update-notice"), null,
+    "an inactive publication must not be described as currently available");
+  const reindex = card.querySelector("button[data-document-reindex]");
+  assert.ok(reindex);
+  reindex.click();
+  const picker = h.document.querySelector("input[data-reindex-file-picker]");
+  Object.defineProperty(picker, "files", { configurable: true,
+    value: [new h.window.File(["replacement"], "Inactive.pdf", { type: "application/pdf" })] });
+  picker.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  assert.equal(h.document.querySelector("#doc-library .kb-switch input").checked, false,
+    "retry must preserve the source activation state");
+  assert.equal(h.document.querySelector("#doc-library .kb-document-index-update-notice"), null);
 });
 
 test("detached FAQ action cannot mutate a newly selected organization", async (t) => {

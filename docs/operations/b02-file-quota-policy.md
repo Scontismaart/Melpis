@@ -1,6 +1,12 @@
 # B02 file quota policy proposal
 
-**Status: proposal for product and founder review. These amounts are not configured runtime limits.**
+**Status: historical proposal, superseded by the founder mandate of 2026-10-24. No commercial amounts are configured runtime limits.**
+
+The former 5/15/40 MB and 1 MB trial figures below are historical benchmark
+context, not the current product recommendation. The preferred larger-storage
+direction requires separate INF01/INF02 capacity and original-file lifecycle
+review; trial remains undecided. See `v1-private-beta-progress.md`. B02 does
+not implement object storage or raise its uniform 20 MiB technical ceiling.
 
 ## Current behavior shown in the dashboard
 
@@ -12,7 +18,7 @@ The proposed `file_quota` response distinguishes `new_uploads_allowed` from `rep
 
 The dashboard displays byte values as decimal MB (`bytes / 1,000,000`). The API keeps the technical upload ceiling and document/page/chunk usage separate from commercial file quota. `originals_retained` is false.
 
-## Proposed amounts for review
+## Superseded amounts — historical context only
 
 | Account | Proposed original-file quota | Scope |
 | --- | ---: | --- |

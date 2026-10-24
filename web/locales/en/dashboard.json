@@ -316,6 +316,16 @@
       "file_quota_unknown": "File quota unavailable",
       "file_uploads_blocked": "New file uploads are unavailable in the current account state.",
       "file_replacements_blocked": "File replacements are unavailable in the current account state.",
+      "document_previous_version_available": "The previous version is still available.",
+      "document_index_update_badge": "Updating index",
+      "document_index_failed_badge": "Update failed",
+      "document_index_interrupted_badge": "Update interrupted",
+      "document_index_update_in_progress": "Index update in progress.",
+      "document_index_update_failed": "The index update failed. You can retry.",
+      "document_index_update_interrupted": "The index update was interrupted. You can retry.",
+      "document_index_request_failed": "The update request was not confirmed. You can safely retry.",
+      "file_index_published": "File indexed successfully.",
+      "file_index_status_unknown": "Indexing status is unconfirmed. You can safely retry.",
       "file_too_large": "The file exceeds the technical limit of {{max}}.",
       "file_limit_unknown": "The technical file limit is unavailable; try again later."
     }

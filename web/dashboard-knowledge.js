@@ -669,7 +669,47 @@
         documentPollTimer = null;
       }
       function hasPendingDocuments(items) {
-        return items.some((doc) => doc.stato === "caricato" || doc.stato === "in_elaborazione");
+        return items.some((doc) => doc.stato === "caricato" || doc.stato === "in_elaborazione"
+          || doc.index_status === "in_progress");
+      }
+      function findPendingActionDocument(items, action, resultId = null) {
+        if (!action) return null;
+        return items.find((item) => resultId && item.id === resultId)
+          || items.find((item) => action.documentId && item.id === action.documentId)
+          || items.find((item) => item.index_request_id === action.key)
+          || items.find((item) => item.published_request_id === action.key)
+          || null;
+      }
+      function actionPublished(doc, action) {
+        return Boolean(doc && action && doc.published_request_id === action.key
+          && doc.stato === "indicizzata" && doc.index_verified === true);
+      }
+      function showFileActionState(doc, action) {
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (!action) return;
+        if (actionPublished(doc, action)) {
+          setUploadStatus(_tDash("knowledge.runtime.file_index_published", "File indicizzato con successo."), "success");
+          pendingFileAction = null;
+          if (retryButton) retryButton.hidden = true;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "in_progress") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_in_progress", "Aggiornamento dell'indice in corso."));
+          if (retryButton) retryButton.hidden = true;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "failed") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_failed", "Aggiornamento dell'indice non riuscito. Puoi riprovare."), "error");
+          if (retryButton) retryButton.hidden = false;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "interrupted") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_interrupted", "Aggiornamento dell'indice interrotto. Puoi riprovare."), "error");
+          if (retryButton) retryButton.hidden = false;
+          return;
+        }
+        setUploadStatus(_tDash("knowledge.runtime.file_index_status_unknown", "Stato dell'indicizzazione non confermato. Puoi riprovare in sicurezza."), "error");
+        if (retryButton) retryButton.hidden = false;
       }
       function scheduleDocumentPoll() {
         stopDocumentPolling();
@@ -679,18 +719,8 @@
           if (!current(capture(), true)) return;
           await refresh("documenti", caricaDocumenti);
           if (pendingFileAction) {
-            const matching = lastDocumentList.find((item) => item.id && pendingFileAction.documentId === item.id)
-              || lastDocumentList.find((item) => item.nome === pendingFileAction.file.name);
-            if (matching?.index_verified === true && matching.stato === "indicizzata") {
-              setUploadStatus(`File "${pendingFileAction.file.name}" indicizzato con successo.`, "success");
-              pendingFileAction = null;
-            } else if (matching?.stato === "errore") {
-              setUploadStatus("Non è stato possibile indicizzare il file. Controlla i requisiti del formato e riprova.", "error");
-              pendingFileAction = null;
-            } else if (matching?.index_verified === false) {
-              setUploadStatus("Documento salvato; l'indice deve essere verificato e reindicizzato.", "error");
-              pendingFileAction = null;
-            }
+            const matching = findPendingActionDocument(lastDocumentList, pendingFileAction);
+            showFileActionState(matching, pendingFileAction);
           }
           scheduleDocumentPoll();
         }, 2500);
@@ -742,7 +772,8 @@
           setUploadStatus(_tDash("knowledge.runtime.rag_unavailable", "Knowledge Base non disponibile con l'abbonamento o lo stato attuale"), "error");
           return;
         }
-        if (isReplacement ? fileReplacementsAllowed !== true : newFileUploadsAllowed !== true && !isSameIdempotentRetry) {
+        if (isReplacement ? fileReplacementsAllowed !== true && !isSameIdempotentRetry
+          : newFileUploadsAllowed !== true && !isSameIdempotentRetry) {
           const key = isReplacement ? "knowledge.runtime.file_replacements_blocked" : "knowledge.runtime.file_uploads_blocked";
           const fallback = isReplacement
             ? "La sostituzione dei file non è disponibile nello stato corrente."
@@ -779,23 +810,14 @@
           await loadDocumentLimits();
           if (!current(token)) return;
           const matching = lastDocumentList.find((item) => result?.id && item.id === result.id)
-            || lastDocumentList.find((item) => item.nome === file.name);
+            || findPendingActionDocument(lastDocumentList, currentAction);
           if (result?.id) currentAction.documentId = result.id;
-          if (matching?.stato === "indicizzata" && matching.index_verified === true) {
-            setUploadStatus(`File "${file.name}" indicizzato con successo.`, "success");
-            pendingFileAction = null;
-          } else if (matching?.index_verified === false) {
-            setUploadStatus("Documento salvato; l'indice deve essere verificato e reindicizzato.", "error");
-          } else if (matching?.stato === "indicizzata") {
-            setUploadStatus("Documento salvato; stato di verifica dell'indice non disponibile.");
-          } else if (matching?.stato === "errore") {
-            setUploadStatus("Non è stato possibile indicizzare il file. Controlla i requisiti del formato e riprova.", "error");
-          } else {
-            setUploadStatus(`File "${file.name}" ricevuto; indicizzazione in corso.`);
-          }
+          showFileActionState(matching, currentAction);
         } catch (err) {
           if (!current(token)) return;
-          setUploadStatus(err.message || "Errore durante il caricamento del file.", "error");
+          setUploadStatus(isReplacement
+            ? _tDash("knowledge.runtime.document_index_request_failed", "Richiesta di aggiornamento non confermata. Puoi riprovare in sicurezza.")
+            : (err.message || "Errore durante il caricamento del file."), "error");
           if (retryButton) retryButton.hidden = false;
         } finally {
           endMutation("file-upload");
@@ -902,7 +924,19 @@
             metaRow.className = "kb-item-meta";
 
             const badgeStato = document.createElement("span");
-            if (doc.index_verified === false) {
+            const replacementInProgress = doc.index_status === "in_progress";
+            const replacementFailed = doc.index_status === "failed";
+            const replacementInterrupted = doc.index_status === "interrupted";
+            const hasPublishedVersion = isActive;
+            if (replacementInProgress) {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = _tDash("knowledge.runtime.document_index_update_badge", "Aggiornamento in corso");
+            } else if (replacementFailed || replacementInterrupted) {
+              badgeStato.className = "kb-badge kb-badge-danger";
+              badgeStato.textContent = replacementFailed
+                ? _tDash("knowledge.runtime.document_index_failed_badge", "Aggiornamento non riuscito")
+                : _tDash("knowledge.runtime.document_index_interrupted_badge", "Aggiornamento interrotto");
+            } else if (doc.index_verified === false) {
               badgeStato.className = "kb-badge kb-badge-warning";
               badgeStato.textContent = "Da reindicizzare";
             } else if (doc.stato === "caricato") {
@@ -937,6 +971,17 @@
 
             metaRow.append(badgeStato, chunkMeta, pageMeta, dateMeta);
             main.append(title, metaRow);
+            if (hasPublishedVersion && (replacementInProgress || replacementFailed || replacementInterrupted)) {
+              const updateNotice = document.createElement("p");
+              updateNotice.className = "kb-document-index-update-notice";
+              updateNotice.textContent = _tDash("knowledge.runtime.document_previous_version_available", "La versione precedente resta disponibile.")
+                + " " + (replacementInProgress
+                  ? _tDash("knowledge.runtime.document_index_update_in_progress", "Aggiornamento dell'indice in corso.")
+                  : replacementFailed
+                    ? _tDash("knowledge.runtime.document_index_update_failed", "Aggiornamento dell'indice non riuscito. Puoi riprovare.")
+                    : _tDash("knowledge.runtime.document_index_update_interrupted", "Aggiornamento dell'indice interrotto. Puoi riprovare."));
+              main.appendChild(updateNotice);
+            }
 
             const actions = document.createElement("div");
             actions.className = "kb-item-actions";
@@ -977,7 +1022,7 @@
               actions.appendChild(switchLabel);
             }
 
-            if (doc.stato === "errore" || doc.index_verified === false) {
+            if (doc.stato === "errore" || doc.index_verified === false || replacementFailed || replacementInterrupted) {
               const reindexButton = document.createElement("button");
               reindexButton.type = "button";
               reindexButton.className = "report-refresh";

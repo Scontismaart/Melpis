@@ -247,3 +247,39 @@ file-quota lifecycle evidence comes from the disposable PostgreSQL regression
 suite. A fresh local pipeline rerun was unavailable because Docker/WSL failed
 to start; no new end-to-end model/quota result is claimed. The updated local
 probe supports an explicit synthetic allowance and records it separately.
+
+## Replacement failure correction and recovery
+
+The former claim overwrote canonical source identity and made the certified
+revision unavailable before extraction succeeded. A disposable PostgreSQL
+regression reproduced this on the intake head 4035c8d.
+
+Migration 066 now adds a backend-owned `index_intent` on the existing document,
+separate from its published name/type/source, request key/hash, revision,
+metadata, chunks and committed original-byte evidence. A claim changes only
+pending intent, lease/fence and reservation fields. The previous certified
+revision remains available through the normal current-entitlement and active
+source checks; historical/unverified sources are never promoted by failure.
+
+Publication rechecks entitlement, quota and live token/fence, then swaps all
+canonical fields, chunks and committed bytes in one transaction. Its temporary
+unverified state is invisible outside that transaction. An insertion error or
+lease loss rolls the entire swap back. Terminal failure clears only the owned
+reservation and lease, retains the last failed intent for explicit same-key
+retry, and never enables a source or restores a certificate. Process crash
+leaves an interrupted, fenced claim; expiry alone does not refund capacity.
+
+Delete, toggle, semantic metadata edits, certified-chunk mutation and relevant
+business-profile edits revoke pending work. They invalidate its token/fence
+and retry identity, so a delayed worker or old request cannot undo the owner's
+action. A new explicit request is needed after such a revocation. Successful
+replay requires the request ledger's published revision to match the canonical
+revision and latest request identity. Old A04 evidence is fenced by the normal
+knowledge epoch and source-revision checks.
+
+The dashboard receives only operation status and non-authorizing request UUIDs,
+not lease tokens, fences or raw intent. Pending/failed replacement is shown
+separately from the still-available previous revision. Polling must correlate
+the actual published request UUID before reporting a replacement as complete.
+Original files still are not stored; retry/reindex requires the owner to supply
+the original again. INF01, INF02/R2 and larger file limits are separate work.

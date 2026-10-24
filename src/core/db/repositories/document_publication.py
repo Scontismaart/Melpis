@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import json
 import hashlib
 import math
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from src.core.documenti.file_quota import admit, validate_file_evidence
 
@@ -23,10 +24,26 @@ class DocumentPublication:
             yield conn, org
 
     @staticmethod
+    def _intent(row):
+        value = row.get("index_intent") or {}
+        return json.loads(value) if isinstance(value, str) else value
+
+    @staticmethod
     def _document(row):
         value = dict(row)
         if isinstance(value.get("metadata"), str):
             value["metadata"] = json.loads(value["metadata"])
+        intent = DocumentPublication._intent(value)
+        pending = value.pop("_index_pending", bool(value.get("index_token")))
+        deadline = value.get("index_lease_until")
+        live = value.pop("_index_live", isinstance(deadline, datetime)
+                         and deadline > datetime.now(timezone.utc))
+        value["index_status"] = (("in_progress" if live else "interrupted") if pending else
+                                 "failed" if value.get("errore") else "idle")
+        published = value.get("published_request_id", value.get("index_key"))
+        value["published_request_id"] = str(published) if published else None
+        value["index_request_id"] = (value.get("index_request_id") or intent.get("request_key")
+                                     or value["published_request_id"])
         return value
 
     async def begin_index(self, organization_id, name, request_key, payload_hash, *,
@@ -57,13 +74,20 @@ class DocumentPublication:
                 if history["payload_hash"] != payload_hash or stored_spec != spec or history["document_id"] is None:
                     return {"status": "conflict", "document": None}
                 existing = await conn.fetchrow("SELECT * FROM documents WHERE organization_id=$1 AND id=$2 FOR UPDATE", org, history["document_id"])
-                if not existing or existing["index_key"] != key:
+                if not existing:
                     return {"status": "conflict", "document": None}
             if existing:
-                if existing["content_hash"] != payload_hash or (document_id and str(existing["id"]) != str(document_id)):
-                    return {"status": "conflict", "document": self._document(existing)}
-                if existing["index_verified"] and existing["stato"] == "indicizzata":
+                intent = self._intent(existing)
+                latest = intent.get("request_key")
+                if (document_id and str(existing["id"]) != str(document_id)) or (latest and latest != str(key)):
+                    return {"status": "conflict", "document": None}
+                if (existing["index_verified"] and existing["stato"] == "indicizzata"
+                        and history["published_revision"] == existing["revision"]
+                        and existing["index_key"] == key and existing["content_hash"] == payload_hash):
                     return {"status": "replay", "document": self._document(existing)}
+                if (latest != str(key) or intent.get("payload_hash") != payload_hash
+                        or history["published_revision"] is not None):
+                    return {"status": "conflict", "document": None}
                 live = await conn.fetchval("SELECT $1::timestamptz>clock_timestamp()", existing["index_lease_until"])
                 if live:
                     return {"status": "in_progress", "document": self._document(existing)}
@@ -75,20 +99,22 @@ class DocumentPublication:
                     return {"status": "conflict", "document": None}
             await admit(conn, org, existing, file_bytes)
             token = uuid4()
+            intent = json.dumps({"request_key": str(key), "payload_hash": payload_hash,
+                                 "nome": name, "tipo": tipo, "fonte": fonte})
             if existing:
-                row = await conn.fetchrow("""UPDATE documents SET nome=$3,tipo=$4,fonte=$5,index_key=$6,content_hash=$7,
-                    index_token=$8,index_fence=index_fence+1,index_lease_until=clock_timestamp()+INTERVAL '660 seconds',
-                    index_verified=FALSE,stato='in_elaborazione',errore='',updated_at=NOW(),
-                    index_file_bytes=$9,index_file_sha256=$10
-                    WHERE organization_id=$1 AND id=$2 RETURNING *""", org, existing["id"], name, tipo, fonte, key, payload_hash, token,
+                row = await conn.fetchrow("""UPDATE documents SET index_intent=$3::jsonb,
+                    index_token=$4,index_fence=index_fence+1,index_lease_until=clock_timestamp()+INTERVAL '660 seconds',
+                    stato=CASE WHEN index_verified AND stato='indicizzata' THEN stato ELSE 'in_elaborazione' END,
+                    errore='',updated_at=NOW(),index_file_bytes=$5,index_file_sha256=$6
+                    WHERE organization_id=$1 AND id=$2 RETURNING *""", org, existing["id"], intent, token,
                     file_bytes, file_sha256)
             else:
                 row = await conn.fetchrow("""INSERT INTO documents(id,organization_id,nome,tipo,fonte,is_active,stato,
-                    index_key,content_hash,index_token,index_fence,index_lease_until,
+                    index_intent,index_token,index_fence,index_lease_until,
                     file_bytes,index_file_bytes,index_file_sha256)
-                    VALUES($1,$2,$3,$4,$5,TRUE,'in_elaborazione',$6,$7,$8,1,clock_timestamp()+INTERVAL '660 seconds',
-                    0,$9,$10) RETURNING *""",
-                    uuid4(), org, name, tipo, fonte, key, payload_hash, token, file_bytes, file_sha256)
+                    VALUES($1,$2,$3,$4,$5,TRUE,'in_elaborazione',$6::jsonb,$7,1,clock_timestamp()+INTERVAL '660 seconds',
+                    0,$8,$9) RETURNING *""",
+                    uuid4(), org, name, tipo, fonte, intent, token, file_bytes, file_sha256)
             if history is None:
                 await conn.execute("""INSERT INTO document_index_requests(organization_id,request_key,document_id,payload_hash,request_spec)
                     VALUES($1,$2,$3,$4,$5::jsonb)""", org, key, row["id"], payload_hash, json.dumps(spec))
@@ -104,11 +130,18 @@ class DocumentPublication:
                 org, UUID(str(document_id)), UUID(str(token)), fence)
             if not row:
                 raise ValueError("index_claim_lost")
+            intent = self._intent(row)
+            key = UUID(intent["request_key"])
             validate_file_evidence(row["index_file_bytes"], row["index_file_sha256"])
             await admit(conn, org, row, row["index_file_bytes"])
+            # Hide the transition only inside this transaction. Other readers
+            # retain the old certified revision until the complete swap commits.
+            # The legacy chunk guard must not fence this publisher's own writes.
+            await conn.execute("""UPDATE documents SET index_verified=FALSE,stato='in_elaborazione'
+                WHERE organization_id=$1 AND id=$2""", org, row["id"])
             await conn.execute("DELETE FROM document_chunks WHERE organization_id=$1 AND document_id=$2", org, row["id"])
             for i, (content, vector) in enumerate(zip(chunks, embeddings)):
-                meta = {"fonte": row["fonte"] or row["nome"], "tipo": row["tipo"], "document_id": str(row["id"]),
+                meta = {"fonte": intent["fonte"] or intent["nome"], "tipo": intent["tipo"], "document_id": str(row["id"]),
                         "revision": row["revision"]+1}
                 pages = metadata.get("chunk_pages", [])
                 if i < len(pages) and type(pages[i]) is int and pages[i] > 0:
@@ -119,19 +152,22 @@ class DocumentPublication:
             ready = await conn.fetchrow("""UPDATE documents SET stato='indicizzata',index_verified=TRUE,
                 revision=revision+1,metadata=$5::jsonb,index_token=NULL,index_lease_until=NULL,errore='',updated_at=NOW(),
                 file_bytes=index_file_bytes,file_sha256=index_file_sha256,
-                index_file_bytes=NULL,index_file_sha256=NULL
+                index_file_bytes=NULL,index_file_sha256=NULL,index_intent=NULL,
+                nome=$6,tipo=$7,fonte=$8,index_key=$9,content_hash=$10
                 WHERE organization_id=$1 AND id=$2 AND index_token=$3 AND index_fence=$4
                   AND index_lease_until>clock_timestamp() RETURNING *""", org, row["id"], UUID(str(token)), fence,
-                json.dumps({**metadata, "chunks": len(chunks)}))
+                json.dumps({**metadata, "chunks": len(chunks)}), intent["nome"], intent["tipo"], intent["fonte"],
+                key, intent["payload_hash"])
             if not ready:
                 raise ValueError("index_claim_lost")
             await conn.execute("""UPDATE document_index_requests SET published_revision=$3
-                WHERE organization_id=$1 AND request_key=$2""", org, row["index_key"], ready["revision"])
+                WHERE organization_id=$1 AND request_key=$2""", org, key, ready["revision"])
             return self._document(ready)
 
     async def fail_index(self, organization_id, document_id, token, fence, error_code):
         async with self._publication(organization_id) as (conn, org):
-            return bool(await conn.fetchval("""UPDATE documents SET stato='errore',index_verified=FALSE,
+            return bool(await conn.fetchval("""UPDATE documents SET
+                stato=CASE WHEN index_verified AND stato='indicizzata' THEN stato ELSE 'errore' END,
                 errore=$5,index_token=NULL,index_lease_until=NULL,updated_at=NOW(),
                 index_file_bytes=NULL,index_file_sha256=NULL
                 WHERE organization_id=$1 AND id=$2 AND index_token=$3 AND index_fence=$4 RETURNING TRUE""",

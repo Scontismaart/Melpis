@@ -316,6 +316,16 @@
       "file_quota_unknown": "Quota de fichiers indisponible",
       "file_uploads_blocked": "Le chargement de nouveaux fichiers est indisponible avec le statut actuel.",
       "file_replacements_blocked": "Le remplacement de fichiers est indisponible avec le statut actuel.",
+      "document_previous_version_available": "La version précédente reste disponible.",
+      "document_index_update_badge": "Mise à jour de l’index en cours",
+      "document_index_failed_badge": "Échec de la mise à jour",
+      "document_index_interrupted_badge": "Mise à jour interrompue",
+      "document_index_update_in_progress": "La mise à jour de l’index est en cours.",
+      "document_index_update_failed": "La mise à jour de l’index a échoué. Vous pouvez réessayer.",
+      "document_index_update_interrupted": "La mise à jour de l’index a été interrompue. Vous pouvez réessayer.",
+      "document_index_request_failed": "La demande de mise à jour n’a pas été confirmée. Vous pouvez réessayer sans risque.",
+      "file_index_published": "Fichier indexé avec succès.",
+      "file_index_status_unknown": "L’état de l’indexation n’est pas confirmé. Vous pouvez réessayer sans risque.",
       "file_too_large": "Le fichier dépasse la limite technique de {{max}}.",
       "file_limit_unknown": "La limite technique des fichiers est indisponible ; réessayez plus tard."
     }

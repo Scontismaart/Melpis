@@ -316,6 +316,16 @@
       "file_quota_unknown": "Dateikontingent nicht verfügbar",
       "file_uploads_blocked": "Neue Datei-Uploads sind im aktuellen Kontostatus nicht verfügbar.",
       "file_replacements_blocked": "Dateiersetzungen sind im aktuellen Kontostatus nicht verfügbar.",
+      "document_previous_version_available": "Die vorherige Version ist weiterhin verfügbar.",
+      "document_index_update_badge": "Index wird aktualisiert",
+      "document_index_failed_badge": "Aktualisierung fehlgeschlagen",
+      "document_index_interrupted_badge": "Aktualisierung unterbrochen",
+      "document_index_update_in_progress": "Der Index wird aktualisiert.",
+      "document_index_update_failed": "Die Indexaktualisierung ist fehlgeschlagen. Sie können es erneut versuchen.",
+      "document_index_update_interrupted": "Die Indexaktualisierung wurde unterbrochen. Sie können es erneut versuchen.",
+      "document_index_request_failed": "Die Aktualisierungsanfrage wurde nicht bestätigt. Sie können es sicher erneut versuchen.",
+      "file_index_published": "Datei erfolgreich indexiert.",
+      "file_index_status_unknown": "Der Indexierungsstatus ist unbestätigt. Sie können es sicher erneut versuchen.",
       "file_too_large": "Die Datei überschreitet das technische Limit von {{max}}.",
       "file_limit_unknown": "Das technische Dateilimit ist nicht verfügbar. Bitte später erneut versuchen."
     }
