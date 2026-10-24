@@ -1,5 +1,6 @@
 """Real PG checks: source changes cannot repopulate cache or commit stale replies."""
 import hashlib
+import json
 from uuid import uuid4
 
 import pytest
@@ -123,7 +124,15 @@ async def test_a04_commit_remains_valid_after_plan_change_between_rag_plans(
     await pg_pool.execute("UPDATE organizations SET plan=$2 WHERE id=$1", org, target_plan)
 
     committed = await quota.commit(operation, reserved["ticket"], final)
-    assert committed["status"] == "committed"
+    stored = await pg_pool.fetchrow(
+        """SELECT status,response FROM simulation_requests
+             WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3""",
+        org, operation.actor_id, operation.id,
+    )
+    assert stored["status"] == "completed"
+    stored_response = json.loads(stored["response"]) if isinstance(stored["response"], str) else stored["response"]
+    assert committed == stored_response
+    assert await quota.commit(operation, reserved["ticket"], final) == committed
     assert await pg_pool.fetchval(
         "SELECT messages_used_this_period FROM organizations WHERE id=$1", org,
     ) == 1
