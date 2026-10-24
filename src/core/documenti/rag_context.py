@@ -19,6 +19,8 @@ import logging
 from dataclasses import dataclass, field
 
 from src.core.documenti.embeddings import vettorizza
+from src.core.documenti.embeddings import vettorizza as _production_embedding
+from src.core.documenti.access import rag_access
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,8 @@ class ContestoDocumenti:
 
     testo: str = ""
     chunks: list[dict] = field(default_factory=list)
+    knowledge_epoch: int | None = None
+    reason: str = "no_sources"
 
     def __bool__(self) -> bool:
         return bool(self.chunks)
@@ -54,18 +58,28 @@ async def recupera_contesto_documenti(
     secondi. `q_emb` permette di riusare un embedding gia' calcolato dal
     chiamante (es. cache FAQ): se assente viene calcolato qui."""
     try:
-        if q_emb is None:
-            q_emb = (await asyncio.to_thread(vettorizza, [testo], tipo="query"))[0]
-        risultati = await asyncio.wait_for(
-            repo.search_similar(organization_id, q_emb, k),
-            timeout=timeout,
-        )
+        async with asyncio.timeout(timeout):
+            if not isinstance(testo, str) or not testo.strip() or len(testo) > 12000 or type(k) is not int or not 1 <= k <= 20:
+                return ContestoDocumenti(reason="invalid_query")
+            if not await rag_access(repo, organization_id):
+                return ContestoDocumenti(reason="not_authorized")
+            documents = getattr(repo, "doc_repo", repo)
+            epoch = await documents.knowledge_version(organization_id)
+            if q_emb is None:
+                if vettorizza is not _production_embedding:
+                    q_emb = (await asyncio.to_thread(vettorizza, [testo], tipo="query"))[0]
+                else:
+                    from src.core.documenti.isolated import embed_local
+                    q_emb = (await embed_local([testo], tipo="query", timeout=timeout))[0]
+            risultati = await repo.search_similar(organization_id, q_emb, k)
+            if await documents.knowledge_version(organization_id) != epoch:
+                return ContestoDocumenti(reason="knowledge_changed")
     except Exception as e:
-        logger.warning("[rag_context] retrieval non disponibile org=%s: %s", organization_id, e)
-        return ContestoDocumenti()
+        logger.warning("rag_context=unavailable organization_id=%s error_type=%s", organization_id, type(e).__name__)
+        return ContestoDocumenti(reason="unavailable")
 
     if not risultati:
-        return ContestoDocumenti()
+        return ContestoDocumenti(knowledge_epoch=epoch)
 
     from src.core.documenti.priorita import get_priorita_num
 
@@ -87,4 +101,22 @@ async def recupera_contesto_documenti(
             or "documento"
         )
         blocchi.append(f"-- {nome} --\n{r['content']}")
-    return ContestoDocumenti(testo="\n\n".join(blocchi), chunks=risultati_ordinati)
+    return ContestoDocumenti(testo="\n\n".join(blocchi), chunks=risultati_ordinati,
+                             knowledge_epoch=epoch, reason="verified")
+
+
+async def require_current_context(context, repo, organization_id):
+    """Reject stale evidence before a provider call and before exposing its result."""
+    if not context.chunks:
+        return
+    from src.core.billing.suspension import AIGenerationBlocked
+    try:
+        documents = getattr(repo, "doc_repo", repo)
+        async with asyncio.timeout(DEFAULT_TIMEOUT):
+            valid = (type(context.knowledge_epoch) is int
+                     and await rag_access(repo, organization_id)
+                     and await documents.knowledge_version(organization_id) == context.knowledge_epoch)
+    except Exception:
+        valid = False
+    if not valid:
+        raise AIGenerationBlocked("Knowledge sources changed or are unavailable")

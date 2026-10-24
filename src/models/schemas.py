@@ -215,13 +215,13 @@ class ConfiguraEmailInput(BaseModel):
 
 
 class DomandaInput(BaseModel):
-    domanda: str
-    k: int = 5
+    domanda: str = Field(min_length=1, max_length=12000)
+    k: int = Field(default=5, ge=1, le=20)
 
 
 class CaricaDocumentoInput(BaseModel):
-    testo: str
-    nome: str = "documento.txt"
+    testo: str = Field(min_length=1, max_length=2_000_000)
+    nome: str = Field(default="documento.txt", min_length=1, max_length=300)
 
 
 class FAQInput(BaseModel):

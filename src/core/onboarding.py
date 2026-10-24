@@ -224,6 +224,8 @@ async def generate_preview(
     )
 
     messaggio = MessaggioInput(testo=payload.messaggio)
+    from src.core.documenti.rag_context import require_current_context
+    await require_current_context(contesto, repo, organization_id)
     risposta = await genera_risposta_async(
         messaggio,
         profilo,
@@ -232,5 +234,6 @@ async def generate_preview(
         variante=assegna_variante(organization_id),
         provider_context=provider_context,
     )
+    await require_current_context(contesto, repo, organization_id)
     esito = valida_risposta(risposta, contesto.chunks, profilo)
     return applica_guardrail(risposta, esito)

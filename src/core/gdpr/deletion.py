@@ -152,6 +152,7 @@ class Deletion:
                 await conn.execute('DELETE FROM simulation_requests WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM faq_cache WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM document_chunks WHERE organization_id=$1', org)
+                await conn.execute('DELETE FROM document_index_requests WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM documents WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM event_log WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM meta_webhook_inbox WHERE organization_id=$1', org)

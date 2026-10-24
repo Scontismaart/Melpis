@@ -153,7 +153,8 @@ async def lifespan(app: FastAPI):
             # command_timeout: nessuna query web puo' restare appesa
             # all'infinito (difesa post-incidente pool scheduler).
             pool = await asyncpg.create_pool(
-                dsn=dsn, min_size=1, max_size=db_pool_max, command_timeout=30
+                dsn=dsn, min_size=1, max_size=db_pool_max, command_timeout=30,
+                server_settings={"search_path": "public, extensions"},
             )
             app.state.repo = CoreRepository(pool=pool)
             app.state.pool = pool
@@ -300,11 +301,6 @@ async def lifespan(app: FastAPI):
             )
             if background_jobs_enabled:
                 _imposta_fonte_dati_per_scheduler()
-                try:
-                    from src.core.documenti.embeddings import _modello
-                    asyncio.create_task(asyncio.to_thread(_modello))
-                except Exception as e:
-                    logger.warning("[startup] Embedding model warmup warning: %s", e)
     else:
         app.state.repo = None
         app.state.pool = None
@@ -340,6 +336,8 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*background_tasks, return_exceptions=True)
     if app.state.pool:
         await app.state.pool.close()
+    from src.core.documenti.isolated import shutdown_local_workers
+    await shutdown_local_workers()
     await close_http_client()
     await close_rate_limiter()
 

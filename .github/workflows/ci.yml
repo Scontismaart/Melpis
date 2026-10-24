@@ -172,6 +172,15 @@ jobs:
           TEST_DB_DSN: postgresql://postgres:test@localhost:5432/test
         run: pytest -v --tb=short
 
+      - name: Preserve synthetic B02 database benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: b02-pg-benchmark
+          if-no-files-found: ignore
+          include-hidden-files: true
+          path: .runtime/reports/b02-pg-benchmark.json
+
   # Pull requests prove both target architectures build successfully. Each
   # architecture uses a native runner so the API image cannot exhaust an x64
   # runner while emulating arm64. This job cannot publish packages.

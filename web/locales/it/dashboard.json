@@ -58,7 +58,9 @@
     "ai_details_aria": "Dettagli gestiti AI",
     "human_details_aria": "Dettagli girati a umano"
   },
-  "shell": { "skip_link": "Salta al contenuto" },
+  "shell": {
+    "skip_link": "Salta al contenuto"
+  },
   "overview": {
     "attention_title": "Richiede la tua attenzione",
     "go_to_inbox": "Vai all'Inbox",
@@ -288,7 +290,7 @@
     "empty_faq": "Nessuna FAQ configurata.",
     "upload_title": "Carica file",
     "dropzone_title": "Trascina i tuoi documenti qui o clicca per sfogliare",
-    "dropzone_hint": "PDF, DOCX, CSV, TXT, MD, immagini fino a 20 MB",
+    "dropzone_hint": "PDF/RAG incluso; quota file da definire. PDF, DOCX, CSV, TXT, MD e immagini; limite tecnico di 20 MiB per file.",
     "paste_text": "Oppure incolla testo libero non formattato",
     "text_placeholder": "Incolla qui testi, menu, note o descrizioni aggiuntive...",
     "text_name_placeholder": "Nome del testo (es. orari_festivi.txt)",
@@ -303,7 +305,29 @@
       "empty_web": "Nessuna pagina web importata. Inserisci un link sopra per importare listino o info dal tuo sito.",
       "faq_count": "{{active}} FAQ attive su {{total}} totali (tutte indicizzate)",
       "last_update": "Ultimo aggiornamento: {{date}}",
-      "web_count": "{{active}} pagine web attive su {{total}} totali"
+      "web_count": "{{active}} pagine web attive su {{total}} totali",
+      "rag_available": "PDF/RAG incluso",
+      "rag_unavailable": "Knowledge Base non disponibile con l’abbonamento o lo stato attuale",
+      "file_quota_not_configured": "PDF/RAG incluso; quota file da definire",
+      "file_quota_historical_unknown": "Uso storico dei file da verificare",
+      "file_quota_available": "Quota file: {{occupied}} MB occupati su {{limit}} MB ({{committed}} MB acquisiti, {{reserved}} MB riservati; {{remaining}} MB disponibili)",
+      "file_quota_full": "Quota file piena: {{occupied}} MB occupati su {{limit}} MB",
+      "file_quota_over_limit": "Uso file sopra quota: {{occupied}} MB su {{limit}} MB",
+      "file_quota_unknown": "Quota file non disponibile",
+      "file_uploads_blocked": "Il caricamento di nuovi file non è disponibile nello stato corrente.",
+      "file_replacements_blocked": "La sostituzione dei file non è disponibile nello stato corrente.",
+      "document_previous_version_available": "La versione precedente resta disponibile.",
+      "document_index_update_badge": "Aggiornamento in corso",
+      "document_index_failed_badge": "Aggiornamento non riuscito",
+      "document_index_interrupted_badge": "Aggiornamento interrotto",
+      "document_index_update_in_progress": "Aggiornamento dell'indice in corso.",
+      "document_index_update_failed": "Aggiornamento dell'indice non riuscito. Puoi riprovare.",
+      "document_index_update_interrupted": "Aggiornamento dell'indice interrotto. Puoi riprovare.",
+      "document_index_request_failed": "Richiesta di aggiornamento non confermata. Puoi riprovare in sicurezza.",
+      "file_index_published": "File indicizzato con successo.",
+      "file_index_status_unknown": "Stato dell'indicizzazione non confermato. Puoi riprovare in sicurezza.",
+      "file_too_large": "Il file supera il limite tecnico di {{max}}.",
+      "file_limit_unknown": "Limite tecnico del file non disponibile; riprova più tardi."
     }
   },
   "modals": {

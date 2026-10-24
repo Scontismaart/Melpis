@@ -58,7 +58,9 @@
     "ai_details_aria": "Détails traités par l’IA",
     "human_details_aria": "Détails transmis à une personne"
   },
-  "shell": { "skip_link": "Aller au contenu" },
+  "shell": {
+    "skip_link": "Aller au contenu"
+  },
   "overview": {
     "attention_title": "Nécessite votre attention",
     "go_to_inbox": "Ouvrir la boîte de réception",
@@ -82,7 +84,21 @@
     "empty_report": "Aucun rapport n’a encore été généré aujourd’hui.",
     "chart_aria": "Activité des messages",
     "insights_aria": "Principaux enseignements",
-    "runtime": {"error_title":"Une erreur s’est produite","retry":"Réessayer","priority_error":"Impossible de charger les demandes urgentes.","priority_count":"{{count}} éléments","no_messages_title":"Aucun message aujourd’hui","no_messages_desc":"L’assistant est configuré et prêt à répondre automatiquement à vos clients.","activity_error":"Impossible de charger l’activité récente.","waiting_title":"En attente de conversations","waiting_desc":"Les messages des clients et les réponses de l’assistant apparaîtront ici en temps réel.","try_simulator":"Essayer le simulateur","review_kind":"Avis","message_kind":"Message","open_review":"Voir"}
+    "runtime": {
+      "error_title": "Une erreur s’est produite",
+      "retry": "Réessayer",
+      "priority_error": "Impossible de charger les demandes urgentes.",
+      "priority_count": "{{count}} éléments",
+      "no_messages_title": "Aucun message aujourd’hui",
+      "no_messages_desc": "L’assistant est configuré et prêt à répondre automatiquement à vos clients.",
+      "activity_error": "Impossible de charger l’activité récente.",
+      "waiting_title": "En attente de conversations",
+      "waiting_desc": "Les messages des clients et les réponses de l’assistant apparaîtront ici en temps réel.",
+      "try_simulator": "Essayer le simulateur",
+      "review_kind": "Avis",
+      "message_kind": "Message",
+      "open_review": "Voir"
+    }
   },
   "views": {
     "simulator_intro": "Simulez une conversation avec un vrai client pour vérifier les réponses et le comportement de votre assistant IA.",
@@ -136,7 +152,12 @@
     "save_availability": "Enregistrer la disponibilité",
     "capacity_status": "État de disponibilité",
     "export_csv": "Exporter en CSV",
-    "runtime": {"count":"{{count}} réservations","day_title":"Réservations du {{date}}","details":"Détails","empty_day":"Aucune réservation à cette date"}
+    "runtime": {
+      "count": "{{count}} réservations",
+      "day_title": "Réservations du {{date}}",
+      "details": "Détails",
+      "empty_day": "Aucune réservation à cette date"
+    }
   },
   "team": {
     "add_title": "Inviter un membre",
@@ -174,7 +195,20 @@
     "resend_success": "Invitation renvoyée.",
     "revoke_success": "Invitation révoquée.",
     "loading_members": "Chargement des membres de l’équipe...",
-    "runtime": {"load_error":"Impossible de charger les membres de l’équipe : {{detail}}","member_count":"{{count}} membres","unlimited_accounts":"{{count}} comptes actifs (illimités)","essential_account":"1 / 1 compte (offre Essentiel, titulaire uniquement)","account_capacity":"{{used}} / {{limit}} comptes ({{operators}} sur {{max}} collaborateurs)","plan_essential":"Essentiel","plan_growth":"Croissance (Pro)","plan_scale":"Échelle","essential_limit_title":"L’offre Essentiel n’inclut pas de collaborateurs supplémentaires","limit_title":"La limite de collaborateurs de l’offre actuelle est atteinte","essential_limit_banner":"L’offre Essentiel est réservée au titulaire","limit_banner":"Limite de comptes atteinte ({{used}}/{{limit}})"}
+    "runtime": {
+      "load_error": "Impossible de charger les membres de l’équipe : {{detail}}",
+      "member_count": "{{count}} membres",
+      "unlimited_accounts": "{{count}} comptes actifs (illimités)",
+      "essential_account": "1 / 1 compte (offre Essentiel, titulaire uniquement)",
+      "account_capacity": "{{used}} / {{limit}} comptes ({{operators}} sur {{max}} collaborateurs)",
+      "plan_essential": "Essentiel",
+      "plan_growth": "Croissance (Pro)",
+      "plan_scale": "Échelle",
+      "essential_limit_title": "L’offre Essentiel n’inclut pas de collaborateurs supplémentaires",
+      "limit_title": "La limite de collaborateurs de l’offre actuelle est atteinte",
+      "essential_limit_banner": "L’offre Essentiel est réservée au titulaire",
+      "limit_banner": "Limite de comptes atteinte ({{used}}/{{limit}})"
+    }
   },
   "reviews": {
     "compose_title": "Analyser un nouvel avis",
@@ -221,7 +255,22 @@
     "import_replies": "Importation et réponses",
     "manual": "Manuel",
     "draft_placeholder": "Le brouillon de réponse apparaîtra ici...",
-    "runtime": {"ai_reply_label":"Brouillon de réponse suggéré :","copied_toast":"Texte du brouillon copié dans le presse-papiers !","empty_cta":"Coller un avis","empty_desc":"Collez un avis dans le formulaire ci-dessus : l’IA évaluera le sentiment et préparera un brouillon de réponse professionnel.","empty_title":"Aucun avis pour le moment","filtered_desc":"Aucun avis ne correspond aux filtres ou critères de recherche sélectionnés.","filtered_title":"Aucun résultat avec les filtres actuels","rating_total":"Basé sur {{count}} avis","reset_filters":"Réinitialiser les filtres","review_count":"{{count}} avis","review_draft":"Relire le brouillon","status_approved":"Approuvé","status_draft":"Brouillon prêt","status_urgent":"À traiter"}
+    "runtime": {
+      "ai_reply_label": "Brouillon de réponse suggéré :",
+      "copied_toast": "Texte du brouillon copié dans le presse-papiers !",
+      "empty_cta": "Coller un avis",
+      "empty_desc": "Collez un avis dans le formulaire ci-dessus : l’IA évaluera le sentiment et préparera un brouillon de réponse professionnel.",
+      "empty_title": "Aucun avis pour le moment",
+      "filtered_desc": "Aucun avis ne correspond aux filtres ou critères de recherche sélectionnés.",
+      "filtered_title": "Aucun résultat avec les filtres actuels",
+      "rating_total": "Basé sur {{count}} avis",
+      "reset_filters": "Réinitialiser les filtres",
+      "review_count": "{{count}} avis",
+      "review_draft": "Relire le brouillon",
+      "status_approved": "Approuvé",
+      "status_draft": "Brouillon prêt",
+      "status_urgent": "À traiter"
+    }
   },
   "knowledge": {
     "tabs_aria": "Catégories de la base de connaissances",
@@ -241,15 +290,45 @@
     "empty_faq": "Aucune FAQ configurée.",
     "upload_title": "Téléverser des fichiers",
     "dropzone_title": "Déposez vos documents ici ou cliquez pour parcourir",
-    "dropzone_hint": "PDF, DOCX, CSV, TXT, MD et images jusqu’à 20 Mo",
+    "dropzone_hint": "PDF/RAG inclus ; quota de fichiers à définir. PDF, DOCX, CSV, TXT, MD et images ; limite technique de 20 Mio par fichier.",
     "paste_text": "Ou collez du texte brut",
     "text_placeholder": "Collez ici des textes, menus, notes ou descriptions supplémentaires...",
     "text_name_placeholder": "Nom du texte (ex. horaires_fetes.txt)",
     "save_text": "Enregistrer le texte",
     "uploaded_documents": "Documents téléversés",
     "empty_documents": "Aucun document téléversé.",
-    "ask_placeholder":"Ex. : « Combien coûte une coupe homme ? » ou « Quels sont vos horaires d’ouverture ? »",
-    "runtime": {"documents_count":"{{active}} documents actifs sur {{total}}","empty_documents":"Aucun fichier téléversé. Utilisez la zone en pointillés ci-dessus pour ajouter des PDF, DOCX ou images.","empty_faq":"Aucune FAQ configurée. Cliquez sur « + Nouvelle FAQ » pour en ajouter une.","empty_web":"Aucune page web importée. Ajoutez un lien ci-dessus pour importer les tarifs ou les informations de votre site.","faq_count":"{{active}} FAQ actives sur {{total}} (toutes indexées)","last_update":"Dernière mise à jour : {{date}}","web_count":"{{active}} pages web actives sur {{total}}"}
+    "ask_placeholder": "Ex. : « Combien coûte une coupe homme ? » ou « Quels sont vos horaires d’ouverture ? »",
+    "runtime": {
+      "documents_count": "{{active}} documents actifs sur {{total}}",
+      "empty_documents": "Aucun fichier téléversé. Utilisez la zone en pointillés ci-dessus pour ajouter des PDF, DOCX ou images.",
+      "empty_faq": "Aucune FAQ configurée. Cliquez sur « + Nouvelle FAQ » pour en ajouter une.",
+      "empty_web": "Aucune page web importée. Ajoutez un lien ci-dessus pour importer les tarifs ou les informations de votre site.",
+      "faq_count": "{{active}} FAQ actives sur {{total}} (toutes indexées)",
+      "last_update": "Dernière mise à jour : {{date}}",
+      "web_count": "{{active}} pages web actives sur {{total}}",
+      "rag_available": "PDF/RAG inclus",
+      "rag_unavailable": "Knowledge Base indisponible avec l’abonnement ou le statut actuel",
+      "file_quota_not_configured": "PDF/RAG inclus ; quota de fichiers à définir",
+      "file_quota_historical_unknown": "L’usage historique des fichiers doit être vérifié",
+      "file_quota_available": "Quota de fichiers : {{occupied}} Mo utilisés sur {{limit}} Mo ({{committed}} Mo confirmés, {{reserved}} Mo réservés ; {{remaining}} Mo disponibles)",
+      "file_quota_full": "Quota de fichiers atteint : {{occupied}} Mo utilisés sur {{limit}} Mo",
+      "file_quota_over_limit": "Usage des fichiers supérieur au quota : {{occupied}} Mo sur {{limit}} Mo",
+      "file_quota_unknown": "Quota de fichiers indisponible",
+      "file_uploads_blocked": "Le chargement de nouveaux fichiers est indisponible avec le statut actuel.",
+      "file_replacements_blocked": "Le remplacement de fichiers est indisponible avec le statut actuel.",
+      "document_previous_version_available": "La version précédente reste disponible.",
+      "document_index_update_badge": "Mise à jour de l’index en cours",
+      "document_index_failed_badge": "Échec de la mise à jour",
+      "document_index_interrupted_badge": "Mise à jour interrompue",
+      "document_index_update_in_progress": "La mise à jour de l’index est en cours.",
+      "document_index_update_failed": "La mise à jour de l’index a échoué. Vous pouvez réessayer.",
+      "document_index_update_interrupted": "La mise à jour de l’index a été interrompue. Vous pouvez réessayer.",
+      "document_index_request_failed": "La demande de mise à jour n’a pas été confirmée. Vous pouvez réessayer sans risque.",
+      "file_index_published": "Fichier indexé avec succès.",
+      "file_index_status_unknown": "L’état de l’indexation n’est pas confirmé. Vous pouvez réessayer sans risque.",
+      "file_too_large": "Le fichier dépasse la limite technique de {{max}}.",
+      "file_limit_unknown": "La limite technique des fichiers est indisponible ; réessayez plus tard."
+    }
   },
   "modals": {
     "confirm_action": "Confirmer l'opération",

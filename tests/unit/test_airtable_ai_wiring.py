@@ -13,6 +13,7 @@ import pytest
 
 from src.core.receptionist.conversation_orchestrator import ConversationOrchestrator
 from src.core.receptionist.models import OrchestrationInput
+from src.core.documenti.rag_context import ContestoDocumenti
 from src.integrations.airtable.wiring import (
     AI_TOOL_INTENTS,
     FASE_A_EXCLUDED_TOOLS,
@@ -271,6 +272,8 @@ class TestOrchestrateWiring:
     @pytest.mark.asyncio
     async def test_guardrail_still_applies_with_tools(self, mock_provider_context_open):
         deps = _mock_dependencies()
+        deps["doc_repo"].knowledge_version = AsyncMock(return_value=7)
+        deps["doc_repo"].doc_repo = deps["doc_repo"]
         factory = AsyncMock(return_value=[_tool("airtable_find_customer")])
         orchestrator = ConversationOrchestrator(
             **deps, airtable_tool_factory=factory)
@@ -280,11 +283,14 @@ class TestOrchestrateWiring:
         with _intent_patch("booking"), \
              patch("src.core.receptionist.conversation_orchestrator.genera_risposta_async",
                    return_value=hallucinated), \
-             patch("src.core.receptionist.conversation_orchestrator.recupera_contesto_documenti") as mock_rag:
-            mock_rag_res = MagicMock()
-            mock_rag_res.testo = "menu senza prezzi"
-            mock_rag_res.chunks = [{"content": "menu senza prezzi"}]
-            mock_rag.return_value = mock_rag_res
+             patch("src.core.receptionist.conversation_orchestrator.recupera_contesto_documenti",
+                   new_callable=AsyncMock, return_value=ContestoDocumenti(
+                       testo="menu senza prezzi",
+                       chunks=[{"content": "menu senza prezzi", "document_id": str(uuid.uuid4()),
+                                "revision": 1}],
+                       knowledge_epoch=7, reason="verified")), \
+             patch("src.core.documenti.access.rag_access", new_callable=AsyncMock, return_value=True), \
+             patch("src.core.documenti.rag_context.rag_access", new_callable=AsyncMock, return_value=True):
             result = await orchestrator.orchestrate(
                 OrchestrationInput(
                     organization_id=ORG, auth_user_id=uuid.uuid4(),

@@ -3,7 +3,7 @@ import time
 import uuid
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from src.core.documenti.rag_context import recupera_contesto_documenti
 from src.whatsapp.inbound_processor import InboundProcessor
 from src.whatsapp.config import AppConfig, TenantConfig
@@ -90,6 +90,19 @@ def mock_repo(sample_msg):
     repo.faq_cache_lookup = AsyncMock(return_value=None)
     repo.faq_cache_store = AsyncMock(return_value=None)
     repo.pool = MagicMock()
+    # This unit double supplies an explicitly valid RAG authorization snapshot;
+    # real entitlement, epoch and tenant SQL are covered by PostgreSQL tests.
+    now = datetime.now(timezone.utc)
+    conn = repo.pool.acquire.return_value.__aenter__.return_value
+    conn.fetchrow = AsyncMock(return_value={
+        "plan": "business", "subscription_status": "active",
+        "subscription_id": "sub_unitInboundA",
+        "current_period_start": now - timedelta(days=1),
+        "current_period_end": now + timedelta(days=29),
+        "ai_accounting_blocked": False,
+    })
+    repo.doc_repo = repo
+    repo.knowledge_version = AsyncMock(return_value=1)
     repo.claim_message_for_processing = AsyncMock(return_value={
         "status": "claimed",
         "ai_reply_cache": None,

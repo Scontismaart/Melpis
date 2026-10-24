@@ -296,10 +296,10 @@ class Repository(TenantScopedRepository):
     async def faq_cache_store(self, organization_id: str, question_text: str,
                               answer_text: str, embedding: list,
                               prompt_variant: str = "control",
-                              ttl_hours: int = 72) -> dict:
+                              ttl_hours: int = 72, expected_epoch: int | None = None) -> dict | None:
         return await self._doc_repo.faq_cache_store(
             organization_id, question_text, answer_text, embedding,
-            prompt_variant=prompt_variant, ttl_hours=ttl_hours,
+            prompt_variant=prompt_variant, ttl_hours=ttl_hours, expected_epoch=expected_epoch,
         )
 
     async def faq_cache_invalidate(self, organization_id: str) -> int:

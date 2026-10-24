@@ -10,12 +10,20 @@ from src.core.documenti.rag_context import ContestoDocumenti, recupera_contesto_
 
 @pytest.fixture(autouse=True)
 def _no_real_embedding_model():
-    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]), \
+         patch("src.core.documenti.rag_context.rag_access", new_callable=AsyncMock, return_value=True):
         yield
 
 
-async def test_formatta_chunk_con_nome_documento():
+def _repo():
     repo = AsyncMock()
+    repo.doc_repo = repo
+    repo.knowledge_version = AsyncMock(return_value=7)
+    return repo
+
+
+async def test_formatta_chunk_con_nome_documento():
+    repo = _repo()
     repo.search_similar = AsyncMock(return_value=[
         {"id": uuid.uuid4(), "content": "Apriamo alle 12:00",
          "metadata": {"fonte": "menu.pdf"}, "document_name": "menu.pdf"},
@@ -30,13 +38,15 @@ async def test_formatta_chunk_con_nome_documento():
     assert isinstance(ctx, ContestoDocumenti)
     assert len(ctx.chunks) == 2
     assert ctx.chunks[0]["content"] == "Apriamo alle 12:00"
+    assert ctx.knowledge_epoch == 7
+    assert ctx.reason == "verified"
     repo.search_similar.assert_awaited_once_with("org-a", [0.1] * 384, 3)
 
 
 async def test_q_emb_precalcolato_riusato_skip_vettorizza():
     """Il processor calcola l'embedding una volta sola (cache FAQ + RAG):
     se q_emb e' passato, vettorizza non viene chiamato di nuovo."""
-    repo = AsyncMock()
+    repo = _repo()
     repo.search_similar = AsyncMock(return_value=[
         {"content": "x", "document_name": "d.txt"}
     ])
@@ -51,7 +61,7 @@ async def test_q_emb_precalcolato_riusato_skip_vettorizza():
 
 
 async def test_senza_risultati_contesto_vuoto():
-    repo = AsyncMock()
+    repo = _repo()
     repo.search_similar = AsyncMock(return_value=[])
     ctx = await recupera_contesto_documenti("org-a", "testo", repo)
     assert ctx.testo == ""
@@ -63,7 +73,7 @@ async def test_errore_retrieval_contesto_vuoto():
     async def broken(*args, **kwargs):
         raise RuntimeError("pgvector down")
 
-    repo = AsyncMock()
+    repo = _repo()
     repo.search_similar = AsyncMock(side_effect=broken)
     ctx = await recupera_contesto_documenti("org-a", "testo", repo)
     assert ctx.testo == ""
@@ -71,7 +81,7 @@ async def test_errore_retrieval_contesto_vuoto():
 
 
 async def test_errore_vettorizza_contesto_vuoto():
-    repo = AsyncMock()
+    repo = _repo()
     with patch("src.core.documenti.rag_context.vettorizza", side_effect=RuntimeError("no model")):
         ctx = await recupera_contesto_documenti("org-a", "testo", repo)
     assert ctx.testo == ""
@@ -90,7 +100,7 @@ async def test_timeout_reale_scade_e_restituisce_vuoto():
         await release.wait()
         return [{"content": "x", "document_name": "x.pdf"}]
 
-    repo = AsyncMock()
+    repo = _repo()
     repo.search_similar = AsyncMock(side_effect=hanging)
 
     start = time.monotonic()
@@ -103,3 +113,16 @@ async def test_timeout_reale_scade_e_restituisce_vuoto():
 
     assert ctx.testo == ""
     assert elapsed < 2, f"wait_for non ha scaduto: elapsed={elapsed:.2f}s"
+
+
+async def test_rifiuta_contesto_se_knowledge_version_cambia_durante_retrieval():
+    repo = _repo()
+    repo.knowledge_version = AsyncMock(side_effect=[7, 8])
+    repo.search_similar = AsyncMock(return_value=[{"content": "dato vecchio", "document_name": "x.pdf"}])
+
+    ctx = await recupera_contesto_documenti("org-a", "testo", repo)
+
+    assert ctx.testo == ""
+    assert ctx.chunks == []
+    assert ctx.knowledge_epoch is None
+    assert ctx.reason == "knowledge_changed"

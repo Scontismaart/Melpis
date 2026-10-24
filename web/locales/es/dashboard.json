@@ -58,7 +58,9 @@
     "ai_details_aria": "Detalles gestionados por IA",
     "human_details_aria": "Detalles derivados a una persona"
   },
-  "shell": { "skip_link": "Saltar al contenido" },
+  "shell": {
+    "skip_link": "Saltar al contenido"
+  },
   "overview": {
     "attention_title": "Requiere tu atención",
     "go_to_inbox": "Ir a Inbox",
@@ -82,7 +84,21 @@
     "empty_report": "Todavía no se ha generado ningún informe para hoy.",
     "chart_aria": "Actividad de mensajes",
     "insights_aria": "Claves principales",
-    "runtime": {"error_title":"Algo salió mal","retry":"Reintentar","priority_error":"No se pudieron cargar las solicitudes urgentes.","priority_count":"{{count}} elementos","no_messages_title":"No hay mensajes hoy","no_messages_desc":"El asistente está configurado y listo para responder automáticamente a tus clientes.","activity_error":"No se pudo cargar la actividad reciente.","waiting_title":"Esperando conversaciones","waiting_desc":"Los mensajes de los clientes y las respuestas del asistente aparecerán aquí en tiempo real.","try_simulator":"Probar el simulador","review_kind":"Reseña","message_kind":"Mensaje","open_review":"Ver"}
+    "runtime": {
+      "error_title": "Algo salió mal",
+      "retry": "Reintentar",
+      "priority_error": "No se pudieron cargar las solicitudes urgentes.",
+      "priority_count": "{{count}} elementos",
+      "no_messages_title": "No hay mensajes hoy",
+      "no_messages_desc": "El asistente está configurado y listo para responder automáticamente a tus clientes.",
+      "activity_error": "No se pudo cargar la actividad reciente.",
+      "waiting_title": "Esperando conversaciones",
+      "waiting_desc": "Los mensajes de los clientes y las respuestas del asistente aparecerán aquí en tiempo real.",
+      "try_simulator": "Probar el simulador",
+      "review_kind": "Reseña",
+      "message_kind": "Mensaje",
+      "open_review": "Ver"
+    }
   },
   "views": {
     "simulator_intro": "Simula una conversación real con un cliente para revisar las respuestas y el comportamiento de tu asistente de IA.",
@@ -136,7 +152,12 @@
     "save_availability": "Guardar disponibilidad",
     "capacity_status": "Estado de disponibilidad",
     "export_csv": "Exportar CSV",
-    "runtime": {"count":"{{count}} reservas","day_title":"Reservas del {{date}}","details":"Detalles","empty_day":"No hay reservas para esta fecha"}
+    "runtime": {
+      "count": "{{count}} reservas",
+      "day_title": "Reservas del {{date}}",
+      "details": "Detalles",
+      "empty_day": "No hay reservas para esta fecha"
+    }
   },
   "team": {
     "add_title": "Invitar a un colaborador",
@@ -174,7 +195,20 @@
     "resend_success": "Invitación reenviada.",
     "revoke_success": "Invitación revocada.",
     "loading_members": "Cargando miembros del equipo...",
-    "runtime": {"load_error":"No se pudieron cargar los miembros del equipo: {{detail}}","member_count":"{{count}} miembros","unlimited_accounts":"{{count}} cuentas activas (ilimitadas)","essential_account":"1 / 1 cuenta (Plan Esencial, solo el titular)","account_capacity":"{{used}} / {{limit}} cuentas ({{operators}} de {{max}} colaboradores)","plan_essential":"Esencial","plan_growth":"Crecimiento (Pro)","plan_scale":"Escala","essential_limit_title":"El plan Esencial no incluye colaboradores adicionales","limit_title":"Se alcanzó el límite de colaboradores del plan actual","essential_limit_banner":"El plan Esencial solo incluye al titular","limit_banner":"Límite de cuentas alcanzado ({{used}}/{{limit}})"}
+    "runtime": {
+      "load_error": "No se pudieron cargar los miembros del equipo: {{detail}}",
+      "member_count": "{{count}} miembros",
+      "unlimited_accounts": "{{count}} cuentas activas (ilimitadas)",
+      "essential_account": "1 / 1 cuenta (Plan Esencial, solo el titular)",
+      "account_capacity": "{{used}} / {{limit}} cuentas ({{operators}} de {{max}} colaboradores)",
+      "plan_essential": "Esencial",
+      "plan_growth": "Crecimiento (Pro)",
+      "plan_scale": "Escala",
+      "essential_limit_title": "El plan Esencial no incluye colaboradores adicionales",
+      "limit_title": "Se alcanzó el límite de colaboradores del plan actual",
+      "essential_limit_banner": "El plan Esencial solo incluye al titular",
+      "limit_banner": "Límite de cuentas alcanzado ({{used}}/{{limit}})"
+    }
   },
   "reviews": {
     "compose_title": "Analizar una nueva reseña",
@@ -221,7 +255,22 @@
     "import_replies": "Importación y respuestas",
     "manual": "Manual",
     "draft_placeholder": "El borrador de respuesta aparecerá aquí...",
-    "runtime": {"ai_reply_label":"Borrador de respuesta sugerida:","copied_toast":"¡Texto del borrador copiado al portapapeles!","empty_cta":"Pegar una reseña","empty_desc":"Pega una reseña en el formulario superior: la IA evaluará el sentimiento y preparará un borrador de respuesta profesional.","empty_title":"Aún no hay reseñas","filtered_desc":"Ninguna reseña coincide con los filtros o criterios de búsqueda seleccionados.","filtered_title":"No hay resultados con los filtros actuales","rating_total":"Basado en {{count}} reseñas","reset_filters":"Restablecer filtros","review_count":"{{count}} reseñas","review_draft":"Revisar borrador","status_approved":"Aprobada","status_draft":"Borrador listo","status_urgent":"Requiere atención"}
+    "runtime": {
+      "ai_reply_label": "Borrador de respuesta sugerida:",
+      "copied_toast": "¡Texto del borrador copiado al portapapeles!",
+      "empty_cta": "Pegar una reseña",
+      "empty_desc": "Pega una reseña en el formulario superior: la IA evaluará el sentimiento y preparará un borrador de respuesta profesional.",
+      "empty_title": "Aún no hay reseñas",
+      "filtered_desc": "Ninguna reseña coincide con los filtros o criterios de búsqueda seleccionados.",
+      "filtered_title": "No hay resultados con los filtros actuales",
+      "rating_total": "Basado en {{count}} reseñas",
+      "reset_filters": "Restablecer filtros",
+      "review_count": "{{count}} reseñas",
+      "review_draft": "Revisar borrador",
+      "status_approved": "Aprobada",
+      "status_draft": "Borrador listo",
+      "status_urgent": "Requiere atención"
+    }
   },
   "knowledge": {
     "tabs_aria": "Categorías de la base de conocimiento",
@@ -241,15 +290,45 @@
     "empty_faq": "No hay FAQ configuradas.",
     "upload_title": "Subir archivos",
     "dropzone_title": "Arrastra tus documentos aquí o haz clic para buscarlos",
-    "dropzone_hint": "PDF, DOCX, CSV, TXT, MD e imágenes de hasta 20 MB",
+    "dropzone_hint": "PDF/RAG incluido; cuota de archivos por definir. PDF, DOCX, CSV, TXT, MD e imágenes; límite técnico de 20 MiB por archivo.",
     "paste_text": "O pega texto sin formato",
     "text_placeholder": "Pega aquí textos, menús, notas o descripciones adicionales...",
     "text_name_placeholder": "Nombre del texto (p. ej., horario_festivo.txt)",
     "save_text": "Guardar texto",
     "uploaded_documents": "Documentos subidos",
     "empty_documents": "No se han subido documentos.",
-    "ask_placeholder":"Ej.: «¿Cuánto cuesta un corte de hombre?» o «¿Cuál es el horario de apertura?»",
-    "runtime": {"documents_count":"{{active}} documentos activos de {{total}}","empty_documents":"No hay archivos cargados. Usa el área punteada de arriba para subir PDF, DOCX o imágenes.","empty_faq":"No hay preguntas frecuentes configuradas. Haz clic en «+ Nueva FAQ» para añadir una.","empty_web":"No se han importado páginas web. Añade un enlace arriba para importar precios o información de tu sitio.","faq_count":"{{active}} preguntas frecuentes activas de {{total}} (todas indexadas)","last_update":"Última actualización: {{date}}","web_count":"{{active}} páginas web activas de {{total}}"}
+    "ask_placeholder": "Ej.: «¿Cuánto cuesta un corte de hombre?» o «¿Cuál es el horario de apertura?»",
+    "runtime": {
+      "documents_count": "{{active}} documentos activos de {{total}}",
+      "empty_documents": "No hay archivos cargados. Usa el área punteada de arriba para subir PDF, DOCX o imágenes.",
+      "empty_faq": "No hay preguntas frecuentes configuradas. Haz clic en «+ Nueva FAQ» para añadir una.",
+      "empty_web": "No se han importado páginas web. Añade un enlace arriba para importar precios o información de tu sitio.",
+      "faq_count": "{{active}} preguntas frecuentes activas de {{total}} (todas indexadas)",
+      "last_update": "Última actualización: {{date}}",
+      "web_count": "{{active}} páginas web activas de {{total}}",
+      "rag_available": "PDF/RAG incluido",
+      "rag_unavailable": "Knowledge Base no disponible con la suscripción o el estado actual",
+      "file_quota_not_configured": "PDF/RAG incluido; cuota de archivos por definir",
+      "file_quota_historical_unknown": "Hay que revisar el uso histórico de archivos",
+      "file_quota_available": "Cuota de archivos: {{occupied}} MB ocupados de {{limit}} MB ({{committed}} MB confirmados, {{reserved}} MB reservados; {{remaining}} MB disponibles)",
+      "file_quota_full": "Cuota de archivos completa: {{occupied}} MB ocupados de {{limit}} MB",
+      "file_quota_over_limit": "Uso de archivos por encima de la cuota: {{occupied}} MB de {{limit}} MB",
+      "file_quota_unknown": "Cuota de archivos no disponible",
+      "file_uploads_blocked": "La carga de archivos nuevos no está disponible con el estado actual.",
+      "file_replacements_blocked": "La sustitución de archivos no está disponible con el estado actual.",
+      "document_previous_version_available": "La versión anterior sigue disponible.",
+      "document_index_update_badge": "Actualizando el índice",
+      "document_index_failed_badge": "Actualización fallida",
+      "document_index_interrupted_badge": "Actualización interrumpida",
+      "document_index_update_in_progress": "La actualización del índice está en curso.",
+      "document_index_update_failed": "No se pudo actualizar el índice. Puedes volver a intentarlo.",
+      "document_index_update_interrupted": "Se interrumpió la actualización del índice. Puedes volver a intentarlo.",
+      "document_index_request_failed": "No se confirmó la solicitud de actualización. Puedes volver a intentarlo de forma segura.",
+      "file_index_published": "Archivo indexado correctamente.",
+      "file_index_status_unknown": "No se ha confirmado el estado de indexación. Puedes volver a intentarlo de forma segura.",
+      "file_too_large": "El archivo supera el límite técnico de {{max}}.",
+      "file_limit_unknown": "El límite técnico del archivo no está disponible; inténtalo más tarde."
+    }
   },
   "modals": {
     "confirm_action": "Confirmar acción",

@@ -44,5 +44,6 @@ def configure_cors(
             "X-API-Key",
             "X-CSRF-Token",
             "Content-Type",
+            "Idempotency-Key",
         ],
     )

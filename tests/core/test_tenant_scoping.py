@@ -500,20 +500,24 @@ def _vec384(*head):
 
 
 async def _seed_doc_with_chunk(pg_pool, org_id, nome, content, embedding):
-    doc_id = uuid.uuid4()
-    chunk_id = uuid.uuid4()
-    vec = "[" + ",".join(str(v) for v in embedding) + "]"
-    async with pg_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO documents (id, organization_id, nome) VALUES ($1, $2, $3)",
-            doc_id, org_id, nome,
-        )
-        await conn.execute(
-            """INSERT INTO document_chunks
-                   (id, organization_id, document_id, chunk_index, content, embedding)
-               VALUES ($1, $2, $3, 0, $4, $5::vector)""",
-            chunk_id, org_id, doc_id, content, vec,
-        )
+    from src.core.documenti.indexing import index_content
+    await pg_pool.execute(
+        "UPDATE organizations SET plan='business',subscription_status='trialing',"
+        "trial_start=now()-interval '1 hour',trial_end=now()+interval '6 days' WHERE id=$1",
+        org_id,
+    )
+    result = await index_content(
+        CoreRepository(pg_pool), org_id, nome, text=content,
+        request_key=str(uuid.uuid4()),
+        embedding_fn=lambda texts, tipo="passage": [embedding for _ in texts],
+    )
+    assert result["status"] == "indexed"
+    assert result["document"]["index_verified"] is True
+    doc_id = result["document"]["id"]
+    chunk_id = await pg_pool.fetchval(
+        "SELECT id FROM document_chunks WHERE organization_id=$1 AND document_id=$2",
+        org_id, doc_id,
+    )
     return {"doc": doc_id, "chunk": chunk_id}
 
 

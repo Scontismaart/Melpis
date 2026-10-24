@@ -104,6 +104,14 @@
         tabGeneration += 1;
         Object.keys(readGenerations).forEach((key) => { readGenerations[key] += 1; });
         pendingReads.clear();
+        ragEnabled = null;
+        newFileUploadsAllowed = false;
+        fileReplacementsAllowed = false;
+        technicalUploadBytes = null;
+        pendingFileAction = null;
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (retryButton) retryButton.hidden = true;
+        applyDocumentPermissions();
         for (const [button, initial] of busyButtons) {
           button.innerHTML = initial.html;
           button.disabled = initial.disabled;
@@ -118,7 +126,8 @@
           kbWebUrlInput, kbOrariInput, docQuery, docFile].forEach((node) => { if (node) node.value = ""; });
         [kbFAQFormStatus, docCaricaStatus, kbWebImportStatus, kbDatiSaveStatus,
           docRispostaText].forEach((node) => { if (node) node.textContent = ""; });
-        [docRisposta, docFonti, document.getElementById("kb-conflitti-banner")]
+        [docRisposta, docFonti, document.getElementById("kb-conflitti-banner"),
+          document.getElementById("kb-conflitti-parziali")]
           .forEach((node) => { if (node) node.hidden = true; });
         if (kbFAQFormCard) kbFAQFormCard.style.display = "none";
         document.querySelectorAll("[id^='kb-badge-'], [id^='kb-stat-'], [id^='kb-'][id$='-status-text'], [id^='kb-'][id$='-updated-text']")
@@ -182,7 +191,7 @@
 
         // Carica i dati specifici del tab
         if (tabName === "faq") caricaFAQ();
-        else if (tabName === "documenti") caricaDocumenti();
+        else if (tabName === "documenti") { loadDocumentLimits(); caricaDocumenti(); }
         else if (tabName === "web") caricaPagineWeb();
         else if (tabName === "dati-struttura") caricaDatiStruttura();
       }
@@ -248,14 +257,21 @@
 
           // Verifica e visualizzazione banner conflitti
           const bannerConflitti = document.getElementById("kb-conflitti-banner");
+          const avvisoConflittiParziali = document.getElementById("kb-conflitti-parziali");
           const dettagliConflitti = document.getElementById("kb-conflitti-dettagli");
+          if (avvisoConflittiParziali) {
+            avvisoConflittiParziali.hidden = data.conflitti_completi !== false;
+          }
           if (data.conflitti_totali > 0) {
             const confRes = await apiFetch(`${API_BASE}/api/conoscenza/conflitti`);
             if (!valid()) return;
             if (!authorized(confRes, valid)) return;
             if (confRes.ok) {
               const confData = await confRes.json();
-          if (!valid()) return;
+              if (!valid()) return;
+              if (avvisoConflittiParziali && confData.complete === false) {
+                avvisoConflittiParziali.hidden = false;
+              }
               if (confData.conflitti?.length && bannerConflitti && dettagliConflitti) {
                 dettagliConflitti.innerHTML = "";
                 confData.conflitti.forEach((c) => {
@@ -537,10 +553,195 @@
       const docCaricaNome = document.getElementById("doc-carica-nome");
       const docCaricaBtn = document.getElementById("doc-carica-btn");
       const docCaricaStatus = document.getElementById("doc-carica-status");
+      const docLimits = document.getElementById("kb-doc-limits");
+      let pendingFileAction = null;
+      let documentPollTimer = null;
+      let lastDocumentList = [];
+      let ragEnabled = null;
+      let newFileUploadsAllowed = false;
+      let fileReplacementsAllowed = false;
+      let technicalUploadBytes = null;
+
+      function newIdempotencyKey() {
+        if (root.crypto?.randomUUID) return root.crypto.randomUUID();
+        const bytes = new Uint8Array(16);
+        if (root.crypto?.getRandomValues) root.crypto.getRandomValues(bytes);
+        else bytes.forEach((_, index) => { bytes[index] = Math.random() * 256; });
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+        return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+      }
+      function formatLimitBytes(value) {
+        if (!Number.isFinite(value) || value <= 0) return null;
+        return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toLocaleString(localeCorrente())} MiB`
+          : `${Math.ceil(value / 1024).toLocaleString(localeCorrente())} KiB`;
+      }
+      function formatQuotaMegabytes(value) {
+        if (!Number.isFinite(value) || value < 0) return null;
+        return (value / 1_000_000).toLocaleString(localeCorrente(), { maximumFractionDigits: 2 });
+      }
+      function fileQuotaText(quota) {
+        if (!quota || typeof quota !== "object") {
+          return _tDash("knowledge.runtime.file_quota_unknown", "Quota file non disponibile");
+        }
+        const occupied = formatQuotaMegabytes(quota.occupied_bytes);
+        const limit = formatQuotaMegabytes(quota.limit_bytes);
+        const committed = formatQuotaMegabytes(quota.committed_bytes);
+        const reserved = formatQuotaMegabytes(quota.reserved_bytes);
+        const remaining = formatQuotaMegabytes(quota.remaining_bytes);
+        if (quota.status === "not_configured") {
+          return _tDash("knowledge.runtime.file_quota_not_configured", "PDF/RAG incluso; quota file da definire");
+        }
+        if (quota.status === "historical_usage_unknown") {
+          return _tDash("knowledge.runtime.file_quota_historical_unknown", "Uso storico dei file da verificare");
+        }
+        if (quota.status === "available" && occupied !== null && limit !== null
+          && committed !== null && reserved !== null && remaining !== null) {
+          return _tDash("knowledge.runtime.file_quota_available",
+            "Quota file: {{occupied}} MB occupati su {{limit}} MB ({{committed}} MB acquisiti, {{reserved}} MB riservati; {{remaining}} MB disponibili)",
+            { occupied, limit, committed, reserved, remaining });
+        }
+        if (quota.status === "full" && occupied !== null && limit !== null) {
+          return _tDash("knowledge.runtime.file_quota_full", "Quota file piena: {{occupied}} MB occupati su {{limit}} MB", { occupied, limit });
+        }
+        if (quota.status === "over_limit" && occupied !== null && limit !== null) {
+          return _tDash("knowledge.runtime.file_quota_over_limit", "Uso file sopra quota: {{occupied}} MB su {{limit}} MB", { occupied, limit });
+        }
+        return _tDash("knowledge.runtime.file_quota_unknown", "Quota file non disponibile");
+      }
+      function applyDocumentPermissions() {
+        const fileControlsDisabled = ragEnabled !== true || newFileUploadsAllowed !== true;
+        if (docFile) docFile.disabled = fileControlsDisabled;
+        if (kbDocDropzone) kbDocDropzone.setAttribute("aria-disabled", String(fileControlsDisabled));
+        if (docCaricaBtn) docCaricaBtn.disabled = ragEnabled !== true;
+        document.querySelectorAll("[data-document-reindex]").forEach((button) => {
+          button.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
+        });
+      }
+      function displayDocumentLimits(data) {
+        if (!docLimits) return;
+        const technical = data?.technical_limits;
+        const usage = data?.usage;
+        const values = [technical?.upload_bytes, technical?.pages_per_document, technical?.chunks_per_document];
+        const usageValues = [usage?.documents, usage?.pages, usage?.chunks];
+        const supported = values.every(Number.isFinite);
+        const usageKnown = usageValues.every(Number.isFinite);
+        const parts = [data?.rag_enabled === true
+          ? _tDash("knowledge.runtime.rag_available", "PDF/RAG incluso")
+          : _tDash("knowledge.runtime.rag_unavailable", "Knowledge Base non disponibile con l'abbonamento o lo stato attuale")];
+        if (supported) parts.push(`Limiti tecnici per file: ${formatLimitBytes(values[0]) || "non disponibili"}, ${values[1]} pagine, ${values[2]} segmenti`);
+        else parts.push("Limiti tecnici non disponibili");
+        if (usageKnown) parts.push(`Utilizzo: ${usageValues[0]} documenti, ${usageValues[1]} pagine, ${usageValues[2]} segmenti`);
+        else parts.push("Utilizzo non disponibile");
+        parts.push(fileQuotaText(data?.file_quota));
+        docLimits.textContent = parts.join(" · ");
+        ragEnabled = data?.rag_enabled === true ? true : data?.rag_enabled === false ? false : null;
+        newFileUploadsAllowed = data?.file_quota?.new_uploads_allowed === true;
+        fileReplacementsAllowed = data?.file_quota?.replacements_allowed === true;
+        technicalUploadBytes = Number.isSafeInteger(technical?.upload_bytes) && technical.upload_bytes > 0
+          ? technical.upload_bytes : null;
+        applyDocumentPermissions();
+      }
+      async function loadDocumentLimits() {
+        if (!docLimits) return;
+        const token = capture();
+        if (!current(token)) return;
+        docLimits.textContent = "Caricamento limiti…";
+        try {
+          const res = await apiFetch(`${API_BASE}/api/documenti/limiti`);
+          if (!current(token)) return;
+          if (res.status === 401 || res.status === 403) { authorized(res, () => current(token)); return; }
+          if (!res.ok) throw new Error("Limiti non disponibili");
+          const data = await res.json();
+          if (current(token)) displayDocumentLimits(data);
+        } catch {
+          if (current(token)) displayDocumentLimits(null);
+        }
+      }
+      function setUploadStatus(message, kind = "neutral") {
+        if (!docCaricaStatus) return;
+        docCaricaStatus.textContent = message;
+        docCaricaStatus.style.color = kind === "error" ? "var(--red)" : kind === "success" ? "var(--green)" : "var(--ink)";
+      }
+      function stopDocumentPolling() {
+        if (documentPollTimer) root.clearTimeout(documentPollTimer);
+        documentPollTimer = null;
+      }
+      function hasPendingDocuments(items) {
+        return items.some((doc) => doc.stato === "caricato" || doc.stato === "in_elaborazione"
+          || doc.index_status === "in_progress");
+      }
+      function findPendingActionDocument(items, action, resultId = null) {
+        if (!action) return null;
+        return items.find((item) => resultId && item.id === resultId)
+          || items.find((item) => action.documentId && item.id === action.documentId)
+          || items.find((item) => item.index_request_id === action.key)
+          || items.find((item) => item.published_request_id === action.key)
+          || null;
+      }
+      function actionPublished(doc, action) {
+        return Boolean(doc && action && doc.published_request_id === action.key
+          && doc.stato === "indicizzata" && doc.index_verified === true);
+      }
+      function showFileActionState(doc, action) {
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (!action) return;
+        if (actionPublished(doc, action)) {
+          setUploadStatus(_tDash("knowledge.runtime.file_index_published", "File indicizzato con successo."), "success");
+          pendingFileAction = null;
+          if (retryButton) retryButton.hidden = true;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "in_progress") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_in_progress", "Aggiornamento dell'indice in corso."));
+          if (retryButton) retryButton.hidden = true;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "failed") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_failed", "Aggiornamento dell'indice non riuscito. Puoi riprovare."), "error");
+          if (retryButton) retryButton.hidden = false;
+          return;
+        }
+        if (doc?.index_request_id === action.key && doc.index_status === "interrupted") {
+          setUploadStatus(_tDash("knowledge.runtime.document_index_update_interrupted", "Aggiornamento dell'indice interrotto. Puoi riprovare."), "error");
+          if (retryButton) retryButton.hidden = false;
+          return;
+        }
+        setUploadStatus(_tDash("knowledge.runtime.file_index_status_unknown", "Stato dell'indicizzazione non confermato. Puoi riprovare in sicurezza."), "error");
+        if (retryButton) retryButton.hidden = false;
+      }
+      function scheduleDocumentPoll() {
+        stopDocumentPolling();
+        if (!active || !hasPendingDocuments(lastDocumentList)) return;
+        documentPollTimer = root.setTimeout(async () => {
+          documentPollTimer = null;
+          if (!current(capture(), true)) return;
+          await refresh("documenti", caricaDocumenti);
+          if (pendingFileAction) {
+            const matching = findPendingActionDocument(lastDocumentList, pendingFileAction);
+            showFileActionState(matching, pendingFileAction);
+          }
+          scheduleDocumentPoll();
+        }, 2500);
+      }
+      async function submitFile(file, url, key, label) {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await apiFetch(url, { method: "POST", body: form, headers: { "Idempotency-Key": key } });
+        if (res.status === 401 || res.status === 403) authorized(res, () => current(capture()));
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.detail || `Errore durante ${label}`);
+        }
+        return res.json();
+      }
 
       // Setup drag and drop
       if (kbDocDropzone && docFile) {
-        kbDocDropzone.addEventListener("click", () => { if (current(capture())) docFile.click(); });
+        kbDocDropzone.addEventListener("click", () => {
+          if (current(capture()) && !docFile.disabled) docFile.click();
+        });
         kbDocDropzone.addEventListener("dragover", (e) => {
           e.preventDefault();
           if (!current(capture())) return;
@@ -564,47 +765,77 @@
         });
       }
 
-      async function eseguiUploadFile(file) {
+      async function eseguiUploadFile(file, action = null) {
+        const isReplacement = typeof action?.endpoint === "string" && action.endpoint.includes("/reindicizza");
+        const isSameIdempotentRetry = Boolean(action && pendingFileAction === action && action.key);
+        if (ragEnabled !== true) {
+          setUploadStatus(_tDash("knowledge.runtime.rag_unavailable", "Knowledge Base non disponibile con l'abbonamento o lo stato attuale"), "error");
+          return;
+        }
+        if (isReplacement ? fileReplacementsAllowed !== true && !isSameIdempotentRetry
+          : newFileUploadsAllowed !== true && !isSameIdempotentRetry) {
+          const key = isReplacement ? "knowledge.runtime.file_replacements_blocked" : "knowledge.runtime.file_uploads_blocked";
+          const fallback = isReplacement
+            ? "La sostituzione dei file non è disponibile nello stato corrente."
+            : "Il caricamento di nuovi file non è disponibile per la quota o lo stato corrente.";
+          setUploadStatus(_tDash(key, fallback), "error");
+          return;
+        }
+        if (!Number.isSafeInteger(technicalUploadBytes) || technicalUploadBytes <= 0) {
+          setUploadStatus(_tDash("knowledge.runtime.file_limit_unknown", "Limite tecnico per file non disponibile; ricarica i limiti e riprova."), "error");
+          return;
+        }
+        if (!file || !Number.isFinite(file.size) || file.size > technicalUploadBytes) {
+          const max = formatLimitBytes(technicalUploadBytes) || "20 MiB";
+          setUploadStatus(_tDash("knowledge.runtime.file_too_large", "Il file supera il limite tecnico di {{max}}.", { max }), "error");
+          return;
+        }
         const token = beginMutation("file-upload");
         if (!token) return;
         if (!docCaricaStatus) { endMutation("file-upload"); return; }
-        docCaricaStatus.textContent = `Caricamento e indicizzazione di "${file.name}"…`;
-        docCaricaStatus.style.color = "var(--ink)";
+        const currentAction = action || { file, key: newIdempotencyKey(), endpoint: `${API_BASE}/api/documenti/carica-file` };
+        pendingFileAction = currentAction;
+        setUploadStatus(`Caricamento di "${file.name}" e indicizzazione in corso…`);
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (retryButton) retryButton.hidden = true;
         try {
-          const form = new FormData();
-          form.append("file", file);
-          const res = await apiFetch(`${API_BASE}/api/documenti/carica-file`, { method: "POST", body: form });
+          const result = await submitFile(file, currentAction.endpoint, currentAction.key, "il caricamento del file");
           if (!current(token)) return;
-          if (!authorized(res, () => current(token))) return;
-          if (!res.ok) {
-            const err = await res.json().catch(() => null);
-            if (!current(token)) return;
-            throw new Error(err?.detail || "Errore durante il caricamento del file");
-          }
-          const data = await res.json();
-          if (!current(token)) return;
-          docCaricaStatus.textContent = data.detail || `File "${file.name}" indicizzato con successo!`;
-          docCaricaStatus.style.color = "var(--green)";
+          setUploadStatus(`File "${file.name}" ricevuto; verifica dell'indicizzazione in corso…`);
           if (docFile) docFile.value = "";
           await refresh("documenti", caricaDocumenti);
           if (!current(token)) return;
           await refresh("summary", caricaKBSummary);
+          if (!current(token)) return;
+          await loadDocumentLimits();
+          if (!current(token)) return;
+          const matching = lastDocumentList.find((item) => result?.id && item.id === result.id)
+            || findPendingActionDocument(lastDocumentList, currentAction);
+          if (result?.id) currentAction.documentId = result.id;
+          showFileActionState(matching, currentAction);
         } catch (err) {
           if (!current(token)) return;
-          docCaricaStatus.textContent = err.message || "Errore durante l'estrazione del file.";
-          docCaricaStatus.style.color = "var(--red)";
-          await refresh("documenti", caricaDocumenti);
-          if (!current(token)) return;
-          await refresh("summary", caricaKBSummary);
+          setUploadStatus(isReplacement
+            ? _tDash("knowledge.runtime.document_index_request_failed", "Richiesta di aggiornamento non confermata. Puoi riprovare in sicurezza.")
+            : (err.message || "Errore durante il caricamento del file."), "error");
+          if (retryButton) retryButton.hidden = false;
         } finally {
           endMutation("file-upload");
         }
       }
+      document.getElementById("kb-doc-upload-retry")?.addEventListener("click", () => {
+        if (pendingFileAction?.file) eseguiUploadFile(pendingFileAction.file, pendingFileAction);
+      });
 
       // Upload testo libero
       docCaricaBtn?.addEventListener("click", async () => {
         const token = beginMutation("text-upload", docCaricaBtn);
         if (!token) return;
+        if (ragEnabled === false) {
+          setUploadStatus("La Knowledge Base non è inclusa nel piano.", "error");
+          endMutation("text-upload", docCaricaBtn);
+          return;
+        }
         const testo = docCaricaTesto.value.trim();
         const nome = docCaricaNome.value.trim() || "documento.txt";
         if (!testo) {
@@ -657,11 +888,13 @@
           const data = await res.json();
           if (!valid()) return;
           const items = (data.documenti || []).filter((d) => d.tipo === "documento" || d.tipo === "upload");
+          lastDocumentList = items;
+          scheduleDocumentPoll();
           const renderToken = capture();
 
           const statusBarText = document.getElementById("kb-doc-status-text");
           const statusUpdatedText = document.getElementById("kb-doc-updated-text");
-          const attivi = items.filter((d) => d.is_active && d.stato !== "errore").length;
+          const attivi = items.filter((d) => d.is_active && d.stato === "indicizzata" && d.index_verified === true).length;
           if (statusBarText) {
             statusBarText.textContent = _tDash("knowledge.runtime.documents_count", "{{active}} documenti attivi su {{total}} totali", { active: attivi, total: items.length });
           }
@@ -676,7 +909,7 @@
           }
 
           items.forEach((doc) => {
-            const isActive = doc.is_active !== false && doc.stato !== "errore";
+            const isActive = doc.is_active !== false && doc.stato === "indicizzata" && doc.index_verified === true;
             const card = document.createElement("div");
             card.className = `kb-item-card ${isActive ? "" : "is-inactive"}`;
 
@@ -691,32 +924,70 @@
             metaRow.className = "kb-item-meta";
 
             const badgeStato = document.createElement("span");
-            if (doc.stato === "errore") {
+            const replacementInProgress = doc.index_status === "in_progress";
+            const replacementFailed = doc.index_status === "failed";
+            const replacementInterrupted = doc.index_status === "interrupted";
+            const hasPublishedVersion = isActive;
+            if (replacementInProgress) {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = _tDash("knowledge.runtime.document_index_update_badge", "Aggiornamento in corso");
+            } else if (replacementFailed || replacementInterrupted) {
               badgeStato.className = "kb-badge kb-badge-danger";
-              badgeStato.textContent = "Errore estrazione";
-              badgeStato.title = doc.errore || "File illeggibile o corrotto";
-            } else if (isActive) {
+              badgeStato.textContent = replacementFailed
+                ? _tDash("knowledge.runtime.document_index_failed_badge", "Aggiornamento non riuscito")
+                : _tDash("knowledge.runtime.document_index_interrupted_badge", "Aggiornamento interrotto");
+            } else if (doc.index_verified === false) {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "Da reindicizzare";
+            } else if (doc.stato === "caricato") {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "Caricato";
+            } else if (doc.stato === "in_elaborazione") {
+              badgeStato.className = "kb-badge kb-badge-warning";
+              badgeStato.textContent = "In elaborazione";
+            } else if (doc.stato === "errore") {
+              badgeStato.className = "kb-badge kb-badge-danger";
+              badgeStato.textContent = "Errore";
+            } else if (doc.stato === "indicizzata" && doc.index_verified === true && isActive) {
               badgeStato.className = "kb-badge kb-badge-success";
               badgeStato.textContent = "Indicizzato";
-            } else {
+            } else if (doc.stato === "indicizzata" && doc.index_verified === true) {
               badgeStato.className = "kb-badge kb-badge-neutral";
               badgeStato.textContent = "Disattivato";
+            } else {
+              badgeStato.className = "kb-badge kb-badge-neutral";
+              badgeStato.textContent = "Stato non disponibile";
             }
 
             const chunkMeta = document.createElement("span");
-            chunkMeta.textContent = `${doc.chunk || 0} chunk`;
+            chunkMeta.textContent = Number.isFinite(doc.chunk) ? `${doc.chunk} segmenti` : "Segmenti n/d";
+
+            const pageMeta = document.createElement("span");
+            const pageCount = doc.pages ?? doc.metadata?.pages;
+            pageMeta.textContent = Number.isFinite(pageCount) ? `${pageCount} pagine` : "Pagine n/d";
 
             const dateMeta = document.createElement("span");
             dateMeta.textContent = `Caricato: ${_formatDataOra(doc.caricato_il)}`;
 
-            metaRow.append(badgeStato, chunkMeta, dateMeta);
+            metaRow.append(badgeStato, chunkMeta, pageMeta, dateMeta);
             main.append(title, metaRow);
+            if (hasPublishedVersion && (replacementInProgress || replacementFailed || replacementInterrupted)) {
+              const updateNotice = document.createElement("p");
+              updateNotice.className = "kb-document-index-update-notice";
+              updateNotice.textContent = _tDash("knowledge.runtime.document_previous_version_available", "La versione precedente resta disponibile.")
+                + " " + (replacementInProgress
+                  ? _tDash("knowledge.runtime.document_index_update_in_progress", "Aggiornamento dell'indice in corso.")
+                  : replacementFailed
+                    ? _tDash("knowledge.runtime.document_index_update_failed", "Aggiornamento dell'indice non riuscito. Puoi riprovare.")
+                    : _tDash("knowledge.runtime.document_index_update_interrupted", "Aggiornamento dell'indice interrotto. Puoi riprovare."));
+              main.appendChild(updateNotice);
+            }
 
             const actions = document.createElement("div");
             actions.className = "kb-item-actions";
 
             // Toggle switch
-            if (doc.stato !== "errore") {
+            if (doc.stato === "indicizzata" && doc.index_verified === true) {
               const switchLabel = document.createElement("label");
               switchLabel.className = "kb-switch";
               switchLabel.title = isActive ? "Disattiva documento" : "Attiva documento";
@@ -749,6 +1020,34 @@
               switchSlider.className = "kb-switch-slider";
               switchLabel.append(switchInput, switchSlider);
               actions.appendChild(switchLabel);
+            }
+
+            if (doc.stato === "errore" || doc.index_verified === false || replacementFailed || replacementInterrupted) {
+              const reindexButton = document.createElement("button");
+              reindexButton.type = "button";
+              reindexButton.className = "report-refresh";
+              reindexButton.textContent = "Reindicizza documento";
+              reindexButton.dataset.documentReindex = "true";
+              reindexButton.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
+              reindexButton.addEventListener("click", () => {
+                if (!card.isConnected || !current(renderToken, true)) return;
+                const picker = document.createElement("input");
+                picker.type = "file";
+                picker.dataset.reindexFilePicker = "true";
+                picker.accept = docFile?.accept || ".pdf,.docx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp";
+                picker.hidden = true;
+                document.body.appendChild(picker);
+                picker.addEventListener("change", async () => {
+                  const original = picker.files?.[0];
+                  picker.remove();
+                  if (!original || !current(renderToken, true)) return;
+                  const action = { file: original, key: newIdempotencyKey(), endpoint:
+                    `${API_BASE}/api/documenti/${encodeURIComponent(doc.id)}/reindicizza` };
+                  await eseguiUploadFile(original, action);
+                }, { once: true });
+                picker.click();
+              });
+              actions.appendChild(reindexButton);
             }
 
             // Delete button
@@ -1319,7 +1618,7 @@
           entryScope = scope;
           active = true;
         },
-        onExit() { active = false; clearWork(); },
+        onExit() { active = false; stopDocumentPolling(); clearWork(); },
         invalidate() { active = false; destroyed = true; clearWork(); clearPrivateDOM(); },
         aggiornaConoscenzaCompleta,
       });
