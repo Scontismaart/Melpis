@@ -29,7 +29,10 @@ def set_env(monkeypatch):
 async def async_client(repo, pg_pool, install_test_identity, sample_org, other_org):
     from src.api.main import app
     await pg_pool.execute(
-        "UPDATE organizations SET subscription_status = 'active', plan = 'business' WHERE id = ANY($1::uuid[])",
+        "UPDATE organizations SET subscription_status = 'trialing', plan = 'business', "
+        "trial_start = now() - interval '1 hour', trial_end = now() + interval '6 days', "
+        "messages_limit = 500, messages_used_this_period = 0 "
+        "WHERE id = ANY($1::uuid[])",
         [sample_org["id"], other_org["id"]],
     )
     install_test_identity(app, API_KEY)
@@ -69,7 +72,7 @@ async def test_configurazione_ai_salvataggio_completo_e_rag_sync(async_client, r
         "lingua_default": "it"
     }
 
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         resp = await async_client.post(
             "/api/onboarding/profilo",
             json=payload,
@@ -83,10 +86,16 @@ async def test_configurazione_ai_salvataggio_completo_e_rag_sync(async_client, r
     assert len(res_data["regole_escalation"]) == 2
 
     # 1. Verifica sincronizzazione RAG Dati Struttura (Priorità 1)
-    with patch("src.core.documenti.rag_context.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.core.documenti.rag_context.vettorizza", side_effect=lambda texts, tipo="query": [[0.1] * 384 for _ in texts]):
         ctx = await recupera_contesto_documenti(str(sample_org["id"]), "quando siete aperti?", repo)
     assert "Mar-Sab: 10:00 - 20:00" in ctx.testo
-    assert any(c["tipo"] == "dati_struttura" for c in ctx.chunks)
+    assert ctx.reason == "verified"
+    structure_chunks = [c for c in ctx.chunks if c["tipo"] == "dati_struttura"]
+    assert structure_chunks
+    assert all(c["stato"] == "indicizzata" and c["is_active"] for c in structure_chunks)
+    structure_sources = await repo.doc_repo.list_sources(sample_org["id"], tipo="dati_struttura")
+    assert any(source["index_verified"] is True and source["stato"] == "indicizzata"
+               for source in structure_sources)
 
     # 2. Verifica prompt del responder per il verticale centro estetico
     bp = await repo.get_org_business_profile(sample_org["id"])
@@ -114,7 +123,7 @@ async def test_configurazione_ai_salvataggio_completo_e_rag_sync(async_client, r
 async def test_bidirezionalita_orari_conoscenza_e_configurazione_ai(async_client, repo, sample_org):
     """Verifica che aggiornando gli orari da Dati struttura in Conoscenza,
     il business profile venga aggiornato e reso disponibile alla Configurazione AI."""
-    with patch("src.api.main.vettorizza", return_value=[[0.1] * 384]):
+    with patch("src.api.main.vettorizza", side_effect=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts]):
         put_res = await async_client.put(
             "/api/conoscenza/dati-struttura",
             json={
@@ -155,13 +164,15 @@ async def test_tone_only_profile_save_invalidates_only_organization_faq_cache(
         str(sample_org["id"]), OnboardingProfileInput(**original), repo
     )
     embedding = [0.1] * 384
+    sample_epoch = await repo.doc_repo.knowledge_version(str(sample_org["id"]))
+    other_epoch = await repo.doc_repo.knowledge_version(str(other_org["id"]))
     await repo.doc_repo.faq_cache_store(
         str(sample_org["id"]), "Quanto costa il massaggio?", "Risposta precedente A",
-        embedding,
+        embedding, expected_epoch=sample_epoch,
     )
     await repo.doc_repo.faq_cache_store(
         str(other_org["id"]), "Quanto costa il massaggio?", "Risposta precedente B",
-        embedding,
+        embedding, expected_epoch=other_epoch,
     )
     payload = {**original, "tono": "formale e istituzionale"}
 
@@ -233,13 +244,21 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
         lambda **values: MessaggioInput(timestamp=received_at, **values),
     )
     question = "Quanto costa il Massaggio Relax?"
-    document = await repo.create_document(
-        str(sample_org["id"]), "listino.txt", tipo="upload", fonte="listino.txt"
-    )
-    await repo.add_chunk(
-        str(sample_org["id"]), str(document["id"]), 0,
-        "Massaggio Relax: 25 euro, durata 50 minuti.", [0.1] * 384,
-        {"fonte": "listino.txt"},
+    from src.core.documenti.indexing import index_content
+
+    async def index_text(name, content):
+        result = await index_content(
+            repo, str(sample_org["id"]), name, text=content,
+            request_key=str(uuid.uuid4()), tipo="upload", fonte="listino.txt",
+            embedding_fn=lambda texts, tipo="passage": [[0.1] * 384 for _ in texts],
+        )
+        assert result["status"] == "indexed"
+        assert result["document"]["index_verified"] is True
+        assert result["document"]["stato"] == "indicizzata"
+        return result["document"]
+
+    document = await index_text(
+        "listino.txt", "Massaggio Relax: 25 euro, durata 50 minuti."
     )
 
     payload = {
@@ -328,13 +347,8 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
         headers=_headers(sample_org["id"]),
     )
     assert removed.status_code == 200
-    updated = await repo.create_document(
-        str(sample_org["id"]), "listino-aggiornato.txt", tipo="upload", fonte="listino.txt"
-    )
-    await repo.add_chunk(
-        str(sample_org["id"]), str(updated["id"]), 0,
-        "Massaggio Relax: 40 euro, durata 50 minuti.", [0.1] * 384,
-        {"fonte": "listino.txt"},
+    updated = await index_text(
+        "listino-aggiornato.txt", "Massaggio Relax: 40 euro, durata 50 minuti."
     )
     await ask()
 
