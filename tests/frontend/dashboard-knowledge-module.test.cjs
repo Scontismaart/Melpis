@@ -20,6 +20,15 @@ function response(status, body) {
 }
 const emptySummary = { faq: {}, documenti: {}, web: {}, dati_struttura: {}, conflitti_totali: 0 };
 const faq = { id: "faq-1", nome: "Orari", metadata: { domanda: "Orari?", risposta: "9–18" }, is_active: true };
+const availableLimits = (overrides = {}) => ({
+  rag_enabled: true, plan: "starter",
+  technical_limits: { upload_bytes: 20 * 1024 * 1024, pages_per_document: 200, chunks_per_document: 500 },
+  usage: { documents: 0, pages: 0, chunks: 0 },
+  file_quota: { status: "available", limit_bytes: 5_000_000, committed_bytes: 0, reserved_bytes: 0,
+    occupied_bytes: 0, remaining_bytes: 5_000_000, unknown_documents: 0, scope: "paid",
+    originals_retained: false, new_uploads_allowed: true, replacements_allowed: true },
+  ...overrides,
+});
 
 function fixture(transport = async (url) => {
   if (url.endsWith("/summary")) return response(200, emptySummary);
@@ -61,7 +70,7 @@ function fixture(transport = async (url) => {
     },
     _escapeHtml: window.MelpisDashboardShared.escapeHtml,
     _sanitize: window.MelpisDashboardShared.sanitize,
-    _tDash: (_key, fallback) => fallback,
+    _tDash: (_key, fallback, values = {}) => fallback.replace(/{{(\w+)}}/g, (_, name) => values[name] ?? `{{${name}}}`),
     localeCorrente: () => "it-IT",
     confermaDestructiva: confirm,
     getContext: () => ({ ...context }),
@@ -209,6 +218,7 @@ test("file upload rejection and retry retain the original input listener", async
   let uploads = 0;
   const h = fixture(async (url, options) => {
     if (options?.method === "POST") return response(++uploads === 1 ? 400 : 200, { detail: "File" });
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
     return response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] });
   });
   t.after(() => h.dom.window.close());
@@ -217,12 +227,15 @@ test("file upload rejection and retry retain the original input listener", async
   const file = new h.window.File(["hello"], "menu.txt", { type: "text/plain" });
   Object.defineProperty(input, "files", { configurable: true, value: [file] });
   h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
   input.dispatchEvent(new h.window.Event("change"));
   await settle();
   assert.equal(uploads, 1);
   h.module.onExit();
   h.context.transition += 1;
   h.module.onEnter();
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
   assert.equal(zone.querySelector("#doc-file"), input);
   input.dispatchEvent(new h.window.Event("change"));
   await settle();
@@ -236,6 +249,7 @@ test("file upload double dispatch makes one request while pending", async (t) =>
   const h = fixture((url, options) => {
     if (options?.method === "POST") { uploads += 1; return delayed.promise; }
     if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
     if (url.endsWith("/elenco") && uploaded) return response(200, { documenti: [
       { id: "uploaded-1", nome: "menu.txt", tipo: "documento", stato: "indicizzata", index_verified: true, is_active: true },
     ] });
@@ -243,6 +257,7 @@ test("file upload double dispatch makes one request while pending", async (t) =>
   });
   t.after(() => h.dom.window.close());
   h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
   const input = h.document.getElementById("doc-file");
   Object.defineProperty(input, "files", { configurable: true,
     value: [new h.window.File(["hello"], "menu.txt", { type: "text/plain" })] });
@@ -259,10 +274,12 @@ test("document limits render backend values and keep missing values unavailable"
   const h = fixture(async (url) => {
     if (url.endsWith("/summary")) return response(200, emptySummary);
     if (url.endsWith("/limiti")) return response(200, {
-      rag_enabled: true, plan: "scala",
+      rag_enabled: true, plan: "starter",
       technical_limits: { upload_bytes: 8 * 1024 * 1024, pages_per_document: 42, chunks_per_document: 90 },
-      commercial_limits: { documents: null, pages: null, status: "not_configured" },
       usage: { documents: 2, pages: 9, chunks: 12 },
+      file_quota: { status: "available", limit_bytes: 12_500_000, committed_bytes: 2_000_000, reserved_bytes: 500_000,
+        occupied_bytes: 2_500_000, remaining_bytes: 10_000_000, unknown_documents: 0, scope: "paid",
+        originals_retained: false, new_uploads_allowed: true, replacements_allowed: true },
     });
     return response(200, { documenti: [] });
   });
@@ -270,14 +287,13 @@ test("document limits render backend values and keep missing values unavailable"
   h.document.querySelector('[data-kb-tab="documenti"]').click();
   await settle();
   const limits = h.document.getElementById("kb-doc-limits");
-  assert.match(limits.textContent, /Piano scala/);
-  assert.match(limits.textContent, /8 MB, 42 pagine, 90 segmenti/);
+  assert.match(limits.textContent, /8 MiB, 42 pagine, 90 segmenti/);
   assert.match(limits.textContent, /2 documenti, 9 pagine, 12 segmenti/);
-  assert.match(limits.textContent, /Limiti commerciali non configurati/);
+  assert.match(limits.textContent, /2,5 MB occupati su 12,5 MB/);
   assert.equal(limits.textContent.includes("100 documenti"), false);
 
   const unknown = fixture(async (url) => url.endsWith("/limiti")
-    ? response(200, { rag_enabled: true, plan: "scala", technical_limits: {}, usage: {}, commercial_limits: { status: "not_configured" } })
+    ? response(200, { rag_enabled: true, plan: "starter", technical_limits: {}, usage: {}, file_quota: { status: "not_configured", new_uploads_allowed: false, replacements_allowed: false } })
     : response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] }));
   t.after(() => unknown.dom.window.close());
   unknown.document.querySelector('[data-kb-tab="documenti"]').click();
@@ -286,28 +302,49 @@ test("document limits render backend values and keep missing values unavailable"
   assert.match(unknown.document.getElementById("kb-doc-limits").textContent, /Utilizzo non disponibile/);
 });
 
-test("plan-blocked Knowledge disables upload controls from the limits response", async (t) => {
+test("RAG access and file quota control separate upload actions", async (t) => {
   const h = fixture(async (url) => {
     if (url.endsWith("/summary")) return response(200, emptySummary);
-    if (url.endsWith("/limiti")) return response(200, {
-      rag_enabled: false, plan: "starter", technical_limits: {}, usage: {},
-      commercial_limits: { documents: null, pages: null, status: "not_configured" },
-    });
+    if (url.endsWith("/limiti")) return response(200, availableLimits({
+      plan: "pro", file_quota: { ...availableLimits().file_quota, status: "full", limit_bytes: 5_000_000,
+        occupied_bytes: 5_000_000, remaining_bytes: 0, new_uploads_allowed: false, replacements_allowed: true },
+    }));
     return response(200, { documenti: [] });
   });
   t.after(() => h.dom.window.close());
   h.document.querySelector('[data-kb-tab="documenti"]').click();
   await settle();
   assert.equal(h.document.getElementById("doc-file").disabled, true);
-  assert.equal(h.document.getElementById("doc-carica-btn").disabled, true);
-  assert.match(h.document.getElementById("kb-doc-limits").textContent, /Knowledge Base non inclusa nel piano/);
+  assert.equal(h.document.getElementById("doc-carica-btn").disabled, false, "pasted text is not part of the original-file quota");
+  assert.match(h.document.getElementById("kb-doc-limits").textContent, /Quota file piena/);
+});
+
+test("the technical per-file limit blocks oversized files before upload", async (t) => {
+  let uploads = 0;
+  const h = fixture(async (url, options) => {
+    if (options?.method === "POST") { uploads += 1; return response(200, {}); }
+    if (url.endsWith("/summary")) return response(200, emptySummary);
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
+    return response(200, { documenti: [] });
+  });
+  t.after(() => h.dom.window.close());
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  const input = h.document.getElementById("doc-file");
+  const file = new h.window.File(["tiny"], "large.pdf", { type: "application/pdf" });
+  Object.defineProperty(file, "size", { configurable: true, value: 21 * 1024 * 1024 });
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  input.dispatchEvent(new h.window.Event("change"));
+  await settle();
+  assert.equal(uploads, 0);
+  assert.match(h.document.getElementById("doc-carica-status").textContent, /20 MiB/);
 });
 
 test("a document list response from a previous organization cannot replace the selected organization's list", async (t) => {
   const oldList = deferred();
   const h = fixture((url) => {
     if (url.endsWith("/summary")) return response(200, emptySummary);
-    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
     return oldList.promise;
   });
   t.after(() => h.dom.window.close());
@@ -330,7 +367,7 @@ test("document lifecycle does not imply readiness for pending, failed, or unveri
   ];
   const h = fixture(async (url) => {
     if (url.endsWith("/summary")) return response(200, emptySummary);
-    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    if (url.endsWith("/limiti")) return response(200, availableLimits());
     return response(200, { documenti: rows });
   });
   t.after(() => h.dom.window.close());
@@ -350,15 +387,21 @@ test("document lifecycle does not imply readiness for pending, failed, or unveri
 test("network retry reuses the upload idempotency key", async (t) => {
   const keys = [];
   let uploads = 0;
+  let limitReads = 0;
   const h = fixture(async (url, options) => {
     if (options?.method === "POST") {
       keys.push(options.headers["Idempotency-Key"]);
       return response(++uploads === 1 ? 503 : 200, { detail: "Retry" });
     }
+    if (url.endsWith("/limiti")) return response(200, limitReads++ === 0 ? availableLimits() : availableLimits({
+      file_quota: { ...availableLimits().file_quota, status: "full", occupied_bytes: 5_000_000,
+        remaining_bytes: 0, new_uploads_allowed: false },
+    }));
     return response(200, url.endsWith("/summary") ? emptySummary : { documenti: [] });
   });
   t.after(() => h.dom.window.close());
   h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
   const input = h.document.getElementById("doc-file");
   Object.defineProperty(input, "files", { configurable: true,
     value: [new h.window.File(["hello"], "retry.pdf", { type: "application/pdf" })] });
@@ -366,6 +409,9 @@ test("network retry reuses the upload idempotency key", async (t) => {
   await settle();
   const retry = h.document.getElementById("kb-doc-upload-retry");
   assert.equal(retry.hidden, false);
+  h.document.querySelector('[data-kb-tab="documenti"]').click();
+  await settle();
+  assert.equal(h.document.getElementById("doc-file").disabled, true, "the updated quota blocks new file keys");
   retry.click();
   await settle();
   assert.equal(keys.length, 2);
@@ -378,7 +424,10 @@ test("reindex uploads the selected original file with a fresh idempotency key", 
   let submitted;
   const h = fixture(async (url, options) => {
     if (url.endsWith("/summary")) return response(200, emptySummary);
-    if (url.endsWith("/limiti")) return response(200, { rag_enabled: true, plan: "scala" });
+    if (url.endsWith("/limiti")) return response(200, availableLimits({ file_quota: {
+      ...availableLimits().file_quota, status: "full", occupied_bytes: 5_000_000, remaining_bytes: 0,
+      new_uploads_allowed: false, replacements_allowed: true,
+    } }));
     if (url.endsWith("/reindicizza") && options?.method === "POST") {
       submitted = { url, options };
       return response(200, { detail: "Accepted" });

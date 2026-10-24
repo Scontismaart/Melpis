@@ -281,31 +281,31 @@ async def test_moving_chunk_invalidates_both_certified_documents(repo, sample_or
     assert all(row["stato"] == "caricato" and not row["index_verified"] for row in rows)
 
 
-@pytest.mark.parametrize("plan", ["starter", "pro"])
-async def test_plans_without_rag_cannot_claim_publication(repo, sample_org, pg_pool, plan):
+@pytest.mark.parametrize("plan", ["starter", "pro", "business"])
+async def test_all_plans_can_claim_publication(repo, sample_org, pg_pool, plan):
     await pg_pool.execute(
         "UPDATE organizations SET plan=$2 WHERE id=$1", sample_org["id"], plan,
     )
 
-    with pytest.raises(ValueError, match="rag_not_authorized"):
-        await _claim(repo, sample_org["id"])
+    claim = await _claim(repo, sample_org["id"])
+    assert claim["status"] == "claimed"
 
 
-async def test_downgrade_between_claim_and_publish_denies_publication(
+async def test_downgrade_keeps_text_publication_available(
     repo, sample_org, pg_pool,
 ):
     org_id = sample_org["id"]
     claim = await _claim(repo, org_id)
     await pg_pool.execute(
-        "UPDATE organizations SET plan='pro' WHERE id=$1", org_id,
+        "UPDATE organizations SET plan='starter' WHERE id=$1", org_id,
     )
 
-    with pytest.raises(ValueError, match="rag_not_authorized"):
-        await _publish(repo, org_id, claim)
+    published = await _publish(repo, org_id, claim)
+    assert published["index_verified"] is True
     assert await pg_pool.fetchval(
         "SELECT count(*) FROM document_chunks WHERE document_id=$1",
         claim["document"]["id"],
-    ) == 0
+    ) == 1
 
 
 async def test_client_roles_cannot_write_documents_chunks_or_faq_cache(pg_pool):

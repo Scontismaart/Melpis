@@ -4,6 +4,7 @@ import json
 import hashlib
 import math
 from uuid import UUID, uuid4
+from src.core.documenti.file_quota import admit, validate_file_evidence
 
 
 class DocumentPublication:
@@ -29,7 +30,9 @@ class DocumentPublication:
         return value
 
     async def begin_index(self, organization_id, name, request_key, payload_hash, *,
-                          tipo="upload", fonte="", document_id=None, expected_profile=None):
+                          tipo="upload", fonte="", document_id=None, expected_profile=None,
+                          file_bytes=0, file_sha256=None):
+        validate_file_evidence(file_bytes, file_sha256)
         key = UUID(str(request_key))
         if not isinstance(payload_hash, str) or len(payload_hash) != 64 or any(c not in "0123456789abcdef" for c in payload_hash):
             raise ValueError("invalid_payload_hash")
@@ -40,7 +43,8 @@ class DocumentPublication:
                     current_profile = json.loads(current_profile)
                 if not isinstance(expected_profile, dict) or current_profile != expected_profile:
                     raise ValueError("profile_changed")
-            specification = {"name": name, "tipo": tipo, "fonte": fonte, "target": str(document_id) if document_id else None, "pipeline": 1}
+            specification = {"name": name, "tipo": tipo, "fonte": fonte, "target": str(document_id) if document_id else None,
+                             "pipeline": 2, "file_bytes": file_bytes, "file_sha256": file_sha256}
             # Keep replay identities without retaining old filenames/URLs in
             # deleted-source tombstones. Full content already has its hash.
             spec = {"signature": hashlib.sha256(json.dumps(specification, sort_keys=True).encode()).hexdigest()}
@@ -69,17 +73,22 @@ class DocumentPublication:
                     raise ValueError("document_not_found")
                 if await conn.fetchval("SELECT $1::timestamptz>clock_timestamp()", existing["index_lease_until"]):
                     return {"status": "conflict", "document": None}
+            await admit(conn, org, existing, file_bytes)
             token = uuid4()
             if existing:
                 row = await conn.fetchrow("""UPDATE documents SET nome=$3,tipo=$4,fonte=$5,index_key=$6,content_hash=$7,
                     index_token=$8,index_fence=index_fence+1,index_lease_until=clock_timestamp()+INTERVAL '660 seconds',
-                    index_verified=FALSE,stato='in_elaborazione',errore='',updated_at=NOW()
-                    WHERE organization_id=$1 AND id=$2 RETURNING *""", org, existing["id"], name, tipo, fonte, key, payload_hash, token)
+                    index_verified=FALSE,stato='in_elaborazione',errore='',updated_at=NOW(),
+                    index_file_bytes=$9,index_file_sha256=$10
+                    WHERE organization_id=$1 AND id=$2 RETURNING *""", org, existing["id"], name, tipo, fonte, key, payload_hash, token,
+                    file_bytes, file_sha256)
             else:
                 row = await conn.fetchrow("""INSERT INTO documents(id,organization_id,nome,tipo,fonte,is_active,stato,
-                    index_key,content_hash,index_token,index_fence,index_lease_until)
-                    VALUES($1,$2,$3,$4,$5,TRUE,'in_elaborazione',$6,$7,$8,1,clock_timestamp()+INTERVAL '660 seconds') RETURNING *""",
-                    uuid4(), org, name, tipo, fonte, key, payload_hash, token)
+                    index_key,content_hash,index_token,index_fence,index_lease_until,
+                    file_bytes,index_file_bytes,index_file_sha256)
+                    VALUES($1,$2,$3,$4,$5,TRUE,'in_elaborazione',$6,$7,$8,1,clock_timestamp()+INTERVAL '660 seconds',
+                    0,$9,$10) RETURNING *""",
+                    uuid4(), org, name, tipo, fonte, key, payload_hash, token, file_bytes, file_sha256)
             if history is None:
                 await conn.execute("""INSERT INTO document_index_requests(organization_id,request_key,document_id,payload_hash,request_spec)
                     VALUES($1,$2,$3,$4,$5::jsonb)""", org, key, row["id"], payload_hash, json.dumps(spec))
@@ -95,6 +104,8 @@ class DocumentPublication:
                 org, UUID(str(document_id)), UUID(str(token)), fence)
             if not row:
                 raise ValueError("index_claim_lost")
+            validate_file_evidence(row["index_file_bytes"], row["index_file_sha256"])
+            await admit(conn, org, row, row["index_file_bytes"])
             await conn.execute("DELETE FROM document_chunks WHERE organization_id=$1 AND document_id=$2", org, row["id"])
             for i, (content, vector) in enumerate(zip(chunks, embeddings)):
                 meta = {"fonte": row["fonte"] or row["nome"], "tipo": row["tipo"], "document_id": str(row["id"]),
@@ -106,7 +117,9 @@ class DocumentPublication:
                     VALUES($1,$2,$3,$4,$5,$6::vector,$7::jsonb)""", uuid4(), org, row["id"], i, content,
                     self._vec_str(vector), json.dumps(meta))
             ready = await conn.fetchrow("""UPDATE documents SET stato='indicizzata',index_verified=TRUE,
-                revision=revision+1,metadata=$5::jsonb,index_token=NULL,index_lease_until=NULL,errore='',updated_at=NOW()
+                revision=revision+1,metadata=$5::jsonb,index_token=NULL,index_lease_until=NULL,errore='',updated_at=NOW(),
+                file_bytes=index_file_bytes,file_sha256=index_file_sha256,
+                index_file_bytes=NULL,index_file_sha256=NULL
                 WHERE organization_id=$1 AND id=$2 AND index_token=$3 AND index_fence=$4
                   AND index_lease_until>clock_timestamp() RETURNING *""", org, row["id"], UUID(str(token)), fence,
                 json.dumps({**metadata, "chunks": len(chunks)}))
@@ -119,6 +132,19 @@ class DocumentPublication:
     async def fail_index(self, organization_id, document_id, token, fence, error_code):
         async with self._publication(organization_id) as (conn, org):
             return bool(await conn.fetchval("""UPDATE documents SET stato='errore',index_verified=FALSE,
-                errore=$5,index_token=NULL,index_lease_until=NULL,updated_at=NOW()
+                errore=$5,index_token=NULL,index_lease_until=NULL,updated_at=NOW(),
+                index_file_bytes=NULL,index_file_sha256=NULL
                 WHERE organization_id=$1 AND id=$2 AND index_token=$3 AND index_fence=$4 RETURNING TRUE""",
                 org, UUID(str(document_id)), UUID(str(token)), fence, error_code))
+
+    async def file_quota_status(self, organization_id):
+        from src.core.documenti.file_quota import snapshot
+        from src.core.documenti.access import snapshot_allows_rag
+        async with self._publication(organization_id) as (conn, org):
+            row = await conn.fetchrow("SELECT *,clock_timestamp() AS verified_now FROM organizations WHERE id=$1", org)
+            status = await snapshot(conn, org)
+            enabled = snapshot_allows_rag(dict(row), org)
+            status["new_uploads_allowed"] = enabled and status["status"] == "available"
+            # The server must still admit each replacement using its exact size.
+            status["replacements_allowed"] = enabled and not status["unknown_documents"]
+            return {"rag_enabled": enabled, "plan": row["plan"], "file_quota": status}

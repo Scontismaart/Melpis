@@ -9,7 +9,10 @@ from src.core.billing.quota_reservations import QuotaConflict, _period
 def snapshot_allows_rag(snapshot, organization_id):
     if not isinstance(snapshot, dict):
         return False
-    plan = PLANS.get(snapshot.get("plan"))
+    slug = snapshot.get("plan")
+    if snapshot.get("subscription_status") == "trialing" and not slug:
+        slug = "pro"  # Preserve the existing authorized-trial capability fallback.
+    plan = PLANS.get(slug)
     if plan is None or not plan.has_rag or snapshot.get("ai_accounting_blocked"):
         return False
     try:

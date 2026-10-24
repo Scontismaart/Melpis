@@ -12,6 +12,7 @@ from src.core.documenti.access import rag_access
 from src.core.documenti.chunking import chunk_testo
 from src.core.documenti.embeddings import vettorizza
 from src.core.documenti.isolated import embed_local, extract_local
+from src.core.documenti.file_quota import FileQuotaError, http_error
 
 _index_locks = weakref.WeakKeyDictionary()
 
@@ -48,17 +49,24 @@ async def _index_content(repo, org_id, name, *, request_key=None, text=None, fil
     if not source or len(source) > limits.UPLOAD_BYTES:
         raise HTTPException(413, "Dimensione documento non consentita.")
     metadata = {key: value for key, value in (metadata or {}).items()
-                if key not in {"pages", "ocr_pages", "bytes", "chunk_pages", "chunks"}}
+                if key not in {"pages", "ocr_pages", "bytes", "chunk_pages", "chunks",
+                               "original_file_bytes", "original_file_sha256"}}
+    original_bytes = len(file_content) if file_content is not None else 0
+    original_hash = hashlib.sha256(file_content).hexdigest() if file_content is not None else None
     spec = {"content": hashlib.sha256(source).hexdigest(), "name": name,
             "tipo": tipo, "fonte": fonte, "target": str(document_id) if document_id else None,
-            "content_type": content_type, "metadata": metadata or {}, "pipeline": 1,
+            "content_type": content_type, "metadata": metadata or {}, "pipeline": 2,
+            "original_file_bytes": original_bytes, "original_file_sha256": original_hash,
             "expected_profile": expected_profile}
     payload_hash = hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
     try:
         key = UUID(str(request_key)) if request_key else uuid5(UUID(str(org_id)), payload_hash)
         documents = document_repository(repo)
         claim = await documents.begin_index(org_id, name, key, payload_hash, tipo=tipo,
-                                             fonte=fonte, document_id=document_id, expected_profile=expected_profile)
+                                             fonte=fonte, document_id=document_id, expected_profile=expected_profile,
+                                             file_bytes=original_bytes, file_sha256=original_hash)
+    except FileQuotaError as exc:
+        raise http_error(exc) from None
     except ValueError as exc:
         if str(exc) == "rag_not_authorized":
             raise HTTPException(403, "Knowledge Base AI non disponibile.") from None
@@ -115,6 +123,8 @@ async def _index_content(repo, org_id, name, *, request_key=None, text=None, fil
             pass  # Still not certified; expiry permits a fenced, explicit retry.
         if isinstance(exc, asyncio.CancelledError):
             raise
+        if isinstance(exc, FileQuotaError):
+            raise http_error(exc) from None
         raise HTTPException(422, messages.get(code, "Indicizzazione non completata. Verifica il file o riprova; nessuna fonte parziale e disponibile.")) from None
 
 
@@ -127,8 +137,11 @@ async def knowledge_limits(repo, org_id):
             metadata = json.loads(metadata)
         usage["pages"] += int(metadata.get("pages") or 0)
         usage["chunks"] += int(document.get("chunk") or 0)
-    async with repo.pool.acquire() as conn:
-        plan = await conn.fetchval("SELECT plan FROM organizations WHERE id=$1", UUID(str(org_id)))
-    return {"rag_enabled": await rag_access(repo, org_id), "plan": plan,
+    current = await document_repository(repo).file_quota_status(org_id)
+    quota = current["file_quota"]
+    usage.update(file_bytes=quota["committed_bytes"], reserved_file_bytes=quota["reserved_bytes"],
+                 unknown_file_sources=quota["unknown_documents"])
+    return {**current,
             "technical_limits": limits.technical_limits(), "usage": usage,
-            "commercial_limits": {"documents": None, "pages": None, "status": "not_configured"}, "remaining": None}
+            "commercial_limits": {"file_bytes": quota["limit_bytes"], "status": quota["status"]},
+            "remaining": {"file_bytes": quota["remaining_bytes"]}}

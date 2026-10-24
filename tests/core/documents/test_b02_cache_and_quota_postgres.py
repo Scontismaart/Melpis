@@ -11,8 +11,8 @@ from tests.core.test_quota_reservation_lifecycle import _organization, _auth_mem
 pytestmark = pytest.mark.asyncio
 
 
-async def _fixture(pool, repo):
-    org = await _organization(pool)
+async def _fixture(pool, repo, *, status="trialing"):
+    org = await _organization(pool, status=status)
     await pool.execute("UPDATE organizations SET plan='business' WHERE id=$1", org['id'])
     actor = await _auth_member(pool, org['id'])
     documents = repo.doc_repo
@@ -32,7 +32,7 @@ async def test_late_cache_write_rejected_after_source_toggle(pg_pool, repo):
     assert await pg_pool.fetchval('SELECT count(*) FROM faq_cache WHERE organization_id=$1', org) == 0
 
 
-@pytest.mark.parametrize('change', ['toggle', 'delete', 'profile', 'downgrade'])
+@pytest.mark.parametrize('change', ['toggle', 'delete', 'profile'])
 async def test_changed_evidence_prevents_commercial_commit(pg_pool, repo, change):
     org, actor, doc = await _fixture(pg_pool, repo)
     quota = QuotaReservations(pg_pool)
@@ -48,8 +48,6 @@ async def test_changed_evidence_prevents_commercial_commit(pg_pool, repo, change
         await repo.delete_document(org, doc['id'])
     elif change == 'profile':
         await pg_pool.execute("UPDATE organizations SET business_profile='{" + '"nome":"Profilo nuovo"' + "}'::jsonb WHERE id=$1", org)
-    else:
-        await pg_pool.execute("UPDATE organizations SET plan='starter' WHERE id=$1", org)
     with pytest.raises(QuotaConflict):
         await quota.commit(operation, reserved['ticket'], final)
     assert await pg_pool.fetchval('SELECT messages_used_this_period FROM organizations WHERE id=$1', org) == 0
@@ -105,3 +103,27 @@ async def test_qa_profile_change_denies_even_when_pdf_revision_is_unchanged(pg_p
     with pytest.raises(QuotaConflict):
         await quota.commit(operation, ticket, final)
     assert await pg_pool.fetchval('SELECT messages_used_this_period FROM organizations WHERE id=$1', org) == 0
+
+
+@pytest.mark.parametrize("target_plan", ["starter", "pro", "business"])
+async def test_a04_commit_remains_valid_after_plan_change_between_rag_plans(
+    pg_pool, repo, target_plan,
+):
+    org, actor, doc = await _fixture(pg_pool, repo, status="active")
+    quota = QuotaReservations(pg_pool)
+    operation = _operation(org, actor_id=actor)
+    reserved = await quota.reserve(operation)
+    final = validate_final_response(
+        operation, reserved["ticket"],
+        RispostaOutput(risposta="Informazioni sintetiche aggiornate.",
+                       richiede_umano=False, motivo="", categoria="faq"),
+        knowledge_epoch=await repo.doc_repo.knowledge_version(org),
+    )
+
+    await pg_pool.execute("UPDATE organizations SET plan=$2 WHERE id=$1", org, target_plan)
+
+    committed = await quota.commit(operation, reserved["ticket"], final)
+    assert committed["status"] == "committed"
+    assert await pg_pool.fetchval(
+        "SELECT messages_used_this_period FROM organizations WHERE id=$1", org,
+    ) == 1

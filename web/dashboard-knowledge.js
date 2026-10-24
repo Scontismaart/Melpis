@@ -104,6 +104,14 @@
         tabGeneration += 1;
         Object.keys(readGenerations).forEach((key) => { readGenerations[key] += 1; });
         pendingReads.clear();
+        ragEnabled = null;
+        newFileUploadsAllowed = false;
+        fileReplacementsAllowed = false;
+        technicalUploadBytes = null;
+        pendingFileAction = null;
+        const retryButton = document.getElementById("kb-doc-upload-retry");
+        if (retryButton) retryButton.hidden = true;
+        applyDocumentPermissions();
         for (const [button, initial] of busyButtons) {
           button.innerHTML = initial.html;
           button.disabled = initial.disabled;
@@ -550,6 +558,9 @@
       let documentPollTimer = null;
       let lastDocumentList = [];
       let ragEnabled = null;
+      let newFileUploadsAllowed = false;
+      let fileReplacementsAllowed = false;
+      let technicalUploadBytes = null;
 
       function newIdempotencyKey() {
         if (root.crypto?.randomUUID) return root.crypto.randomUUID();
@@ -563,8 +574,50 @@
       }
       function formatLimitBytes(value) {
         if (!Number.isFinite(value) || value <= 0) return null;
-        return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toLocaleString(localeCorrente())} MB`
-          : `${Math.ceil(value / 1024).toLocaleString(localeCorrente())} KB`;
+        return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toLocaleString(localeCorrente())} MiB`
+          : `${Math.ceil(value / 1024).toLocaleString(localeCorrente())} KiB`;
+      }
+      function formatQuotaMegabytes(value) {
+        if (!Number.isFinite(value) || value < 0) return null;
+        return (value / 1_000_000).toLocaleString(localeCorrente(), { maximumFractionDigits: 2 });
+      }
+      function fileQuotaText(quota) {
+        if (!quota || typeof quota !== "object") {
+          return _tDash("knowledge.runtime.file_quota_unknown", "Quota file non disponibile");
+        }
+        const occupied = formatQuotaMegabytes(quota.occupied_bytes);
+        const limit = formatQuotaMegabytes(quota.limit_bytes);
+        const committed = formatQuotaMegabytes(quota.committed_bytes);
+        const reserved = formatQuotaMegabytes(quota.reserved_bytes);
+        const remaining = formatQuotaMegabytes(quota.remaining_bytes);
+        if (quota.status === "not_configured") {
+          return _tDash("knowledge.runtime.file_quota_not_configured", "PDF/RAG incluso; quota file da definire");
+        }
+        if (quota.status === "historical_usage_unknown") {
+          return _tDash("knowledge.runtime.file_quota_historical_unknown", "Uso storico dei file da verificare");
+        }
+        if (quota.status === "available" && occupied !== null && limit !== null
+          && committed !== null && reserved !== null && remaining !== null) {
+          return _tDash("knowledge.runtime.file_quota_available",
+            "Quota file: {{occupied}} MB occupati su {{limit}} MB ({{committed}} MB acquisiti, {{reserved}} MB riservati; {{remaining}} MB disponibili)",
+            { occupied, limit, committed, reserved, remaining });
+        }
+        if (quota.status === "full" && occupied !== null && limit !== null) {
+          return _tDash("knowledge.runtime.file_quota_full", "Quota file piena: {{occupied}} MB occupati su {{limit}} MB", { occupied, limit });
+        }
+        if (quota.status === "over_limit" && occupied !== null && limit !== null) {
+          return _tDash("knowledge.runtime.file_quota_over_limit", "Uso file sopra quota: {{occupied}} MB su {{limit}} MB", { occupied, limit });
+        }
+        return _tDash("knowledge.runtime.file_quota_unknown", "Quota file non disponibile");
+      }
+      function applyDocumentPermissions() {
+        const fileControlsDisabled = ragEnabled !== true || newFileUploadsAllowed !== true;
+        if (docFile) docFile.disabled = fileControlsDisabled;
+        if (kbDocDropzone) kbDocDropzone.setAttribute("aria-disabled", String(fileControlsDisabled));
+        if (docCaricaBtn) docCaricaBtn.disabled = ragEnabled !== true;
+        document.querySelectorAll("[data-document-reindex]").forEach((button) => {
+          button.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
+        });
       }
       function displayDocumentLimits(data) {
         if (!docLimits) return;
@@ -574,22 +627,21 @@
         const usageValues = [usage?.documents, usage?.pages, usage?.chunks];
         const supported = values.every(Number.isFinite);
         const usageKnown = usageValues.every(Number.isFinite);
-        const plan = typeof data?.plan === "string" && data.plan ? `Piano ${data.plan}` : "Piano non disponibile";
-        const commercial = data?.commercial_limits;
-        const commercialConfigured = commercial?.status !== "not_configured" && commercial
-          && [commercial.documents, commercial.pages].some(Number.isFinite);
-        const parts = [plan, data?.rag_enabled === true ? "Knowledge Base attiva" : data?.rag_enabled === false
-          ? "Knowledge Base non inclusa nel piano" : "Disponibilità Knowledge Base non disponibile"];
+        const parts = [data?.rag_enabled === true
+          ? _tDash("knowledge.runtime.rag_available", "PDF/RAG incluso")
+          : _tDash("knowledge.runtime.rag_unavailable", "Knowledge Base non disponibile con l'abbonamento o lo stato attuale")];
         if (supported) parts.push(`Limiti tecnici per file: ${formatLimitBytes(values[0]) || "non disponibili"}, ${values[1]} pagine, ${values[2]} segmenti`);
         else parts.push("Limiti tecnici non disponibili");
         if (usageKnown) parts.push(`Utilizzo: ${usageValues[0]} documenti, ${usageValues[1]} pagine, ${usageValues[2]} segmenti`);
         else parts.push("Utilizzo non disponibile");
-        parts.push(commercialConfigured ? "Limiti del piano disponibili" : "Limiti commerciali non configurati");
+        parts.push(fileQuotaText(data?.file_quota));
         docLimits.textContent = parts.join(" · ");
         ragEnabled = data?.rag_enabled === true ? true : data?.rag_enabled === false ? false : null;
-        if (docFile) docFile.disabled = data?.rag_enabled !== true;
-        if (docCaricaBtn) docCaricaBtn.disabled = data?.rag_enabled !== true;
-        if (kbDocDropzone) kbDocDropzone.setAttribute("aria-disabled", String(data?.rag_enabled !== true));
+        newFileUploadsAllowed = data?.file_quota?.new_uploads_allowed === true;
+        fileReplacementsAllowed = data?.file_quota?.replacements_allowed === true;
+        technicalUploadBytes = Number.isSafeInteger(technical?.upload_bytes) && technical.upload_bytes > 0
+          ? technical.upload_bytes : null;
+        applyDocumentPermissions();
       }
       async function loadDocumentLimits() {
         if (!docLimits) return;
@@ -657,7 +709,9 @@
 
       // Setup drag and drop
       if (kbDocDropzone && docFile) {
-        kbDocDropzone.addEventListener("click", () => { if (current(capture())) docFile.click(); });
+        kbDocDropzone.addEventListener("click", () => {
+          if (current(capture()) && !docFile.disabled) docFile.click();
+        });
         kbDocDropzone.addEventListener("dragover", (e) => {
           e.preventDefault();
           if (!current(capture())) return;
@@ -682,14 +736,32 @@
       }
 
       async function eseguiUploadFile(file, action = null) {
+        const isReplacement = typeof action?.endpoint === "string" && action.endpoint.includes("/reindicizza");
+        const isSameIdempotentRetry = Boolean(action && pendingFileAction === action && action.key);
+        if (ragEnabled !== true) {
+          setUploadStatus(_tDash("knowledge.runtime.rag_unavailable", "Knowledge Base non disponibile con l'abbonamento o lo stato attuale"), "error");
+          return;
+        }
+        if (isReplacement ? fileReplacementsAllowed !== true : newFileUploadsAllowed !== true && !isSameIdempotentRetry) {
+          const key = isReplacement ? "knowledge.runtime.file_replacements_blocked" : "knowledge.runtime.file_uploads_blocked";
+          const fallback = isReplacement
+            ? "La sostituzione dei file non è disponibile nello stato corrente."
+            : "Il caricamento di nuovi file non è disponibile per la quota o lo stato corrente.";
+          setUploadStatus(_tDash(key, fallback), "error");
+          return;
+        }
+        if (!Number.isSafeInteger(technicalUploadBytes) || technicalUploadBytes <= 0) {
+          setUploadStatus(_tDash("knowledge.runtime.file_limit_unknown", "Limite tecnico per file non disponibile; ricarica i limiti e riprova."), "error");
+          return;
+        }
+        if (!file || !Number.isFinite(file.size) || file.size > technicalUploadBytes) {
+          const max = formatLimitBytes(technicalUploadBytes) || "20 MiB";
+          setUploadStatus(_tDash("knowledge.runtime.file_too_large", "Il file supera il limite tecnico di {{max}}.", { max }), "error");
+          return;
+        }
         const token = beginMutation("file-upload");
         if (!token) return;
         if (!docCaricaStatus) { endMutation("file-upload"); return; }
-        if (ragEnabled === false) {
-          setUploadStatus("La Knowledge Base non è inclusa nel piano.", "error");
-          endMutation("file-upload");
-          return;
-        }
         const currentAction = action || { file, key: newIdempotencyKey(), endpoint: `${API_BASE}/api/documenti/carica-file` };
         pendingFileAction = currentAction;
         setUploadStatus(`Caricamento di "${file.name}" e indicizzazione in corso…`);
@@ -703,6 +775,8 @@
           await refresh("documenti", caricaDocumenti);
           if (!current(token)) return;
           await refresh("summary", caricaKBSummary);
+          if (!current(token)) return;
+          await loadDocumentLimits();
           if (!current(token)) return;
           const matching = lastDocumentList.find((item) => result?.id && item.id === result.id)
             || lastDocumentList.find((item) => item.nome === file.name);
@@ -908,6 +982,8 @@
               reindexButton.type = "button";
               reindexButton.className = "report-refresh";
               reindexButton.textContent = "Reindicizza documento";
+              reindexButton.dataset.documentReindex = "true";
+              reindexButton.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
               reindexButton.addEventListener("click", () => {
                 if (!card.isConnected || !current(renderToken, true)) return;
                 const picker = document.createElement("input");

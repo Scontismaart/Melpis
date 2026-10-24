@@ -1,7 +1,7 @@
 # B02 PDF and RAG implementation review
 
 **State: implementation review; not a release or cutover certification.**
-Migration 065 is present in the working tree but has **not** been applied to
+Migrations 065/066 are present in source but have **not** been applied to
 the remote database. Local PostgreSQL publication tests (25) and a real
 Valkey concurrency test passed. Another 82 wider PostgreSQL regressions
 also passed. Final SHA-specific CI/audit/build results are recorded in PR #132;
@@ -48,18 +48,21 @@ generation or exposure, callers revalidate entitlement and epoch again.
 
 ## Ingress and entitlement matrix
 
-RAG remains available only to eligible Scala organizations. Essenziale and
-Crescita remain unchanged with RAG disabled. A03/A04 accounting and admission
-remain separate from this feature; B02 makes no entitlement, reservation, or
-quota-policy changes. Retrieval failure or an empty result falls back without
+The founder revised the commercial contract after c29274f7: PDF/RAG is
+included in Essenziale, Crescita and Scala, including an authorized trial.
+Prices and response quotas remain 29/69/149 EUR and 500/2,000/10,000 monthly
+responses; trial generation remains limited to seven days or 150 responses.
+A03/A04 admission, accounting and final-response quotas remain separate.
+Only original uploaded file bytes differentiate commercial RAG capacity.
+No numeric paid or trial file budget has been approved or configured. Retrieval failure or an empty result falls back without
 document context; a stale non-empty context is denied before generation.
 
-| Path | Current integration | Scala and A03/A04 behavior |
+| Path | Current integration | Current plan/trial and A03/A04 behavior |
 | --- | --- | --- |
 | Inbound legacy | `src/core/inbound/legacy_pipeline.py` uses shared retrieval and checks context freshness around generation. | Entitlement is checked at retrieval and again before use; existing A03/A04 path remains authoritative. |
 | Inbound orchestrated | `src/core/receptionist/conversation_orchestrator.py` uses shared retrieval and freshness checks. | Same RAG gate; no change to A03/A04 admission or accounting. |
-| Simulator | `src/api/routes/simulator.py` retrieves context and revalidates it around generation. | Scala gate applies; authenticated simulations retain the existing A04 reservation, canonical commit and replay contract; anonymous demo remains separate. |
-| Preview | `src/core/onboarding.py` uses shared retrieval and checks current context. | Scala gate applies; existing preview flow and accounting are unchanged. |
+| Simulator | `src/api/routes/simulator.py` retrieves context and revalidates it around generation. | Valid current-plan/trial gate applies; authenticated simulations retain the existing A04 reservation, canonical commit and replay contract; anonymous demo remains separate. |
+| Preview | `src/core/onboarding.py` uses shared retrieval and checks current context. | Valid current-plan/trial gate applies; existing preview flow and accounting are unchanged. |
 | Reviews | `src/api/routes/simulator.py` and `src/core/reviews/google_service.py` use shared retrieval for review drafts. | RAG access is checked; A03/A04 review-generation controls remain separate. |
 | Knowledge QA | `src/core/documenti/qa_agent.py` uses the shared retrieval and safe prompt serialization. | RAG access is checked; existing QA generation admission remains in force. |
 
@@ -77,7 +80,7 @@ through the canonical publisher; no migration or startup path should infer
 verification from legacy state.
 
 The C01 cutover runbook must cover backups and a tested restore for migrations
-060 through 065, verify the actual target schema, drain old application
+060 through 066, verify the actual target schema, drain old application
 writers before enabling the new publisher, and record the deployment/worker
 state. Rollback is a deliberate operator procedure with compatible code and
 database state; there is no automatic schema rollback. Do not cut over until
@@ -134,11 +137,17 @@ The final PR check suite must pass application validation, installed-runtime
 audit, Migration check and all four API/web architecture builds. Initial
 failed runs are not certification of the corrected head. C03 must use
 the approved real-provider certification procedure; this document performs
-no provider calls and grants no C03 readiness. No automatic commercial limits
-are configured (`commercial_limits` remain `NULL`). The proposed Scala
-allowance of 20 documents and 200 aggregate pages is a conservative option for
-founder approval and evaluation only. The 100-document/500-page values are an
-unvalidated hypothesis. Neither proposal is implemented or advertised.
+no provider calls and grants no C03 readiness.
+
+The only commercial file limits are original bytes. Plan and trial budgets
+remain `None` (not configured, never unlimited). New uploaded files/growth
+are blocked until approved budgets exist; lookup, manual knowledge sources
+and dashboard access are independent. Existing known-file replacements that
+do not increase their charge remain possible. The earlier proposal of a
+commercial document/page allowance is withdrawn; those counts are usage
+information only. See [the MB proposal](b02-file-quota-policy.md), which is
+not an activated entitlement.
+
 
 ## Dependency audit correction
 
@@ -190,3 +199,51 @@ is therefore 1 GiB; it remains independent of the 2 GiB embedding ceiling.
 This certifies that synthetic OCR case, not arbitrary scan accuracy or a
 second concurrently resident embedding model. C01 must budget both children,
 API, PostgreSQL and OS headroom before activation.
+
+## Founder-approved requirement change: file bytes, all plans
+
+Migration 066 adds original file byte/hash evidence and pending byte/hash
+fields directly to documents. Original uploads are not retained. Authoritative
+values come from server-side `len(file_content)` and SHA-256, never filename,
+MIME, source type, client metadata, extracted text or vector storage size.
+A non-file source has explicitly known zero original-file bytes; a historical
+row without provenance remains NULL/unknown, including old manual sources.
+
+`DocumentPublication` reuses the existing organization lock, request ledger,
+lease token and fencing generation. Occupancy is the sum of max(committed,
+pending) per document, derived from these rows rather than a second mutable
+counter. Claim reserves before extraction/embedding; publication rechecks the
+current plan/trial policy and atomically settles the exact original bytes.
+Replay cannot add a reservation. Expiry alone cannot release it; a new fenced
+claim or a verified terminal transition is required. A failed replacement
+releases only its pending increment. A successful smaller replacement or an
+explicit tenant-scoped deletion lowers occupancy; inactive files still count.
+
+Billing renewal/trial conversion does not reset file usage. Upgrade uses the
+current approved plan budget. Downgrade preserves stored content and read
+access; existing-file replacements can keep/reduce a known charge, while
+new/growing sources may not exceed the current budget. A plan change during
+preparation is checked again before publication. A03/A04 still gate provider
+calls and response consumption independently of file storage capacity.
+
+C01 must inventory historical NULL values before enabling new file uploads.
+Do not backfill `metadata.bytes`, document type, text length or SQL relation
+size as an original-byte measurement. An unknown row may not be converted
+silently to zero by a text replacement. A separately verified reconciliation,
+or explicit owner deletion and fresh upload, is required. No remote migration
+or such historical modification is authorized by this PR. The dashboard
+reports unknown counts and prevents unjustified remaining-MB claims.
+
+All source kinds retain common technical ceilings, rate limits, admission
+serialization and process budgets. There are no new commercial document/page
+limits. FAQ/manual/web/structured content consumes no original-file quota,
+but still passes the bounded publication/retrieval and authorization paths.
+The earlier c29274f7 CI is historical evidence only: new checks must pass on
+the revised head before independent review.
+
+The existing full MiniLM/PostgreSQL pipeline receipt predates the founder
+requirement change; its source hashes identify that earlier contract. New
+file-quota lifecycle evidence comes from the disposable PostgreSQL regression
+suite. A fresh local pipeline rerun was unavailable because Docker/WSL failed
+to start; no new end-to-end model/quota result is claimed. The updated local
+probe supports an explicit synthetic allowance and records it separately.

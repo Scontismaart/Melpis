@@ -198,6 +198,7 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                 rows = await conn.fetch("""
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
                            d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
+                           d.file_bytes, d.index_file_bytes,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
@@ -210,6 +211,7 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                 rows = await conn.fetch("""
                     SELECT d.id, d.nome, d.tipo, d.fonte, d.is_active, d.stato, d.errore,
                            d.metadata, d.caricato_il, d.updated_at, d.index_verified, d.revision,
+                           d.file_bytes, d.index_file_bytes,
                            COUNT(dc.id) AS chunk
                     FROM documents d
                     LEFT JOIN document_chunks dc ON dc.document_id = d.id
