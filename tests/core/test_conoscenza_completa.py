@@ -115,7 +115,7 @@ async def test_web_import_success_and_error(async_client, sample_org):
             headers=_headers(sample_org["id"]),
         )
         assert res.status_code == 200
-        res.json()["id"]
+        web_id = res.json()["id"]
 
         list_res = await async_client.get(
             "/api/documenti/elenco?tipo=web",
@@ -136,15 +136,19 @@ async def test_web_import_success_and_error(async_client, sample_org):
             headers=_headers(sample_org["id"]),
         )
         assert err_res.status_code == 422
-        # La fonte fallita deve comunque essere salvata come record con stato 'errore' per la UI
+        # Fetch validation fails before publication is claimed. Report the
+        # HTTP error to the UI without manufacturing an indexed/failed source.
         list_all = await async_client.get(
             "/api/documenti/elenco?tipo=web",
             headers=_headers(sample_org["id"]),
         )
-        error_items = [d for d in list_all.json()["documenti"] if d["stato"] == "errore"]
-        assert len(error_items) == 1
-        assert "404" in error_items[0]["errore"]
-        assert error_items[0]["is_active"] is False
+        assert "404" in err_res.json()["detail"]
+        remaining = list_all.json()["documenti"]
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == web_id
+        assert remaining[0]["stato"] == "indicizzata"
+        assert remaining[0]["index_verified"] is True
+        assert remaining[0]["is_active"] is True
 
 
 async def test_dati_struttura_sync_and_conflict_detection(async_client, repo, sample_org):

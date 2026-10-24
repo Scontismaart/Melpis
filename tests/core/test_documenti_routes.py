@@ -259,7 +259,7 @@ async def test_upload_documento_invalida_cache_faq(async_client, repo, pg_pool, 
 
     wrepo = WhatsAppRepository(pool=pg_pool)
     organization_id = str(sample_org["id"])
-    epoch = await wrepo.knowledge_version(organization_id)
+    epoch = await wrepo.doc_repo.knowledge_version(organization_id)
     stored = await wrepo.faq_cache_store(
         organization_id, "quanto costa?", "8 euro", [0.1] * 384,
         expected_epoch=epoch,
