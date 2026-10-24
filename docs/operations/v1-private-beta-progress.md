@@ -1,7 +1,7 @@
 # Melpis V1 private beta progress register
 
-**Intake snapshot date:** 2026-10-24  
-**Repository:** [Scontismaart/Melpis](https://github.com/Scontismaart/Melpis)  
+**Intake snapshot date:** 2026-10-24
+**Repository:** [Scontismaart/Melpis](https://github.com/Scontismaart/Melpis)
 **Purpose:** evidence-based readiness register for the private beta. This records GitHub state and the roadmap snapshot; it does not certify remote infrastructure, providers, or production.
 
 ## 1. Executive snapshot
@@ -187,4 +187,3 @@ after testing; other local Supabase services are left running as instructed.
 - GitHub PRs: [#103](https://github.com/Scontismaart/Melpis/pull/103), [#119](https://github.com/Scontismaart/Melpis/pull/119), [#120](https://github.com/Scontismaart/Melpis/pull/120), [#122](https://github.com/Scontismaart/Melpis/pull/122), [#123](https://github.com/Scontismaart/Melpis/pull/123), [#130](https://github.com/Scontismaart/Melpis/pull/130), [#131](https://github.com/Scontismaart/Melpis/pull/131), [#132](https://github.com/Scontismaart/Melpis/pull/132).
 - Current #132 exact-head runs: [CI 40096981755](https://github.com/Scontismaart/Melpis/actions/runs/40096981755), [Migration 40096981661](https://github.com/Scontismaart/Melpis/actions/runs/40096981661).
 - Current main runs: [CI 40001253658](https://github.com/Scontismaart/Melpis/actions/runs/40001253658), [Migration 40001253651](https://github.com/Scontismaart/Melpis/actions/runs/40001253651).
-
