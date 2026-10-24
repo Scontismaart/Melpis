@@ -88,3 +88,20 @@ async def test_late_claim_cannot_republish_old_profile(pg_pool, repo):
     await pg_pool.execute("UPDATE organizations SET plan='business',business_profile=$2::jsonb WHERE id=$1", org['id'], '{"nome":"Nuovo"}')
     with pytest.raises(ValueError, match='profile_changed'):
         await repo.doc_repo.begin_index(org['id'], 'Profilo', uuid4(), hashlib.sha256(b'old').hexdigest(), tipo='dati_struttura', expected_profile={'nome':'Vecchio'})
+
+
+async def test_qa_profile_change_denies_even_when_pdf_revision_is_unchanged(pg_pool, repo):
+    from src.core.billing.quota_reservations import validate_qa_final_response
+    org, actor, doc = await _fixture(pg_pool, repo)
+    quota = QuotaReservations(pg_pool)
+    operation = _operation(org, actor_id=actor, channel='qa')
+    ticket = (await quota.reserve(operation))['ticket']
+    final = validate_qa_final_response(operation, ticket, {
+        'risposta':'Informazioni sintetiche aggiornate.',
+        'fonti':[{'documento':'synthetic.pdf','tipo':'upload','score':0.1,
+                  'priorita':3,'document_id':str(doc['id']),'revision':doc['revision']}],
+    }, knowledge_epoch=await repo.doc_repo.knowledge_version(org))
+    await pg_pool.execute('UPDATE organizations SET business_profile=$2::jsonb WHERE id=$1', org, '{"nome":"Changed during QA"}')
+    with pytest.raises(QuotaConflict):
+        await quota.commit(operation, ticket, final)
+    assert await pg_pool.fetchval('SELECT messages_used_this_period FROM organizations WHERE id=$1', org) == 0

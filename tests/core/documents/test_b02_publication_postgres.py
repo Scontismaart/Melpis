@@ -124,6 +124,14 @@ async def test_same_idempotency_key_with_different_payload_conflicts(repo, sampl
     assert second["document"] is None
 
 
+async def test_legacy_metadata_writer_cannot_promote_a_verified_source(repo, sample_org):
+    claim = await _claim(repo, sample_org["id"])
+    await _publish(repo, sample_org["id"], claim)
+    changed = await repo.update_document(sample_org["id"], claim["document"]["id"], tipo="dati_struttura")
+    assert changed["index_verified"] is False
+    assert await repo.search_similar(sample_org["id"], _vectors()[0]) == []
+
+
 async def test_idempotency_key_is_tenant_scoped(repo, sample_org, other_org):
     key = str(uuid.uuid4())
     first = await _claim(repo, sample_org["id"], key=key)
@@ -315,4 +323,3 @@ async def test_client_roles_cannot_write_documents_chunks_or_faq_cache(pg_pool):
                 "SELECT has_table_privilege($1, 'faq_cache', $2)", role, privilege,
             )
             assert allowed is False, f"{role} unexpectedly has {privilege} on faq_cache"
-

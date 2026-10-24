@@ -3,6 +3,8 @@ APScheduler==3.11.3
 asyncpg==0.31.0
 crewai[litellm]==1.15.4
 crewai-core==1.15.4
+# Explicit safe SDK version per upstream incident advisory; never resolve 1.107.0.
+litellm==1.106.2
 # Exact security-fixed SDK; install through scripts/reviewed_runtime.py.
 mcp==1.30.0
 # CVE-2026-114603: align the official fixed OTel family through the reviewed builder.
@@ -11,6 +13,10 @@ opentelemetry-sdk==1.45.1
 opentelemetry-exporter-otlp-proto-http==1.45.1
 cryptography==50.0.1
 fastapi==0.139.2
+# Compatible unaffected release: fixes CVE-2026-22701/2025-68146 and predates
+# the new RW-lock/oplock paths affected by CVE-2026-112907/-112913/-112940.
+# LiteLLM requires filelock<4; retain normal resolver/audit, no metadata override.
+filelock==3.20.3
 google-api-python-client==2.198.0
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0

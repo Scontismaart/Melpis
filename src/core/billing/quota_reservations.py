@@ -226,6 +226,7 @@ def validate_final_response(
 def validate_qa_final_response(
     operation: QuotaOperation, ticket: QuotaTicket, response: dict, *,
     context_chunks: list[dict] | None = None, profile: ProfiloAttivita | None = None,
+    knowledge_epoch: int | None = None,
 ) -> FinalQuotaResponse:
     """Guardrail and bind the complete, safe document-Q&A response for replay."""
     if (type(operation) is not QuotaOperation or operation.channel != "qa"
@@ -267,13 +268,13 @@ def validate_qa_final_response(
         operation, ticket,
         RispostaOutput(risposta=response["risposta"], richiede_umano=False,
                        motivo="", categoria="document_qa"),
-        context_chunks=context_chunks, profile=profile,
+        context_chunks=context_chunks, profile=profile, knowledge_epoch=knowledge_epoch,
     )
     guarded = json.loads(validated.serialized)
     payload = {"risposta": guarded["risposta"], "fonti": safe_sources}
     return FinalQuotaResponse(
         operation.id, operation.payload_hash, ticket.claim_id, ticket.epoch,
-        ticket.period_id, _json(payload), _CAPABILITY,
+        ticket.period_id, _json(payload), _CAPABILITY, validated.knowledge_epoch,
     )
 
 

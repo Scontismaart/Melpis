@@ -181,5 +181,6 @@ async def rispondi(
             quota_operation, quota_ticket, output,
             context_chunks=risultati_ordinati,
             profile=profile_from_raw(raw_bp, fallback_name=nome_attivita),
+            knowledge_epoch=context.knowledge_epoch,
         )
     return output

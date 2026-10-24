@@ -66,6 +66,7 @@ class DocumentRepository(DocumentPublication, TenantScopedRepository):
                 stato = CASE WHEN $11 THEN $12 ELSE stato END,
                 errore = CASE WHEN $13 THEN $14 ELSE errore END,
                 metadata = CASE WHEN $15 THEN $16::jsonb ELSE metadata END,
+                index_verified = CASE WHEN $3 OR $5 OR $7 OR $11 OR $13 OR $15 THEN FALSE ELSE index_verified END,
                 updated_at = NOW()
             WHERE id = $1 AND organization_id = $2
             RETURNING *

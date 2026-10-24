@@ -1,0 +1,40 @@
+{
+  "metrics": {
+    "chunks_per_tenant": [
+      5,
+      5
+    ],
+    "index_seconds_per_tenant": [
+      30.389589099999284,
+      0.721337199996924
+    ],
+    "messages_used_after_pipeline": 0,
+    "ocr_seconds": 5.806813700008206,
+    "parallel_query_count": 2,
+    "parallel_query_wall_seconds": 0.09411210000689607,
+    "parent_cpu_seconds_per_tenant": [
+      0.0625,
+      0.015625
+    ],
+    "pdf_bytes": 2537,
+    "pdf_pages": 5,
+    "replay_confirmed": 1,
+    "results_after_toggle": 0
+  },
+  "ocr_status": "passed",
+  "source": {
+    "commit": "ffb98490b50c3d252f8c5b07c14a8a1091488914",
+    "source_sha256": {
+      "src/core/db/migrations/065_document_publication.sql": "375e4d03062677cf3b201e572de7766490176f99d5939a46e74b7b251d850a11",
+      "src/core/db/repositories/document_publication.py": "fe1a42568d595bc0a3d9b83cce878aa0c41c419213f24aae18c69ae82919de77",
+      "src/core/db/repositories/document_repo.py": "aea786932ee10d02951a84f74f70b7e824d1bf7c10fec03f5a4e297feb4c4297",
+      "src/core/documenti/extractor.py": "f1842e6b0b2c70160a1a00aa64e745997d92aaa100d68431241031e921bdc77f",
+      "src/core/documenti/indexing.py": "40d6be2abc4b25449d583d89a0c18be21831ede8ab3dd5197f2045589aaa66d7",
+      "src/core/documenti/limits.py": "8a715e01c03921ede64e933c6acf5e63c6174e3c22c2987c57b3e4c684e669f6",
+      "src/core/documenti/local_worker.py": "66dff540fa9ada2c0caf4e0edc0f4c619466bcd81072d744a3eb1a5e7ebb1b71",
+      "src/core/documenti/rag_context.py": "6942ee9c8e198db6e094033a547a2282ddb8565698d6b9ebc153b2cc19797c27"
+    },
+    "working_tree_dirty": true
+  },
+  "status": "passed"
+}

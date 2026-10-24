@@ -153,7 +153,8 @@ async def lifespan(app: FastAPI):
             # command_timeout: nessuna query web puo' restare appesa
             # all'infinito (difesa post-incidente pool scheduler).
             pool = await asyncpg.create_pool(
-                dsn=dsn, min_size=1, max_size=db_pool_max, command_timeout=30
+                dsn=dsn, min_size=1, max_size=db_pool_max, command_timeout=30,
+                server_settings={"search_path": "public, extensions"},
             )
             app.state.repo = CoreRepository(pool=pool)
             app.state.pool = pool

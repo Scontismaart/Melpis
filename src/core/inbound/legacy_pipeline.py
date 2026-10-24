@@ -365,13 +365,13 @@ class LegacyInboundPipeline:
                 return result
             result.quota_final = validate_final_response(
                 quota_operation, quota_ticket, risposta,
-                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
+                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
             )
             if pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
                 risposta.risposta = BOOKING_RECEIVED_REPLY
                 result.response_text = risposta.risposta
                 result.quota_final = validate_final_response(
                     quota_operation, quota_ticket, risposta,
-                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
+                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
                 )
         return result

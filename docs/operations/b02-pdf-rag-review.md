@@ -3,8 +3,9 @@
 **State: implementation review; not a release or cutover certification.**
 Migration 065 is present in the working tree but has **not** been applied to
 the remote database. Local PostgreSQL publication tests (25) and a real
-Valkey concurrency test passed; wider regressions and CI/build results are
-still pending. C03 real-provider certification is separate. No real-provider calls are part
+Valkey concurrency test passed. Another 82 wider PostgreSQL regressions
+also passed. Final SHA-specific CI/audit/build results are recorded in PR #132;
+only successful runs on its current head certify that head. C03 real-provider certification is separate. No real-provider calls are part
 of this review.
 
 ## Architecture and reused components
@@ -57,7 +58,7 @@ document context; a stale non-empty context is denied before generation.
 | --- | --- | --- |
 | Inbound legacy | `src/core/inbound/legacy_pipeline.py` uses shared retrieval and checks context freshness around generation. | Entitlement is checked at retrieval and again before use; existing A03/A04 path remains authoritative. |
 | Inbound orchestrated | `src/core/receptionist/conversation_orchestrator.py` uses shared retrieval and freshness checks. | Same RAG gate; no change to A03/A04 admission or accounting. |
-| Simulator | `src/api/routes/simulator.py` retrieves context and revalidates it around generation. | Scala gate applies; simulation keeps its existing non-production accounting behavior. |
+| Simulator | `src/api/routes/simulator.py` retrieves context and revalidates it around generation. | Scala gate applies; authenticated simulations retain the existing A04 reservation, canonical commit and replay contract; anonymous demo remains separate. |
 | Preview | `src/core/onboarding.py` uses shared retrieval and checks current context. | Scala gate applies; existing preview flow and accounting are unchanged. |
 | Reviews | `src/api/routes/simulator.py` and `src/core/reviews/google_service.py` use shared retrieval for review drafts. | RAG access is checked; A03/A04 review-generation controls remain separate. |
 | Knowledge QA | `src/core/documenti/qa_agent.py` uses the shared retrieval and safe prompt serialization. | RAG access is checked; existing QA generation admission remains in force. |
@@ -88,7 +89,7 @@ The local multilingual MiniLM snapshot must be provisioned on the C01 host
 before enabling indexing or retrieval. Provisioning must be offline and
 version-pinned; runtime workers must not download model assets. Start with one
 API process: its shared embedding child has a 2 GiB ceiling, and an extraction
-child has a separate 512 MiB ceiling. These do not include API, PostgreSQL or
+child has a separate 1 GiB ceiling. These do not include API, PostgreSQL or
 OS memory. Index admission permits one preparation per API event loop;
 multiple API processes therefore require a separately measured host budget.
 Retain the three-second query deadline and confirm host RAM/headroom in C01.
@@ -99,9 +100,9 @@ around 1.53 GB RSS; document embedding took about 7.42/39.68/186.63 seconds,
 and warm query embedding p95 was 46/31/50 ms. The benchmark did not measure
 PostgreSQL. Its two-worker concurrency case was skipped because available
 memory was insufficient; do not treat it as passed. OCR was measured
-separately. PostgreSQL tests are currently running under the root task; their
-results beyond the focused receipt remain pending. The focused PostgreSQL
-and Valkey results above are real disposable-service measurements. The actual
+separately; this baseline OCR measurement does not certify OCR under the new
+extraction memory ceiling. The focused and wider PostgreSQL and Valkey
+results above are real disposable-service measurements. The actual
 isolated embedding child also succeeded with 384 dimensions on Linux inside
 a network-disabled disposable container (2 CPU/3 GiB container ceiling,
 2 GiB child data limit), using the cached snapshot and current source. This
@@ -112,6 +113,8 @@ not certification of the final API image or its deployment model assets.
 
 Before release, verify on the deployed schema and code that:
 
+- schema CREATE privileges on public/extensions are denied to untrusted roles
+  before using the explicit application search path;
 - retrieval and publication remain organization-scoped, and direct client
   writes to documents, chunks, and the semantic cache remain denied;
 - stale publication leases are fenced, request keys are immutable, deleted
@@ -127,10 +130,63 @@ Before release, verify on the deployed schema and code that:
 - retrieved PDF, FAQ, and web text stays serialized as untrusted data, and
   structured listino/price-priority guardrails continue to run.
 
-CI/build and PostgreSQL integration results remain **PENDING**. C03 must use
+The final PR check suite must pass application validation, installed-runtime
+audit, Migration check and all four API/web architecture builds. Initial
+failed runs are not certification of the corrected head. C03 must use
 the approved real-provider certification procedure; this document performs
 no provider calls and grants no C03 readiness. No automatic commercial limits
 are configured (`commercial_limits` remain `NULL`). The proposed Scala
 allowance of 20 documents and 200 aggregate pages is a conservative option for
 founder approval and evaluation only. The 100-document/500-page values are an
 unvalidated hypothesis. Neither proposal is implemented or advertised.
+
+## Dependency audit correction
+
+The first CI run stopped on three new filelock advisories. LiteLLM 1.106.2
+requires filelock <4, so 4.2.1 is not a compatible normal-resolver update.
+Pin the official unaffected 3.20.3 release: it contains the older
+CVE-2025-68146/CVE-2026-22701 fixes and predates the new RW-lock/oplock code
+affected by CVE-2026-112907/112913/112940. Its PyPI wheel SHA256 is
+`4b0dda527ee31078689fc205ec4f1c1bf7d56cf88b6dc9426c4f230e46c2dce1`.
+The local install verified that hash and passed normal `pip check`; the OSV
+version query reports no advisory for 3.20.3. The complete installed-runtime
+CI audit remains mandatory. No audit exception or package metadata override
+is introduced. CrewAI/MCP/OTel artifact verification is unchanged.
+
+Primary references: [older SoftFileLock fix](https://github.com/advisories/GHSA-qmgc-5h2g-mvrw),
+[new Windows oplock range](https://github.com/advisories/GHSA-567q-5qvw-pf92),
+[new Windows RW-lock range](https://github.com/advisories/GHSA-9vhv-jxww-xfm5),
+[new POSIX RW-lock range](https://github.com/tox-dev/filelock/security/advisories/GHSA-v4x8-3wr5-3wq8).
+LiteLLM is explicitly pinned at the existing 1.106.2 version, following its
+[official incident guidance](https://docs.litellm.ai/blog/security-incident-oct-21-2026);
+1.107.0 is not installed or executed by this task.
+
+## Final contract corrections
+
+Document-Q&A final responses now carry the captured knowledge epoch into the
+existing A04 capability: a profile change that leaves PDF revisions unchanged
+still rejects a stale final commit. A PostgreSQL regression covers this race.
+Legacy document metadata/type/status writers invalidate verification; they
+cannot turn an already indexed source into a new trusted priority silently.
+Empty retrieval contexts do not manufacture an epoch capability.
+
+Cross-origin upload preflight explicitly permits Idempotency-Key only for the
+configured origins; unauthorized origins remain rejected. Nginx indexing
+routes allow 660 seconds around the bounded 600-second preparation, while
+ordinary API requests retain the existing 60-second timeout. The application
+pool explicitly uses public/extensions so pgvector resolves in databases
+whose name differs from the historical postgres migration target.
+
+The local real pipeline receipt `pdf-rag-pipeline-probe.json` records complete
+synthetic PDF extraction, actual cached MiniLM embedding, atomic PostgreSQL
+publication, idempotent replay, two-tenant parallel retrieval, toggle exclusion
+and unchanged commercial counters. It identifies the source commit, dirty
+state and file hashes; no remote provider is used. OCR status is reported
+separately and must not be inferred from the overall text-PDF pipeline result.
+
+The bounded Windows OCR probe failed safely at 512 MiB and succeeded at
+1 GiB (about five seconds for synthetic printed text). The extraction ceiling
+is therefore 1 GiB; it remains independent of the 2 GiB embedding ceiling.
+This certifies that synthetic OCR case, not arbitrary scan accuracy or a
+second concurrently resident embedding model. C01 must budget both children,
+API, PostgreSQL and OS headroom before activation.

@@ -427,14 +427,14 @@ class ConversationOrchestrator:
             # pending wording. A rejected response cannot authorize a booking.
             output._quota_final = validate_final_response(
                 req.quota_operation, req.quota_ticket, risposta,
-                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
+                context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
             )
             if not req.is_simulation and pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
                 risposta.risposta = BOOKING_RECEIVED_REPLY
                 output.response_text = risposta.risposta
                 output._quota_final = validate_final_response(
                     req.quota_operation, req.quota_ticket, risposta,
-                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch,
+                    context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
                 )
         return output
 

@@ -9,7 +9,9 @@ EXTRACTION_SECONDS = 45
 INDEX_SECONDS = 600
 MODEL_START_SECONDS = 60
 QUERY_SECONDS = 3
-EXTRACTION_MEMORY_BYTES = 512 * 1024 * 1024
+# Local ONNX OCR needs more commit memory than its ~472 MB baseline RSS.
+# The isolated synthetic OCR probe succeeds under this hard ceiling.
+EXTRACTION_MEMORY_BYTES = 1024 * 1024 * 1024
 EMBEDDING_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 
 
