@@ -4,7 +4,7 @@
   "hero": {
     "badge": "Transparent pricing",
     "title": "A plan tailored to every stage of your growth",
-    "subtitle": "Activate your AI WhatsApp assistant in minutes. Free 7-day trial, no credit card required, no lock-in contracts.",
+    "subtitle": "Free trial with PDF/RAG included: up to 7 days or 150 AI replies, whichever comes first. No credit card or long-term commitment required.",
     "monthly_toggle": "Monthly"
   },
   "plans": {
@@ -18,11 +18,11 @@
       "features": [
         "1 official WhatsApp Business phone number",
         "Up to 500 AI messages/month",
+        "PDF/RAG included; file quota to be defined",
         "Business hours, pricing, and 24/7 automated replies",
         "Shared web inbox accessible from any device",
         "Email escalation notifications",
-        "Standard ticket support within 24h",
-        "PDF/RAG included; file quota to be defined"
+        "Standard ticket support within 24h"
       ]
     },
     "growth": {
@@ -35,11 +35,11 @@
       "features": [
         "Everything included in Essential",
         "Up to 2,000 AI messages/month",
-        "Google Calendar synchronization",
+        "PDF/RAG included; file quota to be defined",
         "Appointment management and no-show reminders",
         "Up to 3 concurrent team operators in the Inbox",
-        "PDF/RAG included; file quota to be defined",
-        "Priority WhatsApp and email support"
+        "Priority WhatsApp and email support",
+        "Google Calendar is optional; authorized setup is required"
       ]
     },
     "scale": {
@@ -52,6 +52,7 @@
       "features": [
         "Everything included in Growth",
         "Up to 10,000 AI messages/month",
+        "PDF/RAG included; file quota to be defined",
         "Unlimited operators with granular permissions",
         "Instagram Direct, subject to provider verification",
         "AI configuration and team management",

@@ -32,14 +32,15 @@
       const integrationTabs = new Set(["whatsapp", "instagram", "calendar", "reviews", "webhook", "booking-pms", "airtable"]);
       const accountPlans = [
         { slug: "starter", nome: "Essenziale", prezzo: "€29", cadenza: "/mese", limite: "500 messaggi / mese", features: [
-          "1 numero WhatsApp Business", "1 utente staff (operatore)", "Gestione orari e listino servizi", "Supporto standard",
+          "1 numero WhatsApp Business", "1 utente staff (operatore)", "PDF/RAG incluso; quota file da definire", "Gestione orari e listino servizi", "Supporto standard",
         ], popolare: false },
         { slug: "pro", nome: "Crescita", prezzo: "€69", cadenza: "/mese", limite: "2.000 messaggi / mese", features: [
           "WhatsApp + Instagram Direct", "Fino a 3 utenti staff (operatori)",
-          "Recensioni Google, previa verifica di disponibilità dell'account", "Sincronizzazione Google Calendar", "Supporto prioritario",
+          "PDF/RAG incluso; quota file da definire",
+          "Recensioni Google, previa verifica di disponibilità dell'account", "Google Calendar opzionale; richiede configurazione autorizzata", "Supporto prioritario",
         ], popolare: true },
         { slug: "business", nome: "Scala", prezzo: "€149", cadenza: "/mese", limite: "10.000 messaggi / mese", features: [
-          "Conoscenza AI con documenti", "Operatori configurabili",
+          "PDF/RAG incluso; quota file da definire", "Google Calendar opzionale; richiede configurazione autorizzata", "Operatori configurabili",
           "Canali disponibili in base alle integrazioni verificate", "Supporto dedicato 1-to-1",
         ], popolare: false },
       ];
