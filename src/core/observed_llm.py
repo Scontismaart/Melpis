@@ -60,15 +60,21 @@ class ProviderResponseVerificationError(ProviderAccountingError):
         self.usage_present = usage_present
 
 
-def parse_raw_provider_response(body: bytes, requested_model: str):
-    """Preserve missing versus explicit zero before any SDK normalization."""
+def _decode_provider_response(body: bytes) -> dict:
+    """Decode bounded, unambiguous provider JSON without trusting its metrics."""
+    if type(body) is not bytes or not body or len(body) > _MAX_BODY:
+        raise ProviderResponseVerificationError() from None
     try:
         payload = json.loads(body, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
     except (ValueError, TypeError, RecursionError):
         raise ProviderResponseVerificationError() from None
     if type(payload) is not dict:
         raise ProviderResponseVerificationError() from None
+    return payload
 
+
+def _validate_provider_usage(payload: dict, requested_model: str):
+    """Preserve missing versus explicit zero before any SDK normalization."""
     raw_model = payload.get("model")
     actual_model = (raw_model if type(raw_model) is str and raw_model
                     and len(raw_model) <= 256
@@ -87,6 +93,10 @@ def parse_raw_provider_response(body: bytes, requested_model: str):
     except (KeyError, TypeError, ProviderAccountingError):
         raise ProviderResponseVerificationError(actual_model, True) from None
     return payload, verified
+
+
+def parse_raw_provider_response(body: bytes, requested_model: str):
+    return _validate_provider_usage(_decode_provider_response(body), requested_model)
 
 
 def _provider_request_id(payload=None, headers=None):
@@ -109,6 +119,18 @@ def _provider_generation_id(payload=None, headers=None, provider=None):
     if type(payload) is dict:
         candidates.append(payload.get("id"))
     return next((value for value in candidates if safe_provider_generation_id(value)), None)
+
+
+def _observed_body_ids(payload, *, provider, request_id, generation_id):
+    """Observe identity only; conflicting observations never authorize a result."""
+    body_request_id = _provider_request_id(payload)
+    body_generation_id = _provider_generation_id(payload, provider=provider)
+    if ((request_id is not None and body_request_id is not None
+         and request_id != body_request_id)
+            or (generation_id is not None and body_generation_id is not None
+                and generation_id != body_generation_id)):
+        _error("Provider response identifiers conflict")
+    return body_request_id or request_id, body_generation_id or generation_id
 
 
 def _with_provider_correlation(body: bytes, attempt):
@@ -285,6 +307,8 @@ class ObservedChatLLM(BaseLLM):
             dispatch_authorized = True
             with client.stream("POST", url, headers=headers, content=body) as response:
                 response_ref["response"] = response
+                self._remaining(deadline_at)
+                self._headers(response)
                 provider_request_id = _provider_request_id(headers=response.headers)
                 provider_generation_id = _provider_generation_id(
                     headers=response.headers, provider=attempt.provider,
@@ -295,8 +319,6 @@ class ObservedChatLLM(BaseLLM):
                         generation_id=provider_generation_id,
                         provider_request_id=provider_request_id,
                     )
-                self._remaining(deadline_at)
-                self._headers(response)
                 data = bytearray()
                 for chunk in response.iter_raw():
                     self._remaining(deadline_at)
@@ -308,17 +330,18 @@ class ObservedChatLLM(BaseLLM):
                 self._session.assert_http_admission()
             deadline_timer.cancel()
             deadline_timer = None
-            payload, usage = parse_raw_provider_response(bytes(data), self.model)
-            provider_request_id = _provider_request_id(payload) or provider_request_id
-            provider_generation_id = _provider_generation_id(
-                payload, provider=attempt.provider,
-            ) or provider_generation_id
+            payload = _decode_provider_response(bytes(data))
+            provider_request_id, provider_generation_id = _observed_body_ids(
+                payload, provider=attempt.provider, request_id=provider_request_id,
+                generation_id=provider_generation_id,
+            )
             if provider_request_id is not None or provider_generation_id is not None:
                 self._session.bridge(
                     self._session.record_provider_ids, attempt,
                     generation_id=provider_generation_id,
                     provider_request_id=provider_request_id,
                 )
+            payload, usage = _validate_provider_usage(payload, self.model)
             try:
                 content = _content(payload)
             except ProviderAccountingError:
@@ -441,27 +464,34 @@ class ObservedChatLLM(BaseLLM):
             closed = False
             await self._session.mark_dispatching(attempt)
             dispatch_authorized = True
-            response = await client.post(url, headers=headers, content=body)
-            provider_request_id = _provider_request_id(headers=response.headers)
-            provider_generation_id = _provider_generation_id(
-                headers=response.headers, provider=attempt.provider,
+            async with client.stream("POST", url, headers=headers, content=body) as response:
+                self._headers(response)
+                provider_request_id = _provider_request_id(headers=response.headers)
+                provider_generation_id = _provider_generation_id(
+                    headers=response.headers, provider=attempt.provider,
+                )
+                if provider_request_id is not None or provider_generation_id is not None:
+                    await self._session.record_provider_ids(
+                        attempt, generation_id=provider_generation_id,
+                        provider_request_id=provider_request_id,
+                    )
+                data = bytearray()
+                async for chunk in response.aiter_raw():
+                    self._session.assert_http_admission()
+                    if len(data) + len(chunk) > _MAX_BODY:
+                        _error()
+                    data.extend(chunk)
+            payload = _decode_provider_response(bytes(data))
+            provider_request_id, provider_generation_id = _observed_body_ids(
+                payload, provider=attempt.provider, request_id=provider_request_id,
+                generation_id=provider_generation_id,
             )
             if provider_request_id is not None or provider_generation_id is not None:
                 await self._session.record_provider_ids(
                     attempt, generation_id=provider_generation_id,
                     provider_request_id=provider_request_id,
                 )
-            self._headers(response)
-            payload, usage = parse_raw_provider_response(response.content, self.model)
-            provider_request_id = _provider_request_id(payload) or provider_request_id
-            provider_generation_id = _provider_generation_id(
-                payload, provider=attempt.provider,
-            ) or provider_generation_id
-            if provider_request_id is not None or provider_generation_id is not None:
-                await self._session.record_provider_ids(
-                    attempt, generation_id=provider_generation_id,
-                    provider_request_id=provider_request_id,
-                )
+            payload, usage = _validate_provider_usage(payload, self.model)
             try:
                 content = _content(payload)
             except ProviderAccountingError:
