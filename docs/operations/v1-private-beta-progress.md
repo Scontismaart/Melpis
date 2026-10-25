@@ -1,35 +1,105 @@
 # Melpis V1 private beta progress register
 
-**Intake snapshot date:** 2026-10-24
+**Intake snapshot date:** 2026-10-24; current cycle update: 2026-10-25
 **Repository:** [Scontismaart/Melpis](https://github.com/Scontismaart/Melpis)
 **Purpose:** evidence-based readiness register for the private beta. This records GitHub state and the roadmap snapshot; it does not certify remote infrastructure, providers, or production.
 
 ## 1. Executive snapshot
 
-**Current integration snapshot:** 2026-10-24, after the founder-authorized normal merge of PR #132.
+**Current integration snapshot: 2026-10-25.** Main contains the founder-authorized
+normal merges of #133 and #134. All other cycle PRs below are unmerged.
 
-1. **Canonical issue set:** #85–#102 contains 18 issues: #85, #86, #87 and #89 are closed; the other 14 remain open. #121 is an additional open P0 blocker. No issue was closed by the B02 technical merge.
-2. **Current main:** `6a26813e9a0f52d25e78da55465744e3ca798c3a`, the normal merge commit for [#132](https://github.com/Scontismaart/Melpis/pull/132). Parent main was `a7f09f2d4155dade5f93a6512fb2f5bdd4a9a5ea`. The independently reviewed and explicitly authorized head was `d141d1625175b97d3ba746c66a8ce9654cbc5f0f`.
-3. **Replacement defect corrected and integrated:** pending `index_intent` preserves the previous authorized, active, verified revision until atomic publication. Failed replacement does not revoke that revision; owner revocation/deletion and stale-worker fencing cannot be undone by retry.
-4. **Approved-head evidence:** [CI 40111907116](https://github.com/Scontismaart/Melpis/actions/runs/40111907116) and [Migration 40111907091](https://github.com/Scontismaart/Melpis/actions/runs/40111907091) passed on `d141d162`. Each ran 3,824 passing Python tests, 36 skipped, 124 warnings. Audit, frontend and all four API/web amd64/arm64 no-push builds passed. The 18 new replacement PostgreSQL regressions are part of these totals, not additional tests to sum.
-5. **Post-merge evidence:** [CI 40114921956](https://github.com/Scontismaart/Melpis/actions/runs/40114921956) and [Migration 40114921848](https://github.com/Scontismaart/Melpis/actions/runs/40114921848) target the actual merge SHA. Both completed SUCCESS on `6a26813e`: each 3,824 passed, 36 skipped, 124 warnings. All four actual architecture publications and both multiarch manifests succeeded. The no-push build matrix was skipped as expected on main. Publication must be verified independently of build success; no deployment is authorized.
-6. **B02 #93 stays open:** code integration does not certify Staging, original-byte provenance for historical rows, commercial file allowances, capacity, or original-file storage. Migrations 065/066 are source-only here; no remote migration was run.
-7. **A03 remains a beta blocker:** #88/#121 remain open. Earlier OpenRouter generation E2E succeeded, but generation recovery GET returned 404. Preserve that partial evidence without certifying recovery or Groq. Earlier Stripe Test A02 evidence remains valid within its scope; C04 public webhook delivery remains separate.
-8. **Commercial limits remain unapproved:** 100 MB / 1 GB / 5 GB aggregate and 10 / 25 / 50 MB per-file are proposals; trial is TBD. The former 5/15/40 MB plus 1 MB trial proposal is superseded. Missing budgets deny new/growing file claims. The technical per-file ceiling remains 20 MiB.
-9. **Next authorized scope:** after the post-merge report, analyze and run local-only tests for #121; plan INF01. No real provider requests, infrastructure changes, purchases or remote operations are implied. INF02/R2 remains a separate proposal.
-10. **Operational boundaries:** no deploy, flag activation, remote migration, provider operation, erasure or backup/volume removal. Only the B02 synthetic PostgreSQL container was stopped after tests; Docker Desktop and other projects' Supabase services remain unchanged.
+1. **Main:** `327822f0e880ad0bf6a6ac1273e24b30d49dda9c`.
+   #133 merge `688737ac0fb563c9b7144cb5106b892e8df41e0d`, approved head
+   `4c30335ee6110ba53b57768cead4c6a410a50ec4`; #134 merge equals current main,
+   approved head `c267cd67ae30fed7775390edd42f5f8c83f31ae4`. Ordinary merge
+   commits only; no squash/rebase/bypass. Both approved heads are ancestors.
+2. **Post-merge CI:** [40161580843](https://github.com/Scontismaart/Melpis/actions/runs/40161580843)
+   completed SUCCESS on that exact main: **3,866 passed, 36 skipped, 124 warnings**.
+   Audit, frontend and four actual API/web architecture publications and both
+   multiarch manifests passed. PR-only no-push build jobs skipped as expected.
+   The standalone Migration workflow was not triggered by its unchanged SQL/schema
+   path filter; this is N/A, not a fabricated green check. Full CI exercised
+   existing disposable PostgreSQL migrations and regressions.
+3. **GHCR:** direct manifest inspection for `sha-327822f0e880ad0bf6a6ac1273e24b30d49dda9c`:
+   API `sha256:7a9f5f5735ec4c176078f1fc52af1e1988750eef2013a8083052bc36078f95ad`;
+   web `sha256:84a1c8e1ce885db5271b5eb815366368cc07cca8783c0026f255fffafde86c89`.
+   Both contain linux/amd64 and linux/arm64. Publication is verified separately
+   from a build; no operational image was deployed.
+4. **Audit scope:** existing strict reviewed policy passed. Scanner still reports
+   nine known vulnerabilities in two packages: chromadb 1.1.1
+   (PYSEC-2026-311/3813/3814/3815) and json-repair 0.25.3
+   (GHSA-xf7x-x43h-rpqh). No new exception, suppression or audit-policy weakening.
+5. **OpenRouter #121: NOT CERTIFIED.** One authorized Free generation; actual
+   metadata GET statuses **404, 404, 200** at offsets 0/2/10 seconds. The dated
+   model in the last response does not match the requested alias under the
+   verified accounting contract. No broad alias acceptance was added. Native
+   tokens 17 prompt/32 completion and total_cost 0 were observed, but are not
+   enough to reconcile this attempt. Accounting remains blocked, one provider
+   attempt retained, commercial consumption zero and A04 reservation retained.
+   [Detailed evidence](openrouter-recovery-20261025.md). No further generation
+   is authorized by the exhausted one-POST budget; #121 and #88 stay open and
+   Groq is still uncertified.
+6. **INF01 implemented, not deployed:** [#139](https://github.com/Scontismaart/Melpis/pull/139)
+   head `5648210647f76c5e17056e3cbfcfb28d3fadffdb`, shared private authenticated
+   pinned ONNX FP32, no local fallback, bounded queue/query priority, process
+   fencing and fixed cold-start duplicate-model race. Local 54 focused tests
+   and 83 PDF/RAG/PostgreSQL regressions pass (overlapping, not additive).
+   Actual offline, crash, missing-model, 5/25/100 HTTP and PDF/pgvector mixed
+   diagnostics pass. Two PyTorch workers measured 2.19 GB summed RSS; shared
+   ONNX sampled cgroup peak about 975 MB. INT8 failed parity and was rejected.
+   Whole-host C02/SLO, ARM inference and durable-inbox/real WhatsApp mixed load
+   are not certified. Read the exact-head [CI](https://github.com/Scontismaart/Melpis/actions/runs/40181058730)
+   and PR evidence for current review state.
+7. **B03:** [#135](https://github.com/Scontismaart/Melpis/pull/135), head
+   `25e6c06bfb8439c9bb2edb62dd138916d5134411`; tenant/account/session-bound
+   drafts, real initialization route, truthful unavailable/error states and
+   five-language wizard. Local frontend 428 passed/3 skipped; exact-head CI
+   **3,866 passed/36 skipped** and four builds succeeded. Real responsive,
+   Meta/Google and Staging acceptance remain open.
+8. **C01:** [#136](https://github.com/Scontismaart/Melpis/pull/136), head
+   `a6cc7d84a8da60caa1dac6061836e7eefaf491bc`; actual owned local clean,
+   059-upgrade and 060–066 replay passed, with ACL/RLS, append-only evidence,
+   preserved backend grants, historical unknown file bytes and counter checks.
+   16 local tests; exact-head CI **3,882 passed/36 skipped** and four builds
+   succeeded. No remote schema or cutover was certified.
+9. **C04:** [#137](https://github.com/Scontismaart/Melpis/pull/137), head
+   `937b6b8e8b2f61d15c2836b32a596f1c18d512bd`. Separate selections: 75 offline
+   tests; 98 local PostgreSQL tests; 8 final focused guard/signature/tenant/replay
+   tests. These are overlapping evidence, not a summed count. Final added test
+   blocks non-loopback sockets; the earlier 98-test run did not have a global
+   network guard. No Stripe Test/Live API was called. Exact-head CI validation
+   has **3,874 passed/36 skipped**; [live build checks](https://github.com/Scontismaart/Melpis/pull/137/checks)
+   remain authoritative. Public webhook delivery and release Stripe gates stay open.
+10. **B04:** [#138](https://github.com/Scontismaart/Melpis/pull/138), head
+    `172a11db02e6ba73eacf29cd4568a6dc9bda6649`; RAG all valid paid plans/trial,
+    Calendar optional wording, prices/response quotas unchanged. Local 26 Python
+    and 40 targeted frontend tests pass. Use [exact-head checks](https://github.com/Scontismaart/Melpis/pull/138/checks)
+    for CI status. 100 MB/1 GB/5 GB and 10/25/50 MB remain proposals; technical
+    upload cap 20 MiB. No R2/original-retention promise.
+11. **C05:** [technical readiness checklist](c05-readiness-20261025.md) records
+    data, processors, unknown deployment facts and founder/legal decisions.
+    The draft 90-day physical-delete promise does not match the gated runtime
+    retention implementation. No legal approval, erasure, retention activation
+    or provider configuration change is claimed.
+12. **Tracker and boundaries:** no issue was closed during this cycle. Existing
+    four original issues remain closed; the other 14 plus #121 remain open.
+    No deploy, remote migration, R2, spending, commercial activation, provider
+    call beyond the narrow OpenRouter budget, or data/volume/backup deletion.
+    Only task-owned test containers are stopped after local tests; Docker
+    Desktop and other projects' Supabase services are left intact. Temporary
+    runtimes/credentials cleanup and credential rotation remain beta gates.
 
-### Post-merge registry and audit evidence
-
-Verified directly with registry manifest inspection for tag
-`sha-6a26813e9a0f52d25e78da55465744e3ca798c3a`:
-
-- API `ghcr.io/scontismaart/melpis-api@sha256:d9c27bb773d63a94f615bd8e68119affd4bf8b5090686096bfb4e4c5ff543fc9`.
-- Web `ghcr.io/scontismaart/melpis-web@sha256:7c625d576e723ed5c41d2ca249c53c30249a1e8621f16b31f84da8156b6a0cd2`.
-- Both manifests contain `linux/amd64` and `linux/arm64`. No image was launched.
-- Audit passed the existing strict policy, not a zero-advisory claim: scanner reported 9 known vulnerabilities in 2 packages. Logged reviewed residuals: chromadb 1.1.1 (PYSEC-2026-311, PYSEC-2026-3813/3814/3815) and json-repair 0.25.3 (GHSA-xf7x-x43h-rpqh). No exceptions or audit policy were changed by this merge operation.
-- All publish jobs succeeded; only the main-inapplicable no-push build matrix was skipped. No failed/cancelled post-merge job. The 36 skipped Python tests remain excluded evidence.
-- GitHub reported `main` unprotected immediately before merge; the ordinary merge API was used without administrator/bypass options. Branch policy was not changed.
+New PR checks link to live exact-head evidence. Their publication jobs are
+expected to skip on pull requests; new GHCR publication is neither required
+nor claimed before an authorized merge. Independent review/GO is still required.
+The B02-specific approved-head and merge evidence in section 11 remains historical.
+Eleven scanner findings in the initial INF01 feature commit were independently
+verified as the same public tokenizer checksum. The checksum was preserved under
+public vocabulary-digest labels; no scanner rule or ignore list was weakened.
+The unreviewed feature commit was replaced using an exact lease on its own
+branch; main was not rewritten. The updated full-ref scan reported zero findings.
+Only failed dependent build jobs were retried; no failed check was bypassed.
 
 ## 2. Evidence stages and vocabulary
 
@@ -56,15 +126,15 @@ Statuses are the GitHub tracker state observed for this snapshot. “Evidence”
 | [#85](https://github.com/Scontismaart/Melpis/issues/85) | Closed | V1-A00 | Issue closed. |
 | [#86](https://github.com/Scontismaart/Melpis/issues/86) | Closed | V1-A01 | Issue closed. |
 | [#87](https://github.com/Scontismaart/Melpis/issues/87) | Closed | V1-A02 | Issue closed. |
-| [#88](https://github.com/Scontismaart/Melpis/issues/88) | Open, P0 | V1-A03 provider gate, attempts, attribution, and accounting. PR #120 integrated the deterministic provider-dispatch gate/accounting. Prior OpenRouter E2E generation succeeded, but its recovery GET returned 404. | **KEEP OPEN / BLOCKED** on #121 recovery and complete accounting evidence. Preserve successful-generation evidence; do not call recovery certified. Test billing absent/error, expired trial, exhausted quota, accounting outage, and provider-native model/token/cost correlation. |
+| [#88](https://github.com/Scontismaart/Melpis/issues/88) | Open, P0 | V1-A03 provider gate, attempts, attribution, and accounting. PR #120 integrated the deterministic provider-dispatch gate/accounting. Prior generation evidence is retained; the latest authorized GET reached 200 but exact dated-model binding still prevents recovery. See section 1. | **KEEP OPEN / BLOCKED** on #121 recovery and complete accounting evidence. Preserve successful-generation evidence; do not call recovery certified. Test billing absent/error, expired trial, exhausted quota, accounting outage, and provider-native model/token/cost correlation. |
 | [#89](https://github.com/Scontismaart/Melpis/issues/89) | Closed | V1-A04 | Issue closed; PR #122 integrated atomic quota reservation. |
 | [#90](https://github.com/Scontismaart/Melpis/issues/90) | Open, P0 | V1-A05 deterministic booking authorization. PR #123 integrated the implementation. Current documented implementation scope includes restaurant/table booking with 60-minute slots. | **SPLIT** implementation from beta certification/perimeter. Keep the issue open until supported verticals, ambiguity/handoff rules, availability and concurrency cases, and acceptance evidence are agreed. |
 | [#91](https://github.com/Scontismaart/Melpis/issues/91) | Open, P0 | V1-A06 export/delete/retention/token protection. PR #130 integrated durable GDPR gates. | **KEEP OPEN / BLOCKED** on data inventory, legal retention/DPA, provider deletion propagation, and backup/restore evidence. CI does not prove external erasure or retention. |
 | [#92](https://github.com/Scontismaart/Melpis/issues/92) | Open, P0 | V1-B01 Calendar readiness. PR #131 is integrated at main. Readiness must fail closed on unknown availability and avoid duplicate reconciled events. | **KEEP OPEN / BLOCKED** on identified staging and authorized Google E2E under #96/#98. #131’s main checks are code evidence only. |
 | [#93](https://github.com/Scontismaart/Melpis/issues/93) | Open, P0 | V1-B02 tenant-scoped PDF/RAG; #132 integrated at `6a26813e9a0f52d25e78da55465744e3ca798c3a`, including the failed-replacement fix. | **KEEP OPEN.** Technical integration completed; current-head and post-merge evidence are recorded above. Staging/capacity, historical byte provenance, commercial quota approval and any original-storage promise remain separate gates. |
-| [#94](https://github.com/Scontismaart/Melpis/issues/94) | Open, P1 | V1-B03 wizard, multilingual behavior, and AI transparency reuse the dashboard. | **KEEP OPEN.** Wizard implementation exists, but post-B01/B02 persistence, error disclosure, and end-to-end acceptance are not evidenced here. |
-| [#95](https://github.com/Scontismaart/Melpis/issues/95) | Open, P1 | V1-B04 plans, dashboard consumption, and product copy. | **KEEP OPEN / BLOCKED** on commercial approval. File quotas in INF01/INF02 remain proposals; do not encode proposal values as approved entitlements. |
-| [#96](https://github.com/Scontismaart/Melpis/issues/96) | Open, P0 | V1-C01 identify staging/production and certify migrations. Issue body contains historical environment observations and schema checks. | **KEEP OPEN / BLOCKED** pending authorized, current environment identification and migration evidence. Historical issue observations are stale for present-state claims. |
+| [#94](https://github.com/Scontismaart/Melpis/issues/94) | Open, P1 | V1-B03 wizard, multilingual behavior, and AI transparency reuse the dashboard. | **KEEP OPEN.** #135 supplies local wizard/session/persistence/error-state regressions; exact-head CI and four builds pass. Real Staging/Meta/Google/responsive acceptance remains separate. |
+| [#95](https://github.com/Scontismaart/Melpis/issues/95) | Open, P1 | V1-B04 plans, dashboard consumption, and product copy; unmerged #138 corrects all-plan RAG/trial and optional Calendar copy. | **KEEP OPEN / BLOCKED** on commercial approval. File quotas in INF01/INF02 remain proposals; do not encode proposal values as approved entitlements. |
+| [#96](https://github.com/Scontismaart/Melpis/issues/96) | Open, P0 | V1-C01 identify staging/production and certify migrations. Issue body contains historical environment observations and schema checks. Unmerged #136 supplies actual guarded local clean/upgrade/replay evidence for 060–066. | **KEEP OPEN / BLOCKED** pending authorized, current environment identification and migration evidence. Historical issue observations are stale for present-state claims. |
 | [#97](https://github.com/Scontismaart/Melpis/issues/97) | Open, P0 | V1-C02 host, HTTPS, email, backups, monitoring, and approved budget. | **KEEP OPEN / BLOCKED** on infrastructure ownership/budget and operational evidence, including restore and alert checks. INF01 capacity evidence informs sizing. |
 | [#98](https://github.com/Scontismaart/Melpis/issues/98) | Open, P0 | V1-C03 Meta and Google Calendar with authorized recipients/accounts. | **KEEP OPEN / BLOCKED** until authorized provider E2E is run against the identified environment with traceable evidence. |
 | [#99](https://github.com/Scontismaart/Melpis/issues/99) | Open, P0 | V1-C04 Stripe Test and preparation of monthly Live prices. Earlier Stripe Test A02 evidence exists. | **KEEP OPEN / BLOCKED** on public endpoint delivery/verification under C04 and explicit Live-price approval. Preserve prior A02 evidence without treating C04 as complete. |
@@ -109,7 +179,7 @@ The old `4035c8d` snapshot and runs 40096981755/40096981661 are superseded intak
 
 ## 6. INF01 / INF02 and commercial decisions
 
-**INF01 (capacity benchmark) is a proposal, not a GitHub issue or certification.** It should measure the current MiniLM/PyTorch path against a shared process and viable alternatives such as ONNX/INT8; include batching/queue behavior, cold start and offline model availability, RSS/CPU, latency (including p95), throughput, concurrency, retry/crash/retrieval behavior, and mixed WhatsApp plus PDF load. Workload points proposed in the roadmap include 3–5 beta businesses and 5/25/100 workload scenarios. It depends on B02’s stable behavior, C01’s known schema/environment, and C02’s hosting target. Keep benchmark output separate from production capacity claims.
+**INF01 now has an unmerged implementation and actual local diagnostics in #139; it is not fleet or C02 certification.** The original measurement plan was to measure the current MiniLM/PyTorch path against a shared process and viable alternatives such as ONNX/INT8; include batching/queue behavior, cold start and offline model availability, RSS/CPU, latency (including p95), throughput, concurrency, retry/crash/retrieval behavior, and mixed WhatsApp plus PDF load. Workload points proposed in the roadmap include 3–5 beta businesses and 5/25/100 workload scenarios. It depends on B02’s stable behavior, C01’s known schema/environment, and C02’s hosting target. Keep benchmark output separate from production capacity claims.
 
 **INF02 (original-file storage) is a proposal, not implemented storage.** Current B02 discards uploaded originals after processing; any promise to retain, download, or re-index originals needs a separately reviewed private object-storage design. R2 is a candidate only. INF02 depends on B02, B04 commercial copy, A06 deletion/retention, C05 legal policy, and C02 backup/security/cost controls. The proposal should cover tenant authorization, content hash, idempotent upload, retries/orphans, re-index, erasure/retention, backups/versioning, downgrade/concurrency, streaming, timeouts, and malicious archive/document handling.
 
@@ -140,7 +210,7 @@ Avoid starting multiple broad implementation PRs at once. INF01 can provide deci
 |---|---|---|
 | Integrated #132 | **XL** | Broad existing B02 package, including the reviewed replacement correction. Completed technical review and merge; future work stays in separate, smaller PRs. |
 | #121 recovery contract and tests | **M** | Keep deterministic accounting/recovery logic separate from any authorized provider E2E. |
-| INF01 benchmark harness/report | **M** | Benchmark code/config and findings; avoid bundling unrelated runtime optimizations. |
+| INF01 shared runtime/benchmarks #139 | **M/L** | Runtime/contract and real bounded diagnostic evidence; most added lines are harnesses and receipts. No unrelated product work. |
 | C01 inventory/migration evidence | **S–M** | Primarily environment-specific evidence and controlled migration work; remote actions require explicit scope/authorization. |
 | C02 operational setup | **M–L** | Depends on approved budget/host and backup/restore/monitoring requirements. |
 | INF02 storage design | **S–M** for design; **L** for implementation | Treat the storage decision and implementation as separate review steps. |
@@ -163,11 +233,11 @@ Explicit open P0 blockers: (1) B02 operational certification (replacement code d
 
 The primary local checkout was not reset or cleaned. The isolated B02 worktree
 was used for the reviewed implementation and the separate document-only
-follow-up. Remote GitHub `main` at `6a26813e9a0f52d25e78da55465744e3ca798c3a`
-is the integration baseline for this snapshot. Unrelated local files and
+follow-up. Remote GitHub `main` at `327822f0e880ad0bf6a6ac1273e24b30d49dda9c`
+is the integration baseline for this snapshot; all new implementation PRs remain separate. Unrelated local files and
 runtime directories remain untouched.
 
-## 11. B02 correction cycle
+## 11. Historical B02 correction cycle (24 October)
 
 The founder's replacement-failure report was reproduced against a dedicated
 local PostgreSQL 16/pgvector disposable database. The initial regression
