@@ -148,7 +148,7 @@ Statuses are the GitHub tracker state observed for this snapshot. “Evidence”
 |---|---|---|
 | [#121](https://github.com/Scontismaart/Melpis/issues/121) | Open, P0 beta blocker | OpenRouter generation recovery must reconcile a generation ID with provider-native evidence. A provider 404, timeout, missing field, or mismatch must remain fail-closed: do not invent cost/tokens or unlock another generation. **KEEP OPEN / BLOCKED** until the correlation and authorized recovery flow are evidenced. It blocks A03/#88 certification. |
 
-## 4. Integrated PRs and current branch
+## 4. Integrated PR history
 
 | PR | State / main evidence | Scope |
 |---|---|---|
@@ -159,15 +159,17 @@ Statuses are the GitHub tracker state observed for this snapshot. “Evidence”
 | [#123](https://github.com/Scontismaart/Melpis/pull/123) | Merged; merge commit `a94d8d938fdaa06db91f977ace2814d8467f9f75` | A05 deterministic auto-booking authorization. |
 | [#130](https://github.com/Scontismaart/Melpis/pull/130) | Merged; merge commit `bf7ddcb6bcf3467b07beae05779e82de77791486` | A06 durable GDPR gates. |
 | [#131](https://github.com/Scontismaart/Melpis/pull/131) | Merged at `a7f09f2d4155dade5f93a6512fb2f5bdd4a9a5ea` | B01 Calendar readiness; prior baseline, not current main. |
-| [#132](https://github.com/Scontismaart/Melpis/pull/132) | Merged at current main `6a26813e9a0f52d25e78da55465744e3ca798c3a`; approved head `d141d1625175b97d3ba746c66a8ce9654cbc5f0f` | B02 PDF/RAG, byte accounting and safe replacement. Technical merge only; #93 remains open. |
+| [#132](https://github.com/Scontismaart/Melpis/pull/132) | Merged at the former B02 baseline `6a26813e9a0f52d25e78da55465744e3ca798c3a`; approved head `d141d1625175b97d3ba746c66a8ce9654cbc5f0f` | B02 PDF/RAG, byte accounting and safe replacement. Technical merge only; #93 remains open. |
+| [#133](https://github.com/Scontismaart/Melpis/pull/133) | Merged at `688737ac0fb563c9b7144cb5106b892e8df41e0d` | Separate B02 progress documentation. |
+| [#134](https://github.com/Scontismaart/Melpis/pull/134) | Merged at current main `327822f0e880ad0bf6a6ac1273e24b30d49dda9c` | Preserve authentic observed OpenRouter generation ID independently of invalid usage; recovery certification remains separate. |
 
-The old `4035c8d` snapshot and runs 40096981755/40096981661 are superseded intake history. They do not certify the replacement correction or the integrated main. Use the exact approved-head and post-merge links in section 1.
+The old `4035c8d` snapshot and runs 40096981755/40096981661 are superseded intake history. They do not certify the replacement correction or the integrated main. Use the current-main evidence in section 1 and historical B02 links in section 12.
 
 ## 5. Environment and evidence separation
 
 | Environment / activity | Verified state | Remaining boundary |
 |---|---|---|
-| Local regressions | Unit: 1,556 passed, 1 skipped; frontend: 418 passed, 3 skipped. Replacement plus repository PostgreSQL suite: 28 passed. | Overlapping local/CI suites must not be added together. Synthetic providers are not real-provider E2E. |
+| Historical B02 local regressions | Unit: 1,556 passed, 1 skipped; frontend: 418 passed, 3 skipped. Replacement plus repository PostgreSQL suite: 28 passed. | Overlapping local/CI suites must not be added together. Synthetic providers are not real-provider E2E. |
 | Approved PR head | `d141d162`; CI/Migration green, each 3,824 passed and 36 skipped. Four no-push builds green. | PR jobs did not publish GHCR images. |
 | Integrated main | #132 merged normally at `6a26813e9a0f52d25e78da55465744e3ca798c3a`. Post-merge runs linked above. | Technical integration does not authorize activation. |
 | GHCR | API/web SHA-specific tags published; each manifest directly inspected and contains linux/amd64 and linux/arm64. Digests below. | Published image is not a deployed service. |
@@ -218,7 +220,7 @@ Avoid starting multiple broad implementation PRs at once. INF01 can provide deci
 
 ## 9. Real P0 blockers and founder decisions
 
-Explicit open P0 blockers: (1) B02 operational certification (replacement code defect resolved in #132); (2) #121 OpenRouter recovery; (3) INF01 capacity evidence; (4) C01 staging schema and historical-row handling; (5) C02 host, backup, monitoring, and restore; (6) C03 authorized Meta/Google E2E; (7) C04 public Stripe endpoint delivery/verification and pricing approval; (8) C05 legal/provider policy and A06 deletion/retention evidence; (9) B02 file quotas not commercially approved. INF02 becomes a gate if product copy promises original-file retention, download, or re-index; otherwise it remains a conditional design item.
+Explicit open P0 blockers: (1) B02 operational certification (replacement code defect resolved in #132); (2) #121 OpenRouter recovery; (3) INF01 review and C02 whole-host capacity evidence; (4) C01 staging schema and historical-row handling; (5) C02 host, backup, monitoring, and restore; (6) C03 authorized Meta/Google E2E; (7) C04 public Stripe endpoint delivery/verification and pricing approval; (8) C05 legal/provider policy and A06 deletion/retention evidence; (9) B02 file quotas not commercially approved. INF02 becomes a gate if product copy promises original-file retention, download, or re-index; otherwise it remains a conditional design item.
 
 1. Approve or reject the proposed aggregate/per-file quota matrix and define trial quota; until then retain the unconfigured-budget behavior that denies new file growth.
 2. Decide whether private beta supports restaurant/table booking only or a broader vertical set; this determines the A05/#90 acceptance boundary.
@@ -255,7 +257,7 @@ implemented. The former capacity proposal is explicitly superseded.
 
 Local unit proof: 1,556 passed, 1 skipped. Full frontend proof: 418 passed,
 3 skipped. Final approved-head totals are 3,824 passed and 36 skipped in each workflow;
-see section 1 for exact-head and post-merge links. No overlapping counts are summed.
+see section 12 for the historical B02 exact-head and post-merge links. No overlapping counts are summed.
 
 Founder GO authorized only the technical merge, now completed. Open issue decisions, staging,
 provider certification, INF01/INF02 work and commercial approvals remain incomplete. Only the task's dedicated PostgreSQL container is stopped
