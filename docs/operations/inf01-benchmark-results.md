@@ -75,16 +75,6 @@ The harness creates fictional multilingual cafe questions and matching passages,
 
 These measurements cover local synthetic embedding and in-memory retrieval only. The Linux PyTorch baseline and Windows ONNX runs used different runtimes and execution environments, so their timing values are not a direct speedup comparison. Shared-runtime measurements with API clients are recorded below and remain distinct from direct inference timings. Root selected shared FP32 ONNX as the next candidate; INT8 did not meet the diagnostic parity gate and is rejected for this embedding space. This does not establish production capacity or rollout readiness. The Windows PyTorch failure remains documented independently of the completed Linux PyTorch baseline.
 
-## Mixed PDF, shared embedding, pgvector, and responder run
-
-**Status: harness ready; execution pending. No mixed-pipeline results are claimed yet.** [benchmark_inf01_mixed.py](../../scripts/benchmark_inf01_mixed.py) runs 5/25/100 synthetic activities against the local PDF extractor, the authenticated shared ONNX service, fenced document indexing, and pgvector retrieval. It creates a query for the first published PDF while the next PDF extractor worker is running, records the measured overlap and wait, then continues indexing. It also checks retrieval separation across two entitled synthetic organizations and confirms a third unentitled organization receives no search results and is denied indexing.
-
-The first indexing request is replayed with the same synthetic key and PDF to measure idempotent replay without an extra embedding call. One deterministic Crew stub is sent through `genera_risposta_async` and the real output/guardrail validation; it makes no provider call. In parallel, the harness delegates the existing `tests/whatsapp/test_router.py::TestRouter::test_post_inbound_message` unit test with `--noconftest`, because the test directory's regular autouse fixture truncates a database. That delegated test uses a mocked repository and verifies only the in-process route ACK; it does not contact Meta, send an outbound message, or establish WhatsApp E2E behavior.
-
-The harness accepts only `INF01_TEST_DSN` for `melpis_inf01_mixed_20261025` on `melpis-cycle-pg-20261025:5432` or `127.0.0.1:55495`, and only internal embedding service aliases or loopback. It requires the target database to be empty and sets the benchmark connection search path to `public,extensions`. It performs no migrations and no automatic cleanup; synthetic organization, PDF-derived text, document, and vector rows are retained for inspection. The receipt path is `artifacts/inf01/mixed-pdf-pg.json`. Re-run only after separately preparing another empty dedicated database; this harness refuses an already populated target.
-
-The receipt separates client-side extraction, embedding, index/publication and retrieval timings, retrieval quality, tenant checks, row counts and parent-process CPU/RSS. It does not expose or estimate shared model-service or PostgreSQL server CPU/RSS; collect those from the container runtime if needed. It makes no WhatsApp webhook, Meta, OpenRouter, or other provider request.
-
 ## Shared HTTP: bounded demand and overload
 
 The service ran with an ephemeral internal credential, no published port, an
@@ -173,6 +163,14 @@ These generated pages include common boilerplate and repeated multilingual
 content. They differ from the frozen direct-embedding fixture; comparing these
 scores with its Torch results would be invalid. This run certifies the stated
 publication/isolation mechanics, not acceptable production answer quality.
+
+The canonical mixed-run receipt is [mixed-pdf-pg-d.json](../../artifacts/inf01/mixed-pdf-pg-d.json). It records the completed synthetic PDF extraction, shared embedding, fenced publication, pgvector retrieval, replay, tenant checks and deterministic responder/guardrail exercise. The harness is [benchmark_inf01_mixed.py](../../scripts/benchmark_inf01_mixed.py). The workload labels 5/25/100 mean synthetic activities in this run, not pages or tenants.
+
+## C02 real-host evidence still required
+
+These diagnostics do not establish readiness or capacity for a real host. Before a C02 decision, record the named target and accountable owner; host and container CPU, memory, PID and disk limits; API/worker replica and database/pool topology; baseline competing workloads; monitoring access; and owner-approved resource, latency, throughput and storage thresholds. Then run an explicitly authorized, bounded workload on that target, measuring API, embedding and PostgreSQL resource use together with PDF indexing and retrieval under the intended process topology.
+
+The current mixed run does not exercise the durable WhatsApp inbox/worker path concurrently with PDF work. A mocked route ACK check is not webhook latency or WhatsApp certification. C02/C03 evidence still needs the approved host run to measure ACK separately from background processing, durable worker behavior and restart/replay under mixed load. No live Meta or provider calls are included in the existing receipts. Do not infer a fleet capacity, production rollout, or commercial allowance from these synthetic results.
 
 Failed preliminary harness runs were retained separately: CLI tier parsing and
 read-only CrewAI storage were corrected, without relaxing database guards. The
