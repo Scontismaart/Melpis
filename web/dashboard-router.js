@@ -16,6 +16,7 @@
     assistente: "/app/ai-simulator",
     conoscenza: "/app/knowledge",
     "configurazione-ai": "/app/ai-settings",
+    onboarding: "/app/onboarding",
     impostazioni: "/app/settings",
   });
   const SETTINGS_TABS = Object.freeze([
