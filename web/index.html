@@ -341,25 +341,25 @@
       </div>
     </section>
 
-    <!-- ---------- PANNELLO: ONBOARDING (fuori nav: si apre dal banner in Assistente) ---------- -->
-    <section class="view view-hidden" data-view-panel="onboarding" aria-label="Configurazione assistente">
-      <p class="view-intro">Configura un assistente pronto per il tuo settore. Il profilo salvato sostituisce il profilo demo usato dalla chat.</p>
+    <!-- ---------- PANNELLO: ONBOARDING ---------- -->
+    <section class="view view-hidden" data-view-panel="onboarding" aria-label="Configurazione assistente" data-i18n-aria="dashboard:onboarding.aria">
+      <p class="view-intro" data-i18n="dashboard:onboarding.intro">Configura un assistente pronto per il tuo settore. Il profilo salvato sostituisce il profilo demo usato dalla chat.</p>
 
       <div class="onboarding-shell">
-        <aside class="onboarding-rail" aria-label="Step onboarding">
-          <button type="button" class="onboarding-step active" data-onboarding-step="0"><span>01</span>Attività</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="1"><span>02</span>Voce e servizi</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="2"><span>03</span>Lingue</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="3"><span>04</span>Escalation</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="4"><span>05</span>WhatsApp</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="5"><span>06</span>Documenti</button>
-          <button type="button" class="onboarding-step" data-onboarding-step="6"><span>07</span>Test</button>
+        <aside class="onboarding-rail" aria-label="Step onboarding" data-i18n-aria="dashboard:onboarding.steps_aria">
+          <button type="button" class="onboarding-step active" data-onboarding-step="0"><span>01</span><span data-i18n="dashboard:onboarding.step_activity">Attività</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="1"><span>02</span><span data-i18n="dashboard:onboarding.step_voice">Voce e servizi</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="2"><span>03</span><span data-i18n="dashboard:onboarding.step_languages">Lingue</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="3"><span>04</span><span data-i18n="dashboard:onboarding.step_escalation">Escalation</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="4"><span>05</span><span data-i18n="dashboard:onboarding.step_whatsapp">WhatsApp</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="5"><span>06</span><span data-i18n="dashboard:onboarding.step_documents">Documenti</span></button>
+          <button type="button" class="onboarding-step" data-onboarding-step="6"><span>07</span><span data-i18n="dashboard:onboarding.step_test">Test</span></button>
         </aside>
 
         <div class="onboarding-panel">
           <div class="onboarding-head-row">
             <div class="onboarding-progress"><span id="onboarding-progress-bar"></span></div>
-            <button type="button" class="report-refresh" id="onboarding-chiudi">Chiudi configurazione</button>
+            <button type="button" class="report-refresh" id="onboarding-chiudi" data-i18n="dashboard:onboarding.close">Chiudi configurazione</button>
           </div>
           <div class="onboarding-draft-banner" id="onboarding-draft-banner" hidden>
             <div class="onboarding-draft-banner-text">
@@ -367,113 +367,113 @@
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </span>
               <div>
-                <strong>Riprendiamo da dove avevi lasciato</strong>
-                <span id="onboarding-draft-time-hint">Bozza recuperata in locale.</span>
+                <strong data-i18n="dashboard:onboarding.draft_title">Riprendiamo da dove avevi lasciato</strong>
+                <span id="onboarding-draft-time-hint" data-i18n="dashboard:onboarding.draft_recovered">Bozza recuperata in locale.</span>
               </div>
             </div>
-            <button type="button" class="onboarding-draft-discard-btn" id="onboarding-draft-discard">Scarta bozza</button>
+            <button type="button" class="onboarding-draft-discard-btn" id="onboarding-draft-discard" data-i18n="dashboard:onboarding.draft_discard">Scarta bozza</button>
           </div>
           <span class="onboarding-autosave-badge" id="onboarding-autosave" hidden></span>
 
           <section class="onboarding-page" data-onboarding-page="0">
-            <span class="onboarding-kicker">Profilo attività</span>
-            <h2>Che assistente vuoi creare?</h2>
-            <p>Ogni verticale cambia prompt, regole di prudenza e esempi iniziali.</p>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.activity_kicker">Profilo attività</span>
+            <h2 data-i18n="dashboard:onboarding.activity_title">Che assistente vuoi creare?</h2>
+            <p data-i18n="dashboard:onboarding.activity_intro">Ogni settore adatta stile, regole di prudenza ed esempi iniziali.</p>
             <div class="vertical-grid" id="vertical-grid"></div>
-            <label class="wizard-label" for="onboarding-name">Nome attività</label>
-            <input class="wizard-input" id="onboarding-name" type="text" placeholder="Es. Studio Capelli Nora">
+            <label class="wizard-label" for="onboarding-name" data-i18n="dashboard:onboarding.business_name">Nome attività</label>
+            <input class="wizard-input" id="onboarding-name" type="text" placeholder="Es. Studio Capelli Nora" data-i18n-placeholder="dashboard:onboarding.business_name_placeholder">
           </section>
 
           <section class="onboarding-page" data-onboarding-page="1" hidden>
-            <span class="onboarding-kicker">Voce operativa</span>
-            <h2>Orari, servizi, tono</h2>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.voice_kicker">Voce operativa</span>
+            <h2 data-i18n="dashboard:onboarding.voice_title">Orari, servizi, tono</h2>
             <div class="wizard-two">
               <div>
-                <label class="wizard-label" for="onboarding-hours">Orari</label>
-                <textarea class="wizard-input" id="onboarding-hours" rows="4" placeholder="Es. Martedi-Sabato 09:00-19:00"></textarea>
+                <label class="wizard-label" for="onboarding-hours" data-i18n="dashboard:onboarding.hours">Orari</label>
+                <textarea class="wizard-input" id="onboarding-hours" rows="4" placeholder="Es. Martedi-Sabato 09:00-19:00" data-i18n-placeholder="dashboard:onboarding.hours_placeholder"></textarea>
               </div>
               <div>
-                <label class="wizard-label" for="onboarding-tone">Tono di voce</label>
-                <textarea class="wizard-input" id="onboarding-tone" rows="4" placeholder="Gentile, preciso, professionale..."></textarea>
+                <label class="wizard-label" for="onboarding-tone" data-i18n="dashboard:onboarding.tone">Tono di voce</label>
+                <textarea class="wizard-input" id="onboarding-tone" rows="4" placeholder="Gentile, preciso, professionale..." data-i18n-placeholder="dashboard:onboarding.tone_placeholder"></textarea>
               </div>
             </div>
-            <label class="wizard-label" for="onboarding-services">Servizi principali, uno per riga</label>
-            <textarea class="wizard-input" id="onboarding-services" rows="5"></textarea>
+            <label class="wizard-label" for="onboarding-services" data-i18n="dashboard:onboarding.services">Servizi principali, uno per riga</label>
+            <textarea class="wizard-input" id="onboarding-services" rows="5" data-i18n-placeholder="dashboard:onboarding.services_placeholder"></textarea>
             <div class="preview-card">
               <div>
-                <span class="preview-title">Anteprima risposta AI</span>
-                <p id="onboarding-preview-text">Compila i dati e genera una preview.</p>
+                <span class="preview-title" data-i18n="dashboard:onboarding.preview_title">Anteprima risposta AI</span>
+                <p id="onboarding-preview-text" data-i18n="dashboard:onboarding.preview_initial">Compila i dati e genera una preview.</p>
               </div>
-              <button type="button" class="review-analyze" id="onboarding-preview-btn">Genera preview</button>
+              <button type="button" class="review-analyze" id="onboarding-preview-btn" data-i18n="dashboard:onboarding.preview_button">Genera anteprima</button>
             </div>
           </section>
 
           <section class="onboarding-page" data-onboarding-page="2" hidden>
-            <span class="onboarding-kicker">Multilingua</span>
-            <h2>In quali lingue parla il tuo assistente?</h2>
-            <p>Il bot rileva la lingua del cliente e risponde nella stessa lingua. L'italiano è sempre attivo.</p>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.languages_kicker">Multilingua</span>
+            <h2 data-i18n="dashboard:onboarding.languages_title">In quali lingue parla il tuo assistente?</h2>
+            <p data-i18n="dashboard:onboarding.languages_intro">L'assistente rileva la lingua del cliente e risponde nella stessa lingua. L'italiano è sempre attivo.</p>
             <div class="escalation-list" id="lingue-grid"></div>
-            <label class="wizard-label" for="lingua-default">Lingua di default</label>
+            <label class="wizard-label" for="lingua-default" data-i18n="dashboard:onboarding.default_language">Lingua predefinita</label>
             <select class="wizard-input" id="lingua-default"></select>
           </section>
 
           <section class="onboarding-page" data-onboarding-page="3" hidden>
-            <span class="onboarding-kicker">Regole di prudenza</span>
-            <h2>Quando passa a un umano?</h2>
-            <p>Parti dalle regole consigliate per settore. Puoi aggiungerne altre.</p>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.escalation_kicker">Regole di prudenza</span>
+            <h2 data-i18n="dashboard:onboarding.escalation_title">Quando passa a una persona?</h2>
+            <p data-i18n="dashboard:onboarding.escalation_intro">Parti dalle regole consigliate per settore. Puoi aggiungerne altre.</p>
             <div class="escalation-list" id="escalation-list"></div>
-            <label class="wizard-label" for="onboarding-extra-rule">Aggiungi regola</label>
+            <label class="wizard-label" for="onboarding-extra-rule" data-i18n="dashboard:onboarding.extra_rule">Aggiungi regola</label>
             <div class="wizard-inline">
-              <input class="wizard-input" id="onboarding-extra-rule" type="text" placeholder="Es. richieste fuori listino">
-              <button type="button" class="report-refresh" id="onboarding-add-rule">Aggiungi</button>
+              <input class="wizard-input" id="onboarding-extra-rule" type="text" placeholder="Es. richieste fuori listino" data-i18n-placeholder="dashboard:onboarding.extra_rule_placeholder">
+              <button type="button" class="report-refresh" id="onboarding-add-rule" data-i18n="dashboard:onboarding.add_rule">Aggiungi</button>
             </div>
           </section>
 
           <section class="onboarding-page" data-onboarding-page="4" hidden>
-            <span class="onboarding-kicker">Canale</span>
-            <h2>Collegamento WhatsApp Business</h2>
-            <p>Per la demo segniamo lo step come pronto. In produzione qui entrano Meta App ID, numero e webhook.</p>
-            <label class="wizard-check strong"><input type="checkbox" id="onboarding-whatsapp"> WhatsApp Business configurato o da collegare in onboarding tecnico</label>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.whatsapp_kicker">Canale</span>
+            <h2 data-i18n="dashboard:onboarding.whatsapp_title">Collegamento WhatsApp Business</h2>
+            <p data-i18n="dashboard:onboarding.whatsapp_intro">Questa guida non collega né verifica WhatsApp. Per collegare un numero e verificarne lo stato, usa Impostazioni → WhatsApp.</p>
+            <label class="wizard-check strong"><input type="checkbox" id="onboarding-whatsapp"> <span data-i18n="dashboard:onboarding.whatsapp_acknowledge">Ho letto le indicazioni per collegare WhatsApp in Impostazioni</span></label>
             <div class="connection-strip">
-              <span>Webhook</span><strong>Pronto</strong>
-              <span>Numero</span><strong>Da collegare</strong>
-              <span>Template</span><strong>Opzionali</strong>
+              <span data-i18n="dashboard:onboarding.webhook">Webhook</span><strong data-i18n="dashboard:onboarding.webhook_not_checked">Non verificato qui</strong>
+              <span data-i18n="dashboard:onboarding.phone_number">Numero</span><strong data-i18n="dashboard:onboarding.phone_not_connected">Da collegare nelle impostazioni</strong>
+              <span data-i18n="dashboard:onboarding.templates">Template</span><strong data-i18n="dashboard:onboarding.optional">Opzionali</strong>
             </div>
-            <p class="settings-help">Google Calendar è facoltativo e non serve per completare la configurazione. Puoi collegarlo e scegliere la modalità in Impostazioni → Google Calendar.</p>
+            <p class="settings-help" data-i18n="dashboard:onboarding.google_calendar_help">Google Calendar è facoltativo e non serve per completare la configurazione. Puoi collegarlo e verificarne lo stato in Impostazioni → Google Calendar.</p>
           </section>
 
           <section class="onboarding-page" data-onboarding-page="5" hidden>
-            <span class="onboarding-kicker">Knowledge base</span>
-            <h2>Import menu e documenti</h2>
-            <p>Carica qui i PDF e i documenti che l'assistente deve conoscere. Vengono indicizzati e usati come contesto nelle risposte.</p>
-            <label class="wizard-label" for="onboarding-doc-file">Documento da importare</label>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.documents_kicker">Base di conoscenza</span>
+            <h2 data-i18n="dashboard:onboarding.documents_title">Importa menu e documenti</h2>
+            <p data-i18n="dashboard:onboarding.documents_intro">Carica qui i PDF e i documenti che l'assistente deve conoscere. Vengono indicizzati e usati come contesto nelle risposte.</p>
+            <label class="wizard-label" for="onboarding-doc-file" data-i18n="dashboard:onboarding.document_file">Documento da importare</label>
             <div class="wizard-inline">
               <input class="wizard-input" id="onboarding-doc-file" type="file" accept=".pdf,.txt,.md,.csv,.docx,.html">
-              <button type="button" class="report-refresh" id="onboarding-doc-upload">Carica</button>
+              <button type="button" class="report-refresh" id="onboarding-doc-upload" data-i18n="dashboard:onboarding.upload">Carica</button>
             </div>
             <p class="doc-config-status" id="onboarding-doc-status"></p>
-            <label class="wizard-check strong"><input type="checkbox" id="onboarding-docs"> Ho importato almeno un documento utile</label>
-            <button type="button" class="report-refresh" id="onboarding-open-docs">Vai ai documenti</button>
+            <label class="wizard-check strong"><input type="checkbox" id="onboarding-docs"> <span data-i18n="dashboard:onboarding.documents_acknowledge">Ho importato almeno un documento utile</span></label>
+            <button type="button" class="report-refresh" id="onboarding-open-docs" data-i18n="dashboard:onboarding.open_documents">Vai ai documenti</button>
           </section>
 
           <section class="onboarding-page" data-onboarding-page="6" hidden>
-            <span class="onboarding-kicker">Prova guidata</span>
-            <h2>Test conversazione</h2>
-            <p>Salva il profilo e fai una domanda come cliente.</p>
-            <textarea class="wizard-input" id="onboarding-test-message" rows="3"></textarea>
+            <span class="onboarding-kicker" data-i18n="dashboard:onboarding.test_kicker">Prova guidata</span>
+            <h2 data-i18n="dashboard:onboarding.test_title">Test conversazione</h2>
+            <p data-i18n="dashboard:onboarding.test_intro">Salva il profilo e fai una domanda come cliente.</p>
+            <textarea class="wizard-input" id="onboarding-test-message" rows="3" placeholder="Es. Siete aperti domani?" data-i18n-placeholder="dashboard:onboarding.test_placeholder"></textarea>
             <div class="preview-card final">
               <div>
-                <span class="preview-title">Risposta test</span>
-                <p id="onboarding-test-output">Nessun test eseguito.</p>
+                <span class="preview-title" data-i18n="dashboard:onboarding.test_response">Risposta test</span>
+                <p id="onboarding-test-output" data-i18n="dashboard:onboarding.test_initial">Nessun test eseguito.</p>
               </div>
-              <button type="button" class="review-analyze" id="onboarding-test-btn">Salva e testa</button>
+              <button type="button" class="review-analyze" id="onboarding-test-btn" data-i18n="dashboard:onboarding.save_and_test">Salva e prova</button>
             </div>
           </section>
 
           <p class="doc-config-status" id="onboarding-status"></p>
           <div class="onboarding-actions">
-            <button type="button" class="report-refresh" id="onboarding-prev">Indietro</button>
-            <button type="button" class="review-analyze" id="onboarding-next">Avanti</button>
+            <button type="button" class="report-refresh" id="onboarding-prev" data-i18n="dashboard:onboarding.previous">Indietro</button>
+            <button type="button" class="review-analyze" id="onboarding-next" data-i18n="dashboard:onboarding.next">Avanti</button>
           </div>
         </div>
       </div>

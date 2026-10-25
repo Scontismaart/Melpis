@@ -4,7 +4,7 @@
   "hero": {
     "badge": "Precios transparentes",
     "title": "Un plan diseñado para cada etapa de tu negocio",
-    "subtitle": "Activa tu asistente de WhatsApp con IA en pocos minutos. Prueba gratis durante 7 días, sin tarjeta y sin permanencia.",
+    "subtitle": "Prueba gratis con PDF/RAG incluido: hasta 7 días o 150 respuestas de IA, lo que ocurra primero. Sin tarjeta de crédito ni permanencia.",
     "monthly_toggle": "Mensual"
   },
   "plans": {
@@ -18,6 +18,7 @@
       "features": [
         "1 número oficial de WhatsApp Business",
         "Hasta 500 mensajes con IA/mes",
+        "PDF/RAG incluido; cuota de archivos por definir",
         "Horarios, tarifas y respuestas automáticas 24/7",
         "Bandeja de entrada web desde cualquier dispositivo",
         "Notificaciones de escalado por correo",
@@ -34,11 +35,11 @@
       "features": [
         "Todo lo incluido en Esencial",
         "Hasta 2.000 mensajes con IA/mes",
-        "Sincronización con Google Calendar",
+        "PDF/RAG incluido; cuota de archivos por definir",
         "Gestión de reservas y recordatorios anti-ausencias",
         "Hasta 3 operadores simultáneos en la bandeja",
-        "Entrenamiento con documentos PDF y listas de precios",
-        "Soporte prioritario por WhatsApp y correo"
+        "Soporte prioritario por WhatsApp y correo",
+        "Google Calendar es opcional; requiere configuración autorizada"
       ]
     },
     "scale": {
@@ -51,6 +52,7 @@
       "features": [
         "Todo lo incluido en Crecimiento",
         "Hasta 10.000 mensajes con IA/mes",
+        "PDF/RAG incluido; cuota de archivos por definir",
         "Operadores ilimitados con permisos dedicados",
         "Instagram Direct, previa verificación del proveedor",
         "Configuración de IA y gestión del equipo",

@@ -1,0 +1,139 @@
+{
+  "benchmark": "inf01_shared_http_synthetic",
+  "status": "complete",
+  "timestamp_utc": "2026-10-25T08:51:29.132807+00:00",
+  "service_fingerprint": {
+    "ready": true,
+    "model_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "embedding_space": "minilm-e8f8c211-query-passage-mean-l2-384-v1",
+    "dimension": 384,
+    "artifact_sha256": "10f7a088420252b26caf819236ca2c9d2987afd0fc06fec7553b542a5655a05a",
+    "queued_queries": 0,
+    "queued_passages": 0,
+    "in_flight_and_queued": 0,
+    "counters": {
+      "failures": 2,
+      "timeouts": 1,
+      "completed": 1
+    }
+  },
+  "scope": "Synthetic activity DTOs over the internal embedding HTTP API; no database, PDF, provider, or customer-data workload.",
+  "tiers": {
+    "5": {
+      "activities": 5,
+      "synthetic_languages": {
+        "en": 1,
+        "es": 2,
+        "it": 2
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 1,
+      "successful_activities": 5,
+      "requests": 10,
+      "error_events": 0,
+      "successful_requests": 10,
+      "status_counts": {
+        "200": 10
+      },
+      "errors": {},
+      "backpressure_responses": 0,
+      "backpressure_rate": 0.0,
+      "latency_p50_seconds": 0.060817,
+      "latency_p95_seconds": 0.08025,
+      "latency_p99_seconds": 0.08025,
+      "successful_activities_per_second": 4.621,
+      "wall_seconds": 1.08212,
+      "client_cpu_seconds_total": 0.234546,
+      "client_process_peak_rss_bytes": [
+        42119168,
+        42119168,
+        42119168
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        2,
+        2,
+        2
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    },
+    "25": {
+      "activities": 25,
+      "synthetic_languages": {
+        "en": 8,
+        "es": 8,
+        "it": 9
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 1,
+      "successful_activities": 25,
+      "requests": 50,
+      "error_events": 0,
+      "successful_requests": 50,
+      "status_counts": {
+        "200": 50
+      },
+      "errors": {},
+      "backpressure_responses": 0,
+      "backpressure_rate": 0.0,
+      "latency_p50_seconds": 0.052142,
+      "latency_p95_seconds": 0.117008,
+      "latency_p99_seconds": 0.125742,
+      "successful_activities_per_second": 11.506,
+      "wall_seconds": 2.1728,
+      "client_cpu_seconds_total": 0.505848,
+      "client_process_peak_rss_bytes": [
+        42119168,
+        42119168,
+        42119168
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        2,
+        2,
+        2
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    },
+    "100": {
+      "activities": 100,
+      "synthetic_languages": {
+        "en": 33,
+        "es": 33,
+        "it": 34
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 1,
+      "successful_activities": 100,
+      "requests": 200,
+      "error_events": 0,
+      "successful_requests": 200,
+      "status_counts": {
+        "200": 200
+      },
+      "errors": {},
+      "backpressure_responses": 0,
+      "backpressure_rate": 0.0,
+      "latency_p50_seconds": 0.043535,
+      "latency_p95_seconds": 0.159201,
+      "latency_p99_seconds": 0.247193,
+      "successful_activities_per_second": 19.992,
+      "wall_seconds": 5.001949,
+      "client_cpu_seconds_total": 0.938939,
+      "client_process_peak_rss_bytes": [
+        42119168,
+        42119168,
+        42119168
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        2,
+        2,
+        2
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    }
+  },
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

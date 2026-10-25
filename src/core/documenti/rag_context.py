@@ -70,7 +70,8 @@ async def recupera_contesto_documenti(
                     q_emb = (await asyncio.to_thread(vettorizza, [testo], tipo="query"))[0]
                 else:
                     from src.core.documenti.isolated import embed_local
-                    q_emb = (await embed_local([testo], tipo="query", timeout=timeout))[0]
+                    q_emb = (await embed_local([testo], tipo="query", timeout=timeout,
+                                               organization_id=str(organization_id)))[0]
             risultati = await repo.search_similar(organization_id, q_emb, k)
             if await documents.knowledge_version(organization_id) != epoch:
                 return ContestoDocumenti(reason="knowledge_changed")

@@ -75,27 +75,29 @@ async function caricaStatoOnboarding(token = capture()) {
     ]);
     if (!guard(token)) return null;
 
-    let hasDocs = false;
-    if (resDoc.status === "fulfilled" && resDoc.value?.ok) {
-      const d = await resDoc.value.json().catch(() => ({}));
-      if (!guard(token)) return null;
-      hasDocs = Number(d.chunk_indicizzati || 0) > 0;
+    if ([resDoc, resBook, resWa].some((result) => result.status !== "fulfilled" || !result.value?.ok)) {
+      return { unavailable: true };
     }
 
-    let hasBookingHours = false;
-    if (resBook.status === "fulfilled" && resBook.value?.ok) {
-      const b = await resBook.value.json().catch(() => ({}));
-      if (!guard(token)) return null;
-      const capienze = b.capienze_orarie || {};
-      hasBookingHours = Object.values(capienze).some((v) => Number(v) > 0);
+    const [d, b, w] = await Promise.all([
+      resDoc.value.json().catch(() => null),
+      resBook.value.json().catch(() => null),
+      resWa.value.json().catch(() => null),
+    ]);
+    if (!guard(token)) return null;
+    if (!d || typeof d !== "object" || !b || typeof b !== "object" || !w || typeof w !== "object"
+      || typeof d.chunk_indicizzati !== "number" || !Number.isFinite(d.chunk_indicizzati)
+      || !b.capienze_orarie || typeof b.capienze_orarie !== "object" || Array.isArray(b.capienze_orarie)) {
+      return { unavailable: true };
     }
 
-    let hasWa = false;
-    if (resWa.status === "fulfilled" && resWa.value?.ok) {
-      const w = await resWa.value.json().catch(() => ({}));
-      if (!guard(token)) return null;
-      hasWa = Boolean(w.phone_number_id || w.status === "connected" || w.configured);
-    }
+    const hasDocs = Number(d.chunk_indicizzati) > 0;
+    const hasBookingHours = Object.values(b.capienze_orarie).some((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+    const hasWa = Boolean(
+      (typeof w.phone_number_id === "string" && w.phone_number_id.trim())
+      || w.status === "connected"
+      || w.configured === true
+    );
 
     return {
       hasDocs,
@@ -105,7 +107,7 @@ async function caricaStatoOnboarding(token = capture()) {
     };
   } catch {
     if (!guard(token)) return null;
-    return { hasDocs: true, hasBookingHours: true, hasWa: true, isFullyConfigured: true };
+    return { unavailable: true };
   }
 }
 
@@ -132,6 +134,14 @@ async function aggiornaPrioritari(silent = false) {
     const eventi = Array.isArray(rawEventi) ? rawEventi : [];
     const cfg = eventi.length === 0 ? await loadOnboardingState(token) : null;
     if (!isCurrent()) return;
+    if (eventi.length === 0 && (!cfg || cfg.unavailable)) {
+      priorityList.innerHTML = "";
+      priorityList.appendChild(_errorState(
+        _tDash("overview.runtime.setup_unavailable", "Impossibile verificare la configurazione. Riprova."),
+        () => aggiornaPrioritari()
+      ));
+      return;
+    }
     const countBadge = document.getElementById("priority-count-badge");
     if (countBadge) {
       countBadge.textContent = eventi.length ? _tDash("overview.runtime.priority_count", "{{count}} elementi", { count: eventi.length }) : "";
@@ -152,6 +162,7 @@ async function aggiornaPrioritari(silent = false) {
                 <h3 class="onboarding-checklist-title">Completa la configurazione iniziale</h3>
                 <p class="onboarding-checklist-sub">Segui questi 3 passaggi per attivare l'assistente con i tuoi clienti.</p>
               </div>
+              <button type="button" class="onboarding-step-btn" data-action="setup-wizard">${_tDash("onboarding.full_guide", "Guida completa · 7 passaggi")}</button>
             </div>
             <div class="onboarding-checklist-steps">
               <div class="onboarding-step-row">
@@ -186,6 +197,9 @@ async function aggiornaPrioritari(silent = false) {
         `;
         li.querySelector('[data-action="setup-wa"]')?.addEventListener("click", () => {
           apriVistaImpostazioni("whatsapp");
+        });
+        li.querySelector('[data-action="setup-wizard"]')?.addEventListener("click", () => {
+          apriView("onboarding");
         });
         li.querySelector('[data-action="setup-docs"]')?.addEventListener("click", () => {
           apriView("conoscenza");

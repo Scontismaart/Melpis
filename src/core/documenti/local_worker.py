@@ -33,14 +33,21 @@ def main():
     os.environ["TRANSFORMERS_OFFLINE"] = "1"
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     try:
-        if mode == "embed":
+        if mode in {"embed", "embed_verified"}:
             import torch
             torch.set_num_threads(2)
             from sentence_transformers import SentenceTransformer
+            model_path = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+            if mode == "embed_verified":
+                from src.core.documenti.embedding_assets import verified_assets
+                model_path = str(verified_assets("torch")[0])
             model = SentenceTransformer(
-                "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                model_path,
                 local_files_only=True, trust_remote_code=False,
             )
+        elif mode == "embed_onnx":
+            from src.core.documenti.embedding_assets import OfflineOnnxEncoder
+            model = OfflineOnnxEncoder()
         elif mode != "extract":
             return
         emit({"ready": True})
@@ -57,8 +64,11 @@ def main():
                     or sum(map(len, texts)) > limits.TEXT_CHARACTERS):
                 raise ValueError("embedding_input_limit")
             prefix = "query: " if request.get("tipo") == "query" else "passage: "
-            vectors = model.encode([prefix + t for t in texts], batch_size=16,
-                                   normalize_embeddings=True, show_progress_bar=False).tolist()
+            if mode == "embed_onnx":
+                vectors = model.encode(texts, request.get("tipo", "passage"))
+            else:
+                vectors = model.encode([prefix + t for t in texts], batch_size=16,
+                                       normalize_embeddings=True, show_progress_bar=False).tolist()
             emit({"result": vectors})
             del request, texts, vectors
     except Exception as exc:

@@ -274,6 +274,7 @@ async function caricaSessione() {
 
 function invalidaSessione() {
   dashboardSessionEpoch += 1;
+  resetOnboardingMemory();
   dashboardOverviewModule?.invalidate();
   dashboardReviewsModule?.invalidate();
   dashboardKnowledgeModule?.invalidate();
@@ -456,6 +457,8 @@ async function renderDashboardView(viewName) {
   topbarTitle.dataset.i18n = `dashboard:topbar.${titleKeys[viewName] || "title_panoramica"}`;
   topbarTitle.textContent = t(topbarTitle.dataset.i18n);
 
+  if (viewName === "onboarding") void inizializzaOnboarding();
+
   if (viewName === "impostazioni") {
     const routerApi = window.MelpisDashboardRouter;
     const tab = routerApi?.settingsTabFromSearch(window.location.search) || "generale";
@@ -521,7 +524,7 @@ const VIEW_FALLBACK = {
   reviews: { view: "impostazioni", tab: "reviews" },
   documenti: { view: "conoscenza" },
   report: { view: "panoramica" },
-  onboarding: { view: "configurazione-ai" },
+  onboarding: { view: "onboarding" },
 };
 
 function apriVistaImpostazioni(cat = "generale") {
@@ -708,6 +711,55 @@ function aggiornaDefaultLingua() {
 
 const ONBOARDING_DRAFT_KEY = "melpis_onboarding_bozza";
 let dbProfileRecord = null;
+let onboardingOwnerKey = null;
+
+function onboardingSessionKey() {
+  if (!sessione?.user_id || !sessione?.organization_id) return null;
+  return `${sessione.user_id}:${sessione.organization_id}:${dashboardSessionEpoch}`;
+}
+
+function onboardingSessionIsCurrent(ownerKey = onboardingOwnerKey) {
+  return Boolean(ownerKey && ownerKey === onboardingOwnerKey && ownerKey === onboardingSessionKey());
+}
+
+function onboardingDraftStorageKey(userId = sessione?.user_id, organizationId = sessione?.organization_id) {
+  return userId && organizationId ? `${ONBOARDING_DRAFT_KEY}:${userId}:${organizationId}` : null;
+}
+
+function resetOnboardingMemory() {
+  onboardingState.loaded = false;
+  onboardingState.step = 0;
+  onboardingState.verticals = [];
+  onboardingState.selectedVertical = "ristorante";
+  onboardingState.extraRules = [];
+  onboardingState.lingue = ["it"];
+  onboardingState.linguaDefault = "it";
+  onboardingState.lingueDisponibili = ["it", "en", "fr", "de", "es"];
+  onboardingState.profileLoaded = false;
+  onboardingOwnerKey = null;
+  dbProfileRecord = null;
+  if (onboardingEls.name) onboardingEls.name.value = "";
+  if (onboardingEls.hours) onboardingEls.hours.value = "";
+  if (onboardingEls.tone) onboardingEls.tone.value = "";
+  if (onboardingEls.services) onboardingEls.services.value = "";
+  if (onboardingEls.testMessage) onboardingEls.testMessage.value = "";
+  if (onboardingEls.whatsapp) onboardingEls.whatsapp.checked = false;
+  if (onboardingEls.docs) onboardingEls.docs.checked = false;
+  [onboardingEls.prev, onboardingEls.next, onboardingEls.previewBtn, onboardingEls.testBtn, onboardingEls.uploadDoc]
+    .forEach((button) => { if (button) button.disabled = false; });
+  if (onboardingEls.previewText) onboardingEls.previewText.textContent = _tDash("onboarding.preview_initial", "Compila i dati e genera una preview.");
+  if (onboardingEls.testOutput) onboardingEls.testOutput.textContent = _tDash("onboarding.test_initial", "Nessun test eseguito.");
+  if (onboardingEls.status) onboardingEls.status.textContent = "";
+  if (onboardingEls.docStatus) onboardingEls.docStatus.textContent = "";
+  const banner = document.getElementById("onboarding-draft-banner");
+  if (banner) banner.hidden = true;
+  const badge = document.getElementById("onboarding-autosave");
+  if (badge) badge.hidden = true;
+  onboardingEls.verticalGrid?.replaceChildren();
+  onboardingEls.escalationList?.replaceChildren();
+  onboardingEls.lingueGrid?.replaceChildren();
+  onboardingEls.linguaDefault?.replaceChildren();
+}
 
 function profiloOnboarding() {
   const vertical = verticaleCorrente();
@@ -728,6 +780,8 @@ function profiloOnboarding() {
 function salvaBozzaOnboarding() {
   /* Bozza in localStorage: il wizard resta riprendibile anche se il
      browser si chiude a metà. I dati sono non-sensibili (profilo attività). */
+  const storageKey = onboardingDraftStorageKey();
+  if (!storageKey || !onboardingSessionIsCurrent()) return;
   try {
     const bozza = {
       step: onboardingState.step,
@@ -735,19 +789,21 @@ function salvaBozzaOnboarding() {
       profilo: profiloOnboarding(),
       extraRules: onboardingState.extraRules || [],
     };
-    localStorage.setItem(ONBOARDING_DRAFT_KEY, JSON.stringify(bozza));
+    localStorage.setItem(storageKey, JSON.stringify(bozza));
     const badge = document.getElementById("onboarding-autosave");
     if (badge) {
       const ora = new Date().toLocaleTimeString(localeCorrente(), { hour: "2-digit", minute: "2-digit" });
-      badge.textContent = `Bozza salvata · ${ora}`;
+      badge.textContent = _tDash("onboarding.autosaved", "Bozza salvata · {{time}}", { time: ora });
       badge.hidden = false;
     }
   } catch { /* localStorage pieno/bloccato: non blocca il wizard */ }
 }
 
 function leggiBozzaOnboarding() {
+  const storageKey = onboardingDraftStorageKey();
+  if (!storageKey || !onboardingSessionIsCurrent()) return null;
   try {
-    const raw = localStorage.getItem(ONBOARDING_DRAFT_KEY);
+    const raw = localStorage.getItem(storageKey);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -755,8 +811,10 @@ function leggiBozzaOnboarding() {
 }
 
 function pulisciBozzaOnboarding() {
+  const storageKey = onboardingDraftStorageKey();
+  if (!storageKey || !onboardingSessionIsCurrent()) return;
   try {
-    localStorage.removeItem(ONBOARDING_DRAFT_KEY);
+    localStorage.removeItem(storageKey);
   } catch { /* storage non disponibile */ }
   const banner = document.getElementById("onboarding-draft-banner");
   if (banner) banner.hidden = true;
@@ -792,6 +850,7 @@ function applicaProfiloAForm(record, extraRules = null) {
 }
 
 function renderOnboardingStep() {
+  if (!onboardingSessionIsCurrent()) return;
   onboardingEls.steps.forEach((step) => {
     step.classList.toggle("active", Number(step.dataset.onboardingStep) === onboardingState.step);
   });
@@ -802,7 +861,9 @@ function renderOnboardingStep() {
     onboardingEls.progress.style.width = `${((onboardingState.step + 1) / 7) * 100}%`;
   }
   onboardingEls.prev.disabled = onboardingState.step === 0;
-  onboardingEls.next.textContent = onboardingState.step === 6 ? "Completa" : "Avanti";
+  onboardingEls.next.textContent = onboardingState.step === 6
+    ? _tDash("onboarding.complete", "Completa")
+    : _tDash("onboarding.next", "Avanti");
   salvaBozzaOnboarding();
 }
 
@@ -846,41 +907,55 @@ function renderEscalationRules() {
   });
 }
 
-async function caricaProfiloOnboarding() {
+async function caricaProfiloOnboarding(ownerKey) {
+  if (!onboardingSessionIsCurrent(ownerKey)) return null;
   try {
     const res = await apiFetch(`${API_BASE}/api/onboarding/profilo`);
+    if (!onboardingSessionIsCurrent(ownerKey)) return null;
     if (res.status === 401) {
-      onboardingEls.status.textContent = 'Serve la config di accesso: clicca "Configura accesso" in alto.';
+      onboardingEls.status.textContent = _tDash("onboarding.access_required", 'Serve la config di accesso: clicca "Configura accesso" in alto.');
       onboardingEls.status.style.color = "var(--red)";
       return null;
     }
+    if (res.status === 403) {
+      throw new Error(_tDash("onboarding.access_denied", "Non hai i permessi per caricare questa configurazione."));
+    }
     if (!res.ok) return null;
     const data = await res.json();
+    if (!onboardingSessionIsCurrent(ownerKey)) return null;
     dbProfileRecord = data.profilo || null;
     return dbProfileRecord;
-  } catch {
-    return null;
+  } catch (err) {
+    if (!onboardingSessionIsCurrent(ownerKey)) return null;
+    throw err;
   }
 }
 
 async function inizializzaOnboarding() {
-  if (onboardingState.loaded) {
+  const ownerKey = onboardingSessionKey();
+  if (!ownerKey) {
+    resetOnboardingMemory();
+    onboardingEls.status.textContent = _tDash("onboarding.session_required", "Accedi per configurare l'assistente.");
+    onboardingEls.status.style.color = "var(--red)";
+    return;
+  }
+  if (onboardingState.loaded && onboardingOwnerKey === ownerKey) {
     renderOnboardingStep();
     return;
   }
-  if (!sessione) {
-    vaiAdAccesso();
-    return;
-  }
+  if (onboardingOwnerKey !== ownerKey) resetOnboardingMemory();
+  onboardingOwnerKey = ownerKey;
   try {
     const res = await apiFetch(`${API_BASE}/api/onboarding/verticali`);
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     if (res.status === 401) {
-      onboardingEls.status.textContent = "Sessione scaduta: effettua di nuovo il login.";
+      onboardingEls.status.textContent = _tDash("onboarding.session_expired", "Sessione scaduta: effettua di nuovo il login.");
       onboardingEls.status.style.color = "var(--red)";
       return;
     }
-    if (!res.ok) throw new Error("Template verticali non disponibili");
+    if (!res.ok) throw new Error(_tDash("onboarding.templates_unavailable", "Template attività non disponibili."));
     const data = await res.json();
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     onboardingState.verticals = data.verticali || [];
     onboardingState.lingueDisponibili = data.lingue_disponibili || ["it", "en", "fr", "de", "es"];
     const first = onboardingState.verticals[0];
@@ -890,7 +965,8 @@ async function inizializzaOnboarding() {
       onboardingEls.services.value = first.servizi.join("\n");
       onboardingEls.testMessage.value = first.esempio;
     }
-    const savedProfile = await caricaProfiloOnboarding();
+    const savedProfile = await caricaProfiloOnboarding(ownerKey);
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     const bozzaLocale = leggiBozzaOnboarding();
 
     let usaBozza = false;
@@ -917,9 +993,12 @@ async function inizializzaOnboarding() {
         if (timeHint && bozzaLocale.salvata_at) {
           try {
             const d = new Date(bozzaLocale.salvata_at);
-            timeHint.textContent = `Bozza salvata il ${d.toLocaleDateString(localeCorrente())} alle ${d.toLocaleTimeString(localeCorrente(), { hour: "2-digit", minute: "2-digit" })}.`;
+          timeHint.textContent = _tDash("onboarding.draft_saved_at", "Bozza salvata il {{date}} alle {{time}}.", {
+            date: d.toLocaleDateString(localeCorrente()),
+            time: d.toLocaleTimeString(localeCorrente(), { hour: "2-digit", minute: "2-digit" }),
+          });
           } catch {
-            timeHint.textContent = "Bozza recuperata in locale.";
+          timeHint.textContent = _tDash("onboarding.draft_recovered", "Bozza recuperata in locale.");
           }
         }
       }
@@ -932,25 +1011,37 @@ async function inizializzaOnboarding() {
     renderEscalationRules();
     renderLingue();
     renderOnboardingStep();
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     onboardingState.loaded = true;
   } catch (err) {
-    onboardingEls.status.textContent = err.message || "Errore caricamento onboarding.";
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
+    onboardingEls.status.textContent = err.message || _tDash("onboarding.load_error", "Errore caricamento onboarding.");
     onboardingEls.status.style.color = "var(--red)";
   }
 }
 
 async function salvaProfiloOnboarding() {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   const payload = profiloOnboarding();
   const res = await apiFetch(`${API_BASE}/api/onboarding/profilo`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => null);
-    throw new Error(err?.detail || "Errore salvataggio profilo");
+    throw new Error(err?.detail || _tDash("onboarding.save_error", "Errore salvataggio profilo."));
   }
   const data = await res.json();
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   const record = data.profilo;
   dbProfileRecord = record;
   pulisciBozzaOnboarding();
@@ -992,7 +1083,7 @@ document.getElementById("onboarding-draft-discard")?.addEventListener("click", (
   renderEscalationRules();
   renderLingue();
   renderOnboardingStep();
-  toast("Bozza locale scartata. Ripartito dal profilo iniziale.", "info");
+  toast(_tDash("onboarding.draft_discarded", "Bozza locale scartata. Ripartito dal profilo iniziale."), "info");
 });
 
 [onboardingEls.name, onboardingEls.hours, onboardingEls.tone, onboardingEls.services].forEach((el) => {
@@ -1113,16 +1204,26 @@ document.getElementById("security-email-form")?.addEventListener("submit", async
 });
 
 async function generaPreviewOnboarding(targetEl, message) {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   const res = await apiFetch(`${API_BASE}/api/onboarding/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ profilo: profiloOnboarding(), messaggio: message }),
   });
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => null);
     throw new Error(err?.detail || "Errore preview");
   }
   const data = await res.json();
+  if (!onboardingSessionIsCurrent(ownerKey)) {
+    throw new Error(_tDash("onboarding.session_changed", "La sessione è cambiata. Riapri la configurazione."));
+  }
   targetEl.textContent = data.risposta;
   return data;
 }
@@ -1140,22 +1241,27 @@ onboardingEls.prev?.addEventListener("click", () => {
 });
 
 onboardingEls.next?.addEventListener("click", async () => {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) return;
   if (onboardingState.step < 6) {
     onboardingState.step += 1;
     renderOnboardingStep();
     return;
   }
   onboardingEls.next.disabled = true;
-  onboardingEls.status.textContent = "Salvataggio profilo...";
+  onboardingEls.status.textContent = _tDash("onboarding.saving_profile", "Salvataggio profilo...");
   try {
     await salvaProfiloOnboarding();
-    onboardingEls.status.textContent = "Profilo salvato. La chat ora usa questo assistente.";
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
+    onboardingEls.status.textContent = _tDash("onboarding.profile_saved", "Profilo salvato. La chat ora usa questo assistente." );
     onboardingEls.status.style.color = "var(--sage)";
   } catch (err) {
-    onboardingEls.status.textContent = err.message;
-    onboardingEls.status.style.color = "var(--red)";
+    if (onboardingSessionIsCurrent(ownerKey)) {
+      onboardingEls.status.textContent = err.message;
+      onboardingEls.status.style.color = "var(--red)";
+    }
   } finally {
-    onboardingEls.next.disabled = false;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.next.disabled = false;
   }
 });
 
@@ -1169,32 +1275,38 @@ onboardingEls.addRule?.addEventListener("click", () => {
 });
 
 onboardingEls.previewBtn?.addEventListener("click", async () => {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) return;
   onboardingEls.previewBtn.disabled = true;
-  onboardingEls.previewText.textContent = "Genero anteprima...";
+  onboardingEls.previewText.textContent = _tDash("onboarding.generating_preview", "Genero anteprima...");
   try {
     await generaPreviewOnboarding(onboardingEls.previewText, verticaleCorrente()?.esempio || "Siete aperti domani?");
   } catch (err) {
-    onboardingEls.previewText.textContent = err.message;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.previewText.textContent = err.message;
   } finally {
-    onboardingEls.previewBtn.disabled = false;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.previewBtn.disabled = false;
   }
 });
 
 onboardingEls.testBtn?.addEventListener("click", async () => {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) return;
   onboardingEls.testBtn.disabled = true;
-  onboardingEls.testOutput.textContent = "Salvo profilo e provo risposta...";
+  onboardingEls.testOutput.textContent = _tDash("onboarding.saving_and_testing", "Salvo il profilo e provo una risposta...");
   try {
     await salvaProfiloOnboarding();
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     await generaPreviewOnboarding(
       onboardingEls.testOutput,
       onboardingEls.testMessage.value.trim() || verticaleCorrente()?.esempio || "Siete aperti?"
     );
-    onboardingEls.status.textContent = "Wizard completato end-to-end.";
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
+    onboardingEls.status.textContent = _tDash("onboarding.completed", "Configurazione guidata completata.");
     onboardingEls.status.style.color = "var(--sage)";
   } catch (err) {
-    onboardingEls.testOutput.textContent = err.message;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.testOutput.textContent = err.message;
   } finally {
-    onboardingEls.testBtn.disabled = false;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.testBtn.disabled = false;
   }
 });
 
@@ -1203,32 +1315,45 @@ onboardingEls.openDocs?.addEventListener("click", () => {
 });
 
 onboardingEls.uploadDoc?.addEventListener("click", async () => {
+  const ownerKey = onboardingOwnerKey;
+  if (!onboardingSessionIsCurrent(ownerKey)) return;
   const file = onboardingEls.docFile.files[0];
   if (!file) {
-    onboardingEls.docStatus.textContent = "Scegli un file prima di caricare.";
+    onboardingEls.docStatus.textContent = _tDash("onboarding.choose_file", "Scegli un file prima di caricare.");
     onboardingEls.docStatus.style.color = "var(--red)";
     return;
   }
   onboardingEls.uploadDoc.disabled = true;
-  onboardingEls.docStatus.textContent = "Caricamento e indicizzazione...";
+  onboardingEls.docStatus.textContent = _tDash("onboarding.uploading", "Caricamento e indicizzazione...");
   onboardingEls.docStatus.style.color = "";
   try {
     const form = new FormData();
     form.append("file", file);
     const res = await apiFetch(`${API_BASE}/api/documenti/carica-file`, { method: "POST", body: form });
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
     if (!res.ok) {
       const err = await res.json().catch(() => null);
-      throw new Error(err?.detail || "Errore caricamento");
+      throw new Error(err?.detail || _tDash("onboarding.upload_error", "Errore caricamento."));
     }
     const data = await res.json();
-    onboardingEls.docStatus.textContent = `Indicizzati ${data.indicizzati} chunk da '${data.nome}'.`;
+    if (!onboardingSessionIsCurrent(ownerKey)) return;
+    if (!Number.isSafeInteger(data?.indicizzati) || data.indicizzati <= 0
+      || typeof data.nome !== "string" || !data.nome.trim()
+      || typeof data.id !== "string" || !data.id.trim()) {
+      throw new Error(_tDash("onboarding.upload_error", "Errore caricamento."));
+    }
+    onboardingEls.docStatus.textContent = _tDash("onboarding.indexed", "Indicizzati {{count}} segmenti da '{{name}}'.", {
+      count: data.indicizzati, name: data.nome,
+    });
     onboardingEls.docStatus.style.color = "var(--sage)";
     onboardingEls.docs.checked = true;
   } catch (err) {
-    onboardingEls.docStatus.textContent = err.message;
-    onboardingEls.docStatus.style.color = "var(--red)";
+    if (onboardingSessionIsCurrent(ownerKey)) {
+      onboardingEls.docStatus.textContent = err.message;
+      onboardingEls.docStatus.style.color = "var(--red)";
+    }
   } finally {
-    onboardingEls.uploadDoc.disabled = false;
+    if (onboardingSessionIsCurrent(ownerKey)) onboardingEls.uploadDoc.disabled = false;
   }
 });
 

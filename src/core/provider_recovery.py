@@ -17,7 +17,8 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from src.core.provider_accounting import RawProviderUsage, provider_model_matches
+from src.core.provider_accounting import RawProviderUsage
+from src.core.openrouter_recovery_models import recovery_model_matches
 from src.core.provider_evidence import safe_provider_generation_id, safe_provider_request_id
 
 _ISSUER = object()
@@ -90,10 +91,11 @@ def verify_openrouter_generation(
     if type(payload) is not dict or type(payload.get("data")) is not dict:
         raise ProviderReconciliationUnavailable
     data = payload["data"]
+    provider_cost_usd = _safe_decimal(data.get("total_cost"))
     returned_id = data.get("id")
     if (returned_id != generation_id or data.get("external_user") != str(attempt_id)
             or type(data.get("model")) is not str
-            or not provider_model_matches(requested_model, data.get("model"))):
+            or not recovery_model_matches(requested_model, data.get("model"), provider_cost_usd)):
         raise ProviderReconciliationUnavailable
     request_id = data.get("request_id")
     if request_id is not None and not safe_provider_request_id(request_id):
@@ -131,7 +133,6 @@ def verify_openrouter_generation(
         latency = _safe_decimal(data.get("latency"))
     except ProviderReconciliationUnavailable:
         raise ProviderReconciliationUnavailable
-    provider_cost_usd = _safe_decimal(data.get("total_cost"))
     return VerifiedOpenRouterGeneration(
         attempt_id=attempt_id,
         generation_id=generation_id,

@@ -15,7 +15,7 @@ function deferred() {
   const promise = new Promise((yes) => { resolve = yes; });
   return { promise, resolve };
 }
-function fixture(apiFetch) {
+function fixture(apiFetch, onboardingLoader = async () => ({ hasDocs: true, hasBookingHours: true, hasWa: true, isFullyConfigured: true })) {
   const dom = new JSDOM(html, { url: "https://melpis.test/app/overview", runScripts: "outside-only" });
   const { window } = dom;
   const context = { userId: "user-1", sessionOrganizationId: "org-1", selectedOrganizationId: "org-1", view: "panoramica", transition: 1, epoch: 1 };
@@ -39,7 +39,7 @@ function fixture(apiFetch) {
     apriView(view) { module.onExit(); context.view = view; context.transition += 1; },
     apriVistaImpostazioni() {}, apriBookingModal() {},
     getReviewsApi: () => ({ apriDettaglioRecensione: (review) => opened.push(review) }),
-    loadOnboarding: async () => ({ hasDocs: true, hasBookingHours: true, hasWa: true, isFullyConfigured: true }),
+    loadOnboarding: onboardingLoader,
   });
   module.onEnter();
   return { dom, document: window.document, context, module, intervals, timers, opened };
@@ -77,6 +77,23 @@ test("Overview failed endpoints display their existing error states", async (t) 
   await h.module.aggiornaRiepilogo();
   await h.module.aggiornaPrioritari();
   assert.equal(h.document.querySelectorAll("#ticket-list .error-state, #priority-list .error-state").length, 2);
+});
+
+test("setup checks show unavailable on failed or invalid channel responses instead of claiming completion", async (t) => {
+  for (const failingResponse of [
+    async (url) => url.endsWith("prioritari") ? response(200, []) : Promise.reject(new Error("offline")),
+    async (url) => url.endsWith("prioritari")
+      ? response(200, [])
+      : ({ ok: true, status: 200, async json() { throw new Error("invalid JSON"); } }),
+  ]) {
+    const h = fixture(failingResponse, null);
+    t.after(() => h.dom.window.close());
+    await h.module.aggiornaPrioritari();
+    const setupArea = h.document.getElementById("priority-list");
+    assert.match(setupArea.textContent, /Impossibile verificare la configurazione/);
+    assert.equal(setupArea.querySelector("[data-action='setup-wizard']"), null);
+    assert.doesNotMatch(setupArea.textContent, /Completato|pronto a rispondere/);
+  }
 });
 
 test("Overview starts one poller and removes it on exit", async (t) => {

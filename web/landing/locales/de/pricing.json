@@ -4,7 +4,7 @@
   "hero": {
     "badge": "Transparente Tarife",
     "title": "Der passende Plan für jede Phase Ihres Wachstums",
-    "subtitle": "Aktivieren Sie Ihren KI-WhatsApp-Assistenten in wenigen Minuten. 7 Tage kostenlos testen, ohne Kreditkarte und ohne Vertragslaufzeit.",
+    "subtitle": "Kostenloser Test mit PDF/RAG: bis zu 7 Tage oder 150 KI-Antworten, je nachdem, was zuerst eintritt. Keine Kreditkarte und keine Vertragsbindung.",
     "monthly_toggle": "Monatlich"
   },
   "plans": {
@@ -18,11 +18,11 @@
       "features": [
         "1 offizielle WhatsApp Business Rufnummer",
         "Bis zu 500 KI-Nachrichten/Monat",
+        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
         "Öffnungszeiten, Preislisten & automatische 24/7-Antworten",
         "Webbasierter Posteingang auf allen Endgeräten",
         "E-Mail-Benachrichtigungen bei Weiterleitungen",
-        "Standard-Ticketsupport innerhalb von 24 Stunden",
-        "PDF/RAG inklusive; Dateikontingent noch festzulegen"
+        "Standard-Ticketsupport innerhalb von 24 Stunden"
       ]
     },
     "growth": {
@@ -35,11 +35,11 @@
       "features": [
         "Alle Funktionen aus dem Basis-Tarif",
         "Bis zu 2.000 KI-Nachrichten/Monat",
-        "Google Calendar Synchronisierung",
+        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
         "Terminverwaltung & automatische No-Show-Erinnerungen",
         "Bis zu 3 parallele Mitarbeiter im Posteingang",
-        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
-        "Prioritäts-Support via WhatsApp und E-Mail"
+        "Prioritäts-Support via WhatsApp und E-Mail",
+        "Google Calendar ist optional; eine autorisierte Einrichtung ist erforderlich"
       ]
     },
     "scale": {
@@ -52,6 +52,7 @@
       "features": [
         "Alle Funktionen aus dem Wachstum-Tarif",
         "Bis zu 10.000 KI-Nachrichten/Monat",
+        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
         "Unbegrenzte Teammitglieder mit differenzierten Rechten",
         "Instagram Direct, vorbehaltlich Anbieterprüfung",
         "KI-Konfiguration und Teamverwaltung",

@@ -15,6 +15,7 @@ const primaryRoutes = {
   assistente: "/app/ai-simulator",
   conoscenza: "/app/knowledge",
   "configurazione-ai": "/app/ai-settings",
+  onboarding: "/app/onboarding",
 };
 const routes = { ...primaryRoutes, impostazioni: "/app/settings" };
 
@@ -103,7 +104,7 @@ function assertSettingsDom(dom, tab) {
   assert.equal(topbarTitle.textContent, titleKey, "Settings heading is synchronized to the active tab");
 }
 
-test("route table maps the eight primary views and auxiliary settings view to canonical paths", () => {
+test("route table maps dashboard views and setup wizard to canonical paths", () => {
   assert.deepEqual(routerApi.ROUTES, routes);
   for (const [view, route] of Object.entries(routes)) {
     assert.equal(routerApi.pathForView(view), route);
@@ -182,6 +183,7 @@ test("settings and AI settings remain separate routes and a settings deep link k
   assert.deepEqual(rendered, ["impostazioni"]);
   assert.equal(routerApi.resolveRoute("/app/ai-settings").view, "configurazione-ai");
   assert.notEqual(routerApi.pathForView("impostazioni"), routerApi.pathForView("configurazione-ai"));
+  assert.equal(routerApi.resolveRoute("/app/onboarding").view, "onboarding");
   dom.window.close();
 });
 
@@ -489,7 +491,7 @@ test("dashboard HTML uses canonical semantic links, accessible active state, and
 
 test("changing dashboard language does not rewrite canonical route hrefs", () => {
   const html = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
-  for (const href of Object.values(primaryRoutes)) {
+  for (const href of Object.values(primaryRoutes).filter((route) => route !== "/app/onboarding")) {
     assert.ok(html.includes(`href="${href}"`));
   }
   assert.ok(html.includes('href="/app/settings"'));

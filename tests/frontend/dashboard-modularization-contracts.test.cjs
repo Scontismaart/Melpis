@@ -11,6 +11,7 @@ const canonicalRoutes = {
   assistente: "/app/ai-simulator",
   conoscenza: "/app/knowledge",
   "configurazione-ai": "/app/ai-settings",
+  onboarding: "/app/onboarding",
   impostazioni: "/app/settings",
 };
 
@@ -81,7 +82,7 @@ test("full dashboard script order and authenticated startup are single-instance"
   assertNoRendererErrors(harness);
 });
 
-test("real shell routes stay canonical across nine destinations and deep links", async (t) => {
+test("real shell routes stay canonical across ten destinations and deep links", async (t) => {
   const harness = createDashboardHarness();
   t.after(harness.dispose);
   await harness.ready();
@@ -89,7 +90,8 @@ test("real shell routes stay canonical across nine destinations and deep links",
   assert.deepEqual(JSON.parse(JSON.stringify(harness.window.MelpisDashboardRouter.ROUTES)), canonicalRoutes);
   const routeHrefs = [...new Set([...harness.document.querySelectorAll("[data-app-view]")]
     .map((anchor) => new URL(anchor.href).pathname))].sort();
-  assert.deepEqual(routeHrefs, Object.values(canonicalRoutes).sort());
+  assert.deepEqual(routeHrefs, Object.values(canonicalRoutes).filter((href) => href !== "/app/onboarding").sort());
+  assert.equal(harness.window.MelpisDashboardRouter.pathForView("onboarding"), "/app/onboarding");
   assert.equal(harness.document.querySelector('[data-app-view="report"]'), null);
   assert.equal(harness.document.querySelector('[data-view-panel="report"]'), null);
 
@@ -101,8 +103,8 @@ test("real shell routes stay canonical across nine destinations and deep links",
     assert.equal(activePanel(harness.document).length, 1, `${view} has exactly one active panel`);
     assert.equal(activePanel(harness.document)[0].dataset.viewPanel, view);
     const activeSidebarItems = harness.document.querySelectorAll(".sidebar-nav .nav-item.active");
-    if (view === "impostazioni") {
-      assert.equal(activeSidebarItems.length, 0, "Settings is an account-menu route, not a primary sidebar item");
+    if (view === "impostazioni" || view === "onboarding") {
+      assert.equal(activeSidebarItems.length, 0, `${view} is not a primary sidebar item`);
     } else {
       assert.equal(activeSidebarItems.length, 1, `${view} has one active sidebar item`);
       assert.equal(activeSidebarItems[0].dataset.view, view);

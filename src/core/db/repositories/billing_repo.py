@@ -672,7 +672,9 @@ class BillingRepository(TenantScopedRepository):
     ) -> bool:
         from src.core.llm_routing import stima_costo_eur
         from src.core.provider_recovery import is_verified_openrouter_generation
-        from src.core.provider_accounting import provider_model_matches
+        from src.core.openrouter_recovery_models import (
+            recovery_model_matches, reviewed_recovery_binding,
+        )
 
         try:
             organization_id, attempt_id, actor_auth_user_id = map(
@@ -716,12 +718,19 @@ class BillingRepository(TenantScopedRepository):
             metadata = json.loads(row["metadata"]) if isinstance(row["metadata"], str) else dict(row["metadata"])
             if (metadata.get("accounting_status") != "unresolved"
                     or metadata.get("provider") != "openrouter"
-                    or not provider_model_matches(metadata.get("requested_model"), evidence.actual_model)):
+                    or not recovery_model_matches(
+                        metadata.get("requested_model"), evidence.actual_model, evidence.provider_cost_usd,
+                    )):
                 return False
             expected_request_id = runtime["provider_request_id"]
             if expected_request_id is not None and evidence.request_id != expected_request_id:
                 return False
-            cost = stima_costo_eur(
+            binding = reviewed_recovery_binding(
+                metadata["requested_model"], evidence.actual_model, evidence.provider_cost_usd,
+            )
+            # A mapped model is priced from this authenticated receipt, never
+            # from today's catalog or the requested alias alone.
+            cost = 0.0 if binding is not None else stima_costo_eur(
                 metadata["requested_model"], evidence.prompt_tokens, evidence.completion_tokens,
             )
             if cost is None:
@@ -741,6 +750,7 @@ class BillingRepository(TenantScopedRepository):
                 "reconciled_by": str(actor_auth_user_id),
                 "reconciliation_source": "openrouter_generation_api",
             })
+            metadata.update(binding or {})
             fenced = await conn.fetchval(
                 """UPDATE provider_attempt_runtime SET dispatch_state='verified',worker_id=NULL,
                           lease_expires_at=NULL,provider_request_id=$3,updated_at=now()
@@ -766,6 +776,7 @@ class BillingRepository(TenantScopedRepository):
                 "provider_created_at": evidence.created_at.isoformat(),
                 "recovery_worker_id": str(recovery_worker_id), "lease_epoch": lease_epoch,
             }
+            details.update(binding or {})
             await self._append_provider_attempt_evidence(
                 conn, organization_id, attempt_id, recovery_worker_id, lease_epoch,
                 "openrouter_generation_verified", details,

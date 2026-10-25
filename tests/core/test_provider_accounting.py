@@ -1891,7 +1891,14 @@ async def test_crashed_openrouter_worker_is_fenced_then_reconciled_once(pg_pool,
 
 
 @pytest.mark.asyncio
-async def test_openrouter_generation_evidence_recovers_without_request_id(pg_pool, sample_org):
+@pytest.mark.parametrize(("actual_model", "request_id", "dated_recovery"), [
+    ("xingchen-agi/xing4.0-29b-a4b:free", None, False),
+    ("xingchen-agi/xing4.0-29b-a4b-20261015:free", "req-test-verified-lookup-001", True),
+])
+async def test_openrouter_generation_evidence_recovers_without_persisted_request_id(
+    pg_pool, sample_org, actual_model, request_id, dated_recovery,
+):
+    from dataclasses import replace
     from src.core.provider_recovery import verify_openrouter_generation
 
     org_id = sample_org["id"]
@@ -1924,33 +1931,93 @@ async def test_openrouter_generation_evidence_recovers_without_request_id(pg_poo
             "data": {
                 "id": generation_id,
                 "external_user": str(attempt.attempt_id),
-                "model": "xingchen-agi/xing4.0-29b-a4b:free",
+                "model": actual_model,
                 "created_at": claim["attempt_created_at"].astimezone(timezone.utc).isoformat(),
-                "finish_reason": "stop",
-                "native_tokens_prompt": 11,
-                "native_tokens_completion": 4,
-                "latency": Decimal("0.42"),
+                "finish_reason": "length",
+                "native_tokens_prompt": 17,
+                "native_tokens_completion": 32,
+                "latency": Decimal("1513"),
                 "total_cost": Decimal("0.0"),
             },
         }
+        if request_id is not None:
+            payload["data"]["request_id"] = request_id
         evidence = verify_openrouter_generation(
             payload, generation_id=generation_id, attempt_id=attempt.attempt_id,
             requested_model=claim["requested_model"],
             attempt_created_at=claim["attempt_created_at"], expected_request_id=None,
         )
         assert evidence.attempt_id == attempt.attempt_id
-        assert await repository.finalize_openrouter_recovery(
+
+        async def finalize(claim_to_use, evidence_to_use=evidence):
+            return await repository.finalize_openrouter_recovery(
+                org_id, attempt.attempt_id, **auth,
+                recovery_worker_id=claim_to_use["recovery_worker_id"],
+                lease_epoch=claim_to_use["lease_epoch"], evidence=evidence_to_use,
+            )
+
+        # The persisted requested-model binding is part of the authorization
+        # boundary, even when the authenticated receipt itself verifies.
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE usage_events SET metadata=jsonb_set(metadata,'{requested_model}',to_jsonb($3::text)) "
+                "WHERE organization_id=$1 AND id=$2",
+                org_id, attempt.attempt_id, "openrouter/unreviewed-model:free",
+            )
+        assert await finalize(claim) is False
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE usage_events SET metadata=jsonb_set(metadata,'{requested_model}',to_jsonb($3::text)) "
+                "WHERE organization_id=$1 AND id=$2",
+                org_id, attempt.attempt_id, model,
+            )
+
+        if dated_recovery:
+            # Simulate corrupted in-process evidence to exercise finalizer
+            # defense in depth; the public verifier rejects this receipt too.
+            assert await finalize(claim, replace(evidence, provider_cost_usd="0.01")) is False
+
+        # A replacement recovery worker advances the fencing epoch. The stale
+        # claimant cannot finalize, while the current claimant can.
+        async with pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE provider_attempt_runtime SET lease_expires_at=now()-interval '1 second' "
+                "WHERE organization_id=$1 AND attempt_id=$2", org_id, attempt.attempt_id,
+            )
+        replacement_claim = await repository.recover_provider_attempt(
             org_id, attempt.attempt_id, **auth,
-            recovery_worker_id=claim["recovery_worker_id"],
-            lease_epoch=claim["lease_epoch"], evidence=evidence,
-        ) is True
+        )
+        assert replacement_claim["state"] == "lookup_required"
+        assert replacement_claim["lease_epoch"] > claim["lease_epoch"]
+        async with pg_pool.acquire() as conn:
+            reservation_before = await conn.fetchrow(
+                "SELECT metadata FROM usage_events WHERE organization_id=$1 "
+                "AND event_type='system.quota_reservation'", org_id,
+            )
+            used_before = await conn.fetchval(
+                "SELECT messages_used_this_period FROM organizations WHERE id=$1", org_id,
+            )
+        assert await finalize(claim) is False
+        assert await finalize(replacement_claim) is True
         metadata = (await _events(pg_pool, org_id))[0]["metadata"]
         assert metadata["accounting_status"] == "recorded"
         assert metadata["provider_generation_id"] == generation_id
-        assert metadata["provider_request_id"] is None
+        assert metadata["provider_request_id"] == request_id
         assert metadata["provider_cost_usd"] == "0.0"
         assert metadata["estimated_cost_eur"] == 0
+        if dated_recovery:
+            assert metadata["model_binding_source"] == "openrouter_public_catalog_20261025"
+            assert metadata["model_binding_sha256"] == "94d4db5f5a64d03c63dd64258047f94549284e6b30ce917e667a315cf1a2372e"
+            assert metadata["pricing_source"] == "openrouter_generation_receipt_zero_cost"
+            assert metadata["pricing_model"] == actual_model
+        else:
+            assert "model_binding_source" not in metadata
         assert metadata["application_outcome"] == "usage_reconciled_no_output_replayed"
+        assert metadata["prompt_tokens"] == 17
+        assert metadata["completion_tokens"] == 32
+        assert metadata["latency_ms"] == 1513
+        assert metadata["failure_code"] is None
+        assert await finalize(replacement_claim) is False
         async with pg_pool.acquire() as conn:
             assert await conn.fetchval(
                 "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
@@ -1960,6 +2027,25 @@ async def test_openrouter_generation_evidence_recovers_without_request_id(pg_poo
                 "AND target_id=$2 AND action='provider_attempt.reconciled'",
                 org_id, attempt.attempt_id,
             ) == 1
+            assert await conn.fetchval(
+                "SELECT count(*) FROM provider_attempt_evidence WHERE organization_id=$1 "
+                "AND attempt_id=$2 AND event_type='openrouter_generation_verified'",
+                org_id, attempt.attempt_id,
+            ) == 1
+            assert await conn.fetchval(
+                "SELECT count(*) FROM usage_events WHERE organization_id=$1 "
+                "AND id=$2 AND event_type='system.provider_attempt'",
+                org_id, attempt.attempt_id,
+            ) == 1
+            used_after = await conn.fetchval(
+                "SELECT messages_used_this_period FROM organizations WHERE id=$1", org_id,
+            )
+            reservation_after = await conn.fetchrow(
+                "SELECT metadata FROM usage_events WHERE organization_id=$1 "
+                "AND event_type='system.quota_reservation'", org_id,
+            )
+        assert used_after == used_before == 0
+        assert reservation_after["metadata"] == reservation_before["metadata"]
     finally:
         await context.close()
 
