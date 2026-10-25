@@ -34,6 +34,7 @@ function setup(fetchImpl) {
     let sessione = { user_id: "disposable-user" };
     window.sessionForTest = () => sessione;
     let dashboardSessionEpoch = 0;
+    const resetOnboardingMemory = () => {};
     const dashboardOverviewModule = { invalidate() { window.overviewInvalidations = (window.overviewInvalidations || 0) + 1; } };
     const dashboardReviewsModule = { invalidate() { window.reviewsInvalidations = (window.reviewsInvalidations || 0) + 1; } };
     const dashboardKnowledgeModule = { invalidate() {} };
