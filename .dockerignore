@@ -25,6 +25,7 @@ service-account*.json
 .superpowers/
 .zcode/
 .runtime/
+artifacts/
 .vscode/
 .pytest_cache/
 .pytest-*-tmp/

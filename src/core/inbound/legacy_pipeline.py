@@ -146,7 +146,7 @@ class LegacyInboundPipeline:
         if faq_cache_mod.cache_enabled() and intent_result.intent == "faq" and await rag_access(self.repo, org_id):
             try:
                 cache_epoch = await self.repo.doc_repo.knowledge_version(org_id)
-                q_emb = await faq_cache_mod.embedding_query(text)
+                q_emb = await faq_cache_mod.embedding_query(text, organization_id=str(org_id))
                 cached_answer = await faq_cache_mod.cerca_in_cache(str(org_id), text, self.repo, q_emb=q_emb)
             except Exception as e:
                 logger.warning("FAQ cache lookup failed for org %s msg %s: %s", org_id, msg["id"],type(e).__name__)

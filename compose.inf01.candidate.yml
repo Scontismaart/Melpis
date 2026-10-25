@@ -1,0 +1,71 @@
+# Review-only overlay; does not activate the shared backend by itself.
+# Requires compose.production.yml and separately approved deployment/secrets.
+x-shared-client: &shared-client
+  MELPIS_EMBEDDING_BACKEND: shared
+  MELPIS_EMBEDDING_ENGINE: onnx
+  MELPIS_EMBEDDING_URL: http://embedding:8081
+  MELPIS_EMBEDDING_TOKEN_FILE: /run/secrets/embedding_token
+
+services:
+  api:
+    environment: *shared-client
+    networks: [app_internal, embedding_private]
+    secrets: [embedding_token]
+    depends_on:
+      embedding: {condition: service_healthy}
+  worker-inbound:
+    environment: *shared-client
+    networks: [app_internal, embedding_private]
+    secrets: [embedding_token]
+    depends_on:
+      embedding: {condition: service_healthy}
+  worker-retry:
+    environment: *shared-client
+    networks: [app_internal, embedding_private]
+    secrets: [embedding_token]
+    depends_on:
+      embedding: {condition: service_healthy}
+  supervisor:
+    environment: *shared-client
+    networks: [app_internal, embedding_private]
+    secrets: [embedding_token]
+    depends_on:
+      embedding: {condition: service_healthy}
+  embedding:
+    # Same reviewed runtime and immutable digest as the application, separate process.
+    image: ${MELPIS_API_IMAGE_REF:?set reviewed immutable API image digest}
+    command: [uvicorn, src.core.documenti.embedding_service:app, --host, 0.0.0.0, --port, "8081", --workers, "1", --limit-concurrency, "32", --timeout-keep-alive, "5", --no-access-log, --no-proxy-headers]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; from src.core.documenti.embedding_contract import service_token; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8081/health',headers={'Authorization':'Bearer '+service_token()}),timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+    networks: [embedding_private]
+    environment:
+      MELPIS_EMBEDDING_TOKEN_FILE: /run/secrets/embedding_token
+      MELPIS_EMBEDDING_ENGINE: onnx
+      MELPIS_EMBEDDING_MODEL_DIR: /model
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    secrets: [embedding_token]
+    volumes:
+      - ${MELPIS_EMBEDDING_MODEL_DIR:?set verified offline asset directory}:/model:ro
+    mem_limit: 1536m
+    cpus: 2
+    pids_limit: 128
+    read_only: true
+    tmpfs: [/tmp:size=128m,noexec,nosuid]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+
+networks:
+  embedding_private: {internal: true}
+
+secrets:
+  embedding_token:
+    file: ${MELPIS_EMBEDDING_TOKEN_FILE:?set protected shared secret file}

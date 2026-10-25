@@ -1,0 +1,115 @@
+{
+  "benchmark": "INF01_TORCH_PROCESS_MEMORY_COMPARISON",
+  "cgroup_checkpoint": {
+    "memory_current_bytes": 2339758080,
+    "memory_peak_bytes": 2344005632,
+    "oom_kill_count": 0,
+    "pids_current": 15
+  },
+  "cgroup_end": {
+    "memory_current_bytes": 2337591296,
+    "memory_peak_bytes": 2344005632,
+    "oom_kill_count": 0,
+    "pids_current_before_worker_close": 15
+  },
+  "cgroup_start": {
+    "memory_current_bytes": 16543744,
+    "memory_peak_bytes": 18829312,
+    "oom_kill_count": 0
+  },
+  "elapsed_seconds": 32.182476,
+  "limitations": [
+    "Only one frozen synthetic query is encoded per worker.",
+    "This measures process memory and one-versus-two model residency, not request capacity or production throughput.",
+    "The second-worker result is valid only if both workers reach ready and pass vector validation."
+  ],
+  "preflight": {
+    "cgroup_memory_limit_bytes": 2684354560,
+    "cgroup_version": 2,
+    "container_marker_verified": true,
+    "docker_marker_file_present": true,
+    "model_revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "network_or_external_clients": false,
+    "reference_vectors_sha256": "79fd9a18b085fbe11e876b0f24816bd8da1ebe35221e4b3d3f827f3a3803a414",
+    "vocabulary_sha256": "2c3387be76557bd40970cec13153b3bbf80407865484b209e655e5e4729076b8",
+    "weights_sha256": "eaa086f0ffee582aeb45b36e34cdd1fe2d6de2bef61f8a559a1bbc9bd955917b"
+  },
+  "query": {
+    "activity_id": "activity-001",
+    "language": "it",
+    "sha256": "dd2f0f99cf6c330d1332cc5e224222b4e13c04854fd2c90acc8a1b614d56d5fd"
+  },
+  "stages": {
+    "encoding_worker_1": {
+      "last_worker_cpu_seconds": 7.95,
+      "max_cgroup_processes": 8,
+      "max_live_worker_processes": 1,
+      "peak_cgroup_current_bytes": 1500983296,
+      "peak_worker_rss_bytes": 1123143680,
+      "samples": 3
+    },
+    "encoding_worker_2": {
+      "last_worker_cpu_seconds": 17.0,
+      "max_cgroup_processes": 15,
+      "max_live_worker_processes": 2,
+      "peak_cgroup_current_bytes": 2339905536,
+      "peak_worker_rss_bytes": 2194128896,
+      "samples": 3
+    },
+    "loading_worker_1": {
+      "last_worker_cpu_seconds": 7.56,
+      "max_cgroup_processes": 6,
+      "max_live_worker_processes": 1,
+      "peak_cgroup_current_bytes": 1426333696,
+      "peak_worker_rss_bytes": 1101389824,
+      "samples": 67
+    },
+    "loading_worker_2": {
+      "last_worker_cpu_seconds": 16.67,
+      "max_cgroup_processes": 15,
+      "max_live_worker_processes": 2,
+      "peak_cgroup_current_bytes": 2308046848,
+      "peak_worker_rss_bytes": 2146131968,
+      "samples": 69
+    }
+  },
+  "status": "complete",
+  "timestamp_utc": "2026-10-25T09:16:20.945147+00:00",
+  "worker_returncodes_after_close": [
+    -9,
+    -9
+  ],
+  "worker_returncodes_before_close": [
+    null,
+    null
+  ],
+  "workers": [
+    {
+      "one_query_seconds": 0.643329,
+      "ordinal": 1,
+      "pid": 7,
+      "quality": {
+        "dimension": 384,
+        "finite": true,
+        "l2_norm": 1.000000067,
+        "reference_cosine": 1.0,
+        "vector_sha256": "41fe32cc40c11a99210720939ed1ba8c5033daccc8199f97bbd53ac36fa2768e"
+      },
+      "startup_seconds": 13.563354
+    },
+    {
+      "one_query_seconds": 0.677533,
+      "ordinal": 2,
+      "pid": 31,
+      "quality": {
+        "dimension": 384,
+        "finite": true,
+        "l2_norm": 1.000000067,
+        "reference_cosine": 1.0,
+        "vector_sha256": "41fe32cc40c11a99210720939ed1ba8c5033daccc8199f97bbd53ac36fa2768e"
+      },
+      "startup_seconds": 13.727928
+    }
+  ],
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

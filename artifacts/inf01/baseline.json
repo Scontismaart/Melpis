@@ -1,0 +1,56 @@
+{
+  "benchmark": "INF01 synthetic embedding and retrieval diagnostic",
+  "recorded_at_utc": "2026-10-25T04:40:29Z",
+  "host_platform": "win32",
+  "python": "3.12.5",
+  "network_access": false,
+  "database_access": false,
+  "customer_data": false,
+  "workload_unit": "synthetic activities; not pages or tenants",
+  "sizes": [
+    5
+  ],
+  "preflight_available_physical_memory_bytes": 3344449536,
+  "min_preflight_memory_bytes": 3221225472,
+  "stop_memory_bytes": 805306368,
+  "worker_memory_cap_bytes": 2147483648,
+  "worker_cpu_affinity": "first two logical CPUs where Windows permits",
+  "model": {
+    "id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "snapshot": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "weights_file_bytes": 470641600,
+    "weights_sha256": "eaa086f0ffee582aeb45b36e34cdd1fe2d6de2bef61f8a559a1bbc9bd955917b",
+    "tokenizer_file_bytes": 9081518,
+    "vocabulary_sha256": "2c3387be76557bd40970cec13153b3bbf80407865484b209e655e5e4729076b8",
+    "passage_prefix": "passage: ",
+    "query_prefix": "query: ",
+    "normalization": "L2"
+  },
+  "limitations": [
+    "Synthetic local embedding and in-memory retrieval only; no PDF, database, API, or WhatsApp work.",
+    "One process only; multiprocess and ONNX/INT8 cases are not executed by this harness.",
+    "Quality metrics are diagnostic for a small frozen synthetic multilingual fixture, not a production retrieval evaluation."
+  ],
+  "baseline": {
+    "status": "failed",
+    "attempted_sizes": [
+      5
+    ],
+    "completed_tiers": [],
+    "failure": "Windows worker hit a memory allocation failure while loading local model assets (STATUS_NO_MEMORY 0xC0000017); no workload tiers completed."
+  },
+  "preflight_available_commit_bytes": 16295550976,
+  "min_preflight_commit_bytes": 4294967296,
+  "attempted_sizes": [
+    5
+  ],
+  "runtime_versions": {
+    "torch": "2.14.0+cpu",
+    "sentence_transformers": "5.6.0",
+    "transformers": "5.20.2",
+    "onnx": null,
+    "onnxruntime": "1.31.0",
+    "optimum": null
+  },
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

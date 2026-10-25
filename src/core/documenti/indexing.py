@@ -102,7 +102,8 @@ async def _index_content(repo, org_id, name, *, request_key=None, text=None, fil
                 # Yield between small model batches so a knowledge query is
                 # not queued behind an entire large document.
                 for offset in range(0, len(chunks), 16):
-                    vectors.extend(await embed_local(chunks[offset:offset + 16], timeout=limits.INDEX_SECONDS))
+                    vectors.extend(await embed_local(chunks[offset:offset + 16], timeout=limits.INDEX_SECONDS,
+                                                     organization_id=str(org_id)))
             record = await documents.publish_index(org_id, document["id"], claim["token"], claim["fence"],
                 chunks, vectors, {**(metadata or {}), "pages": extracted["pages"],
                                   "ocr_pages": extracted["ocr_pages"], "bytes": len(source), "chunk_pages": chunk_pages})

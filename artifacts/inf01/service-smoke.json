@@ -1,0 +1,15 @@
+{
+  "status": "passed",
+  "in_flight_crash_status": 503,
+  "cold_request_status": 503,
+  "new_request_status": 200,
+  "model_processes_before": 1,
+  "model_processes_after": 1,
+  "no_automatic_worker_after_failed_dispatch": true,
+  "public_egress_blocked": true,
+  "second_instance_fenced": true,
+  "assets_read_only": true,
+  "cgroup_peak_bytes": 968867840,
+  "scope": "real offline ONNX worker and HTTP; synthetic inputs; no provider or database",
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

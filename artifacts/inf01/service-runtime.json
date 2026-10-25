@@ -1,0 +1,22 @@
+{
+  "cgroup_memory_peak_bytes": 974974976,
+  "cgroup_cpu": {
+    "usage_usec": "24414215",
+    "user_usec": "20540312",
+    "system_usec": "3873903",
+    "nice_usec": "0",
+    "nr_periods": "1403",
+    "nr_throttled": "6",
+    "throttled_usec": "8801",
+    "nr_bursts": "0",
+    "burst_usec": "0"
+  },
+  "model_processes": [
+    {
+      "pid": 35,
+      "rss_peak_kib": 899636,
+      "cpu_seconds": 12.54
+    }
+  ],
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}
