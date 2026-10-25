@@ -1,0 +1,207 @@
+{
+  "as_of": "2026-10-25",
+  "environment": "local synthetic cluster melpis-cycle-pg-20261025; host 127.0.0.1:55496 forwarded to private container PostgreSQL 172.17.0.2/32:5432; no remote provider verified",
+  "execution_matrix": [
+    {
+      "commercial_counter": "no tenant rows seeded",
+      "database": "melpis_c01_clean_20261025",
+      "initial_application": "passed: clean schema plus migrations through 059, then 060-066 and automatic replay",
+      "postconditions": "passed on final replay; see matching runs entry"
+    },
+    {
+      "commercial_counter": "7 preserved",
+      "database": "melpis_c01_upgrade_20261025",
+      "historical_file_bytes": "NULL preserved; one unknown upload, zero attested bytes",
+      "initial_application": "passed: seeded baseline 059, then 060-066 and automatic replay",
+      "postconditions": "passed on final replay; see matching runs entry",
+      "seed": "one historical upload with legacy metadata.bytes=1234, one tenant, messages_used_this_period=7"
+    }
+  ],
+  "runs": [
+    {
+      "commercial_counter": null,
+      "database": "melpis_c01_clean_20261025",
+      "historical_documents": {
+        "attested_original_bytes": 0,
+        "total": 0,
+        "unknown_original_bytes": 0,
+        "uploads": 0
+      },
+      "marker_baseline_version": 66,
+      "migration_060_service_role_grants_preserved": true,
+      "observed_at": "2026-10-25T04:53:50.678740+00:00",
+      "rls_client_real_role_checks": {
+        "anon": {
+          "delete_denied_by_database": {
+            "document_chunks": true,
+            "documents": true,
+            "faq_cache": true,
+            "messages": true,
+            "usage_events": true
+          },
+          "document_select_denied_by_acl": true,
+          "rls_hides_historical_document": true,
+          "temporary_select_grant_rolled_back": true,
+          "visible_document_count": 0
+        },
+        "authenticated": {
+          "delete_denied_by_database": {
+            "document_chunks": true,
+            "documents": true,
+            "faq_cache": true,
+            "messages": true,
+            "usage_events": true
+          },
+          "document_select_denied_by_acl": true,
+          "rls_hides_historical_document": true,
+          "temporary_select_grant_rolled_back": true,
+          "visible_document_count": 0
+        }
+      },
+      "role_bypassrls": {
+        "anon": false,
+        "authenticated": false,
+        "service_role": true
+      },
+      "scenario": "replay",
+      "service_role_table_privileges": {
+        "public.document_chunks:DELETE": true,
+        "public.document_chunks:INSERT": true,
+        "public.document_chunks:REFERENCES": false,
+        "public.document_chunks:SELECT": true,
+        "public.document_chunks:TRIGGER": false,
+        "public.document_chunks:TRUNCATE": false,
+        "public.document_chunks:UPDATE": true,
+        "public.document_index_requests:DELETE": true,
+        "public.document_index_requests:INSERT": true,
+        "public.document_index_requests:REFERENCES": false,
+        "public.document_index_requests:SELECT": true,
+        "public.document_index_requests:TRIGGER": false,
+        "public.document_index_requests:TRUNCATE": false,
+        "public.document_index_requests:UPDATE": true,
+        "public.documents:DELETE": true,
+        "public.documents:INSERT": true,
+        "public.documents:REFERENCES": false,
+        "public.documents:SELECT": true,
+        "public.documents:TRIGGER": false,
+        "public.documents:TRUNCATE": false,
+        "public.documents:UPDATE": true,
+        "public.faq_cache:DELETE": true,
+        "public.faq_cache:INSERT": true,
+        "public.faq_cache:REFERENCES": false,
+        "public.faq_cache:SELECT": true,
+        "public.faq_cache:TRIGGER": false,
+        "public.faq_cache:TRUNCATE": false,
+        "public.faq_cache:UPDATE": true,
+        "public.messages:DELETE": false,
+        "public.messages:INSERT": false,
+        "public.messages:REFERENCES": false,
+        "public.messages:SELECT": false,
+        "public.messages:TRIGGER": false,
+        "public.messages:TRUNCATE": false,
+        "public.messages:UPDATE": false,
+        "public.usage_events:DELETE": false,
+        "public.usage_events:INSERT": false,
+        "public.usage_events:REFERENCES": false,
+        "public.usage_events:SELECT": false,
+        "public.usage_events:TRIGGER": false,
+        "public.usage_events:TRUNCATE": false,
+        "public.usage_events:UPDATE": false
+      }
+    },
+    {
+      "commercial_counter": {
+        "messages_used_this_period": 7,
+        "organization_id": "95dafd8e-27df-4d2d-9e61-8a8c5ef2f90e"
+      },
+      "database": "melpis_c01_upgrade_20261025",
+      "historical_documents": {
+        "attested_original_bytes": 0,
+        "total": 1,
+        "unknown_original_bytes": 1,
+        "uploads": 1
+      },
+      "marker_baseline_version": 66,
+      "migration_060_service_role_grants_preserved": true,
+      "observed_at": "2026-10-25T04:53:51.830562+00:00",
+      "rls_client_real_role_checks": {
+        "anon": {
+          "delete_denied_by_database": {
+            "document_chunks": true,
+            "documents": true,
+            "faq_cache": true,
+            "messages": true,
+            "usage_events": true
+          },
+          "document_select_denied_by_acl": true,
+          "rls_hides_historical_document": true,
+          "temporary_select_grant_rolled_back": true,
+          "visible_document_count": 0
+        },
+        "authenticated": {
+          "delete_denied_by_database": {
+            "document_chunks": true,
+            "documents": true,
+            "faq_cache": true,
+            "messages": true,
+            "usage_events": true
+          },
+          "document_select_denied_by_acl": true,
+          "rls_hides_historical_document": true,
+          "temporary_select_grant_rolled_back": true,
+          "visible_document_count": 0
+        }
+      },
+      "role_bypassrls": {
+        "anon": false,
+        "authenticated": false,
+        "service_role": true
+      },
+      "scenario": "replay",
+      "service_role_table_privileges": {
+        "public.document_chunks:DELETE": true,
+        "public.document_chunks:INSERT": true,
+        "public.document_chunks:REFERENCES": false,
+        "public.document_chunks:SELECT": true,
+        "public.document_chunks:TRIGGER": false,
+        "public.document_chunks:TRUNCATE": false,
+        "public.document_chunks:UPDATE": true,
+        "public.document_index_requests:DELETE": true,
+        "public.document_index_requests:INSERT": true,
+        "public.document_index_requests:REFERENCES": false,
+        "public.document_index_requests:SELECT": true,
+        "public.document_index_requests:TRIGGER": false,
+        "public.document_index_requests:TRUNCATE": false,
+        "public.document_index_requests:UPDATE": true,
+        "public.documents:DELETE": true,
+        "public.documents:INSERT": true,
+        "public.documents:REFERENCES": false,
+        "public.documents:SELECT": true,
+        "public.documents:TRIGGER": false,
+        "public.documents:TRUNCATE": false,
+        "public.documents:UPDATE": true,
+        "public.faq_cache:DELETE": true,
+        "public.faq_cache:INSERT": true,
+        "public.faq_cache:REFERENCES": false,
+        "public.faq_cache:SELECT": true,
+        "public.faq_cache:TRIGGER": false,
+        "public.faq_cache:TRUNCATE": false,
+        "public.faq_cache:UPDATE": true,
+        "public.messages:DELETE": false,
+        "public.messages:INSERT": false,
+        "public.messages:REFERENCES": false,
+        "public.messages:SELECT": false,
+        "public.messages:TRIGGER": false,
+        "public.messages:TRUNCATE": false,
+        "public.messages:UPDATE": false,
+        "public.usage_events:DELETE": false,
+        "public.usage_events:INSERT": false,
+        "public.usage_events:REFERENCES": false,
+        "public.usage_events:SELECT": false,
+        "public.usage_events:TRIGGER": false,
+        "public.usage_events:TRUNCATE": false,
+        "public.usage_events:UPDATE": false
+      }
+    }
+  ]
+}
