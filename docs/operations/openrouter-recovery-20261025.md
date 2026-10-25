@@ -1,5 +1,24 @@
 # OpenRouter recovery verification — 2026-10-25
 
+## Later implementation update — PR #141
+
+The one-POST probe and its blocked accounting state below are historical and
+remain unchanged; the attempt was not reissued, retried, or reconciled by this
+update. PR [#141](https://github.com/Scontismaart/Melpis/pull/141) is now
+integrated at `cfe09e2214431f4015e3fa01972cd1f553ad736e`. It adds a recovery-only
+binding for exactly `openrouter/xingchen-agi/xing4.0-29b-a4b:free` to
+`xingchen-agi/xing4.0-29b-a4b-20261015:free`, based on separately captured
+official public catalog/endpoints evidence. The provider-reported cost for the
+specific authenticated generation receipt must also be zero; the finalizer
+records the binding and pricing provenance. This does not change the shared
+generic model matcher, accept arbitrary dated aliases, or make current catalog
+pricing evidence of historical charges.
+
+The integrated local verifier/finalizer path is implementation evidence, not
+provider or staging certification. The original blocked attempt remains
+unresolved, and A03/#88 and #121 remain open. No additional provider request
+was made for this update.
+
 ## Recovery receipt review
 
 The local receipt `artifacts/openrouter-20261025/recovery-result.json` records a provider generation lookup returning HTTP 200, followed by `ProviderReconciliationUnavailable`. The provider-reported model is the mismatching field:
@@ -20,7 +39,7 @@ The real, non-synthetic probe receipt records exactly **one POST** and generatio
 
 The read endpoint used by this existing receipt is documented by [OpenRouter's Get Generation API](https://openrouter.ai/docs/api/api-reference/generations/get-generation). No new provider requests are part of this review.
 
-### Regression test proposal
+### Historical regression test proposal (superseded by PR #141)
 
 Add a local verifier test with a fully valid generation record and the exact requested/returned model pair above; assert that current behavior rejects it. If an authoritative alias-to-snapshot and pricing binding is established, add tests for that exact binding at both verifier and finalizer boundaries, while confirming unrelated dated models, a wrong generation ID or external user, and an expected request-ID mismatch remain rejected. Keep the rejection as the safe outcome until the binding and accounting treatment are established.
 
