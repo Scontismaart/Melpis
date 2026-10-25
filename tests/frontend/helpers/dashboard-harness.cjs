@@ -76,6 +76,7 @@ function createDashboardHarness({
   url = "https://melpis.test/app/overview",
   overrides = {},
   selectedOrganization = "org-1",
+  storageSeed = {},
 } = {}) {
   const html = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
   const jsdomErrors = [];
@@ -101,6 +102,7 @@ function createDashboardHarness({
   if (selectedOrganization !== null) {
     win.localStorage.setItem("melpis_selected_organization", selectedOrganization);
   }
+  for (const [key, value] of Object.entries(storageSeed)) win.localStorage.setItem(key, String(value));
   win.document.cookie = "wa_csrf=csrf-test-token; Path=/; SameSite=Lax";
   win.document.addEventListener("DOMContentLoaded", () => { domContentLoadedEvents += 1; }, { once: true });
   win.addEventListener("error", (event) => windowErrors.push(event.error || event.message));

@@ -88,6 +88,7 @@
       "error_title": "Une erreur s’est produite",
       "retry": "Réessayer",
       "priority_error": "Impossible de charger les demandes urgentes.",
+      "setup_unavailable": "Impossible de vérifier la configuration. Réessayez.",
       "priority_count": "{{count}} éléments",
       "no_messages_title": "Aucun message aujourd’hui",
       "no_messages_desc": "L’assistant est configuré et prêt à répondre automatiquement à vos clients.",
@@ -99,6 +100,24 @@
       "message_kind": "Message",
       "open_review": "Voir"
     }
+  },
+  "onboarding": {
+    "aria": "Configuration de l'assistant",
+    "intro": "Configurez un assistant adapté à votre activité. Le profil enregistré remplace le profil de démonstration utilisé dans le chat.",
+    "steps_aria": "Étapes de configuration",
+    "full_guide": "Guide complet · 7 étapes",
+    "step_activity": "Activité", "step_voice": "Voix et services", "step_languages": "Langues", "step_escalation": "Transfert humain", "step_whatsapp": "WhatsApp", "step_documents": "Documents", "step_test": "Test",
+    "close": "Fermer la configuration", "draft_title": "Reprendre là où vous en étiez", "draft_recovered": "Brouillon récupéré localement.", "draft_discard": "Supprimer le brouillon",
+    "activity_kicker": "Profil de l'activité", "activity_title": "Quel assistant souhaitez-vous créer ?", "activity_intro": "Chaque secteur adapte le style, les règles de prudence et les exemples de départ.", "business_name": "Nom de l'activité", "business_name_placeholder": "Ex. Salon de coiffure Nora",
+    "voice_kicker": "Style de l'assistant", "voice_title": "Horaires, services et ton", "hours": "Horaires d'ouverture", "hours_placeholder": "Ex. mardi-samedi 09:00-19:00", "tone": "Ton", "tone_placeholder": "Aimable, précis, professionnel...", "services": "Services principaux, un par ligne", "services_placeholder": "Un service par ligne",
+    "preview_title": "Aperçu de la réponse IA", "preview_initial": "Saisissez vos informations pour générer un aperçu.", "preview_button": "Générer un aperçu",
+    "languages_kicker": "Langues", "languages_title": "Quelles langues votre assistant doit-il utiliser ?", "languages_intro": "L'assistant détecte la langue du client et répond dans cette langue. L'italien reste toujours activé.", "default_language": "Langue par défaut",
+    "escalation_kicker": "Règles de prudence", "escalation_title": "Quand une personne doit-elle prendre le relais ?", "escalation_intro": "Commencez par les règles suggérées pour votre secteur et ajoutez-en d'autres si besoin.", "extra_rule": "Ajouter une règle", "extra_rule_placeholder": "Ex. demandes hors catalogue", "add_rule": "Ajouter",
+    "whatsapp_kicker": "Canal", "whatsapp_title": "Connexion WhatsApp Business", "whatsapp_intro": "Ce guide ne connecte et ne vérifie pas WhatsApp. Connectez un numéro et vérifiez son état dans Paramètres → WhatsApp.", "whatsapp_acknowledge": "J'ai lu les instructions de connexion WhatsApp dans Paramètres", "webhook": "Webhook", "webhook_not_checked": "Non vérifié ici", "phone_number": "Numéro", "phone_not_connected": "À connecter dans les paramètres", "templates": "Modèles", "optional": "Facultatifs", "google_calendar_help": "Google Calendar est facultatif. Vous pouvez le connecter et vérifier son état dans Paramètres → Google Calendar.",
+    "documents_kicker": "Base de connaissances", "documents_title": "Importer menus et documents", "documents_intro": "Importez les PDF et documents que l'assistant doit connaître. Ils sont indexés et utilisés comme contexte des réponses.", "document_file": "Document à importer", "upload": "Importer", "documents_acknowledge": "J'ai importé au moins un document utile", "open_documents": "Ouvrir les documents",
+    "test_kicker": "Essai guidé", "test_title": "Tester une conversation", "test_intro": "Enregistrez le profil et posez une question comme un client.", "test_placeholder": "Ex. Êtes-vous ouvert demain ?", "test_response": "Réponse de test", "test_initial": "Aucun test effectué.", "save_and_test": "Enregistrer et tester",
+    "previous": "Retour", "next": "Suivant", "complete": "Terminer", "autosaved": "Brouillon enregistré · {{time}}", "draft_saved_at": "Brouillon enregistré le {{date}} à {{time}}.",
+    "session_required": "Connectez-vous pour configurer l'assistant.", "session_changed": "Votre session a changé. Rouvrez la configuration.", "access_required": "Configurez l'accès avec le bouton en haut de la page.", "session_expired": "Votre session a expiré. Reconnectez-vous.", "templates_unavailable": "Les modèles d'activité sont indisponibles.", "load_error": "Impossible de charger la configuration.", "save_error": "Impossible d'enregistrer le profil.", "draft_discarded": "Brouillon local supprimé. Le profil initial a été rétabli.", "saving_profile": "Enregistrement du profil...", "profile_saved": "Profil enregistré. Le chat utilise maintenant cet assistant.", "generating_preview": "Génération de l'aperçu...", "saving_and_testing": "Enregistrement du profil et test d'une réponse...", "completed": "Configuration guidée terminée.", "choose_file": "Choisissez un fichier avant l'import.", "uploading": "Import et indexation...", "upload_error": "Échec de l'import.", "indexed": "{{count}} segments indexés depuis '{{name}}'."
   },
   "views": {
     "simulator_intro": "Simulez une conversation avec un vrai client pour vérifier les réponses et le comportement de votre assistant IA.",

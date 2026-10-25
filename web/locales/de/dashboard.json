@@ -88,6 +88,7 @@
       "error_title": "Etwas ist schiefgelaufen",
       "retry": "Erneut versuchen",
       "priority_error": "Dringende Anfragen konnten nicht geladen werden.",
+      "setup_unavailable": "Einrichtung kann nicht geprüft werden. Bitte erneut versuchen.",
       "priority_count": "{{count}} Einträge",
       "no_messages_title": "Heute keine Nachrichten",
       "no_messages_desc": "Der Assistent ist eingerichtet und kann Ihren Kunden automatisch antworten.",
@@ -99,6 +100,21 @@
       "message_kind": "Nachricht",
       "open_review": "Ansehen"
     }
+  },
+  "onboarding": {
+    "aria": "Assistent einrichten", "intro": "Richten Sie einen Assistenten für Ihr Unternehmen ein. Das gespeicherte Profil ersetzt das Demo-Profil im Chat.", "steps_aria": "Einrichtungsschritte", "full_guide": "Vollständige Anleitung · 7 Schritte",
+    "step_activity": "Unternehmen", "step_voice": "Stil und Leistungen", "step_languages": "Sprachen", "step_escalation": "Übergabe", "step_whatsapp": "WhatsApp", "step_documents": "Dokumente", "step_test": "Test",
+    "close": "Einrichtung schließen", "draft_title": "Dort weitermachen, wo Sie aufgehört haben", "draft_recovered": "Entwurf lokal wiederhergestellt.", "draft_discard": "Entwurf verwerfen",
+    "activity_kicker": "Unternehmensprofil", "activity_title": "Welchen Assistenten möchten Sie erstellen?", "activity_intro": "Jede Branche passt Stil, Sicherheitsregeln und Startbeispiele an.", "business_name": "Unternehmensname", "business_name_placeholder": "z. B. Noras Friseursalon",
+    "voice_kicker": "Stil des Assistenten", "voice_title": "Öffnungszeiten, Leistungen und Ton", "hours": "Öffnungszeiten", "hours_placeholder": "z. B. Dienstag–Samstag 09:00–19:00", "tone": "Tonfall", "tone_placeholder": "Freundlich, präzise, professionell...", "services": "Wichtigste Leistungen, eine pro Zeile", "services_placeholder": "Eine Leistung pro Zeile",
+    "preview_title": "KI-Antwortvorschau", "preview_initial": "Geben Sie Ihre Angaben ein, um eine Vorschau zu erstellen.", "preview_button": "Vorschau erstellen",
+    "languages_kicker": "Sprachen", "languages_title": "Welche Sprachen soll der Assistent verwenden?", "languages_intro": "Der Assistent erkennt die Sprache des Kunden und antwortet in derselben Sprache. Italienisch bleibt immer aktiviert.", "default_language": "Standardsprache",
+    "escalation_kicker": "Sicherheitsregeln", "escalation_title": "Wann soll ein Mensch übernehmen?", "escalation_intro": "Beginnen Sie mit den Vorschlägen für Ihre Branche und ergänzen Sie eigene Regeln.", "extra_rule": "Regel hinzufügen", "extra_rule_placeholder": "z. B. Anfragen außerhalb der Preisliste", "add_rule": "Hinzufügen",
+    "whatsapp_kicker": "Kanal", "whatsapp_title": "WhatsApp Business verbinden", "whatsapp_intro": "Diese Anleitung verbindet oder prüft WhatsApp nicht. Verbinden Sie eine Nummer und prüfen Sie den Status unter Einstellungen → WhatsApp.", "whatsapp_acknowledge": "Ich habe die Hinweise zum Verbinden von WhatsApp in den Einstellungen gelesen", "webhook": "Webhook", "webhook_not_checked": "Hier nicht geprüft", "phone_number": "Nummer", "phone_not_connected": "In den Einstellungen verbinden", "templates": "Vorlagen", "optional": "Optional", "google_calendar_help": "Google Calendar ist optional. Sie können es verbinden und den Status unter Einstellungen → Google Calendar prüfen.",
+    "documents_kicker": "Wissensdatenbank", "documents_title": "Speisekarten und Dokumente importieren", "documents_intro": "Laden Sie PDFs und Dokumente hoch, die der Assistent kennen soll. Sie werden indexiert und als Kontext für Antworten verwendet.", "document_file": "Zu importierendes Dokument", "upload": "Hochladen", "documents_acknowledge": "Ich habe mindestens ein nützliches Dokument importiert", "open_documents": "Dokumente öffnen",
+    "test_kicker": "Geführter Test", "test_title": "Unterhaltung testen", "test_intro": "Speichern Sie das Profil und stellen Sie eine Frage wie ein Kunde.", "test_placeholder": "z. B. Haben Sie morgen geöffnet?", "test_response": "Testantwort", "test_initial": "Noch kein Test ausgeführt.", "save_and_test": "Speichern und testen",
+    "previous": "Zurück", "next": "Weiter", "complete": "Fertigstellen", "autosaved": "Entwurf gespeichert · {{time}}", "draft_saved_at": "Entwurf gespeichert am {{date}} um {{time}}.",
+    "session_required": "Melden Sie sich an, um den Assistenten einzurichten.", "session_changed": "Ihre Sitzung wurde geändert. Öffnen Sie die Einrichtung erneut.", "access_required": "Richten Sie den Zugang über die Schaltfläche oben ein.", "session_expired": "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an.", "templates_unavailable": "Unternehmensvorlagen sind nicht verfügbar.", "load_error": "Einrichtung konnte nicht geladen werden.", "save_error": "Profil konnte nicht gespeichert werden.", "draft_discarded": "Lokaler Entwurf verworfen. Mit dem Ausgangsprofil gestartet.", "saving_profile": "Profil wird gespeichert...", "profile_saved": "Profil gespeichert. Der Chat verwendet jetzt diesen Assistenten.", "generating_preview": "Vorschau wird erstellt...", "saving_and_testing": "Profil wird gespeichert und eine Antwort getestet...", "completed": "Geführte Einrichtung abgeschlossen.", "choose_file": "Wählen Sie vor dem Hochladen eine Datei aus.", "uploading": "Wird hochgeladen und indexiert...", "upload_error": "Upload fehlgeschlagen.", "indexed": "{{count}} Abschnitte aus '{{name}}' indexiert."
   },
   "views": {
     "simulator_intro": "Simulieren Sie ein echtes Kundengespräch, um die Antworten und das Verhalten Ihres KI-Assistenten zu prüfen.",
