@@ -17,6 +17,25 @@ TOKEN = "x" * 32
 ORG_A = "8b13d4ca-995d-45f5-8b94-3d823d71168c"
 
 
+@pytest.mark.asyncio
+async def test_stalled_body_has_deadline_before_model_admission(monkeypatch):
+    from src.core.documenti import embedding_service
+    monkeypatch.setattr(embedding_service, "BODY_SECONDS", .01)
+    worker = FakeWorker()
+
+    async def stalled():
+        yield b"{"
+        await asyncio.sleep(1)
+        yield b"}"
+
+    async with _live_app(worker) as (_, client):
+        result = await client.post("/v1/embeddings", content=stalled(),
+                                   headers={"Authorization": f"Bearer {TOKEN}"})
+        assert result.status_code == 408
+        assert result.json() == {"detail": "embedding_request_timeout"}
+        assert worker.calls == []
+
+
 def _vector():
     return [1.0] + [0.0] * (DIMENSION - 1)
 

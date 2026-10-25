@@ -26,6 +26,8 @@ from src.core.documenti.embedding_contract import (
 from src.core.documenti.isolated import LocalWorker
 from src.core.documenti.embedding_instance import instance_lock
 
+BODY_SECONDS = 2.0
+
 
 def worker_ready(worker):
     starting = getattr(worker, "starting", None)
@@ -228,10 +230,14 @@ def create_app(*, worker_factory=None, token=None, engine=None):
     async def embeddings(request: Request):
         authenticate(request)
         body = bytearray()
-        async for part in request.stream():
-            if len(body) + len(part) > MAX_BODY:
-                raise HTTPException(413, "embedding_body_limit")
-            body.extend(part)
+        try:
+            async with asyncio.timeout(BODY_SECONDS):
+                async for part in request.stream():
+                    if len(body) + len(part) > MAX_BODY:
+                        raise HTTPException(413, "embedding_body_limit")
+                    body.extend(part)
+        except TimeoutError:
+            raise HTTPException(408, "embedding_request_timeout") from None
         payload = validate_request(strict_json(bytes(body)))
         return await request.app.state.broker.submit(payload)
 

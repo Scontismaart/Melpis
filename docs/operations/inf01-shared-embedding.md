@@ -50,7 +50,7 @@ permanent indexing starvation. Full queues return 429 with Retry-After. There
 is no unbounded retry or generation POST in the encoder.
 
 The candidate uvicorn command caps HTTP concurrency at 32, including request
-body readers; request bodies are bounded at 256 KiB. A cancelled queued request
+body readers; request bodies are bounded at 256 KiB and two seconds before model admission. A cancelled queued request
 is removed. A dispatched request is never automatically replayed. On timeout
 or worker failure, the current caller fails; only a distinct explicit request
 can start a replacement worker. No quota/accounting state is changed here.
