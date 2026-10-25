@@ -1,0 +1,141 @@
+{
+  "benchmark": "inf01_shared_http_synthetic",
+  "status": "complete",
+  "timestamp_utc": "2026-10-25T05:06:43.935349+00:00",
+  "service_fingerprint": {
+    "ready": true,
+    "model_id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "revision": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "embedding_space": "minilm-e8f8c211-query-passage-mean-l2-384-v1",
+    "dimension": 384,
+    "artifact_sha256": "10f7a088420252b26caf819236ca2c9d2987afd0fc06fec7553b542a5655a05a",
+    "queued_queries": 0,
+    "queued_passages": 0,
+    "in_flight_and_queued": 0,
+    "counters": {}
+  },
+  "scope": "Synthetic activity DTOs over the internal embedding HTTP API; no database, PDF, provider, or customer-data workload.",
+  "tiers": {
+    "5": {
+      "activities": 5,
+      "synthetic_languages": {
+        "en": 1,
+        "es": 2,
+        "it": 2
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 8,
+      "successful_activities": 5,
+      "requests": 10,
+      "error_events": 0,
+      "successful_requests": 10,
+      "status_counts": {
+        "200": 10
+      },
+      "errors": {},
+      "backpressure_responses": 0,
+      "backpressure_rate": 0.0,
+      "latency_p50_seconds": 0.08477,
+      "latency_p95_seconds": 0.114589,
+      "latency_p99_seconds": 0.114589,
+      "successful_activities_per_second": 5.203,
+      "wall_seconds": 0.96099,
+      "client_cpu_seconds_total": 0.19903,
+      "client_process_peak_rss_bytes": [
+        42041344,
+        42041344,
+        42041344
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        6,
+        6,
+        7
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    },
+    "25": {
+      "activities": 25,
+      "synthetic_languages": {
+        "en": 8,
+        "es": 8,
+        "it": 9
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 8,
+      "successful_activities": 9,
+      "requests": 50,
+      "error_events": 24,
+      "successful_requests": 26,
+      "status_counts": {
+        "200": 26,
+        "429": 24
+      },
+      "errors": {
+        "backpressure_429": 24
+      },
+      "backpressure_responses": 24,
+      "backpressure_rate": 0.48,
+      "latency_p50_seconds": 0.053696,
+      "latency_p95_seconds": 0.255109,
+      "latency_p99_seconds": 0.266299,
+      "successful_activities_per_second": 6.627,
+      "wall_seconds": 1.3581,
+      "client_cpu_seconds_total": 0.306797,
+      "client_process_peak_rss_bytes": [
+        42041344,
+        42041344,
+        42041344
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        15,
+        15,
+        16
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    },
+    "100": {
+      "activities": 100,
+      "synthetic_languages": {
+        "en": 33,
+        "es": 33,
+        "it": 34
+      },
+      "client_processes": 3,
+      "per_process_concurrency": 8,
+      "successful_activities": 8,
+      "requests": 200,
+      "error_events": 173,
+      "successful_requests": 27,
+      "status_counts": {
+        "200": 27,
+        "429": 173
+      },
+      "errors": {
+        "backpressure_429": 173
+      },
+      "backpressure_responses": 173,
+      "backpressure_rate": 0.865,
+      "latency_p50_seconds": 0.007831,
+      "latency_p95_seconds": 0.482998,
+      "latency_p99_seconds": 0.707056,
+      "successful_activities_per_second": 4.441,
+      "wall_seconds": 1.801524,
+      "client_cpu_seconds_total": 0.570388,
+      "client_process_peak_rss_bytes": [
+        42041344,
+        42041344,
+        42041344
+      ],
+      "client_process_max_observed_in_flight_and_queued": [
+        16,
+        16,
+        16
+      ],
+      "client_process_errors": [],
+      "service_rss_note": "Service RSS is not exposed by the HTTP contract; collect it from the container runtime."
+    }
+  },
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

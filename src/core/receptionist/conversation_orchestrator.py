@@ -166,7 +166,7 @@ class ConversationOrchestrator:
         if rag_enabled and faq_cache.cache_enabled() and intent_result.intent == "faq":
             try:
                 cache_epoch = await getattr(self.doc_repo, "doc_repo", self.doc_repo).knowledge_version(org_id)
-                q_emb = await faq_cache.embedding_query(req.text)
+                q_emb = await faq_cache.embedding_query(req.text, organization_id=str(org_id))
                 cached_answer = await faq_cache.cerca_in_cache(str(org_id), req.text, self.doc_repo, q_emb=q_emb)
             except Exception as e:
                 logger.warning("FAQ cache lookup failed for org %s: %s", org_id,type(e).__name__)

@@ -1,0 +1,148 @@
+{
+  "benchmark": "INF01 synthetic embedding and retrieval diagnostic",
+  "recorded_at_utc": "2026-10-25T04:44:37Z",
+  "host_platform": "linux",
+  "python": "3.12.15",
+  "network_access": false,
+  "database_access": false,
+  "customer_data": false,
+  "workload_unit": "synthetic activities; not pages or tenants",
+  "sizes": [
+    5,
+    25,
+    100
+  ],
+  "attempted_sizes": [
+    5,
+    25,
+    100
+  ],
+  "preflight_available_physical_memory_bytes": null,
+  "preflight_available_commit_bytes": null,
+  "cgroup_memory_preflight": {
+    "limit_bytes": 2147483648,
+    "current_bytes": 36261888,
+    "peak_bytes": 37314560,
+    "oom_kill_count": 0
+  },
+  "min_preflight_memory_bytes": null,
+  "min_preflight_commit_bytes": null,
+  "stop_memory_bytes": null,
+  "worker_memory_cap_bytes": 2147483648,
+  "worker_cpu_affinity": "first two CPUs from the process allowed affinity set",
+  "model": {
+    "id": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "snapshot": "e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "path": "/modelrepo/snapshots/e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "weights_file_bytes": 470641600,
+    "weights_sha256": "eaa086f0ffee582aeb45b36e34cdd1fe2d6de2bef61f8a559a1bbc9bd955917b",
+    "tokenizer_file_bytes": 9081518,
+    "vocabulary_sha256": "2c3387be76557bd40970cec13153b3bbf80407865484b209e655e5e4729076b8",
+    "passage_prefix": "passage: ",
+    "query_prefix": "query: ",
+    "normalization": "L2"
+  },
+  "runtime_versions": {
+    "torch": "2.14.0+cpu",
+    "sentence_transformers": "5.6.0",
+    "transformers": "5.20.1",
+    "onnx": null,
+    "onnxruntime": "1.31.0",
+    "optimum": null
+  },
+  "limitations": [
+    "Synthetic local embedding and in-memory retrieval only; no PDF, database, API, or WhatsApp work.",
+    "One process only; multiprocess and ONNX/INT8 cases are not executed by this harness.",
+    "Quality metrics are diagnostic for a small frozen synthetic multilingual fixture, not a production retrieval evaluation."
+  ],
+  "baseline": {
+    "status": "complete",
+    "model_load_seconds": 1.692222,
+    "worker_affinity_cpus": [
+      0,
+      1
+    ],
+    "reference_vectors_file": "torch-reference-5.json",
+    "reference_vectors_sha256": "79fd9a18b085fbe11e876b0f24816bd8da1ebe35221e4b3d3f827f3a3803a414",
+    "process_peak_rss_bytes": 1166245888,
+    "process_cpu_seconds": 14.477784,
+    "peak_rss_bytes": 1166512128,
+    "memory_cap_bytes": 2147483648,
+    "cgroup_memory_peak_bytes": 1676976128,
+    "tiers": {
+      "5": {
+        "activities": 5,
+        "queries": 5,
+        "passages": 5,
+        "embedding_dimensions": 384,
+        "passage_embedding_seconds": 0.829594,
+        "passage_embedding_cpu_seconds": 0.506247,
+        "passage_throughput_activities_per_second": 6.027,
+        "query_retrieval_samples": 10,
+        "query_retrieval_cpu_seconds": 0.302156,
+        "query_retrieval_p50_seconds": 0.014442,
+        "query_retrieval_p95_seconds": 0.02931,
+        "query_retrieval_p99_seconds": 0.02931,
+        "retrieval_throughput_queries_per_second": 58.51,
+        "quality_queries": 10,
+        "top1_accuracy": 0.8,
+        "recall_at_5": 1.0,
+        "mean_reciprocal_rank": 0.9,
+        "languages": {
+          "en": 1,
+          "es": 2,
+          "it": 2
+        }
+      },
+      "25": {
+        "activities": 25,
+        "queries": 25,
+        "passages": 25,
+        "embedding_dimensions": 384,
+        "passage_embedding_seconds": 0.218726,
+        "passage_embedding_cpu_seconds": 0.306191,
+        "passage_throughput_activities_per_second": 114.298,
+        "query_retrieval_samples": 25,
+        "query_retrieval_cpu_seconds": 0.880927,
+        "query_retrieval_p50_seconds": 0.015234,
+        "query_retrieval_p95_seconds": 0.036695,
+        "query_retrieval_p99_seconds": 0.045845,
+        "retrieval_throughput_queries_per_second": 54.626,
+        "quality_queries": 25,
+        "top1_accuracy": 0.68,
+        "recall_at_5": 1.0,
+        "mean_reciprocal_rank": 0.82,
+        "languages": {
+          "en": 8,
+          "es": 8,
+          "it": 9
+        }
+      },
+      "100": {
+        "activities": 100,
+        "queries": 100,
+        "passages": 100,
+        "embedding_dimensions": 384,
+        "passage_embedding_seconds": 1.20291,
+        "passage_embedding_cpu_seconds": 1.623962,
+        "passage_throughput_activities_per_second": 83.132,
+        "query_retrieval_samples": 100,
+        "query_retrieval_cpu_seconds": 3.167186,
+        "query_retrieval_p50_seconds": 0.015146,
+        "query_retrieval_p95_seconds": 0.022799,
+        "query_retrieval_p99_seconds": 0.029097,
+        "retrieval_throughput_queries_per_second": 62.447,
+        "quality_queries": 100,
+        "top1_accuracy": 0.57,
+        "recall_at_5": 0.88,
+        "mean_reciprocal_rank": 0.6884,
+        "languages": {
+          "en": 33,
+          "es": 33,
+          "it": 34
+        }
+      }
+    }
+  },
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

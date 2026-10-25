@@ -139,6 +139,10 @@ jobs:
         run: |
           bash tests/scripts/test_oracle_vm_bootstrap.sh
           docker compose -f compose.production.yml config --quiet
+          # Candidate overlay: validate wiring only; do not start services,
+          # load model assets, or activate an operational environment.
+          MELPIS_EMBEDDING_TOKEN_FILE=/dev/null MELPIS_EMBEDDING_MODEL_DIR=/tmp \
+            docker compose -f compose.production.yml -f compose.inf01.candidate.yml config --quiet
           docker run --rm \
             --env PUBLIC_HOST \
             --volume "$PWD/Caddyfile.temporary:/etc/caddy/Caddyfile:ro" \

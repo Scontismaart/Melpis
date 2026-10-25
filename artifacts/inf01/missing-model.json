@@ -1,0 +1,7 @@
+{
+  "missing_model_startup_rejected": true,
+  "worker_closed": true,
+  "runtime_download": false,
+  "scope": "missing read-only offline assets; real subprocess startup",
+  "publication_note": "Local filesystem user-home paths redacted; measurements unchanged."
+}

@@ -64,15 +64,22 @@ class LocalWorker:
             raise
 
     async def ensure_started(self):
-        if self.process is not None and self.process.returncode is None and self.starting is None:
-            return
-        if self.starting is None or self.starting.done():
+        if self.starting is None:
+            if self.process is not None and self.process.returncode is None:
+                return
             self.starting = asyncio.create_task(self._start())
             # First retrieval can time out while the bounded model startup
             # continues. It must not restart a cold model on every question.
             self.starting.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
-        await asyncio.shield(self.starting)
-        self.starting = None
+        startup = self.starting
+        try:
+            # A previous caller can time out while startup succeeds. Consume
+            # that same handshake, including a completed task; never spawn a
+            # replacement over its live process and orphan a loaded model.
+            await asyncio.shield(startup)
+        finally:
+            if startup.done() and self.starting is startup:
+                self.starting = None
 
     async def call(self, payload, timeout):
         try:
@@ -109,7 +116,12 @@ class LocalWorker:
 _workers = weakref.WeakKeyDictionary()
 
 
-async def embed_local(texts, tipo="passage", *, timeout=limits.QUERY_SECONDS):
+async def embed_local(texts, tipo="passage", *, timeout=limits.QUERY_SECONDS, organization_id=None):
+    from src.core.documenti.shared_client import _configuration, embed_shared
+    if _configuration() == "shared":
+        if organization_id is None:
+            raise LocalProcessingUnavailable("embedding_organization_required")
+        return await embed_shared(texts, tipo, organization_id, timeout)
     loop = asyncio.get_running_loop()
     worker = _workers.get(loop)
     if worker is None:
