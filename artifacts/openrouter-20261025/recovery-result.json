@@ -1,0 +1,139 @@
+{
+  "main_sha": "327822f0e880ad0bf6a6ac1273e24b30d49dda9c",
+  "historical_id": "not_retrievable_from_trusted_sanitized_evidence",
+  "historical_gets": 0,
+  "new_posts": 1,
+  "new_gets": [
+    {
+      "offset_seconds": 0,
+      "http_status": 404
+    },
+    {
+      "offset_seconds": 2,
+      "http_status": 404
+    },
+    {
+      "offset_seconds": 10,
+      "http_status": 200,
+      "observed_metadata": {
+        "id": "gen-1792904518-LbF8HxcU9yIuXRy1nHIs",
+        "external_user": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+        "model": "xingchen-agi/xing4.0-29b-a4b-20261015:free",
+        "request_id": "req-1792904518-bt1AjazMADAqQPlJI5qD",
+        "native_tokens_prompt": 17,
+        "native_tokens_completion": 32,
+        "total_cost": 0,
+        "latency": 1513,
+        "created_at": "2026-10-25T05:01:58.566Z",
+        "finish_reason": "length"
+      },
+      "error_type": "ProviderReconciliationUnavailable"
+    }
+  ],
+  "verdict": "NOT_CERTIFIED",
+  "provider_responses_synthetic": false,
+  "free_catalog": {
+    "id": "xingchen-agi/xing4.0-29b-a4b:free",
+    "zdr_filtered": true,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "checked_at": 1792904358.6791747
+  },
+  "real_response_usage": {
+    "model": "xingchen-agi/xing4.0-29b-a4b:free",
+    "prompt_tokens": 17,
+    "completion_tokens": 32,
+    "total_tokens": 49,
+    "latency_ms": 2625
+  },
+  "generation_adapter_outcome": "ProviderAccountingError",
+  "organization_id": "7249bb68-dc0a-45d1-8e0e-b3db0bddbb4b",
+  "attempt_id": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+  "generation_id": "gen-1792904518-LbF8HxcU9yIuXRy1nHIs",
+  "pre_recovery_metadata": {
+    "reason": "generation",
+    "context": {
+      "trace_id": "06935f68-9879-4f50-b9bb-2dd093ac5464",
+      "quota_claim_id": "804c7d22-b4b6-4e7b-8472-9094e355fbe5",
+      "quota_period_id": "2401f95f-82a3-5d6f-b993-aa34bfcad728",
+      "quota_operation_id": "39fe6969-d61e-53da-8f62-da4ba94ba141"
+    },
+    "outcome": "in_flight",
+    "version": 1,
+    "provider": "openrouter",
+    "task_type": "document_qa",
+    "attempt_id": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+    "latency_ms": null,
+    "actual_model": null,
+    "execution_id": "ab42e58d-65a1-4b40-b6e5-bd4b6e81706e",
+    "failure_code": null,
+    "total_tokens": null,
+    "prompt_tokens": null,
+    "usage_present": null,
+    "dispatch_state": "prepared",
+    "requested_model": "openrouter/xingchen-agi/xing4.0-29b-a4b:free",
+    "accounting_status": "unresolved",
+    "completion_tokens": null,
+    "estimated_cost_eur": null,
+    "application_outcome": null,
+    "provider_request_id": null,
+    "correlation_contract": "openai_user",
+    "client_correlation_id": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+    "provider_generation_id": "gen-1792904518-LbF8HxcU9yIuXRy1nHIs"
+  },
+  "recovery_initial_state": "lookup_required",
+  "final_organization_state": {
+    "ai_accounting_blocked": true,
+    "messages_used_this_period": 0
+  },
+  "final_attempt_metadata": {
+    "reason": "generation",
+    "context": {
+      "trace_id": "06935f68-9879-4f50-b9bb-2dd093ac5464",
+      "quota_claim_id": "804c7d22-b4b6-4e7b-8472-9094e355fbe5",
+      "quota_period_id": "2401f95f-82a3-5d6f-b993-aa34bfcad728",
+      "quota_operation_id": "39fe6969-d61e-53da-8f62-da4ba94ba141"
+    },
+    "outcome": "uncertain",
+    "version": 1,
+    "provider": "openrouter",
+    "task_type": "document_qa",
+    "attempt_id": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+    "latency_ms": null,
+    "actual_model": null,
+    "execution_id": "ab42e58d-65a1-4b40-b6e5-bd4b6e81706e",
+    "failure_code": "worker_lease_expired",
+    "total_tokens": null,
+    "prompt_tokens": null,
+    "usage_present": null,
+    "dispatch_state": "uncertain",
+    "requested_model": "openrouter/xingchen-agi/xing4.0-29b-a4b:free",
+    "accounting_status": "unresolved",
+    "completion_tokens": null,
+    "estimated_cost_eur": null,
+    "application_outcome": null,
+    "provider_request_id": null,
+    "correlation_contract": "openai_user",
+    "client_correlation_id": "ec7beef8-fecf-4c2f-9ad0-61656530da75",
+    "provider_generation_id": "gen-1792904518-LbF8HxcU9yIuXRy1nHIs"
+  },
+  "provider_attempts": 1,
+  "a04_reservations": [
+    {
+      "epoch": "da5e9f36-4aea-4160-b982-48d4783832c5",
+      "state": "reserved",
+      "channel": "qa",
+      "version": 1,
+      "claim_id": "804c7d22-b4b6-4e7b-8472-9094e355fbe5",
+      "lease_end": "2026-10-25T05:02:26.492083+00:00",
+      "period_id": "2401f95f-82a3-5d6f-b993-aa34bfcad728",
+      "period_end": "2026-10-27T05:01:56.340056+00:00",
+      "lease_start": "2026-10-25T05:01:56.492083+00:00",
+      "payload_hash": "a92adda4c674cd0a76ba221aa7501b472d76dc9ad5bcc3649ca785177fc64344",
+      "response_hash": null
+    }
+  ],
+  "same_credential_for_post_and_get": true
+}
