@@ -2,6 +2,16 @@
 
 **Status: planned, not certified.** This is the execution plan for C03 #98. No Google request, OAuth flow, database migration, or remote event operation has been run as part of preparing this document. Passing unit tests is not evidence of staging-provider readiness.
 
+## Private-beta boundary
+
+Google Calendar is optional for each tenant: a participating business may leave
+it disconnected and disabled. The Calendar integration must nevertheless be
+fully functional and pass this complete C03 staging certification before the
+private-beta go/no-go. Optional per-tenant use does not waive release-level
+certification. This requirement does not authorize connecting a beta customer's
+account or performing an unapproved provider operation; the staging approvals
+and evidence requirements below still apply.
+
 ## Preconditions and approvals
 
 - Use an explicitly authorized Google staging account and a calendar created for this test. Confirm the account owner, calendar ID, organization, staging environment, and an approved test window before connecting it.
