@@ -59,6 +59,15 @@ function responseBody(pathname) {
   if (pathname === "/api/dashboard/prioritari" || pathname === "/api/dashboard") return [];
   if (pathname === "/api/ui/summary") return {};
   if (pathname === "/api/documenti/conteggio") return { chunk_indicizzati: 0 };
+  if (pathname === "/api/documenti/limiti") return {
+    rag_enabled: true,
+    plan: "starter",
+    technical_limits: { upload_bytes: 20 * 1024 * 1024, pages_per_document: 200, chunks_per_document: 500 },
+    usage: { documents: 0, pages: 0, chunks: 0 },
+    file_quota: { status: "available", limit_bytes: 5000000, committed_bytes: 0, reserved_bytes: 0,
+      occupied_bytes: 0, remaining_bytes: 5000000, unknown_documents: 0, scope: "paid",
+      originals_retained: false, new_uploads_allowed: true, replacements_allowed: true },
+  };
   if (pathname === "/api/documenti/elenco") return { documenti: [] };
   if (pathname === "/api/conoscenza/summary") {
     return { faq: {}, documenti: {}, web: {}, dati_struttura: {}, conflitti_totali: 0 };

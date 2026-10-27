@@ -283,3 +283,32 @@ separately from the still-available previous revision. Polling must correlate
 the actual published request UUID before reporting a replacement as complete.
 Original files still are not stored; retry/reindex requires the owner to supply
 the original again. INF01, INF02/R2 and larger file limits are separate work.
+
+## C1 dashboard replacement contract (27 October 2026)
+
+An already indexed document offers **Replace document** and requires a new local
+file. The dashboard reuses `POST /api/documenti/{id}/reindicizza` with the same
+document identity and an idempotency key. A retry of an uncertain request keeps
+that key. New uploads with an existing canonical filename are directed to the
+replacement action; this UI check supplements the authoritative backend rules.
+No original-file storage, download or restore capability is introduced.
+
+Each card shows the canonical name, backend indexing state, revision when known,
+and availability under the current verified RAG entitlement. An accepted HTTP
+request is not reported as a completed publication: success requires the matching
+published request identity. Pending, failed, interrupted and unknown outcomes
+remain distinct. A previously published revision is described as available only
+when the backend marks it active and verified and current entitlement permits it.
+
+On organization changes, permissions, cached document names, pending retry and
+picker state are invalidated. Uploads wait for permissions belonging to the
+effective authenticated organization; a selected organization alone grants no
+authority. Late responses cannot update the new context. In-flight UI mutation
+locks are scoped to the effective user and organization and survive same-tenant
+exit/reentry until their own request settles. Server-side authorization,
+publication, quota and idempotency contracts are unchanged.
+
+Regression evidence lives in `tests/frontend/dashboard-knowledge-module.test.cjs`
+and the real-shell frontend contracts. Operational certification of B02 #93,
+remote migrations, capacity benchmarks and commercial quota activation remain
+separate gates; this UI package does not close them.
