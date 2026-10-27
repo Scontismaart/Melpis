@@ -14,9 +14,9 @@
       let epoch = 0;
       let entryScope = null;
       let tabGeneration = 0;
-      const readGenerations = { summary: 0, faq: 0, documenti: 0, web: 0, dati: 0 };
+      const readGenerations = { summary: 0, faq: 0, documenti: 0, web: 0, dati: 0, limits: 0 };
       const pendingReads = new Map();
-      const mutationLocks = new Set();
+      const mutationLocks = new Map();
       const busyButtons = new Map();
       let pendingConfirmation = null;
       async function askKnowledge(options) {
@@ -38,12 +38,18 @@
           document.getElementById("confirm-desc").textContent = "";
         }
       }
-      function capture() { return { context: getContext(), epoch, tab: tabGeneration }; }
+      function capture() {
+        const context = getContext();
+        return { context, epoch, tab: tabGeneration,
+          scope: JSON.stringify([context?.userId, context?.sessionOrganizationId]) };
+      }
       function current(token, tab = false) {
         const now = getContext();
         return active && !destroyed && token.epoch === epoch
+          && entryScope === scopeKey()
           && (now?.view === "conoscenza" || now?.view === "documenti")
           && now?.userId && now?.sessionOrganizationId
+          && (!now?.selectedOrganizationId || now.selectedOrganizationId === now.sessionOrganizationId)
           && JSON.stringify(now) === JSON.stringify(token.context)
           && (!tab || token.tab === tabGeneration);
       }
@@ -77,8 +83,9 @@
       }
       function beginMutation(key, button) {
         const token = capture();
-        if (!current(token) || mutationLocks.has(key)) return null;
-        mutationLocks.add(key);
+        const lockKey = JSON.stringify([token.scope, key]);
+        if (!current(token) || mutationLocks.has(lockKey)) return null;
+        mutationLocks.set(lockKey, token);
         if (button) {
           busyButtons.set(button, { html: button.innerHTML, disabled: button.disabled,
             restoreFocus: key.includes("delete"), token });
@@ -86,9 +93,11 @@
         }
         return token;
       }
-      function endMutation(key, button) {
-        mutationLocks.delete(key);
-        if (button && busyButtons.has(button)) {
+      function endMutation(key, button, token) {
+        const lockKey = token && JSON.stringify([token.scope, key]);
+        if (!token || mutationLocks.get(lockKey) !== token) return;
+        mutationLocks.delete(lockKey);
+        if (button && busyButtons.get(button)?.token === token) {
           const initial = busyButtons.get(button);
           button.innerHTML = initial.html;
           button.disabled = initial.disabled;
@@ -97,9 +106,11 @@
             && (document.activeElement === document.body
               || document.activeElement?.closest("#confirm-modal[hidden]"))) button.focus();
         }
+        applyDocumentPermissions();
       }
       function clearWork() {
         cancelOwnedConfirmation();
+        stopDocumentPolling();
         epoch += 1;
         tabGeneration += 1;
         Object.keys(readGenerations).forEach((key) => { readGenerations[key] += 1; });
@@ -109,15 +120,21 @@
         fileReplacementsAllowed = false;
         technicalUploadBytes = null;
         pendingFileAction = null;
+        lastDocumentList = [];
+        lastDocumentListKnown = false;
+        pendingReplacementPicker?.remove();
+        pendingReplacementPicker = null;
         const retryButton = document.getElementById("kb-doc-upload-retry");
         if (retryButton) retryButton.hidden = true;
-        applyDocumentPermissions();
+        pickerContextToken = null;
+        if (docFile) docFile.value = "";
         for (const [button, initial] of busyButtons) {
           button.innerHTML = initial.html;
           button.disabled = initial.disabled;
         }
         busyButtons.clear();
         kbDocDropzone?.classList.remove("dragover");
+        applyDocumentPermissions();
       }
       function clearPrivateDOM() {
         [kbFAQList, docLibrary, kbWebList, kbServiziTbody, docFontiList,
@@ -329,7 +346,7 @@
         if (!domanda || !risposta) {
           kbFAQFormStatus.textContent = "Inserisci sia la domanda che la risposta.";
           kbFAQFormStatus.style.color = "var(--red)";
-          endMutation("faq-save", kbFAQSaveBtn);
+          endMutation("faq-save", kbFAQSaveBtn, token);
           return;
         }
 
@@ -366,7 +383,7 @@
           kbFAQFormStatus.textContent = err.message || "Errore di connessione.";
           kbFAQFormStatus.style.color = "var(--red)";
         } finally {
-          endMutation("faq-save", kbFAQSaveBtn);
+          endMutation("faq-save", kbFAQSaveBtn, token);
         }
       });
 
@@ -474,7 +491,7 @@
                 switchInput.checked = !switchInput.checked;
                 alert(err.message || "Impossibile aggiornare lo stato.");
               } finally {
-                endMutation(`faq-toggle:${faq.id}`, switchInput);
+                endMutation(`faq-toggle:${faq.id}`, switchInput, token);
               }
             });
 
@@ -530,7 +547,7 @@
                 alert(err.message || "Impossibile eliminare la FAQ.");
               }
               } finally {
-                endMutation(`faq-delete:${faq.id}`, delBtn);
+                endMutation(`faq-delete:${faq.id}`, delBtn, token);
               }
             });
 
@@ -554,9 +571,12 @@
       const docCaricaBtn = document.getElementById("doc-carica-btn");
       const docCaricaStatus = document.getElementById("doc-carica-status");
       const docLimits = document.getElementById("kb-doc-limits");
+      let pickerContextToken = null;
+      let pendingReplacementPicker = null;
       let pendingFileAction = null;
       let documentPollTimer = null;
       let lastDocumentList = [];
+      let lastDocumentListKnown = false;
       let ragEnabled = null;
       let newFileUploadsAllowed = false;
       let fileReplacementsAllowed = false;
@@ -616,11 +636,13 @@
         if (kbDocDropzone) kbDocDropzone.setAttribute("aria-disabled", String(fileControlsDisabled));
         if (docCaricaBtn) docCaricaBtn.disabled = ragEnabled !== true;
         document.querySelectorAll("[data-document-reindex]").forEach((button) => {
-          button.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
+          button.disabled = ragEnabled !== true || fileReplacementsAllowed !== true
+            || button.dataset.documentPending === "true";
         });
       }
       function displayDocumentLimits(data) {
         if (!docLimits) return;
+        const previousRagEnabled = ragEnabled;
         const technical = data?.technical_limits;
         const usage = data?.usage;
         const values = [technical?.upload_bytes, technical?.pages_per_document, technical?.chunks_per_document];
@@ -642,21 +664,30 @@
         technicalUploadBytes = Number.isSafeInteger(technical?.upload_bytes) && technical.upload_bytes > 0
           ? technical.upload_bytes : null;
         applyDocumentPermissions();
+        if (lastDocumentListKnown && previousRagEnabled !== ragEnabled) {
+          refresh("documenti", caricaDocumenti);
+        }
       }
       async function loadDocumentLimits() {
         if (!docLimits) return;
         const token = capture();
         if (!current(token)) return;
+        const valid = startRead("limits");
+        ragEnabled = null;
+        newFileUploadsAllowed = false;
+        fileReplacementsAllowed = false;
+        technicalUploadBytes = null;
+        applyDocumentPermissions();
         docLimits.textContent = "Caricamento limiti…";
         try {
           const res = await apiFetch(`${API_BASE}/api/documenti/limiti`);
-          if (!current(token)) return;
-          if (res.status === 401 || res.status === 403) { authorized(res, () => current(token)); return; }
+          if (!valid()) return;
+          if (res.status === 401 || res.status === 403) { authorized(res, valid); return; }
           if (!res.ok) throw new Error("Limiti non disponibili");
           const data = await res.json();
-          if (current(token)) displayDocumentLimits(data);
+          if (valid()) displayDocumentLimits(data);
         } catch {
-          if (current(token)) displayDocumentLimits(null);
+          if (valid()) displayDocumentLimits(null);
         }
       }
       function setUploadStatus(message, kind = "neutral") {
@@ -714,10 +745,12 @@
       function scheduleDocumentPoll() {
         stopDocumentPolling();
         if (!active || !hasPendingDocuments(lastDocumentList)) return;
+        const token = capture();
         documentPollTimer = root.setTimeout(async () => {
           documentPollTimer = null;
-          if (!current(capture(), true)) return;
+          if (!current(token, true)) return;
           await refresh("documenti", caricaDocumenti);
+          if (!current(token, true)) return;
           if (pendingFileAction) {
             const matching = findPendingActionDocument(lastDocumentList, pendingFileAction);
             showFileActionState(matching, pendingFileAction);
@@ -725,11 +758,11 @@
           scheduleDocumentPoll();
         }, 2500);
       }
-      async function submitFile(file, url, key, label) {
+      async function submitFile(file, url, key, label, token) {
         const form = new FormData();
         form.append("file", file);
         const res = await apiFetch(url, { method: "POST", body: form, headers: { "Idempotency-Key": key } });
-        if (res.status === 401 || res.status === 403) authorized(res, () => current(capture()));
+        if (res.status === 401 || res.status === 403) authorized(res, () => current(token));
         if (!res.ok) {
           const err = await res.json().catch(() => null);
           throw new Error(err?.detail || `Errore durante ${label}`);
@@ -753,19 +786,29 @@
         });
         kbDocDropzone.addEventListener("drop", async (e) => {
           e.preventDefault();
-          if (!current(capture())) return;
+          const token = capture();
+          if (!current(token)) return;
           kbDocDropzone.classList.remove("dragover");
           const file = e.dataTransfer?.files?.[0];
-          if (file) await eseguiUploadFile(file);
+          if (file) await eseguiUploadFile(file, null, token);
         });
+        docFile.addEventListener("click", () => {
+          const token = capture();
+          pickerContextToken = current(token) && !docFile.disabled ? token : null;
+        });
+        docFile.addEventListener("cancel", () => { pickerContextToken = null; });
         docFile.addEventListener("change", async () => {
-          if (!current(capture())) return;
+          const token = pickerContextToken;
+          pickerContextToken = null;
+          if (!token || !current(token)) { docFile.value = ""; return; }
           const file = docFile.files?.[0];
-          if (file) await eseguiUploadFile(file);
+          if (file) await eseguiUploadFile(file, null, token);
         });
       }
 
-      async function eseguiUploadFile(file, action = null) {
+      async function eseguiUploadFile(file, action = null, originToken = null) {
+        const token = action?.token || originToken || capture();
+        if (!current(token)) return;
         const isReplacement = typeof action?.endpoint === "string" && action.endpoint.includes("/reindicizza");
         const isSameIdempotentRetry = Boolean(action && pendingFileAction === action && action.key);
         if (ragEnabled !== true) {
@@ -790,16 +833,36 @@
           setUploadStatus(_tDash("knowledge.runtime.file_too_large", "Il file supera il limite tecnico di {{max}}.", { max }), "error");
           return;
         }
-        const token = beginMutation("file-upload");
-        if (!token) return;
-        if (!docCaricaStatus) { endMutation("file-upload"); return; }
+        if (!isReplacement && !isSameIdempotentRetry) {
+          if (!lastDocumentListKnown) {
+            setUploadStatus(_tDash("knowledge.runtime.document_names_unavailable",
+              "Non posso verificare i nomi già usati. Aggiorna l'elenco dei documenti e riprova."), "error");
+            await refresh("documenti", caricaDocumenti);
+            if (!current(token)) return;
+            if (docFile && !action) docFile.value = "";
+            return;
+          }
+          const canonicalName = String(file.name || "").normalize("NFC").toLocaleLowerCase(localeCorrente());
+          const duplicate = lastDocumentList.find((doc) => String(doc.nome || "").normalize("NFC")
+            .toLocaleLowerCase(localeCorrente()) === canonicalName);
+          if (duplicate) {
+            setUploadStatus(_tDash("knowledge.runtime.document_name_exists",
+              "Esiste già un documento con questo nome. Usa ‘Sostituisci documento’ nella sua scheda."), "error");
+            if (docFile && !action) docFile.value = "";
+            return;
+          }
+        }
+        const mutationToken = beginMutation("file-upload");
+        if (!mutationToken) return;
+        if (!docCaricaStatus) { endMutation("file-upload", null, mutationToken); return; }
         const currentAction = action || { file, key: newIdempotencyKey(), endpoint: `${API_BASE}/api/documenti/carica-file` };
+        currentAction.token = token;
         pendingFileAction = currentAction;
         setUploadStatus(`Caricamento di "${file.name}" e indicizzazione in corso…`);
         const retryButton = document.getElementById("kb-doc-upload-retry");
         if (retryButton) retryButton.hidden = true;
         try {
-          const result = await submitFile(file, currentAction.endpoint, currentAction.key, "il caricamento del file");
+          const result = await submitFile(file, currentAction.endpoint, currentAction.key, "il caricamento del file", token);
           if (!current(token)) return;
           setUploadStatus(`File "${file.name}" ricevuto; verifica dell'indicizzazione in corso…`);
           if (docFile) docFile.value = "";
@@ -820,20 +883,24 @@
             : (err.message || "Errore durante il caricamento del file."), "error");
           if (retryButton) retryButton.hidden = false;
         } finally {
-          endMutation("file-upload");
+          endMutation("file-upload", null, mutationToken);
         }
       }
       document.getElementById("kb-doc-upload-retry")?.addEventListener("click", () => {
-        if (pendingFileAction?.file) eseguiUploadFile(pendingFileAction.file, pendingFileAction);
+        if (pendingFileAction?.file && current(pendingFileAction.token)) {
+          eseguiUploadFile(pendingFileAction.file, pendingFileAction, pendingFileAction.token);
+        }
       });
 
       // Upload testo libero
       docCaricaBtn?.addEventListener("click", async () => {
         const token = beginMutation("text-upload", docCaricaBtn);
         if (!token) return;
-        if (ragEnabled === false) {
-          setUploadStatus("La Knowledge Base non è inclusa nel piano.", "error");
-          endMutation("text-upload", docCaricaBtn);
+        if (ragEnabled !== true) {
+          setUploadStatus(ragEnabled === false
+            ? "La Knowledge Base non è inclusa nel piano."
+            : _tDash("knowledge.runtime.rag_status_unknown", "Disponibilità della Knowledge Base non verificata; ricarica i limiti e riprova."), "error");
+          endMutation("text-upload", docCaricaBtn, token);
           return;
         }
         const testo = docCaricaTesto.value.trim();
@@ -841,7 +908,7 @@
         if (!testo) {
           docCaricaStatus.textContent = "Incolla il testo del documento prima di salvare.";
           docCaricaStatus.style.color = "var(--red)";
-          endMutation("text-upload", docCaricaBtn);
+          endMutation("text-upload", docCaricaBtn, token);
           return;
         }
         docCaricaBtn.disabled = true;
@@ -871,7 +938,7 @@
           docCaricaStatus.textContent = err.message || "Errore durante il salvataggio.";
           docCaricaStatus.style.color = "var(--red)";
         } finally {
-          endMutation("text-upload", docCaricaBtn);
+          endMutation("text-upload", docCaricaBtn, token);
         }
       });
 
@@ -880,6 +947,7 @@
         const valid = startRead("documenti");
         if (!valid()) return;
         if (!docLibrary) return;
+        lastDocumentListKnown = false;
         try {
           const res = await apiFetch(`${API_BASE}/api/documenti/elenco`);
           if (!valid()) return;
@@ -889,6 +957,7 @@
           if (!valid()) return;
           const items = (data.documenti || []).filter((d) => d.tipo === "documento" || d.tipo === "upload");
           lastDocumentList = items;
+          lastDocumentListKnown = true;
           scheduleDocumentPoll();
           const renderToken = capture();
 
@@ -927,7 +996,8 @@
             const replacementInProgress = doc.index_status === "in_progress";
             const replacementFailed = doc.index_status === "failed";
             const replacementInterrupted = doc.index_status === "interrupted";
-            const hasPublishedVersion = isActive;
+            const hasPublishedVersion = ragEnabled === true && doc.is_active === true
+              && doc.stato === "indicizzata" && doc.index_verified === true;
             if (replacementInProgress) {
               badgeStato.className = "kb-badge kb-badge-warning";
               badgeStato.textContent = _tDash("knowledge.runtime.document_index_update_badge", "Aggiornamento in corso");
@@ -969,7 +1039,23 @@
             const dateMeta = document.createElement("span");
             dateMeta.textContent = `Caricato: ${_formatDataOra(doc.caricato_il)}`;
 
-            metaRow.append(badgeStato, chunkMeta, pageMeta, dateMeta);
+            const revisionMeta = document.createElement("span");
+            const validRevision = Number.isSafeInteger(doc.revision) && doc.revision >= 0;
+            revisionMeta.textContent = validRevision
+              ? _tDash("knowledge.runtime.document_revision", "Revisione {{revision}}", { revision: doc.revision })
+              : _tDash("knowledge.runtime.document_revision_unknown", "Revisione sconosciuta");
+
+            const availabilityMeta = document.createElement("span");
+            availabilityMeta.className = "kb-document-availability";
+            const availabilityUnknown = ragEnabled === null
+              || (ragEnabled === true && (typeof doc.is_active !== "boolean" || typeof doc.index_verified !== "boolean"));
+            availabilityMeta.textContent = availabilityUnknown
+              ? _tDash("knowledge.runtime.document_availability_unknown", "Disponibilità non verificata")
+              : ragEnabled === true && doc.is_active === true && doc.index_verified === true && doc.stato === "indicizzata"
+                ? _tDash("knowledge.runtime.document_available", "Disponibile alla Knowledge Base")
+                : _tDash("knowledge.runtime.document_unavailable", "Non disponibile alla Knowledge Base");
+
+            metaRow.append(badgeStato, chunkMeta, pageMeta, revisionMeta, availabilityMeta, dateMeta);
             main.append(title, metaRow);
             if (hasPublishedVersion && (replacementInProgress || replacementFailed || replacementInterrupted)) {
               const updateNotice = document.createElement("p");
@@ -1012,7 +1098,7 @@
                   switchInput.checked = !switchInput.checked;
                   alert(err.message || "Impossibile aggiornare lo stato.");
                 } finally {
-                  endMutation(`document-toggle:${doc.id}`, switchInput);
+                  endMutation(`document-toggle:${doc.id}`, switchInput, token);
                 }
               });
 
@@ -1022,28 +1108,43 @@
               actions.appendChild(switchLabel);
             }
 
-            if (doc.stato === "errore" || doc.index_verified === false || replacementFailed || replacementInterrupted) {
+            if (doc.stato === "errore" || doc.index_verified === false || replacementFailed || replacementInterrupted
+              || (doc.stato === "indicizzata" && doc.index_verified === true)) {
               const reindexButton = document.createElement("button");
               reindexButton.type = "button";
               reindexButton.className = "report-refresh";
-              reindexButton.textContent = "Reindicizza documento";
+              const isHealthyDocument = doc.stato === "indicizzata" && doc.index_verified === true;
+              reindexButton.textContent = isHealthyDocument
+                ? _tDash("knowledge.runtime.replace_document", "Sostituisci documento")
+                : _tDash("knowledge.runtime.reindex_document", "Reindicizza documento");
               reindexButton.dataset.documentReindex = "true";
-              reindexButton.disabled = ragEnabled !== true || fileReplacementsAllowed !== true;
+              const documentPending = doc.index_status === "in_progress"
+                || doc.stato === "caricato" || doc.stato === "in_elaborazione";
+              reindexButton.dataset.documentPending = String(documentPending);
+              reindexButton.disabled = ragEnabled !== true || fileReplacementsAllowed !== true || documentPending;
+              reindexButton.setAttribute("aria-label", `${reindexButton.textContent}: ${doc.nome}`);
               reindexButton.addEventListener("click", () => {
-                if (!card.isConnected || !current(renderToken, true)) return;
+                if (!card.isConnected || !current(renderToken, true) || reindexButton.disabled) return;
                 const picker = document.createElement("input");
                 picker.type = "file";
                 picker.dataset.reindexFilePicker = "true";
                 picker.accept = docFile?.accept || ".pdf,.docx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp";
                 picker.hidden = true;
                 document.body.appendChild(picker);
+                pendingReplacementPicker = picker;
+                const pickerToken = capture();
                 picker.addEventListener("change", async () => {
                   const original = picker.files?.[0];
                   picker.remove();
-                  if (!original || !current(renderToken, true)) return;
-                  const action = { file: original, key: newIdempotencyKey(), endpoint:
+                  if (pendingReplacementPicker === picker) pendingReplacementPicker = null;
+                  if (!original || !current(pickerToken, true)) return;
+                  const action = { file: original, token: pickerToken, key: newIdempotencyKey(), endpoint:
                     `${API_BASE}/api/documenti/${encodeURIComponent(doc.id)}/reindicizza` };
-                  await eseguiUploadFile(original, action);
+                  await eseguiUploadFile(original, action, pickerToken);
+                }, { once: true });
+                picker.addEventListener("cancel", () => {
+                  picker.remove();
+                  if (pendingReplacementPicker === picker) pendingReplacementPicker = null;
                 }, { once: true });
                 picker.click();
               });
@@ -1083,7 +1184,7 @@
                 alert(err.message || "Impossibile rimuovere il documento.");
               }
               } finally {
-                endMutation(`document-delete:${doc.id}`, delBtn);
+                endMutation(`document-delete:${doc.id}`, delBtn, token);
               }
             });
             actions.appendChild(delBtn);
@@ -1110,7 +1211,7 @@
         if (!url || (!url.startsWith("http://") && !url.startsWith("https://"))) {
           kbWebImportStatus.textContent = "Inserisci un URL valido che inizi con http:// o https://";
           kbWebImportStatus.style.color = "var(--red)";
-          endMutation("web-import", kbWebImportBtn);
+          endMutation("web-import", kbWebImportBtn, token);
           return;
         }
 
@@ -1150,7 +1251,7 @@
           if (!current(token)) return;
           await refresh("summary", caricaKBSummary);
         } finally {
-          endMutation("web-import", kbWebImportBtn);
+          endMutation("web-import", kbWebImportBtn, token);
         }
       });
 
@@ -1265,7 +1366,7 @@
                   switchInput.checked = !switchInput.checked;
                   alert(err.message || "Impossibile aggiornare lo stato.");
                 } finally {
-                  endMutation(`web-toggle:${item.id}`, switchInput);
+                  endMutation(`web-toggle:${item.id}`, switchInput, token);
                 }
               });
 
@@ -1307,7 +1408,7 @@
                 alert(err.message || "Impossibile rimuovere la pagina.");
               }
               } finally {
-                endMutation(`web-delete:${item.id}`, delBtn);
+                endMutation(`web-delete:${item.id}`, delBtn, token);
               }
             });
             actions.appendChild(delBtn);
@@ -1402,7 +1503,7 @@
       kbSalvaDatiBtn?.addEventListener("click", async () => {
         const token = beginMutation("data-save", kbSalvaDatiBtn);
         if (!token) return;
-        if (!kbServiziTbody) { endMutation("data-save", kbSalvaDatiBtn); return; }
+        if (!kbServiziTbody) { endMutation("data-save", kbSalvaDatiBtn, token); return; }
         const rows = kbServiziTbody.querySelectorAll("tr");
         const servizi = [];
 
@@ -1462,7 +1563,7 @@
             kbDatiSaveStatus.style.color = "var(--red)";
           }
         } finally {
-          endMutation("data-save", kbSalvaDatiBtn);
+          endMutation("data-save", kbSalvaDatiBtn, token);
         }
       });
 
@@ -1521,7 +1622,7 @@
         const token = beginMutation("query", docChiediBtn);
         if (!token) return;
         const domanda = (docQuery?.value || "").trim();
-        if (!domanda) { endMutation("query", docChiediBtn); return; }
+        if (!domanda) { endMutation("query", docChiediBtn, token); return; }
         if (qaIdempotencyQuestion !== domanda || !qaIdempotencyKey) {
           qaIdempotencyKey = crypto.randomUUID();
           qaIdempotencyQuestion = domanda;
@@ -1595,7 +1696,7 @@
           docRisposta.hidden = false;
           docFonti.hidden = true;
         } finally {
-          endMutation("query", docChiediBtn);
+          endMutation("query", docChiediBtn, token);
         }
       });
 
@@ -1604,6 +1705,8 @@
         const token = capture();
         if (!current(token)) return;
         await caricaKBSummary();
+        if (!current(token)) return;
+        await loadDocumentLimits();
         if (!current(token)) return;
         if (kbActiveTab === "faq") await caricaFAQ();
         else if (kbActiveTab === "documenti") await caricaDocumenti();

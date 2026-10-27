@@ -1813,6 +1813,11 @@ notifBell?.addEventListener("click", () => {
 // Una pagina /app/ ripristinata dalla back-forward cache potrebbe contenere
 // DOM autenticato precedente al logout. Ricarica per riverificare la sessione.
 window.addEventListener("storage", (event) => {
+  if (event.key === "melpis_selected_organization" && window.location.pathname.startsWith("/app/")) {
+    dashboardKnowledgeModule?.onExit();
+    window.location.reload();
+    return;
+  }
   if (event.key === "melpis_auth_logout" && event.newValue && window.location.pathname.startsWith("/app/")) {
     invalidaSessione();
     vaiAdAccesso();
@@ -2221,6 +2226,7 @@ dashboardTeamModule = window.MelpisDashboardTeam.create({
 });
 ({ caricaTeam } = dashboardTeamModule);
 document.getElementById("team-org-selector")?.addEventListener("change", (event) => {
+  dashboardKnowledgeModule?.onExit();
   dashboardInboxModule?.invalidate();
   localStorage.setItem("melpis_selected_organization", event.target.value);
   window.location.reload();
