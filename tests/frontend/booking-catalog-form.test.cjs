@@ -80,3 +80,15 @@ test("read-only state disables controls, clear removes private data and load cop
   form.clear(); assert.equal(container.textContent, ""); assert.throws(() => form.read(2));
   dom.window.close();
 });
+
+test("translated fixed field labels remain associated with their controls", () => {
+  for (const [lang, expected] of [["en", "Customer name"], ["de", "Kundenname"]]) {
+    const messages = require(`../../locales/${lang}/dashboard.json`).booking_catalog;
+    const keys = { "Nome cliente": "customer_name", "Telefono": "phone", "Email": "email" };
+    const { container, form, dom } = setup({ translate: (text) => messages[keys[text]] || text });
+    form.load(fixtures.parrucchiere);
+    assert.match(container.textContent, new RegExp(expected));
+    assert.ok([...container.querySelectorAll("input, select")].every((input) => input.closest("label")));
+    dom.window.close();
+  }
+});

@@ -126,3 +126,14 @@ test("audit displays only validated safe metadata", async () => {
   h.controller.enter(); await tick(); button(h, "Mostra cronologia").click(); await tick();
   assert.match(h.container.textContent, /draft_saved/); assert.doesNotMatch(h.container.textContent, /secret|<img>/); assert.equal(h.container.querySelector("img"), null); h.dom.window.close();
 });
+
+test("language refresh keeps the current form and permissions within its scope", async () => {
+  let language = "en"; const labels = { en: { "Catalogo caricato.": "Catalog loaded." }, de: { "Catalogo caricato.": "Katalog geladen." } };
+  const h = setup(async () => response(state()));
+  // Exercise the host-independent controller with a mutable translation callback.
+  const dom = h.dom; const container = h.container;
+  const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: async () => response(state()), getContext: () => ({ view: "prenotazioni", userId: "u1", sessionOrganizationId: "o1" }), getSession: () => ({ ruolo: "owner", id: "s1" }), translate: (text) => labels[language][text] || text });
+  controller.enter(); await tick(); assert.match(container.textContent, /Catalog loaded/);
+  language = "de"; controller.refreshLanguage(); assert.match(container.textContent, /Katalog geladen/); assert.equal(button(h, "Salva bozza").hidden, false);
+  controller.invalidate(); controller.refreshLanguage(); assert.equal(container.textContent, ""); dom.window.close();
+});

@@ -376,5 +376,28 @@
     "error": "Ein unerwarteter Fehler ist aufgetreten.",
     "network_error": "Verbindungsfehler zum Server. Bitte versuchen Sie es in Kürze erneut.",
     "session_expired": "Sitzung abgelaufen. Bitte melden Sie sich erneut an."
+  },
+  "booking_catalog": {
+    "customer_name": "Kundenname",
+    "phone": "Telefon",
+    "email": "E-Mail",
+    "appointment_date": "Termindatum",
+    "appointment_time": "Terminuhrzeit",
+    "party_size": "Personenzahl",
+    "service": "Dienstleistung",
+    "resource": "Ressource",
+    "arrival_date": "Anreisedatum",
+    "departure_date": "Abreisedatum",
+    "guest_count": "Anzahl der Gäste",
+    "room_count": "Anzahl der Zimmer",
+    "catalog_title": "Buchungskatalog",
+    "runtime_inactive": "Die automatische Buchungsfunktion ist für diesen Katalog nicht aktiv.",
+    "loading": "Katalog wird geladen…",
+    "loaded": "Katalog geladen.",
+    "save": "Entwurf speichern",
+    "publish": "Veröffentlichen",
+    "reload": "Katalog neu laden",
+    "history": "Verlauf anzeigen",
+    "network_error": "Verbindung nicht verfügbar. Versuchen Sie es erneut."
   }
 }

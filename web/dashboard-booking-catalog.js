@@ -6,7 +6,7 @@
     const doc = container.ownerDocument;
     const tr = typeof deps.translate === "function" ? deps.translate : (s) => s;
     let epoch = 0, identity = null, active = false, controller = null, form = null;
-    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false;
+    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, statusKey = "";
     let status, editor, save, publish, reload, restore, revision, security, audit;
     function signature() {
       const context = getContext(), session = getSession();
@@ -20,7 +20,7 @@
     }
     function node(tag, text, parent) { const element = doc.createElement(tag); if (text != null) element.textContent = tr(text); if (parent) parent.appendChild(element); return element; }
     function addButton(label, handler) { const element = node("button", label, container); element.type = "button"; element.className = "booking-icon-text-button"; element.addEventListener("click", handler); return element; }
-    function setMessage(message) { if (status) status.textContent = tr(message); }
+    function setMessage(message) { statusKey = message; if (status) status.textContent = tr(message); }
     function permissions() {
       const role = getSession()?.ruolo;
       const knownSector = ["ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"].includes(state?.organization_sector);
@@ -35,7 +35,7 @@
     }
     function clear() {
       controller?.abort(); controller = null;
-      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false;
+      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; statusKey = "";
       container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = audit = null;
     }
     function invalidate() { active = false; identity = null; epoch += 1; clear(); }
@@ -153,12 +153,21 @@
       if (!confirmed || !permissions().publish || state.revision !== expected) return;
       await write("publish", { expected_revision: expected });
     }
+    function refreshLanguage() {
+      const token = epoch; if (!valid(token) || busy || !state || !form) return;
+      let draft = null; try { draft = form.read(state.revision + 1); } catch (_) { /* Empty catalog. */ }
+      const message = statusKey, securityVisible = !security.hidden, reloadVisible = !reload.hidden, restoreVisible = !restore.hidden;
+      container.replaceChildren(); setup(); apply(state);
+      if (draft) form.load(draft);
+      security.hidden = !securityVisible; reload.hidden = !reloadVisible; restore.hidden = !restoreVisible;
+      controls(); setMessage(message);
+    }
     function enter() {
       invalidate(); identity = signature();
       if (!identity || getSession()?.ruolo === "staff") return;
       active = true; setup(); load();
     }
-    return Object.freeze({ enter, leave, invalidate });
+    return Object.freeze({ enter, leave, invalidate, refreshLanguage });
   }
   root.MelpisBookingCatalog = Object.freeze({ create });
 })(typeof window !== "undefined" ? window : globalThis);

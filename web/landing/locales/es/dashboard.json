@@ -376,5 +376,28 @@
     "error": "Ocurrió un error inesperado.",
     "network_error": "Problema de conexión con la red. Inténtalo de nuevo en unos momentos.",
     "session_expired": "Sesión caducada. Inicia sesión de nuevo."
+  },
+  "booking_catalog": {
+    "customer_name": "Nombre del cliente",
+    "phone": "Teléfono",
+    "email": "Correo electrónico",
+    "appointment_date": "Fecha de la cita",
+    "appointment_time": "Hora de la cita",
+    "party_size": "Número de personas",
+    "service": "Servicio",
+    "resource": "Recurso",
+    "arrival_date": "Fecha de llegada",
+    "departure_date": "Fecha de salida",
+    "guest_count": "Número de huéspedes",
+    "room_count": "Número de habitaciones",
+    "catalog_title": "Catálogo de reservas",
+    "runtime_inactive": "El motor de reservas automático no está activo para este catálogo.",
+    "loading": "Cargando catálogo…",
+    "loaded": "Catálogo cargado.",
+    "save": "Guardar borrador",
+    "publish": "Publicar",
+    "reload": "Volver a cargar el catálogo",
+    "history": "Mostrar historial",
+    "network_error": "Conexión no disponible. Inténtalo de nuevo."
   }
 }

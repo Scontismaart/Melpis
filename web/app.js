@@ -1386,9 +1386,33 @@ dashboardBookingsModule = window.MelpisDashboardBookings.create({
   },
 });
 ({ aggiornaPrenotazioni, aggiornaSemaforo, apriBookingModal } = dashboardBookingsModule);
+const catalogTranslationKeys = Object.freeze({
+  "Nome cliente": "customer_name",
+  "Telefono": "phone",
+  "Email": "email",
+  "Data appuntamento": "appointment_date",
+  "Ora appuntamento": "appointment_time",
+  "Numero persone": "party_size",
+  "Servizio": "service",
+  "Risorsa": "resource",
+  "Data arrivo": "arrival_date",
+  "Data partenza": "departure_date",
+  "Numero ospiti": "guest_count",
+  "Numero camere": "room_count",
+  "Catalogo prenotazioni": "catalog_title",
+  "Il motore automatico non è attivo per questo catalogo.": "runtime_inactive",
+  "Caricamento catalogo…": "loading",
+  "Catalogo caricato.": "loaded",
+  "Salva bozza": "save",
+  "Pubblica": "publish",
+  "Ricarica catalogo": "reload",
+  "Mostra cronologia": "history",
+  "Connessione non disponibile. Riprova.": "network_error"
+});
 dashboardBookingCatalog = window.MelpisBookingCatalog.create({
   container: document.getElementById("booking-catalog-editor"), API_BASE, apiFetch,
   getContext: dashboardContextSnapshot, getSession: () => sessione,
+  translate: (text) => Object.hasOwn(catalogTranslationKeys, text) ? _tDash(`booking_catalog.${catalogTranslationKeys[text]}`, text) : text,
   confirm: ({ title, description, label }) => confermaDestructiva({ titolo: title, descrizione: description, label }),
   onOpenSecurity: () => {
     if (window.MelpisMfa?.openForStepUp) window.MelpisMfa.openForStepUp();
@@ -2166,6 +2190,7 @@ window.addEventListener("pageshow", (event) => {
     if (typeof aggiornaDataTopbar === "function") {
       aggiornaDataTopbar();
     }
+    dashboardBookingCatalog?.refreshLanguage();
     dashboardInboxModule?.refreshLanguage();
     dashboardAiSettingsModule?.refreshLanguage();
     dashboardSettingsModule?.refreshLanguage();

@@ -379,5 +379,28 @@
     "error": "Si è verificato un errore imprevisto.",
     "network_error": "Problema di connessione alla rete. Riprova tra poco.",
     "session_expired": "Sessione scaduta. Effettua nuovamente il login."
+  },
+  "booking_catalog": {
+    "customer_name": "Nome cliente",
+    "phone": "Telefono",
+    "email": "Email",
+    "appointment_date": "Data appuntamento",
+    "appointment_time": "Ora appuntamento",
+    "party_size": "Numero persone",
+    "service": "Servizio",
+    "resource": "Risorsa",
+    "arrival_date": "Data arrivo",
+    "departure_date": "Data partenza",
+    "guest_count": "Numero ospiti",
+    "room_count": "Numero camere",
+    "catalog_title": "Catalogo prenotazioni",
+    "runtime_inactive": "Il motore automatico non è attivo per questo catalogo.",
+    "loading": "Caricamento catalogo…",
+    "loaded": "Catalogo caricato.",
+    "save": "Salva bozza",
+    "publish": "Pubblica",
+    "reload": "Ricarica catalogo",
+    "history": "Mostra cronologia",
+    "network_error": "Connessione non disponibile. Riprova."
   }
 }

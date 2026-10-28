@@ -379,5 +379,28 @@
     "error": "An unexpected error occurred.",
     "network_error": "Network connectivity issue. Please try again shortly.",
     "session_expired": "Session expired. Please log in again."
+  },
+  "booking_catalog": {
+    "customer_name": "Customer name",
+    "phone": "Phone",
+    "email": "Email",
+    "appointment_date": "Appointment date",
+    "appointment_time": "Appointment time",
+    "party_size": "Party size",
+    "service": "Service",
+    "resource": "Resource",
+    "arrival_date": "Arrival date",
+    "departure_date": "Departure date",
+    "guest_count": "Number of guests",
+    "room_count": "Number of rooms",
+    "catalog_title": "Booking catalog",
+    "runtime_inactive": "The automatic booking engine is not active for this catalog.",
+    "loading": "Loading catalog…",
+    "loaded": "Catalog loaded.",
+    "save": "Save draft",
+    "publish": "Publish",
+    "reload": "Reload catalog",
+    "history": "Show history",
+    "network_error": "Connection unavailable. Try again."
   }
 }

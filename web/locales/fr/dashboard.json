@@ -379,5 +379,28 @@
     "error": "Une erreur inattendue est survenue.",
     "network_error": "Problème de connexion réseau. Veuillez réessayer dans un instant.",
     "session_expired": "Session expirée. Veuillez vous reconnecter."
+  },
+  "booking_catalog": {
+    "customer_name": "Nom du client",
+    "phone": "Téléphone",
+    "email": "E-mail",
+    "appointment_date": "Date du rendez-vous",
+    "appointment_time": "Heure du rendez-vous",
+    "party_size": "Nombre de personnes",
+    "service": "Service",
+    "resource": "Ressource",
+    "arrival_date": "Date d’arrivée",
+    "departure_date": "Date de départ",
+    "guest_count": "Nombre de personnes",
+    "room_count": "Nombre de chambres",
+    "catalog_title": "Catalogue des réservations",
+    "runtime_inactive": "Le moteur de réservation automatique n’est pas actif pour ce catalogue.",
+    "loading": "Chargement du catalogue…",
+    "loaded": "Catalogue chargé.",
+    "save": "Enregistrer le brouillon",
+    "publish": "Publier",
+    "reload": "Recharger le catalogue",
+    "history": "Afficher l’historique",
+    "network_error": "Connexion indisponible. Réessayez."
   }
 }
