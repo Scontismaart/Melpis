@@ -7,7 +7,7 @@ Display names remain untrusted data. No custom field labels/prompts/expressions.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 import json
 from types import MappingProxyType
 from typing import Annotated, Literal
@@ -195,6 +195,8 @@ class CatalogDraft(Contract):
     @field_validator("timezone")
     @classmethod
     def iana_timezone(cls, value):
+        if value in {"localtime", "posixrules"} or value.startswith(("posix/", "right/")):
+            raise ValueError("Invalid IANA timezone")
         try:
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError):
@@ -281,7 +283,7 @@ class AvailabilityObservation:
             raise ValueError("Invalid observation scope/revision")
         if (not isinstance(self.starts_at, datetime) or not isinstance(self.ends_at, datetime)
                 or self.starts_at.utcoffset() is None or self.ends_at.utcoffset() is None
-                or self.starts_at >= self.ends_at):
+                or self.starts_at.astimezone(timezone.utc) >= self.ends_at.astimezone(timezone.utc)):
             raise ValueError("Invalid observation interval")
         if not isinstance(self.evidence, CalendarAvailability):
             raise ValueError("Expected typed calendar evidence")
