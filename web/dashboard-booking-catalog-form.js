@@ -30,7 +30,7 @@
     function control(parent, label, value, type, update, choices) {
       const wrap = el("label", null, parent); el("span", label, wrap);
       const input = el(choices ? "select" : "input", null, wrap);
-      if (choices) choices.forEach(([v, name]) => { const o = el("option", name, input); o.value = v; });
+      if (choices) choices.forEach(([v, name, raw]) => { const o = el("option", raw ? null : name, input); if (raw) o.textContent = name; o.value = v; });
       else input.type = type;
       if (type === "checkbox") input.checked = Boolean(value); else input.value = value == null ? "" : String(value);
       if (type === "number") { input.step = "1"; input.min = "0"; }
@@ -43,14 +43,14 @@
       container.replaceChildren();
       if (!model) {
         el("p", "Nessun catalogo. Scegli un esempio sintetico e verifica tutti i valori prima di salvarlo.", container);
-        sectors.forEach((sector) => button(container, `Usa esempio: ${sectorNames[sector]}`, () => { model = example(sector, opts.timezone); }));
+        sectors.forEach((sector) => button(container, `${translate("Usa esempio")}: ${translate(sectorNames[sector])}`, () => { model = example(sector, opts.timezone); }));
         return;
       }
-      el("p", `Settore: ${sectorNames[model.sector] || model.sector}`, container);
+      el("p", `${translate("Settore")}: ${sectorNames[model.sector] ? translate(sectorNames[model.sector]) : model.sector}`, container);
       control(container, "Fuso orario IANA", model.timezone, "text", (v) => { model.timezone = v; });
       const resources = group(container, "Risorse");
       model.resources.forEach((r, index) => {
-        const box = group(resources, `Risorsa ${index + 1}`);
+        const box = group(resources, `${translate("Risorsa")} ${index + 1}`);
         control(box, "Identificativo", r.resource_id, "text", (v) => { r.resource_id = v; });
         control(box, "Tipo", r.kind, "text", (v) => { r.kind = v; }, kinds.map((k) => [k, kindNames[k]]));
         control(box, "Capacità", r.capacity, "number", (v) => { r.capacity = v; });
@@ -60,7 +60,7 @@
       button(resources, "Aggiungi risorsa", () => { model.resources.push({ resource_id: "", kind: "operator", capacity: 1, exclusive: true }); });
       const services = group(container, "Servizi");
       model.services.forEach((s, index) => {
-        const box = group(services, `Servizio ${index + 1}`);
+        const box = group(services, `${translate("Servizio")} ${index + 1}`);
         control(box, "Identificativo servizio", s.service_id, "text", (v) => { s.service_id = v; });
         control(box, "Nome servizio", s.name, "text", (v) => { s.name = v; });
         if (s.duration.kind === "civil_nights") {
@@ -73,8 +73,8 @@
         const refs = group(box, "Risorse richieste");
         s.resources.forEach((r, i) => {
           const row = el("div", null, refs);
-          const choices = [["", "Seleziona una risorsa"], ...model.resources.map((resource) => [resource.resource_id, resource.resource_id])];
-          if (r.resource_id && !choices.some(([id]) => id === r.resource_id)) choices.push([r.resource_id, r.resource_id]);
+          const choices = [["", "Seleziona una risorsa"], ...model.resources.map((resource) => [resource.resource_id, resource.resource_id, true])];
+          if (r.resource_id && !choices.some(([id]) => id === r.resource_id)) choices.push([r.resource_id, r.resource_id, true]);
           control(row, "Risorsa", r.resource_id, "text", (v) => { r.resource_id = v; }, choices);
           control(row, "Quantità", r.quantity, "number", (v) => { r.quantity = v; });
           button(row, "Rimuovi requisito", () => { s.resources.splice(i, 1); });
@@ -113,7 +113,7 @@
           if (v !== "unknown") model.availability.days.push({ weekday, windows: v === "open" ? [{ start_minute: 0, end_minute: 1 }] : [] });
           render();
         }, [["unknown", "Non definito"], ["closed", "Chiuso"], ["open", "Aperto"]]);
-        select.setAttribute("aria-label", `${name}: ${translate("Stato")}`);
+        select.setAttribute("aria-label", `${translate(name)}: ${translate("Stato")}`);
         if (!day || !day.windows.length) return;
         day.windows.forEach((w, i) => {
           const row = el("div", null, box);

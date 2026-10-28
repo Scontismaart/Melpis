@@ -92,3 +92,35 @@ test("translated fixed field labels remain associated with their controls", () =
     dom.window.close();
   }
 });
+
+
+test("catalog static UI text is mapped to keys present in all locales", () => {
+  const app = fs.readFileSync(path.join(__dirname, "../../web/app.js"), "utf8");
+  const marker = "const catalogTranslationKeys = Object.freeze("; const start = app.indexOf(marker) + marker.length;
+  const keys = JSON.parse(app.slice(start, app.indexOf(");", start)));
+  const modules = ["dashboard-booking-catalog.js", "dashboard-booking-catalog-form.js"];
+  const expected = new Set();
+  for (const name of modules) {
+    const content = fs.readFileSync(path.join(__dirname, "../../web", name), "utf8");
+    for (const match of content.matchAll(/"([^"\n]+)"/g)) {
+      const text = match[1];
+      if (Object.hasOwn(keys, text)) expected.add(text);
+    }
+  }
+  assert.ok(expected.size >= 100);
+  for (const lang of ["it", "en", "es", "fr", "de"]) {
+    const bundle = require(`../../locales/${lang}/dashboard.json`).booking_catalog;
+    for (const text of expected) assert.equal(typeof bundle[keys[text]], "string", `${lang}: ${text}`);
+  }
+});
+
+test("English and German examples and weekly availability use localized labels", () => {
+  const app = fs.readFileSync(path.join(__dirname, "../../web/app.js"), "utf8");
+  const marker = "const catalogTranslationKeys = Object.freeze("; const start = app.indexOf(marker) + marker.length;
+  const keys = JSON.parse(app.slice(start, app.indexOf(");", start)));
+  for (const [lang, example, availability] of [["en", "Use example: Restaurant", "Weekly availability"], ["de", "Beispiel verwenden: Restaurant", "Wöchentliche Verfügbarkeit"]]) {
+    const bundle = require(`../../locales/${lang}/dashboard.json`).booking_catalog;
+    const h = setup({ translate: (text) => Object.hasOwn(keys, text) ? bundle[keys[text]] : text });
+    button(h.container, example).click(); assert.match(h.container.textContent, new RegExp(availability)); h.dom.window.close();
+  }
+});

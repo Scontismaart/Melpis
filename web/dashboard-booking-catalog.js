@@ -6,7 +6,7 @@
     const doc = container.ownerDocument;
     const tr = typeof deps.translate === "function" ? deps.translate : (s) => s;
     let epoch = 0, identity = null, active = false, controller = null, form = null;
-    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, statusKey = "";
+    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, languagePending = false, statusKey = "";
     let status, editor, save, publish, reload, restore, revision, security, audit;
     function signature() {
       const context = getContext(), session = getSession();
@@ -18,7 +18,7 @@
       if (!active || !identity || signature() !== identity) { if (active) invalidate(); return false; }
       return true;
     }
-    function node(tag, text, parent) { const element = doc.createElement(tag); if (text != null) element.textContent = tr(text); if (parent) parent.appendChild(element); return element; }
+    function node(tag, text, parent) { const element = doc.createElement(tag); if (text != null) { element.dataset.catalogText = text; element.textContent = tr(text); } if (parent) parent.appendChild(element); return element; }
     function addButton(label, handler) { const element = node("button", label, container); element.type = "button"; element.className = "booking-icon-text-button"; element.addEventListener("click", handler); return element; }
     function setMessage(message) { statusKey = message; if (status) status.textContent = tr(message); }
     function permissions() {
@@ -35,7 +35,7 @@
     }
     function clear() {
       controller?.abort(); controller = null;
-      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; statusKey = "";
+      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; languagePending = false; statusKey = "";
       container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = audit = null;
     }
     function invalidate() { active = false; identity = null; epoch += 1; clear(); }
@@ -93,7 +93,7 @@
         restore.hidden = !(preserveConflict && conflictCopy && permissions().save);
         setMessage(!data.organization_sector ? "Settore non disponibile: aggiorna il profilo prima di modificare il catalogo." : !restore.hidden ? "Catalogo aggiornato. Puoi ripristinare le tue modifiche e verificarle." : getSession()?.ruolo === "owner" && !data.capabilities.can_publish ? "Per pubblicare verifica i permessi e la verifica a due fattori nelle impostazioni di sicurezza." : "Catalogo caricato.");
       } catch (_) { if (valid(token)) { setMessage(receipt ? "Scrittura riuscita, ma il catalogo aggiornato non è disponibile. Ricarica prima di continuare." : "Connessione non disponibile. Riprova."); reload.hidden = false; } }
-      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
+      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); if (languagePending) refreshLanguage(); } }
     }
     async function write(kind, payload) {
       const token = epoch; if (!valid(token) || busy) return;
@@ -112,7 +112,7 @@
         if (!validState(data) || !Number.isSafeInteger(data.applied_revision)) { setMessage("Risposta non valida. Ricarica prima di continuare."); state = null; controls(); reload.hidden = false; return; }
         receipt = { requestId, appliedRevision: data.applied_revision }; state = null; controls(); succeeded = true;
       } catch (_) { if (valid(token)) setMessage("Esito incerto per un problema di connessione. Riprova senza modificare i dati."); }
-      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
+      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); if (languagePending) refreshLanguage(); } }
       if (succeeded && valid(token)) await load();
     }
     async function loadAudit() {
@@ -130,10 +130,10 @@
         const list = node("ul", null, audit);
         data.events.slice(0, 100).forEach((event) => {
           if (!event || typeof event.action !== "string" || !/^[a-z_]{1,40}$/.test(event.action) || !Number.isSafeInteger(event.revision) || event.revision < 0 || typeof event.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T[0-9:.+Z-]{1,35}$/.test(event.created_at) || typeof event.request_id !== "string" || !/^[0-9a-f-]{36}$/i.test(event.request_id)) return;
-          node("li", `${event.action} · ${event.revision} · ${event.created_at} · ${event.request_id}`, list);
+          const item = node("li", null, list); item.textContent = `${event.action} · ${event.revision} · ${event.created_at} · ${event.request_id}`;
         });
       } catch (_) { if (valid(token)) audit.textContent = tr("Cronologia non disponibile."); }
-      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
+      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); if (languagePending) refreshLanguage(); } }
     }
     async function saveDraft() {
       const token = epoch; if (!valid(token) || busy || !permissions().save || !form) return;
@@ -149,18 +149,18 @@
       try { confirmed = await deps.confirm({ title: tr("Pubblicare il catalogo?"), description: tr("Verifica la bozza. Per pubblicare serve la verifica a due fattori."), label: tr("Pubblica") }); }
       catch (_) { confirmed = false; }
       if (!valid(token)) return;
-      busy = false; controls();
+      busy = false; controls(); if (languagePending) refreshLanguage();
       if (!confirmed || !permissions().publish || state.revision !== expected) return;
       await write("publish", { expected_revision: expected });
     }
     function refreshLanguage() {
-      const token = epoch; if (!valid(token) || busy || !state || !form) return;
-      let draft = null; try { draft = form.read(state.revision + 1); } catch (_) { /* Empty catalog. */ }
-      const message = statusKey, securityVisible = !security.hidden, reloadVisible = !reload.hidden, restoreVisible = !restore.hidden;
-      container.replaceChildren(); setup(); apply(state);
-      if (draft) form.load(draft);
-      security.hidden = !securityVisible; reload.hidden = !reloadVisible; restore.hidden = !restoreVisible;
-      controls(); setMessage(message);
+      const token = epoch; if (!valid(token)) return;
+      if (busy) { languagePending = true; return; }
+      languagePending = false;
+      container.querySelectorAll("[data-catalog-text]").forEach((element) => { element.textContent = tr(element.dataset.catalogText); });
+      if (state && revision) revision.textContent = `${tr("Revisione corrente")}: ${state.revision} · ${tr("Pubblicata")}: ${state.published_revision == null ? tr("nessuna") : state.published_revision}`;
+      setMessage(statusKey);
+      if (form) form.setEditable(permissions().save);
     }
     function enter() {
       invalidate(); identity = signature();

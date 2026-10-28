@@ -17,7 +17,7 @@ function setup(fetch, config = {}) {
   dom.window.MelpisBookingCatalogForm = { create(container, opts) { return { load(c) { model = c && copy(c); container.textContent = model ? model.services[0].name : "empty"; }, read(revision) { if (!model) throw Error("empty"); return { ...copy(model), revision }; }, clear() { model = null; container.replaceChildren(); }, setEditable(v) { container.dataset.editable = String(v); }, opts }; } };
   dom.window.eval(source);
   const container = dom.window.document.querySelector("main");
-  const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: (url, options) => { calls.push({ url, options }); return fetch(url, options, calls.length); }, getContext: () => context, getSession: () => session, confirm: config.confirm || (async () => true), onOpenSecurity: config.onOpenSecurity || (() => {}) });
+  const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: (url, options) => { calls.push({ url, options }); return fetch(url, options, calls.length); }, getContext: () => context, getSession: () => session, translate: config.translate, confirm: config.confirm || (async () => true), onOpenSecurity: config.onOpenSecurity || (() => {}) });
   return { dom, container, controller, calls, setContext: (value) => { context = { ...context, ...value }; }, setSession: (value) => { session = { ...session, ...value }; }, changeModel: (name) => { model.services[0].name = name; } };
 }
 function button(h, text) { return [...h.container.querySelectorAll("button")].find((n) => n.textContent === text); }
@@ -136,4 +136,28 @@ test("language refresh keeps the current form and permissions within its scope",
   controller.enter(); await tick(); assert.match(container.textContent, /Catalog loaded/);
   language = "de"; controller.refreshLanguage(); assert.match(container.textContent, /Katalog geladen/); assert.equal(button(h, "Salva bozza").hidden, false);
   controller.invalidate(); controller.refreshLanguage(); assert.equal(container.textContent, ""); dom.window.close();
+});
+
+
+test("language change during uncertain save preserves draft and idempotency key", async () => {
+  const pending = deferred(); let language = "en";
+  const dict = { en: { "Salva bozza": "Save draft" }, de: { "Salva bozza": "Entwurf speichern", "Esito incerto per un problema di connessione. Riprova senza modificare i dati.": "Ungewisses Ergebnis" } };
+  const h = setup(async (url) => url.endsWith("/draft") ? pending.promise : response(state()), { translate: (text) => dict[language][text] || text });
+  h.controller.enter(); await tick(); h.changeModel("Unsaved value"); button(h, "Save draft").click(); await tick();
+  language = "de"; h.controller.refreshLanguage(); assert.equal(h.calls.length, 2); pending.reject(Error("offline")); await tick();
+  assert.match(h.container.textContent, /Ungewisses Ergebnis/); button(h, "Entwurf speichern").click(); await tick();
+  assert.equal(h.calls.length, 3); const first = JSON.parse(h.calls[1].options.body), retry = JSON.parse(h.calls[2].options.body);
+  assert.equal(first.request_id, retry.request_id); assert.equal(retry.catalog.services[0].name, "Unsaved value"); h.dom.window.close();
+});
+
+test("English and German MFA and service errors use localized messages", async () => {
+  const app = fs.readFileSync(path.join(__dirname, "../../web/app.js"), "utf8"); const marker = "const catalogTranslationKeys = Object.freeze("; const start = app.indexOf(marker) + marker.length;
+  const keys = JSON.parse(app.slice(start, app.indexOf(");", start)));
+  for (const [lang, mfa, unavailable] of [["en", /two-factor verification/, /temporarily unavailable/], ["de", /Zwei-Faktor-Verifizierung/, /vorübergehend nicht verfügbar/]]) {
+    const bundle = require(`../../locales/${lang}/dashboard.json`).booking_catalog;
+    const translate = (text) => Object.hasOwn(keys, text) ? bundle[keys[text]] : text;
+    const h = setup(async (url) => url.endsWith("/draft") ? response({}, 503) : response(state({ capabilities: { can_save: true, can_publish: false } })), { translate });
+    h.controller.enter(); await tick(); assert.match(h.container.textContent, mfa);
+    button(h, bundle.save).click(); await tick(); assert.match(h.container.textContent, unavailable); h.dom.window.close();
+  }
 });
