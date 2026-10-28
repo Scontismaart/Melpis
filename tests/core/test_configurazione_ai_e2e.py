@@ -273,6 +273,15 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
         "lingua_default": "it",
     }
     observed = []
+    profile_embedding_calls = []
+
+    def embed_profile(texts, tipo="passage"):
+        profile_embedding_calls.append(len(texts))
+        return [[0.1] * 384 for _ in texts]
+
+    # Profile indexing must use the same deterministic adapter as uploaded files.
+    # Retrieval-only mocking otherwise lets offline model availability alter context.
+    monkeypatch.setattr("src.api.routes.common.resolve_vettorizza", lambda: embed_profile)
 
     async def mock_provider_boundary(message, profile, **kwargs):
         from src.agents.responder_agent import crea_responder_agent, crea_responder_task
@@ -352,6 +361,8 @@ async def test_same_question_uses_live_profile_and_knowledge_context_after_confi
     )
     await ask()
 
+    assert len(profile_embedding_calls) == 2
+    assert all(count > 0 for count in profile_embedding_calls)
     assert len(observed) == 3
     first, second, third = observed
     assert all(serializza_dati_non_fidati(question) in call["task"] for call in observed)

@@ -430,6 +430,7 @@ SENSITIVE_AAL2_PATHS = frozenset({
     "/api/calendar/settings",
     "/api/calendar/check",
     "/api/bookings/{booking_id}/calendar-sync/retry",
+    "/api/bookings/catalog/publish",
     "/api/reviews/google/auth",
     "/api/reviews/google/settings",
     "/api/reviews/google/disconnect",
