@@ -1,0 +1,577 @@
+{
+  "ristorante": {
+    "version": 2,
+    "revision": 1,
+    "sector": "ristorante",
+    "timezone": "Europe/Rome",
+    "availability": {
+      "days": [
+        {
+          "weekday": 0,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 1,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 2,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 3,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 4,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 5,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 6,
+          "windows": []
+        }
+      ],
+      "closed_dates": [
+        "2027-12-25"
+      ]
+    },
+    "resources": [
+      {
+        "resource_id": "primary",
+        "kind": "seat_pool",
+        "capacity": 12,
+        "exclusive": false
+      }
+    ],
+    "services": [
+      {
+        "service_id": "standard",
+        "name": "Standard",
+        "duration": {
+          "kind": "minutes",
+          "minutes": 60,
+          "buffer_before": 0,
+          "buffer_after": 5
+        },
+        "resources": [
+          {
+            "resource_id": "primary",
+            "quantity": 1
+          }
+        ],
+        "fields": [
+          {
+            "key": "customer_name",
+            "value_type": "text",
+            "required": true
+          },
+          {
+            "key": "appointment_date",
+            "value_type": "date",
+            "required": true
+          },
+          {
+            "key": "appointment_time",
+            "value_type": "time",
+            "required": true
+          },
+          {
+            "key": "party_size",
+            "value_type": "positive_integer",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "parrucchiere": {
+    "version": 2,
+    "revision": 1,
+    "sector": "parrucchiere",
+    "timezone": "Europe/Rome",
+    "availability": {
+      "days": [
+        {
+          "weekday": 0,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 1,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 2,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 3,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 4,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 5,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 6,
+          "windows": []
+        }
+      ],
+      "closed_dates": [
+        "2027-12-25"
+      ]
+    },
+    "resources": [
+      {
+        "resource_id": "primary",
+        "kind": "operator",
+        "capacity": 1,
+        "exclusive": true
+      }
+    ],
+    "services": [
+      {
+        "service_id": "standard",
+        "name": "Standard",
+        "duration": {
+          "kind": "minutes",
+          "minutes": 45,
+          "buffer_before": 0,
+          "buffer_after": 5
+        },
+        "resources": [
+          {
+            "resource_id": "primary",
+            "quantity": 1
+          }
+        ],
+        "fields": [
+          {
+            "key": "customer_name",
+            "value_type": "text",
+            "required": true
+          },
+          {
+            "key": "appointment_date",
+            "value_type": "date",
+            "required": true
+          },
+          {
+            "key": "appointment_time",
+            "value_type": "time",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "centro_estetico": {
+    "version": 2,
+    "revision": 1,
+    "sector": "centro_estetico",
+    "timezone": "Europe/Rome",
+    "availability": {
+      "days": [
+        {
+          "weekday": 0,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 1,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 2,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 3,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 4,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 5,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 6,
+          "windows": []
+        }
+      ],
+      "closed_dates": [
+        "2027-12-25"
+      ]
+    },
+    "resources": [
+      {
+        "resource_id": "primary",
+        "kind": "space",
+        "capacity": 1,
+        "exclusive": true
+      }
+    ],
+    "services": [
+      {
+        "service_id": "standard",
+        "name": "Standard",
+        "duration": {
+          "kind": "minutes",
+          "minutes": 45,
+          "buffer_before": 0,
+          "buffer_after": 5
+        },
+        "resources": [
+          {
+            "resource_id": "primary",
+            "quantity": 1
+          }
+        ],
+        "fields": [
+          {
+            "key": "customer_name",
+            "value_type": "text",
+            "required": true
+          },
+          {
+            "key": "appointment_date",
+            "value_type": "date",
+            "required": true
+          },
+          {
+            "key": "appointment_time",
+            "value_type": "time",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "hotel_bnb": {
+    "version": 2,
+    "revision": 1,
+    "sector": "hotel_bnb",
+    "timezone": "Europe/Rome",
+    "availability": {
+      "days": [
+        {
+          "weekday": 0,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 1,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 2,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 3,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 4,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 5,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 6,
+          "windows": []
+        }
+      ],
+      "closed_dates": [
+        "2027-12-25"
+      ]
+    },
+    "resources": [
+      {
+        "resource_id": "primary",
+        "kind": "room",
+        "capacity": 1,
+        "exclusive": true
+      }
+    ],
+    "services": [
+      {
+        "service_id": "standard",
+        "name": "Standard",
+        "duration": {
+          "kind": "civil_nights",
+          "minimum_nights": 1,
+          "check_in": "14:00",
+          "check_out": "14:00"
+        },
+        "resources": [
+          {
+            "resource_id": "primary",
+            "quantity": 1
+          }
+        ],
+        "fields": [
+          {
+            "key": "customer_name",
+            "value_type": "text",
+            "required": true
+          },
+          {
+            "key": "arrival_date",
+            "value_type": "date",
+            "required": true
+          },
+          {
+            "key": "departure_date",
+            "value_type": "date",
+            "required": true
+          }
+        ]
+      }
+    ]
+  },
+  "studio_medico_dentista": {
+    "version": 2,
+    "revision": 1,
+    "sector": "studio_medico_dentista",
+    "timezone": "Europe/Rome",
+    "availability": {
+      "days": [
+        {
+          "weekday": 0,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 1,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 2,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 3,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 4,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 5,
+          "windows": [
+            {
+              "start_minute": 540,
+              "end_minute": 1080
+            }
+          ]
+        },
+        {
+          "weekday": 6,
+          "windows": []
+        }
+      ],
+      "closed_dates": [
+        "2027-12-25"
+      ]
+    },
+    "resources": [
+      {
+        "resource_id": "primary",
+        "kind": "operator",
+        "capacity": 1,
+        "exclusive": true
+      }
+    ],
+    "services": [
+      {
+        "service_id": "standard",
+        "name": "Standard",
+        "duration": {
+          "kind": "minutes",
+          "minutes": 45,
+          "buffer_before": 0,
+          "buffer_after": 5
+        },
+        "resources": [
+          {
+            "resource_id": "primary",
+            "quantity": 1
+          }
+        ],
+        "fields": [
+          {
+            "key": "customer_name",
+            "value_type": "text",
+            "required": true
+          },
+          {
+            "key": "appointment_date",
+            "value_type": "date",
+            "required": true
+          },
+          {
+            "key": "appointment_time",
+            "value_type": "time",
+            "required": true
+          }
+        ]
+      }
+    ]
+  }
+}
