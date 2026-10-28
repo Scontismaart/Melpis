@@ -19,6 +19,8 @@ const scriptFiles = [
   "web/dashboard-team.js",
   "web/dashboard-ai-simulator.js",
   "web/dashboard-bookings.js",
+  "web/dashboard-booking-catalog-form.js",
+  "web/dashboard-booking-catalog.js",
   "web/dashboard-auth-transport.js",
   "web/app.js",
   "web/mfa.js",
@@ -53,6 +55,7 @@ function responseBody(pathname) {
   if (pathname === "/api/inbox/tickets") return { tickets: [] };
   if (pathname === "/api/recensioni") return { recensioni: [] };
   if (pathname === "/api/report") return {};
+  if (pathname === "/api/bookings/catalog") return { revision: 0, draft: null, published: null, published_revision: null, runtime_enabled: false, organization_sector: "ristorante", capabilities: { can_save: true, can_publish: false } };
   if (pathname === "/api/bookings/settings") return { capienze_orarie: {}, fasce_orarie: [] };
   if (pathname === "/api/bookings/semaforo") return [];
   if (pathname === "/api/bookings") return [];

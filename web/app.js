@@ -41,6 +41,7 @@ let _estraiMessaggioErroreApi;
 let gestisciCalendarRedirect;
 let gestisciReviewsRedirect;
 let dashboardBookingsModule = null;
+let dashboardBookingCatalog = null;
 let dashboardInboxModule = null;
 let aggiornaPrenotazioni;
 let aggiornaSemaforo;
@@ -226,6 +227,7 @@ function vaiAdAccesso() {
 }
 
 async function caricaSessione() {
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   try {
     const orgHeaders = () => {
       const id = localStorage.getItem("melpis_selected_organization");
@@ -281,6 +283,7 @@ function invalidaSessione() {
   dashboardTeamModule?.invalidate();
   dashboardAiSimulatorModule?.invalidate();
   dashboardBookingsModule?.invalidate();
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.invalidate();
   dashboardAiSettingsModule?.invalidate();
   dashboardSettingsModule?.invalidate();
@@ -420,7 +423,7 @@ async function renderDashboardView(viewName) {
   if (activeDashboardView === "conoscenza" || activeDashboardView === "documenti") dashboardKnowledgeModule?.onExit();
   if (activeDashboardView === "team") dashboardTeamModule?.onExit();
   if (activeDashboardView === "assistente") dashboardAiSimulatorModule?.onExit();
-  if (activeDashboardView === "prenotazioni") dashboardBookingsModule?.onExit();
+  if (activeDashboardView === "prenotazioni") { dashboardBookingsModule?.onExit(); dashboardBookingCatalog?.leave(); }
   if (activeDashboardView === "inbox") dashboardInboxModule?.onExit();
   if (activeDashboardView === "configurazione-ai") dashboardAiSettingsModule?.onExit();
   if (activeDashboardView === "impostazioni" || activeDashboardView === "account") dashboardSettingsModule?.onExit();
@@ -506,6 +509,7 @@ async function renderDashboardView(viewName) {
 
   if (viewName !== "prenotazioni") return;
   dashboardBookingsModule?.onEnter();
+  dashboardBookingCatalog?.enter();
   await dashboardBookingsModule?.load();
 }
 
@@ -1382,6 +1386,15 @@ dashboardBookingsModule = window.MelpisDashboardBookings.create({
   },
 });
 ({ aggiornaPrenotazioni, aggiornaSemaforo, apriBookingModal } = dashboardBookingsModule);
+dashboardBookingCatalog = window.MelpisBookingCatalog.create({
+  container: document.getElementById("booking-catalog-editor"), API_BASE, apiFetch,
+  getContext: dashboardContextSnapshot, getSession: () => sessione,
+  confirm: ({ title, description, label }) => confermaDestructiva({ titolo: title, descrizione: description, label }),
+  onOpenSecurity: () => {
+    if (window.MelpisMfa?.openForStepUp) window.MelpisMfa.openForStepUp();
+    else apriVistaImpostazioni("sicurezza");
+  },
+});
 
 
 /* ============================================================
@@ -1814,6 +1827,7 @@ notifBell?.addEventListener("click", () => {
 // DOM autenticato precedente al logout. Ricarica per riverificare la sessione.
 window.addEventListener("storage", (event) => {
   if (event.key === "melpis_selected_organization" && window.location.pathname.startsWith("/app/")) {
+    dashboardBookingCatalog?.invalidate();
     dashboardKnowledgeModule?.onExit();
     window.location.reload();
     return;
@@ -1830,6 +1844,7 @@ window.addEventListener("pagehide", () => {
   dashboardTeamModule?.onExit();
   dashboardAiSimulatorModule?.onExit();
   dashboardBookingsModule?.onExit();
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.onExit();
   dashboardAiSettingsModule?.invalidate();
   dashboardSettingsModule?.invalidate();
@@ -2226,6 +2241,7 @@ dashboardTeamModule = window.MelpisDashboardTeam.create({
 });
 ({ caricaTeam } = dashboardTeamModule);
 document.getElementById("team-org-selector")?.addEventListener("change", (event) => {
+  dashboardBookingCatalog?.invalidate();
   dashboardKnowledgeModule?.onExit();
   dashboardInboxModule?.invalidate();
   localStorage.setItem("melpis_selected_organization", event.target.value);
@@ -2247,6 +2263,7 @@ async function accettaInvitoDaLink() {
     return false;
   }
   const accepted = await res.json();
+  dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.invalidate();
   localStorage.setItem("melpis_selected_organization", accepted.organization_id);
   window.location.replace("/app/team");
