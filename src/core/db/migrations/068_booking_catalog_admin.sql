@@ -30,6 +30,23 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.booking_catalog_immutable() FROM PUBLIC;
 
+CREATE OR REPLACE FUNCTION public.booking_catalog_no_truncate() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE populated BOOLEAN;
+BEGIN
+    -- TRUNCATE bypasses row triggers and RLS. Only the table owner can clear an
+    -- already EMPTY fixture; no role can truncate existing evidence here.
+    IF (SELECT relowner FROM pg_class WHERE oid=TG_RELID) <> current_user::regrole THEN
+        RAISE EXCEPTION 'Booking catalogue evidence cannot be truncated' USING ERRCODE='42501';
+    END IF;
+    EXECUTE format('SELECT EXISTS(SELECT 1 FROM %I.%I)',TG_TABLE_SCHEMA,TG_TABLE_NAME) INTO populated;
+    IF populated THEN
+        RAISE EXCEPTION 'Booking catalogue evidence cannot be truncated' USING ERRCODE='42501';
+    END IF;
+    RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public.booking_catalog_no_truncate() FROM PUBLIC;
+
 DO $$
 DECLARE t TEXT; col RECORD; client RECORD; reachable RECORD; target REGCLASS; p TEXT;
 BEGIN
@@ -37,9 +54,9 @@ BEGIN
         AND NOT EXISTS (SELECT 1 FROM public.booking_catalog_requests cr WHERE cr.organization_id=bs.organization_id)) THEN
         RAISE EXCEPTION 'Historical catalogue namespace requires review';
     END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles backend CROSS JOIN pg_roles client
+    IF EXISTS (SELECT 1 FROM pg_roles backend CROSS JOIN pg_roles client_role
         WHERE backend.rolname='service_role' AND NOT backend.rolbypassrls AND NOT backend.rolsuper
-        AND client.rolname IN ('anon','authenticated') AND pg_has_role(backend.oid,client.oid,'MEMBER')) THEN
+        AND client_role.rolname IN ('anon','authenticated') AND pg_has_role(backend.oid,client_role.oid,'MEMBER')) THEN
         RAISE EXCEPTION 'Backend/client role inheritance requires review';
     END IF;
     FOREACH t IN ARRAY ARRAY['booking_catalog_publications','booking_catalog_requests'] LOOP
@@ -53,12 +70,25 @@ BEGIN
         EXECUTE format('DROP POLICY IF EXISTS catalog_deny_clients ON %s',target);
         EXECUTE format('CREATE POLICY catalog_deny_clients ON %s AS RESTRICTIVE FOR ALL TO anon,authenticated USING(false) WITH CHECK(false)',target);
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='service_role') THEN
+            EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE %s FROM service_role',target);
+            FOR col IN SELECT attname FROM pg_attribute WHERE attrelid=target AND attnum>0 AND NOT attisdropped LOOP
+                EXECUTE format('REVOKE ALL PRIVILEGES (%I) ON TABLE %s FROM service_role',col.attname,target);
+            END LOOP;
             EXECUTE format('GRANT SELECT,INSERT ON TABLE %s TO service_role',target);
             EXECUTE format('DROP POLICY IF EXISTS catalog_backend ON %s',target);
             EXECUTE format('CREATE POLICY catalog_backend ON %s FOR ALL TO service_role USING(true) WITH CHECK(true)',target);
+            FOREACH p IN ARRAY ARRAY['UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
+                IF (SELECT oid FROM pg_roles WHERE rolname='service_role') <>
+                   (SELECT relowner FROM pg_class WHERE oid=target)
+                   AND has_table_privilege('service_role',target,p) THEN
+                    RAISE EXCEPTION 'Inherited backend evidence privileges require review';
+                END IF;
+            END LOOP;
         END IF;
         EXECUTE format('DROP TRIGGER IF EXISTS catalog_immutable ON %s',target);
         EXECUTE format('CREATE TRIGGER catalog_immutable BEFORE UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION public.booking_catalog_immutable()',target);
+        EXECUTE format('DROP TRIGGER IF EXISTS catalog_no_truncate ON %s',target);
+        EXECUTE format('CREATE TRIGGER catalog_no_truncate BEFORE TRUNCATE ON %s FOR EACH STATEMENT EXECUTE FUNCTION public.booking_catalog_no_truncate()',target);
         EXECUTE format('DROP TRIGGER IF EXISTS gdpr_guard_write ON %s',target);
         EXECUTE format('CREATE TRIGGER gdpr_guard_write BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION public.gdpr_guard_write()',target);
     END LOOP;
