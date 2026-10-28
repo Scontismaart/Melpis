@@ -622,6 +622,8 @@ class BookingService:
     async def aggiorna_impostazioni(self, org_id, capienze_orarie=None,
                                      coperti_massimi=40, fasce_orarie=None, config=None):
         from src.core.bookings.auto_policy import validate_auto_booking_configuration
+        if config is not None and (not isinstance(config, dict) or "catalog_v2" in config):
+            raise ValueError("Il catalogo si modifica soltanto dall'editor dedicato")
         if not hasattr(self.repo, "booking_settings_lock"):
             from src.core.bookings.memory_repo import InMemoryBookingRepo
             if not isinstance(self.repo, InMemoryBookingRepo):
@@ -637,7 +639,8 @@ class BookingService:
                     capienze_orarie=capienze_orarie or current.get("capienze_orarie")
                         or {slot: coperti_massimi for slot in SLOT_ORE},
                 )
-            return await self.repo.upsert_booking_settings_config(org_id, merged)
+            return await self.repo.upsert_booking_settings_config(
+                org_id, {key: value for key, value in merged.items() if key != "catalog_v2"})
         async with self.repo.booking_settings_lock(org_id) as organization:
             current = await self.repo.get_booking_settings(org_id) or {}
             from src.core.calendar.connection import authority_from
@@ -666,7 +669,8 @@ class BookingService:
                 raise ValueError(f"Invalid A05 booking policy: {decision.reason.value}")
             return await self.repo.save_booking_settings_locked(
                 org_id, slot_minutes=current.get("slot_minutes") or 60,
-                fasce_orarie=intervals, capienze_orarie=capacities, config=merged,
+                fasce_orarie=intervals, capienze_orarie=capacities,
+                config={key: value for key, value in merged.items() if key != "catalog_v2"},
             )
 
     async def process_pending_calendar_sync(self, limit=10):

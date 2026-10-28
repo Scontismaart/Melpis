@@ -177,12 +177,18 @@ class InMemoryBookingRepo:
         return deepcopy(current)
 
     async def upsert_booking_settings_config(self, organization_id, config):
+        if not isinstance(config, dict) or "catalog_v2" in config:
+            raise ValueError("Use the protected catalogue endpoint")
         key = str(organization_id)
         current = deepcopy(self._settings.get(key)) or {
             "fasce_orarie": SLOT_ORE,
             "capienze_orarie": {f: 40 for f in SLOT_ORE},
             "config": {},
         }
-        current["config"] = config or {}
+        protected = (current.get("config") or {}).get("catalog_v2")
+        has_protected = "catalog_v2" in (current.get("config") or {})
+        current["config"] = deepcopy(config)
+        if has_protected:
+            current["config"]["catalog_v2"] = deepcopy(protected)
         self._settings[key] = current
         return deepcopy(current)
