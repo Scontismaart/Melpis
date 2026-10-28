@@ -8,6 +8,18 @@
   const kindNames = { operator: "Operatore", space: "Spazio", table: "Tavolo", seat_pool: "Posti", room: "Camera", equipment: "Attrezzatura" };
   const weekdays = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  function timeValue(minutes) {
+    if (!Number.isInteger(minutes) || minutes < 0 || minutes > 1440) return "";
+    const value = minutes === 1440 ? 0 : minutes;
+    return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+  }
+  function minutesValue(value, end) {
+    if (!/^\d{2}:\d{2}$/.test(value)) return null;
+    const [hours, minutes] = value.split(":").map(Number);
+    if (hours > 23 || minutes > 59) return null;
+    const total = hours * 60 + minutes;
+    return end && total === 0 ? 1440 : total;
+  }
   function allowed(sector) {
     return ["customer_name", "contact_phone", "contact_email", ...(sector === "hotel_bnb" ? ["arrival_date", "departure_date", "guest_count", "room_count"] : ["appointment_date", "appointment_time", ...(sector === "ristorante" ? ["party_size"] : [])]), "service_id", "resource_id"];
   }
@@ -43,9 +55,11 @@
       container.replaceChildren();
       if (!model) {
         el("p", "Nessun catalogo. Scegli un esempio sintetico e verifica tutti i valori prima di salvarlo.", container);
-        sectors.forEach((sector) => button(container, `${translate("Usa esempio")}: ${translate(sectorNames[sector])}`, () => { model = example(sector, opts.timezone); }));
+        sectors.filter((sector) => !opts.sector || sector === opts.sector).forEach((sector) => button(container, `${translate("Usa esempio")}: ${translate(sectorNames[sector])}`, () => { model = example(sector, opts.timezone); }));
         return;
       }
+      el("p", "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi.", container);
+      if (opts.sector && sectors.includes(opts.sector) && model.sector !== opts.sector) button(container, `${translate("Usa esempio")}: ${translate(sectorNames[opts.sector])}`, () => { model = example(opts.sector, opts.timezone); });
       el("p", `${translate("Settore")}: ${sectorNames[model.sector] ? translate(sectorNames[model.sector]) : model.sector}`, container);
       control(container, "Fuso orario IANA", model.timezone, "text", (v) => { model.timezone = v; });
       const resources = group(container, "Risorse");
@@ -117,8 +131,9 @@
         if (!day || !day.windows.length) return;
         day.windows.forEach((w, i) => {
           const row = el("div", null, box);
-          const start = control(row, "Inizio (minuto 0–1439)", w.start_minute, "number", (v) => { w.start_minute = v; }); start.max = "1439";
-          const end = control(row, "Fine (minuto 1–1440)", w.end_minute, "number", (v) => { w.end_minute = v; }); end.max = "1440";
+          control(row, "Inizio", timeValue(w.start_minute), "time", (v) => { w.start_minute = minutesValue(v, false); });
+          control(row, "Fine", timeValue(w.end_minute), "time", (v) => { w.end_minute = minutesValue(v, true); });
+          el("p", "La mezzanotte indica la fine della giornata.", row);
           button(row, "Rimuovi fascia", () => { day.windows.splice(i, 1); });
         });
         button(box, "Aggiungi fascia", () => { day.windows.push({ start_minute: 0, end_minute: 1 }); });

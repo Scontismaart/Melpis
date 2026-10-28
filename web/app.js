@@ -1387,6 +1387,7 @@ dashboardBookingsModule = window.MelpisDashboardBookings.create({
 });
 ({ aggiornaPrenotazioni, aggiornaSemaforo, apriBookingModal } = dashboardBookingsModule);
 const catalogTranslationKeys = Object.freeze({
+  "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi.": "example_warning",
   "Nome cliente": "customer_name",
   "Telefono": "phone",
   "Email": "email",
@@ -1502,7 +1503,10 @@ const catalogTranslationKeys = Object.freeze({
   "Date di chiusura": "closures",
   "Data": "date",
   "Rimuovi data": "remove_date",
-  "Aggiungi data": "add_date"
+  "Aggiungi data": "add_date",
+  "Inizio": "start_time",
+  "Fine": "end_time",
+  "La mezzanotte indica la fine della giornata.": "midnight_end"
 });
 dashboardBookingCatalog = window.MelpisBookingCatalog.create({
   container: document.getElementById("booking-catalog-editor"), API_BASE, apiFetch,

@@ -124,3 +124,24 @@ test("English and German examples and weekly availability use localized labels",
     button(h.container, example).click(); assert.match(h.container.textContent, new RegExp(availability)); h.dom.window.close();
   }
 });
+
+test("weekly hours use time inputs and round-trip civil-day boundaries", () => {
+  const h = setup(); h.form.load(fixtures.ristorante);
+  const monday = [...h.container.querySelectorAll("fieldset")].find((f) => f.querySelector("legend")?.textContent === "Lunedì");
+  const start = field(monday, "Inizio"), end = field(monday, "Fine");
+  assert.equal(start.type, "time"); assert.equal(end.type, "time");
+  assert.equal(start.value, "09:00"); assert.equal(end.value, "18:00");
+  assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: 540, end_minute: 1080 });
+  change(h.dom, start, "09:15"); change(h.dom, end, "18:30");
+  assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: 555, end_minute: 1110 });
+  change(h.dom, start, "18:00"); change(h.dom, end, "09:00");
+  assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: 1080, end_minute: 540 });
+  change(h.dom, start, "00:00"); change(h.dom, end, "00:00");
+  assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: 0, end_minute: 1440 });
+  h.form.load(h.form.read(2));
+  const updatedMonday = [...h.container.querySelectorAll("fieldset")].find((f) => f.querySelector("legend")?.textContent === "Lunedì");
+  assert.equal(field(updatedMonday, "Inizio").value, "00:00"); assert.equal(field(updatedMonday, "Fine").value, "00:00");
+  change(h.dom, field(updatedMonday, "Inizio"), ""); change(h.dom, field(updatedMonday, "Fine"), "");
+  assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: null, end_minute: null });
+  h.dom.window.close();
+});
