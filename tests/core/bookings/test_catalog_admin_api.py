@@ -65,3 +65,16 @@ async def test_duplicate_malformed_and_scope_override(api_env):
     assert (await client.put(endpoint,json=stale)).status_code==409
 
 
+
+async def test_receipt_replay_cannot_bypass_revoked_role_or_mfa(api_env):
+    client,identity=api_env
+    identity['aal']='aal2'
+    draft={'expected_revision':0,'request_id':str(uuid4()),'catalog':copy.deepcopy(FIXTURE)}
+    assert (await client.put('/api/bookings/catalog/draft',json=draft)).status_code==200
+    publication={'expected_revision':1,'request_id':str(uuid4())}
+    assert (await client.post('/api/bookings/catalog/publish',json=publication)).status_code==200
+    identity['aal']='aal1'
+    assert (await client.post('/api/bookings/catalog/publish',json=publication)).status_code==403
+    identity['aal']='aal2'; identity['ruolo']='manager'
+    assert (await client.post('/api/bookings/catalog/publish',json=publication)).status_code==403
+    assert (await client.put('/api/bookings/catalog/draft',json=draft)).status_code==403

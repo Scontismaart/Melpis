@@ -160,3 +160,61 @@ async def test_nonempty_evidence_cannot_be_truncated(catalog_env):
                 await conn.execute(f'TRUNCATE {table}')
             assert await conn.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1',org)>0
             assert not await conn.fetchval("SELECT has_table_privilege('service_role',$1,'TRUNCATE')",table)
+
+MIGRATION = (Path(__file__).parents[3] / 'src/core/db/migrations/068_booking_catalog_admin.sql').read_text(encoding='utf-8')
+
+@pytest.mark.parametrize('grant_sql', [
+    'GRANT UPDATE(config) ON booking_settings TO {role}',
+    'GRANT SELECT ON booking_catalog_requests TO {role}',
+])
+async def test_inherited_client_grants_abort_migration_atomically(catalog_env, grant_sql):
+    pool,_,_,org,_,_=catalog_env
+    await write(catalog_env,'draft_saved',0,body=draft())
+    role='catalog_test_'+uuid4().hex
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(f'CREATE ROLE {role}; GRANT {role} TO authenticated')
+            await conn.execute(grant_sql.format(role=role))
+            async with conn.transaction():
+                with pytest.raises(asyncpg.PostgresError):
+                    async with conn.transaction(): await conn.execute(MIGRATION)
+                assert await conn.fetchval('SELECT pg_has_role(\'authenticated\',$1,\'MEMBER\')',role)
+                assert await conn.fetchval('SELECT count(*) FROM booking_catalog_requests WHERE organization_id=$1',org)==1
+                if 'UPDATE' in grant_sql:
+                    assert await conn.fetchval("SELECT has_column_privilege($1,'booking_settings','config','UPDATE')",role)
+                else:
+                    assert await conn.fetchval("SELECT has_table_privilege($1,'booking_catalog_requests','SELECT')",role)
+        finally:
+            await conn.execute(f'REVOKE {role} FROM authenticated; DROP OWNED BY {role}; DROP ROLE {role}')
+
+async def test_service_role_forced_truncate_cannot_erase_evidence(catalog_env):
+    pool,_,_,org,_,_=catalog_env
+    await write(catalog_env,'draft_saved',0,body=draft())
+    await write(catalog_env,'published',1)
+    async with pool.acquire() as conn:
+        for table in ('booking_catalog_requests','booking_catalog_publications'):
+            async with conn.transaction():
+                await conn.execute(f'GRANT TRUNCATE ON {table} TO service_role')
+                await conn.execute('SET LOCAL ROLE service_role')
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    async with conn.transaction(): await conn.execute(f'TRUNCATE {table}')
+                await conn.execute('RESET ROLE')
+                await conn.execute(f'REVOKE TRUNCATE ON {table} FROM service_role')
+            assert await conn.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1',org)>0
+
+async def test_reapply_caps_broad_service_role_grants(catalog_env):
+    pool,_,_,_,_,_=catalog_env
+    async with pool.acquire() as conn:
+        for table in ('booking_catalog_requests','booking_catalog_publications'):
+            await conn.execute(f'GRANT ALL ON {table} TO service_role')
+        await conn.execute(MIGRATION)
+        for table in ('booking_catalog_requests','booking_catalog_publications'):
+            for privilege in ('SELECT','INSERT'):
+                assert await conn.fetchval('SELECT has_table_privilege($1,$2,$3)','service_role',table,privilege)
+            for privilege in ('UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+                assert not await conn.fetchval('SELECT has_table_privilege($1,$2,$3)','service_role',table,privilege)
+
+async def test_owner_may_truncate_empty_evidence(catalog_env):
+    pool,_,_,_,_,_=catalog_env
+    async with pool.acquire() as conn:
+        await conn.execute('TRUNCATE booking_catalog_requests,booking_catalog_publications')
