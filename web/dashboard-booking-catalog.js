@@ -6,15 +6,16 @@
     const doc = container.ownerDocument;
     const tr = typeof deps.translate === "function" ? deps.translate : (s) => s;
     let epoch = 0, identity = null, active = false, controller = null, form = null;
-    let state = null, pending = null, conflictCopy = null, busy = false;
-    let status, editor, save, publish, reload, restore, revision, security;
+    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false;
+    let status, editor, save, publish, reload, restore, revision, security, audit;
     function signature() {
       const context = getContext(), session = getSession();
       if (!context || context.view !== "prenotazioni" || !context.userId || !context.sessionOrganizationId || !session || !["owner", "manager", "staff"].includes(session.ruolo)) return null;
       return JSON.stringify([context, session]);
     }
     function valid(token) {
-      if (!active || token !== epoch || !identity || signature() !== identity) { if (active) invalidate(); return false; }
+      if (token !== epoch) return false;
+      if (!active || !identity || signature() !== identity) { if (active) invalidate(); return false; }
       return true;
     }
     function node(tag, text, parent) { const element = doc.createElement(tag); if (text != null) element.textContent = tr(text); if (parent) parent.appendChild(element); return element; }
@@ -22,7 +23,8 @@
     function setMessage(message) { if (status) status.textContent = tr(message); }
     function permissions() {
       const role = getSession()?.ruolo;
-      return { save: role === "owner" && state?.capabilities?.can_save === true, publish: role === "owner" && state?.capabilities?.can_publish === true };
+      const knownSector = ["ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"].includes(state?.organization_sector);
+      return { save: knownSector && role === "owner" && state?.capabilities?.can_save === true, publish: knownSector && role === "owner" && state?.capabilities?.can_publish === true };
     }
     function controls() {
       if (!save) return;
@@ -33,8 +35,8 @@
     }
     function clear() {
       controller?.abort(); controller = null;
-      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; busy = false;
-      container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = null;
+      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false;
+      container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = audit = null;
     }
     function invalidate() { active = false; identity = null; epoch += 1; clear(); }
     function leave() { invalidate(); }
@@ -43,12 +45,14 @@
       node("p", "Il motore automatico non è attivo per questo catalogo.", container);
       revision = node("p", "", container);
       status = node("p", "", container); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
-      security = node("a", "Apri impostazioni di sicurezza", container); security.href = "/app/settings"; security.hidden = true;
+      security = addButton("Apri impostazioni di sicurezza", () => { if (valid(epoch) && typeof deps.onOpenSecurity === "function") deps.onOpenSecurity(); }); security.hidden = true;
       editor = node("div", null, container);
       save = addButton("Salva bozza", saveDraft);
       publish = addButton("Pubblica", publishDraft);
       reload = addButton("Ricarica catalogo", () => load(true)); reload.hidden = true;
       restore = addButton("Ripristina modifiche non salvate", () => { if (!valid(epoch) || !conflictCopy || !form || !permissions().save) return; form.load(conflictCopy); conflictCopy = null; restore.hidden = true; setMessage("Modifiche ripristinate: verifica il catalogo prima di salvare."); }); restore.hidden = true;
+      addButton("Mostra cronologia", loadAudit);
+      audit = node("div", null, container);
       save.hidden = publish.hidden = true;
     }
     function validState(data) {
@@ -68,7 +72,7 @@
         state = null; pending = null; controls(); reload.hidden = false;
         setMessage("Il catalogo è cambiato. Ricarica e verifica le modifiche non salvate.");
       } else if (response.status === 403) {
-        state = null; pending = null; controls(); reload.hidden = false; security.hidden = false;
+        state = null; pending = null; controls(); reload.hidden = false; security.hidden = typeof deps.onOpenSecurity !== "function";
         setMessage("Permesso mancante o verifica a due fattori necessaria. Controlla le impostazioni di sicurezza.");
       } else if (response.status === 503) {
         reload.hidden = false; setMessage("Catalogo temporaneamente non disponibile. Riprova più tardi.");
@@ -81,14 +85,14 @@
       try {
         const response = await apiFetch(`${API_BASE}/api/bookings/catalog`, { signal: localController.signal });
         if (!valid(token)) return;
-        if (!response.ok) { fail(response); return; }
+        if (!response.ok) { if (receipt) { reload.hidden = false; setMessage("Scrittura riuscita, ma il catalogo aggiornato non è disponibile. Ricarica prima di continuare."); } else fail(response); return; }
         const data = await response.json(); if (!valid(token)) return;
         if (!validState(data)) { state = null; controls(); setMessage("Risposta del catalogo non valida."); reload.hidden = false; return; }
         if (!preserveConflict) conflictCopy = null;
-        apply(data); pending = null; reload.hidden = true; security.hidden = true;
+        apply(data); pending = null; receipt = null; reload.hidden = true; security.hidden = !(getSession()?.ruolo === "owner" && !data.capabilities.can_publish && typeof deps.onOpenSecurity === "function");
         restore.hidden = !(preserveConflict && conflictCopy && permissions().save);
-        setMessage(restore.hidden ? "Catalogo caricato." : "Catalogo aggiornato. Puoi ripristinare le tue modifiche e verificarle.");
-      } catch (_) { if (valid(token)) { setMessage("Connessione non disponibile. Riprova."); reload.hidden = false; } }
+        setMessage(!data.organization_sector ? "Settore non disponibile: aggiorna il profilo prima di modificare il catalogo." : !restore.hidden ? "Catalogo aggiornato. Puoi ripristinare le tue modifiche e verificarle." : getSession()?.ruolo === "owner" && !data.capabilities.can_publish ? "Per pubblicare verifica i permessi e la verifica a due fattori nelle impostazioni di sicurezza." : "Catalogo caricato.");
+      } catch (_) { if (valid(token)) { setMessage(receipt ? "Scrittura riuscita, ma il catalogo aggiornato non è disponibile. Ricarica prima di continuare." : "Connessione non disponibile. Riprova."); reload.hidden = false; } }
       finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
     }
     async function write(kind, payload) {
@@ -106,10 +110,30 @@
         if (!response.ok) { if (![503, 409].includes(response.status)) pending = null; fail(response); return; }
         const data = await response.json(); if (!valid(token)) return;
         if (!validState(data) || !Number.isSafeInteger(data.applied_revision)) { setMessage("Risposta non valida. Ricarica prima di continuare."); state = null; controls(); reload.hidden = false; return; }
-        pending = null; succeeded = true;
+        receipt = { requestId, appliedRevision: data.applied_revision }; state = null; controls(); succeeded = true;
       } catch (_) { if (valid(token)) setMessage("Esito incerto per un problema di connessione. Riprova senza modificare i dati."); }
       finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
       if (succeeded && valid(token)) await load();
+    }
+    async function loadAudit() {
+      const token = epoch; if (!valid(token) || busy || !state) return;
+      busy = true; controls(); audit.textContent = tr("Caricamento cronologia…");
+      const localController = new root.AbortController(); controller = localController;
+      try {
+        const response = await apiFetch(`${API_BASE}/api/bookings/catalog/audit`, { signal: localController.signal });
+        if (!valid(token)) return;
+        if (!response.ok) { audit.textContent = tr("Cronologia non disponibile."); return; }
+        const data = await response.json(); if (!valid(token)) return;
+        audit.replaceChildren();
+        if (!Array.isArray(data.events)) { audit.textContent = tr("Cronologia non disponibile."); return; }
+        if (!data.events.length) { audit.textContent = tr("Nessun evento."); return; }
+        const list = node("ul", null, audit);
+        data.events.slice(0, 100).forEach((event) => {
+          if (!event || typeof event.action !== "string" || !/^[a-z_]{1,40}$/.test(event.action) || !Number.isSafeInteger(event.revision) || event.revision < 0 || typeof event.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T[0-9:.+Z-]{1,35}$/.test(event.created_at) || typeof event.request_id !== "string" || !/^[0-9a-f-]{36}$/i.test(event.request_id)) return;
+          node("li", `${event.action} · ${event.revision} · ${event.created_at} · ${event.request_id}`, list);
+        });
+      } catch (_) { if (valid(token)) audit.textContent = tr("Cronologia non disponibile."); }
+      finally { if (valid(token)) { if (controller === localController) controller = null; busy = false; controls(); } }
     }
     async function saveDraft() {
       const token = epoch; if (!valid(token) || busy || !permissions().save || !form) return;
