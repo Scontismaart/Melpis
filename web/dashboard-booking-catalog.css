@@ -1,0 +1,17 @@
+/* C2.2 scoped component: preserve the reviewed dashboard global stylesheet. */
+#booking-catalog-editor { margin-top:24px; padding:24px; border:1px solid var(--border-default); border-radius:12px; background:var(--panel-bg); color:var(--text-primary); overflow-wrap:anywhere; }
+#booking-catalog-editor:empty { display:none; }
+#booking-catalog-editor h2 { margin:0 0 12px; font-size:1.25rem; }
+#booking-catalog-editor p { max-width:75ch; color:var(--text-secondary); }
+#booking-catalog-editor fieldset { min-width:0; margin:20px 0; padding:16px; border:1px solid var(--border-default); border-radius:12px; }
+#booking-catalog-editor legend { padding:0 6px; font-weight:600; color:var(--text-primary); }
+#booking-catalog-editor label { display:inline-flex; flex-direction:column; gap:6px; margin:8px 16px 8px 0; max-width:100%; vertical-align:top; color:var(--text-secondary); font-size:.875rem; }
+#booking-catalog-editor input, #booking-catalog-editor select { min-width:0; max-width:100%; min-height:40px; padding:8px 10px; border:1px solid var(--border-strong); border-radius:8px; background:var(--control-bg); color:var(--text-primary); font:inherit; }
+#booking-catalog-editor input[type="checkbox"] { align-self:flex-start; min-height:24px; width:24px; accent-color:var(--text-primary); }
+#booking-catalog-editor input:disabled, #booking-catalog-editor select:disabled, #booking-catalog-editor button:disabled { cursor:not-allowed; opacity:.65; }
+#booking-catalog-editor button { margin:6px 8px 6px 0; min-height:40px; border:1px solid var(--border-strong); border-radius:8px; padding:8px 12px; background:var(--control-bg); color:var(--text-primary); font:inherit; cursor:pointer; }
+#booking-catalog-editor button:hover:not(:disabled) { background:var(--control-hover); }
+#booking-catalog-editor a { color:var(--text-primary); text-decoration:underline; }
+#booking-catalog-editor :is(button,input,select,a):focus-visible { outline:2px solid var(--text-primary); outline-offset:3px; }
+#booking-catalog-editor [role="status"] { min-height:1.5em; }
+@media(max-width:600px) { #booking-catalog-editor { padding:16px; } #booking-catalog-editor fieldset { padding:12px; } #booking-catalog-editor label { width:100%; margin-right:0; } #booking-catalog-editor input, #booking-catalog-editor select { width:100%; } }

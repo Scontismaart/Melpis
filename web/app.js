@@ -41,6 +41,7 @@ let _estraiMessaggioErroreApi;
 let gestisciCalendarRedirect;
 let gestisciReviewsRedirect;
 let dashboardBookingsModule = null;
+let dashboardBookingCatalog = null;
 let dashboardInboxModule = null;
 let aggiornaPrenotazioni;
 let aggiornaSemaforo;
@@ -226,6 +227,7 @@ function vaiAdAccesso() {
 }
 
 async function caricaSessione() {
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   try {
     const orgHeaders = () => {
       const id = localStorage.getItem("melpis_selected_organization");
@@ -281,6 +283,7 @@ function invalidaSessione() {
   dashboardTeamModule?.invalidate();
   dashboardAiSimulatorModule?.invalidate();
   dashboardBookingsModule?.invalidate();
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.invalidate();
   dashboardAiSettingsModule?.invalidate();
   dashboardSettingsModule?.invalidate();
@@ -420,7 +423,7 @@ async function renderDashboardView(viewName) {
   if (activeDashboardView === "conoscenza" || activeDashboardView === "documenti") dashboardKnowledgeModule?.onExit();
   if (activeDashboardView === "team") dashboardTeamModule?.onExit();
   if (activeDashboardView === "assistente") dashboardAiSimulatorModule?.onExit();
-  if (activeDashboardView === "prenotazioni") dashboardBookingsModule?.onExit();
+  if (activeDashboardView === "prenotazioni") { dashboardBookingsModule?.onExit(); dashboardBookingCatalog?.leave(); }
   if (activeDashboardView === "inbox") dashboardInboxModule?.onExit();
   if (activeDashboardView === "configurazione-ai") dashboardAiSettingsModule?.onExit();
   if (activeDashboardView === "impostazioni" || activeDashboardView === "account") dashboardSettingsModule?.onExit();
@@ -506,6 +509,7 @@ async function renderDashboardView(viewName) {
 
   if (viewName !== "prenotazioni") return;
   dashboardBookingsModule?.onEnter();
+  dashboardBookingCatalog?.enter();
   await dashboardBookingsModule?.load();
 }
 
@@ -1382,6 +1386,138 @@ dashboardBookingsModule = window.MelpisDashboardBookings.create({
   },
 });
 ({ aggiornaPrenotazioni, aggiornaSemaforo, apriBookingModal } = dashboardBookingsModule);
+const catalogTranslationKeys = Object.freeze({
+  "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi.": "example_warning",
+  "Nome cliente": "customer_name",
+  "Telefono": "phone",
+  "Email": "email",
+  "Data appuntamento": "appointment_date",
+  "Ora appuntamento": "appointment_time",
+  "Numero persone": "party_size",
+  "Servizio": "service",
+  "Risorsa": "resource",
+  "Data arrivo": "arrival_date",
+  "Data partenza": "departure_date",
+  "Numero ospiti": "guest_count",
+  "Numero camere": "room_count",
+  "Catalogo prenotazioni": "catalog_title",
+  "Il motore automatico non è attivo per questo catalogo.": "runtime_inactive",
+  "Caricamento catalogo…": "loading",
+  "Catalogo caricato.": "loaded",
+  "Salva bozza": "save",
+  "Pubblica": "publish",
+  "Ricarica catalogo": "reload",
+  "Mostra cronologia": "history",
+  "Connessione non disponibile. Riprova.": "network_error",
+  "Apri impostazioni di sicurezza": "security",
+  "Ripristina modifiche non salvate": "restore",
+  "Modifiche ripristinate: verifica il catalogo prima di salvare.": "restored",
+  "Revisione corrente": "revision",
+  "Pubblicata": "published",
+  "nessuna": "none",
+  "Il catalogo è cambiato. Ricarica e verifica le modifiche non salvate.": "conflict",
+  "Permesso mancante o verifica a due fattori necessaria. Controlla le impostazioni di sicurezza.": "forbidden",
+  "Catalogo temporaneamente non disponibile. Riprova più tardi.": "unavailable",
+  "Operazione non riuscita. Controlla i dati e riprova.": "operation_error",
+  "Scrittura riuscita, ma il catalogo aggiornato non è disponibile. Ricarica prima di continuare.": "written_refresh_failed",
+  "Risposta del catalogo non valida.": "invalid_catalog",
+  "Settore non disponibile: aggiorna il profilo prima di modificare il catalogo.": "sector_missing",
+  "Catalogo aggiornato. Puoi ripristinare le tue modifiche e verificarle.": "conflict_reloaded",
+  "Per pubblicare verifica i permessi e la verifica a due fattori nelle impostazioni di sicurezza.": "mfa_hint",
+  "Salvataggio bozza…": "saving",
+  "Pubblicazione…": "publishing",
+  "Risposta non valida. Ricarica prima di continuare.": "invalid_response",
+  "Esito incerto per un problema di connessione. Riprova senza modificare i dati.": "uncertain",
+  "Caricamento cronologia…": "audit_loading",
+  "Cronologia non disponibile.": "audit_unavailable",
+  "Nessun evento.": "audit_empty",
+  "Seleziona un catalogo prima di salvare.": "select_catalog",
+  "L'esempio scelto non corrisponde al settore dell'organizzazione.": "sector_mismatch",
+  "La conferma di pubblicazione non è disponibile.": "confirm_unavailable",
+  "Pubblicare il catalogo?": "confirm_title",
+  "Verifica la bozza. Per pubblicare serve la verifica a due fattori.": "confirm_description",
+  "Ristorante": "restaurant",
+  "Parrucchiere": "hairdresser",
+  "Centro estetico": "beauty",
+  "Hotel / B&B": "hotel",
+  "Studio medico / dentista": "medical",
+  "Operatore": "operator",
+  "Spazio": "space",
+  "Tavolo": "table",
+  "Posti": "seats",
+  "Camera": "room",
+  "Attrezzatura": "equipment",
+  "Lunedì": "monday",
+  "Martedì": "tuesday",
+  "Mercoledì": "wednesday",
+  "Giovedì": "thursday",
+  "Venerdì": "friday",
+  "Sabato": "saturday",
+  "Domenica": "sunday",
+  "Nessun catalogo. Scegli un esempio sintetico e verifica tutti i valori prima di salvarlo.": "empty_example",
+  "Usa esempio": "use_example",
+  "Settore": "sector",
+  "Fuso orario IANA": "timezone",
+  "Risorse": "resources",
+  "Identificativo": "identifier",
+  "Tipo": "kind",
+  "Capacità": "capacity",
+  "Esclusiva (capacità 1)": "exclusive",
+  "Rimuovi risorsa": "remove_resource",
+  "Aggiungi risorsa": "add_resource",
+  "Servizi": "services",
+  "Identificativo servizio": "service_identifier",
+  "Nome servizio": "service_name",
+  "Notti minime": "minimum_nights",
+  "Check-in": "check_in",
+  "Check-out": "check_out",
+  "Durata in minuti": "duration",
+  "Intervallo prima (minuti)": "buffer_before",
+  "Intervallo dopo (minuti)": "buffer_after",
+  "Risorse richieste": "requirements",
+  "Seleziona una risorsa": "select_resource",
+  "Quantità": "quantity",
+  "Rimuovi requisito": "remove_requirement",
+  "Aggiungi requisito": "add_requirement",
+  "Informazioni amministrative in ordine di raccolta": "admin_fields",
+  "Obbligatorio": "required",
+  "Sposta su": "move_up",
+  "Sposta giù": "move_down",
+  "Rimuovi campo": "remove_field",
+  "Campo da aggiungere": "select_field",
+  "Aggiungi campo": "add_field",
+  "Ulteriore intervento umano": "handoff",
+  "Richiedi revisione del personale": "staff_review",
+  "Intervento sopra il numero di persone (facoltativo)": "party_threshold",
+  "Rimuovi servizio": "remove_service",
+  "Aggiungi servizio": "add_service",
+  "Disponibilità settimanale": "weekly",
+  "Stato": "status",
+  "Non definito": "unknown",
+  "Chiuso": "closed",
+  "Aperto": "open",
+  "Inizio (minuto 0–1439)": "start_minute",
+  "Fine (minuto 1–1440)": "end_minute",
+  "Rimuovi fascia": "remove_window",
+  "Aggiungi fascia": "add_window",
+  "Date di chiusura": "closures",
+  "Data": "date",
+  "Rimuovi data": "remove_date",
+  "Aggiungi data": "add_date",
+  "Inizio": "start_time",
+  "Fine": "end_time",
+  "La mezzanotte indica la fine della giornata.": "midnight_end"
+});
+dashboardBookingCatalog = window.MelpisBookingCatalog.create({
+  container: document.getElementById("booking-catalog-editor"), API_BASE, apiFetch,
+  getContext: dashboardContextSnapshot, getSession: () => sessione,
+  translate: (text) => Object.hasOwn(catalogTranslationKeys, text) ? _tDash(`booking_catalog.${catalogTranslationKeys[text]}`, text) : text,
+  confirm: ({ title, description, label }) => confermaDestructiva({ titolo: title, descrizione: description, label }),
+  onOpenSecurity: () => {
+    if (window.MelpisMfa?.openForStepUp) window.MelpisMfa.openForStepUp();
+    else apriVistaImpostazioni("sicurezza");
+  },
+});
 
 
 /* ============================================================
@@ -1814,6 +1950,7 @@ notifBell?.addEventListener("click", () => {
 // DOM autenticato precedente al logout. Ricarica per riverificare la sessione.
 window.addEventListener("storage", (event) => {
   if (event.key === "melpis_selected_organization" && window.location.pathname.startsWith("/app/")) {
+    dashboardBookingCatalog?.invalidate();
     dashboardKnowledgeModule?.onExit();
     window.location.reload();
     return;
@@ -1830,6 +1967,7 @@ window.addEventListener("pagehide", () => {
   dashboardTeamModule?.onExit();
   dashboardAiSimulatorModule?.onExit();
   dashboardBookingsModule?.onExit();
+  if (typeof dashboardBookingCatalog !== "undefined") dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.onExit();
   dashboardAiSettingsModule?.invalidate();
   dashboardSettingsModule?.invalidate();
@@ -2151,6 +2289,7 @@ window.addEventListener("pageshow", (event) => {
     if (typeof aggiornaDataTopbar === "function") {
       aggiornaDataTopbar();
     }
+    dashboardBookingCatalog?.refreshLanguage();
     dashboardInboxModule?.refreshLanguage();
     dashboardAiSettingsModule?.refreshLanguage();
     dashboardSettingsModule?.refreshLanguage();
@@ -2226,6 +2365,7 @@ dashboardTeamModule = window.MelpisDashboardTeam.create({
 });
 ({ caricaTeam } = dashboardTeamModule);
 document.getElementById("team-org-selector")?.addEventListener("change", (event) => {
+  dashboardBookingCatalog?.invalidate();
   dashboardKnowledgeModule?.onExit();
   dashboardInboxModule?.invalidate();
   localStorage.setItem("melpis_selected_organization", event.target.value);
@@ -2247,6 +2387,7 @@ async function accettaInvitoDaLink() {
     return false;
   }
   const accepted = await res.json();
+  dashboardBookingCatalog?.invalidate();
   dashboardInboxModule?.invalidate();
   localStorage.setItem("melpis_selected_organization", accepted.organization_id);
   window.location.replace("/app/team");

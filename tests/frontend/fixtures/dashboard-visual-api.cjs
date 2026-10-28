@@ -12,6 +12,8 @@ const readFixtures = {
   "/api/report": {},
   "/api/bookings": [],
   "/api/bookings/semaforo": [],
+  "/api/bookings/catalog": { revision: 0, draft: null, published: null, published_revision: null, runtime_enabled: false, organization_sector: "ristorante", capabilities: { can_save: true, can_publish: true } },
+  "/api/bookings/catalog/audit": { events: [] },
   "/api/bookings/settings": { capienza: 40, timezone: "Europe/Rome", durata_slot_minuti: 30 },
   "/api/onboarding/profilo": profile,
   "/api/onboarding/verticali": [],
