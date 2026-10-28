@@ -499,12 +499,17 @@ async def aggiorna_modalita_booking(
         )
 
     updated = await ext_repo.update_mode(org_id, new_mode.value)
+    if updated is None:
+        raise HTTPException(
+            409,
+            "Configurazione booking cambiata durante l'operazione; aggiorna e riprova.",
+        )
     return {
         "success": True,
         "message": f"Modalità operativa aggiornata a '{new_mode.value}'.",
-        "provider": provider,
+        "provider": updated.get("provider", provider),
         "mode": new_mode.value,
-        "updated_at": updated.get("updated_at") if updated else None,
+        "updated_at": updated.get("updated_at"),
     }
 
 

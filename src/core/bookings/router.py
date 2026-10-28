@@ -60,6 +60,7 @@ class DataMinimizationPolicy:
     """
 
     SENSITIVE_VERTICALS = frozenset({
+        "studio_medico_dentista",
         "studio_medico",
         "medico",
         "clinica",
@@ -69,6 +70,12 @@ class DataMinimizationPolicy:
         "fisioterapia",
     })
 
+    # Only recognized non-medical sectors may preserve operational notes by
+    # default. Unknown/malformed values must not become a medical bypass.
+    NON_MEDICAL_VERTICALS = frozenset({
+        "ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "hotel",
+    })
+
     def apply(
         self,
         req: CreateBookingRequest,
@@ -76,14 +83,8 @@ class DataMinimizationPolicy:
         medical_dpa_signed: bool = False,
     ) -> CreateBookingRequest:
         """Restituisce una copia sanitizzata della richiesta se applicabile la minimizzazione."""
-        is_medical = False
-
-        if verticale is None:
-            # FAIL-CLOSED: Non possiamo verificare che l'attività NON sia medica.
-            # Nel dubbio, minimizziamo per proteggere i dati personali.
-            is_medical = True
-        elif verticale.lower() in self.SENSITIVE_VERTICALS:
-            is_medical = True
+        normalized = verticale.strip().lower() if isinstance(verticale, str) else None
+        is_medical = normalized not in self.NON_MEDICAL_VERTICALS
 
         # Invariante 6 (Whitelist rigorosa): autorizzazione concessa SOLO se medical_dpa_signed
         # è tassativamente True (bool). Qualsiasi valore diverso (None, False, stringa non vuota, 0)
@@ -93,10 +94,8 @@ class DataMinimizationPolicy:
         if is_medical and not has_signed_dpa:
             # Minimizzazione attiva: azzera le note per evitare leak di sintomi o terapie
             logger.info(
-                "GDPR Data Minimization applicata a req %s: verticale=%s, dpa_signed=%s",
+                "GDPR Data Minimization applicata a req %s",
                 req.idempotency_key,
-                verticale,
-                medical_dpa_signed,
             )
             return req.model_copy(update={"note": ""})
 
@@ -316,8 +315,7 @@ class BookingAdapterRouter:
             resolved_adapter, resolved_mode, config = await self.resolve_adapter(org_uuid)
             adapter = adapter or resolved_adapter
             mode = mode or resolved_mode
-            if "medical_dpa_signed" in config:
-                medical_dpa_signed = bool(config["medical_dpa_signed"])
+            medical_dpa_signed = config.get("medical_dpa_signed") is True
 
         if mode == BookingMode.LOCAL_ONLY:
             return BookingResult(

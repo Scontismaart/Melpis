@@ -187,42 +187,30 @@ class ExternalBookingRepository(TenantScopedRepository):
     async def update_mode(
         self, organization_id: uuid.UUID | str, new_mode: str
     ) -> dict[str, Any] | None:
-        """Aggiorna solo la modalità operativa mantenendo le credenziali cifrate esistenti."""
+        """Patch only mode on the current row, preserving concurrent owner edits.
+
+        None means absent row or a provider policy that no longer permits the
+        mode. Malformed JSON raises a PostgreSQL error; never replace it with {}.
+        """
+        from src.core.bookings.router import BookingMode
+
+        mode = BookingMode(new_mode).value
         if isinstance(organization_id, str):
             organization_id = uuid.UUID(organization_id)
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM external_booking_credentials
-                WHERE organization_id = $1
-                """,
-                organization_id,
-            )
-            if not row:
-                return None
-
-            cfg = row.get("config")
-            if isinstance(cfg, str):
-                try:
-                    cfg = json.loads(cfg)
-                except Exception:
-                    cfg = {}
-            elif not isinstance(cfg, dict):
-                cfg = {}
-
-            cfg["mode"] = new_mode
-            config_json = json.dumps(cfg)
-
             updated = await conn.fetchrow(
                 """
                 UPDATE external_booking_credentials
-                SET config = $2::jsonb, updated_at = NOW()
+                SET config = jsonb_set(config, '{mode}', to_jsonb($2::text), true),
+                    updated_at = NOW()
                 WHERE organization_id = $1
+                  AND (lower(provider) NOT IN ('zak', 'wubook', 'wubook_zak')
+                       OR $2::text IN ('shadow', 'local_only'))
                 RETURNING *
                 """,
                 organization_id,
-                config_json,
+                mode,
             )
             return self._format_credential_row(dict(updated)) if updated else None
 
