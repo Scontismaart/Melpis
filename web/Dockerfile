@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Frontend statico (restyle): nginx serve landing su "/" e dashboard su "/app/"
-# in un unico container. In produzione il backend è raggiunto same-origin
+# in un unico container. In produzione il backend Ã¨ raggiunto same-origin
 # su "/api/*" (proxy Traefik): MELPIS_API_BASE resta vuota -> niente CORS,
 # cookie same-site.
 #
@@ -25,7 +25,7 @@ RUN node ./web/scripts/compose-dashboard.mjs --output /tmp/dashboard.html && \
 
 FROM nginx:1.27-alpine AS runtime
 
-# ── Landing e pagine pubbliche multilingua (root del docroot) ─
+# â”€â”€ Landing e pagine pubbliche multilingua (root del docroot) â”€
 COPY landing/index.html landing/style.css landing/app.js landing/navbar.js /usr/share/nginx/html/
 COPY design-tokens.css /usr/share/nginx/html/
 COPY landing/404.html /usr/share/nginx/html/
@@ -44,14 +44,15 @@ COPY landing/de/ /usr/share/nginx/html/de/
 COPY locales/ /usr/share/nginx/html/locales/
 COPY i18n-client.js /usr/share/nginx/html/
 
-# ── Pagine di accesso e registrazione dedicate (/accedi/, /registrati/) ──
+# â”€â”€ Pagine di accesso e registrazione dedicate (/accedi/, /registrati/) â”€â”€
 COPY login.html login.js register.html register.js auth.js auth.css /usr/share/nginx/html/
 
-# ── Dashboard (sotto /app/) ─────────────────────────────────
+# â”€â”€ Dashboard (sotto /app/) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 COPY --from=dashboard-builder /tmp/style.css /usr/share/nginx/html/app/style.css
 COPY app.js dashboard-auth-transport.js dashboard-ai-settings.js dashboard-settings.js dashboard-integrations.js dashboard-router.js dashboard-shared.js dashboard-inbox.js dashboard-overview.js dashboard-reviews.js dashboard-knowledge.js dashboard-team.js dashboard-ai-simulator.js dashboard-bookings.js dialog-focus.js theme-init.js mfa.js i18n-client.js /usr/share/nginx/html/app/
 COPY dashboard-booking-catalog-form.js /usr/share/nginx/html/app/
 COPY dashboard-booking-catalog.js /usr/share/nginx/html/app/
+COPY dashboard-booking-catalog.css /usr/share/nginx/html/app/
 COPY --from=dashboard-builder /tmp/dashboard.html /usr/share/nginx/html/app/index.html
 COPY design-tokens.css /usr/share/nginx/html/app/
 COPY fonts/ /usr/share/nginx/html/app/fonts/

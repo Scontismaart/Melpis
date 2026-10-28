@@ -6,7 +6,7 @@
     const doc = container.ownerDocument;
     const tr = typeof deps.translate === "function" ? deps.translate : (s) => s;
     let epoch = 0, identity = null, active = false, controller = null, form = null;
-    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, languagePending = false, statusKey = "";
+    let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, languagePending = false, dirty = false, statusKey = "";
     let status, editor, save, publish, reload, restore, revision, security, audit;
     function signature() {
       const context = getContext(), session = getSession();
@@ -30,12 +30,12 @@
       if (!save) return;
       const p = permissions();
       save.hidden = !p.save; publish.hidden = !p.publish;
-      save.disabled = busy || !p.save; publish.disabled = busy || !p.publish || !state?.draft;
+      save.disabled = busy || !p.save; publish.disabled = busy || dirty || !p.publish || !state?.draft;
       if (form) form.setEditable(!busy && p.save);
     }
     function clear() {
       controller?.abort(); controller = null;
-      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; languagePending = false; statusKey = "";
+      form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; languagePending = false; dirty = false; statusKey = "";
       container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = audit = null;
     }
     function invalidate() { active = false; identity = null; epoch += 1; clear(); }
@@ -50,7 +50,7 @@
       save = addButton("Salva bozza", saveDraft);
       publish = addButton("Pubblica", publishDraft);
       reload = addButton("Ricarica catalogo", () => load(true)); reload.hidden = true;
-      restore = addButton("Ripristina modifiche non salvate", () => { if (!valid(epoch) || !conflictCopy || !form || !permissions().save) return; form.load(conflictCopy); conflictCopy = null; restore.hidden = true; setMessage("Modifiche ripristinate: verifica il catalogo prima di salvare."); }); restore.hidden = true;
+      restore = addButton("Ripristina modifiche non salvate", () => { if (!valid(epoch) || !conflictCopy || !form || !permissions().save) return; form.load(conflictCopy); dirty = true; controls(); conflictCopy = null; restore.hidden = true; setMessage("Modifiche ripristinate: verifica il catalogo prima di salvare."); }); restore.hidden = true;
       addButton("Mostra cronologia", loadAudit);
       audit = node("div", null, container);
       save.hidden = publish.hidden = true;
@@ -59,10 +59,10 @@
       return data && Number.isSafeInteger(data.revision) && data.revision >= 0 && data.runtime_enabled === false && data.capabilities && typeof data.capabilities.can_save === "boolean" && typeof data.capabilities.can_publish === "boolean" && (data.published_revision === null || Number.isSafeInteger(data.published_revision));
     }
     function apply(data) {
-      state = data;
+      state = data; dirty = false;
       revision.textContent = `${tr("Revisione corrente")}: ${data.revision} · ${tr("Pubblicata")}: ${data.published_revision == null ? tr("nessuna") : data.published_revision}`;
       form?.clear();
-      form = root.MelpisBookingCatalogForm.create(editor, { sector: data.organization_sector, canEdit: permissions().save, translate: tr, onChange: () => { /* Pending request is compared with the complete current payload. */ } });
+      form = root.MelpisBookingCatalogForm.create(editor, { sector: data.organization_sector, canEdit: permissions().save, translate: tr, onChange: () => { dirty = true; controls(); setMessage("Salva bozza"); } });
       form.load(data.draft || data.published || null);
       controls();
     }
@@ -129,7 +129,9 @@
         if (!data.events.length) { audit.textContent = tr("Nessun evento."); return; }
         const list = node("ul", null, audit);
         data.events.slice(0, 100).forEach((event) => {
-          if (!event || typeof event.action !== "string" || !/^[a-z_]{1,40}$/.test(event.action) || !Number.isSafeInteger(event.revision) || event.revision < 0 || typeof event.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T[0-9:.+Z-]{1,35}$/.test(event.created_at) || typeof event.request_id !== "string" || !/^[0-9a-f-]{36}$/i.test(event.request_id)) return;
+          if (!event) return;
+          const eventRevision = typeof event.revision === "string" && /^[1-9][0-9]{0,15}$/.test(event.revision) ? Number(event.revision) : event.revision;
+          if (!["booking_catalog.draft_saved", "booking_catalog.published"].includes(event.action) || !Number.isSafeInteger(eventRevision) || eventRevision < 1 || typeof event.created_at !== "string" || !/^\d{4}-\d{2}-\d{2}T[0-9:.+Z-]{1,35}$/.test(event.created_at) || typeof event.request_id !== "string" || !/^[0-9a-f-]{36}$/i.test(event.request_id)) return;
           const item = node("li", null, list); item.textContent = `${event.action} · ${event.revision} · ${event.created_at} · ${event.request_id}`;
         });
       } catch (_) { if (valid(token)) audit.textContent = tr("Cronologia non disponibile."); }
@@ -142,7 +144,7 @@
       await write("draft", { expected_revision: state.revision, catalog });
     }
     async function publishDraft() {
-      const token = epoch; if (!valid(token) || busy || !permissions().publish || !state?.draft) return;
+      const token = epoch; if (!valid(token) || busy || dirty || !permissions().publish || !state?.draft) return;
       const expected = state.revision;
       if (typeof deps.confirm !== "function") { setMessage("La conferma di pubblicazione non è disponibile."); return; }
       busy = true; controls(); let confirmed = false;
@@ -150,7 +152,7 @@
       catch (_) { confirmed = false; }
       if (!valid(token)) return;
       busy = false; controls(); if (languagePending) refreshLanguage();
-      if (!confirmed || !permissions().publish || state.revision !== expected) return;
+      if (!confirmed || dirty || !permissions().publish || state.revision !== expected) return;
       await write("publish", { expected_revision: expected });
     }
     function refreshLanguage() {

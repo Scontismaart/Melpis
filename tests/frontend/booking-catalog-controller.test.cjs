@@ -12,13 +12,13 @@ const state = (extra = {}) => ({ revision: 1, draft: copy(fixture), published: n
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 function setup(fetch, config = {}) {
   const dom = new JSDOM("<main></main>", { runScripts: "outside-only", url: "https://example.test" });
-  let context = { view: "prenotazioni", userId: "u1", sessionOrganizationId: "o1", selectedOrganizationId: null }, session = { ruolo: "owner", id: "session-1" }, model = null;
+  let context = { view: "prenotazioni", userId: "u1", sessionOrganizationId: "o1", selectedOrganizationId: null }, session = { ruolo: "owner", id: "session-1" }, model = null, formOptions = null;
   const calls = [];
-  dom.window.MelpisBookingCatalogForm = { create(container, opts) { return { load(c) { model = c && copy(c); container.textContent = model ? model.services[0].name : "empty"; }, read(revision) { if (!model) throw Error("empty"); return { ...copy(model), revision }; }, clear() { model = null; container.replaceChildren(); }, setEditable(v) { container.dataset.editable = String(v); }, opts }; } };
+  dom.window.MelpisBookingCatalogForm = { create(container, opts) { formOptions = opts; return { load(c) { model = c && copy(c); container.textContent = model ? model.services[0].name : "empty"; }, read(revision) { if (!model) throw Error("empty"); return { ...copy(model), revision }; }, clear() { model = null; container.replaceChildren(); }, setEditable(v) { container.dataset.editable = String(v); }, opts }; } };
   dom.window.eval(source);
   const container = dom.window.document.querySelector("main");
   const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: (url, options) => { calls.push({ url, options }); return fetch(url, options, calls.length); }, getContext: () => context, getSession: () => session, translate: config.translate, confirm: config.confirm || (async () => true), onOpenSecurity: config.onOpenSecurity || (() => {}) });
-  return { dom, container, controller, calls, setContext: (value) => { context = { ...context, ...value }; }, setSession: (value) => { session = { ...session, ...value }; }, changeModel: (name) => { model.services[0].name = name; } };
+  return { dom, container, controller, calls, setContext: (value) => { context = { ...context, ...value }; }, setSession: (value) => { session = { ...session, ...value }; }, changeModel: (name) => { model.services[0].name = name; formOptions.onChange(); } };
 }
 function button(h, text) { return [...h.container.querySelectorAll("button")].find((n) => n.textContent === text); }
 
@@ -122,9 +122,9 @@ test("unknown organization sector cannot edit or publish", async () => {
 });
 
 test("audit displays only validated safe metadata", async () => {
-  const h = setup(async (url) => url.endsWith("/audit") ? response({ events: [{ action: "draft_saved", revision: 2, created_at: "2027-01-01T10:00:00Z", request_id: "12345678-1234-1234-1234-123456789012", body: "secret" }, { action: "<img>", revision: 1, created_at: "bad", request_id: "bad" }] }) : response(state()));
+  const h = setup(async (url) => url.endsWith("/audit") ? response({ events: [{ action: "booking_catalog.draft_saved", revision: "2", created_at: "2027-01-01T10:00:00Z", request_id: "12345678-1234-1234-1234-123456789012", body: "secret" }, { action: "<img>", revision: 1, created_at: "bad", request_id: "bad" }] }) : response(state()));
   h.controller.enter(); await tick(); button(h, "Mostra cronologia").click(); await tick();
-  assert.match(h.container.textContent, /draft_saved/); assert.doesNotMatch(h.container.textContent, /secret|<img>/); assert.equal(h.container.querySelector("img"), null); h.dom.window.close();
+  assert.match(h.container.textContent, /booking_catalog\.draft_saved \u00b7 2/); assert.doesNotMatch(h.container.textContent, /secret|<img>/); assert.equal(h.container.querySelector("img"), null); h.dom.window.close();
 });
 
 test("language refresh keeps the current form and permissions within its scope", async () => {
@@ -160,4 +160,18 @@ test("English and German MFA and service errors use localized messages", async (
     h.controller.enter(); await tick(); assert.match(h.container.textContent, mfa);
     button(h, bundle.save).click(); await tick(); assert.match(h.container.textContent, unavailable); h.dom.window.close();
   }
+});
+
+
+test("unsaved edits cannot publish the older server draft", async () => {
+  const h = setup(async () => response(state()));
+  h.controller.enter(); await tick();
+  assert.equal(button(h, "Pubblica").disabled, false);
+  h.changeModel("Not saved");
+  assert.equal(button(h, "Pubblica").disabled, true);
+  button(h, "Pubblica").click(); await tick();
+  assert.equal(h.calls.length, 1);
+  h.controller.enter(); await tick();
+  assert.equal(button(h, "Pubblica").disabled, false);
+  h.dom.window.close();
 });

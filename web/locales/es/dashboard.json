@@ -569,9 +569,9 @@
     "date": "Fecha",
     "remove_date": "Eliminar fecha",
     "add_date": "Añadir fecha",
-    "example_warning": "Revisa las duraciones, los recursos y la capacidad antes de guardar. Los ejemplos son solo orientativos.",
     "start_time": "Inicio",
     "end_time": "Fin",
-    "midnight_end": "La medianoche indica el final del día."
+    "midnight_end": "La medianoche indica el final del día.",
+    "example_warning": "Revisa duraciones, recursos y capacidad antes de guardar. Los ejemplos son solo ilustrativos."
   }
 }

@@ -569,9 +569,9 @@
     "date": "Data",
     "remove_date": "Rimuovi data",
     "add_date": "Aggiungi data",
-    "example_warning": "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi.",
     "start_time": "Inizio",
     "end_time": "Fine",
-    "midnight_end": "La mezzanotte indica la fine della giornata."
+    "midnight_end": "La mezzanotte indica la fine della giornata.",
+    "example_warning": "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi."
   }
 }

@@ -569,9 +569,9 @@
     "date": "Date",
     "remove_date": "Remove date",
     "add_date": "Add date",
-    "example_warning": "Review durations, resources and capacity before saving. Examples are illustrative only.",
     "start_time": "Start",
     "end_time": "End",
-    "midnight_end": "Midnight marks the end of the day."
+    "midnight_end": "Midnight marks the end of the day.",
+    "example_warning": "Check durations, resources and capacity before saving. Examples are illustrative only."
   }
 }

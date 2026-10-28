@@ -569,9 +569,9 @@
     "date": "Datum",
     "remove_date": "Datum entfernen",
     "add_date": "Datum hinzufügen",
-    "example_warning": "Prüfe Dauer, Ressourcen und Kapazität vor dem Speichern. Beispiele dienen nur zur Veranschaulichung.",
     "start_time": "Beginn",
     "end_time": "Ende",
-    "midnight_end": "Mitternacht bezeichnet das Ende des Tages."
+    "midnight_end": "Mitternacht bezeichnet das Ende des Tages.",
+    "example_warning": "Prüfe Dauer, Ressourcen und Kapazität vor dem Speichern. Beispiele dienen nur zur Veranschaulichung."
   }
 }

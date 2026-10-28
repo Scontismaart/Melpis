@@ -991,14 +991,3 @@
   .booking-modal-panel { padding: 20px; max-height: calc(100vh - 24px); }
   .booking-modal-grid { grid-template-columns: 1fr; }
 }
-
-/* Booking catalog editor */
-#booking-catalog-editor { margin-top: 20px; padding: 20px; border: 1px solid var(--border, #ddd); border-radius: 12px; background: var(--surface, #fff); }
-#booking-catalog-editor:empty { display: none; }
-#booking-catalog-editor fieldset { min-width: 0; margin: 16px 0; padding: 12px; border: 1px solid var(--border, #ddd); border-radius: 8px; }
-#booking-catalog-editor legend { padding: 0 6px; font-weight: 600; }
-#booking-catalog-editor label { display: inline-flex; flex-direction: column; gap: 4px; margin: 6px 12px 6px 0; max-width: 100%; }
-#booking-catalog-editor input, #booking-catalog-editor select { min-width: 0; max-width: 100%; padding: 8px; border: 1px solid var(--border, #bbb); border-radius: 6px; font: inherit; }
-#booking-catalog-editor input[type="checkbox"] { align-self: flex-start; }
-#booking-catalog-editor button { margin: 6px 8px 6px 0; }
-#booking-catalog-editor [role="status"] { min-height: 1.5em; }

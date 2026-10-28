@@ -569,9 +569,9 @@
     "date": "Date",
     "remove_date": "Supprimer la date",
     "add_date": "Ajouter une date",
-    "example_warning": "Vérifiez les durées, les ressources et les capacités avant d’enregistrer. Les exemples sont uniquement indicatifs.",
     "start_time": "Début",
     "end_time": "Fin",
-    "midnight_end": "Minuit indique la fin de la journée."
+    "midnight_end": "Minuit indique la fin de la journée.",
+    "example_warning": "Vérifiez les durées, les ressources et la capacité avant de sauvegarder. Les exemples sont uniquement indicatifs."
   }
 }
