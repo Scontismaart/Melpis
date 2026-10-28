@@ -218,3 +218,54 @@ async def test_owner_may_truncate_empty_evidence(catalog_env):
     pool,_,_,_,_,_=catalog_env
     async with pool.acquire() as conn:
         await conn.execute('TRUNCATE booking_catalog_requests,booking_catalog_publications')
+
+async def wait_until_blocked(pool, blocker_pid):
+    async def observe():
+        while True:
+            async with pool.acquire() as conn:
+                if await conn.fetchval('SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))', blocker_pid):
+                    return
+            await asyncio.sleep(0)
+    await asyncio.wait_for(observe(), timeout=5)
+
+async def test_publication_blocks_legacy_writer_and_preserves_both(catalog_env):
+    pool,legacy,repo,org,_,_=catalog_env
+    await write(catalog_env,'draft_saved',0,body=draft())
+    async with pool.acquire() as holder:
+        tx=holder.transaction(); await tx.start()
+        try:
+            await holder.fetchrow('SELECT id FROM booking_settings WHERE organization_id=$1 FOR UPDATE',org)
+            publication=asyncio.create_task(write(catalog_env,'published',1))
+            await wait_until_blocked(pool,holder.get_server_pid())
+            legacy_task=asyncio.create_task(legacy.upsert_booking_settings_config(org,{'other':{'updated':True}}))
+            # Publisher holds the capacity lock and waits for holder; legacy must wait for publisher.
+            async def blocked_chain():
+                while True:
+                    async with pool.acquire() as conn:
+                        found=await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM pg_stat_activity waiter
+                            JOIN pg_stat_activity publisher ON publisher.pid=ANY(pg_blocking_pids(waiter.pid))
+                            WHERE $1=ANY(pg_blocking_pids(publisher.pid)))""",holder.get_server_pid())
+                    if found: return
+                    await asyncio.sleep(0)
+            await asyncio.wait_for(blocked_chain(),5)
+        finally:
+            await tx.rollback()
+        await asyncio.wait_for(asyncio.gather(publication,legacy_task),5)
+    state=await repo.read(org); settings=await legacy.get_booking_settings(org)
+    assert state['published_revision']==2 and settings['config']['other']=={'updated':True}
+
+async def test_publication_waits_for_legacy_settings_transaction(catalog_env):
+    pool,legacy,repo,org,_,_=catalog_env
+    await write(catalog_env,'draft_saved',0,body=draft())
+    async with legacy.booking_settings_lock(org):
+        async with legacy._connection() as conn:
+            pid=conn.get_server_pid()
+            publication=asyncio.create_task(write(catalog_env,'published',1))
+            await wait_until_blocked(pool,pid)
+            settings=await legacy.get_booking_settings(org)
+            await legacy.save_booking_settings_locked(org,slot_minutes=settings['slot_minutes'],
+                fasce_orarie=settings['fasce_orarie'],capienze_orarie=settings['capienze_orarie'],
+                config={'other':{'updated':True}})
+    await asyncio.wait_for(publication,5)
+    assert (await repo.read(org))['published_revision']==2
+    assert (await legacy.get_booking_settings(org))['config']['other']=={'updated':True}
