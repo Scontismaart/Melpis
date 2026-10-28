@@ -52,6 +52,8 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "bookings": ("direct", "Booking carries its organization_id."),
     "booking_confirmation_outbox": ("direct", "Confirmation send is bound to one organization's booking and messages."),
     "booking_settings": ("direct", "Settings row is keyed by organization_id."),
+    "booking_catalog_publications": ("direct", "Immutable administrative catalogue snapshots carry organization_id."),
+    "booking_catalog_requests": ("direct", "Administrative catalogue receipts carry organization_id."),
     "reviews": ("direct", "Review carries its organization_id."),
     "documents": ("direct", "Document metadata carries its organization_id."),
     "document_index_requests": ("direct", "Index request identities and deletion tombstones belong to one organization."),

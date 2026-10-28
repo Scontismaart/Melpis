@@ -101,6 +101,8 @@ class BookingRepository(TenantScopedRepository):
 
     async def save_booking_settings_locked(self, organization_id, *, slot_minutes,
                                            fasce_orarie, capienze_orarie, config):
+        if not isinstance(config, dict) or "catalog_v2" in config:
+            raise ValueError("Use the protected catalogue endpoint")
         owned = self._locked_connection.get()
         if owned is None or owned[0] is not asyncio.current_task():
             raise RuntimeError("Booking settings write requires the settings transaction")
@@ -113,7 +115,10 @@ class BookingRepository(TenantScopedRepository):
                 slot_minutes=EXCLUDED.slot_minutes,
                 fasce_orarie=EXCLUDED.fasce_orarie,
                 capienze_orarie=EXCLUDED.capienze_orarie,
-                config=EXCLUDED.config,
+                config=EXCLUDED.config || CASE
+                    WHEN booking_settings.config ? 'catalog_v2'
+                    THEN jsonb_build_object('catalog_v2',booking_settings.config->'catalog_v2')
+                    ELSE '{}'::jsonb END,
                 updated_at=NOW()
             RETURNING *
         """, uuid.uuid4(), uuid.UUID(str(organization_id)), slot_minutes,
@@ -570,12 +575,17 @@ class BookingRepository(TenantScopedRepository):
             return [dict(r) for r in rows]
 
     async def upsert_booking_settings_config(self, organization_id, config):
-        async with self.pool.acquire() as conn:
+        if not isinstance(config, dict) or "catalog_v2" in config:
+            raise ValueError("Use the protected catalogue endpoint")
+        async with self.booking_settings_lock(organization_id), self._connection() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO booking_settings (id, organization_id, config)
                 VALUES ($1, $2, $3::jsonb)
                 ON CONFLICT (organization_id) DO UPDATE
-                    SET config = $3::jsonb, updated_at = NOW()
+                    SET config = $3::jsonb || CASE
+                        WHEN booking_settings.config ? 'catalog_v2'
+                        THEN jsonb_build_object('catalog_v2',booking_settings.config->'catalog_v2')
+                        ELSE '{}'::jsonb END, updated_at = NOW()
                 RETURNING *
             """, uuid.uuid4(), organization_id, json.dumps(config))
             result = dict(row)

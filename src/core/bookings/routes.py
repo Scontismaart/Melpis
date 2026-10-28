@@ -7,6 +7,8 @@ from src.models.schemas import DisponibilitaSlot, PrenotazioneModificaInput
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
+from src.core.bookings.catalog_api import router as catalog_router
+router.include_router(catalog_router)
 
 
 def _get_booking_service(request: Request):
@@ -55,6 +57,8 @@ async def get_settings(request: Request,
 @router.put("/settings")
 async def update_settings(body: dict, request: Request,
                           user: dict = Depends(require_ruolo("owner", "manager"))):
+    if "catalog_v2" in body or any(key.startswith("catalog_") for key in body):
+        raise HTTPException(422, "Usa l'editor dedicato per il catalogo")
     service = _get_booking_service(request)
     try:
         return await service.aggiorna_impostazioni(
