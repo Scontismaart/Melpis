@@ -136,3 +136,58 @@ diff byte-per-byte, nuovo digest canonico/manifest, test di compatibilità MCP e
 regressioni Melpis, audit completo e review di sicurezza. Non cambiare hash o
 rilassare verifiche per far passare una build. I report devono essere nuovi;
 un errore di rete/auditor non può riutilizzare un report precedente.
+
+
+## Correzione filelock — candidata da artifact ufficiali, 29 ottobre 2026
+
+Le advisory [CVE-2026-112909](https://github.com/tox-dev/filelock/security/advisories/GHSA-69hj-f68j-2879)
+e [CVE-2026-112910](https://github.com/tox-dev/filelock/security/advisories/GHSA-8mx5-7m5m-r77g)
+indicano filelock 4.2.1 come prima versione corretta. Il precedente pin 3.20.3
+non le risolve. LiteLLM 1.106.2 e le release ufficiali fino alla 1.106.5
+richiedono filelock >=3.16.1,<4.0: pip standard rifiuta il pin corretto.
+
+La candidata minima usa [LiteLLM 1.103.10 ufficiale](https://pypi.org/pypi/litellm/1.103.10/json)
+e filelock 4.2.1. Quella release non dichiara ne usa direttamente filelock:
+la verifica indipendente dello sdist ufficiale (SHA-256
+`b1bf12810b6565156c6b23bda2ccaf115c6edafbbf92e98220ecbc73f89d6972`)
+non trova riferimenti nei 3.697 file. Non e una dichiarazione di certificazione
+upstream di LiteLLM con filelock 4: la compatibilita va verificata nel grafo
+e nei consumatori reali. CrewAI 1.15.4 ammette LiteLLM >=1.84,<2; Python 3.12
+soddisfa i vincoli delle due distribuzioni. Nessuna wheel LiteLLM modificata.
+
+Il pin esplicito huggingface-hub 1.33.0 conserva il componente embedding gia
+revisionato: la rimozione del vincolo LiteLLM <2 avrebbe altrimenti consentito
+una major 2.x non necessaria. Torch e Hugging Face devono accettare il nuovo
+filelock tramite i propri metadata ufficiali e superare le prove di lock.
+Non vengono modificati CrewAI/Core, MCP, OTel, relativi backport, hash o builder.
+
+La risoluzione usa dipendenze normali, senza --no-deps, ignore-installed,
+falsificazioni metadata o nuove eccezioni audit. Installazione effettiva,
+pip check, verifica provenance, audit completo e regressioni sono gate prima
+del merge, insieme alle quattro build API/web e alla review indipendente.
+Il virtualenv pip-audit resta separato: la sua versione filelock non costituisce
+prova della versione del runtime; il confronto inventario gia esistente resta
+obbligatorio. Il run storico C2.2 40769914701 rimane fallito e non va riscritto.
+Nessun provider reale, deploy o migrazione remota viene autorizzato dal fix.
+
+Il fondatore ha autorizzato separatamente test e PR di questa candidata:
+l'assenza di una dipendenza LiteLLM non equivale al supporto esplicito upstream
+richiesto dal primo mandato. Il merge richiede una nuova approvazione.
+
+La verifica locale Python 3.12 ha installato il grafo con pip standard:
+`pip check` e verifica dei file CrewAI/Core tramite il manifest esistente
+superati. L'audit del runtime effettivo copre 204 distribuzioni: nessuna nuova
+vulnerabilita, con le sole eccezioni gia revisionate ChromaDB/json-repair.
+Le nove voci del report rappresentano cinque ID distinti, quattro duplicati.
+Rispetto all'ambiente precedente non cambiano i pacchetti presenti: oltre ai
+due pin mirati cambiano otto versioni transitive (google-api-core, httplib2,
+hf-xet, boto3, botocore, tzdata, fonttools, pydantic-settings).
+
+Le regressioni mirate locali passano 144 test, inclusi PostgreSQL/pgvector,
+accounting A03, quote A04, recovery offline, guardrail, retry e tre prove di
+lock cross-process con filelock, Hugging Face e Torch. Il frontend passa
+472 test con tre saltati. Questi risultati Windows non certificano i lock
+POSIX: suite completa, audit e build Linux sui due target restano gate CI.
+La prima prova PostgreSQL locale senza estensione vector e fallita nel setup;
+il successivo run usa l'immagine pgvector prevista dalla CI, senza cambiare
+test o migrazioni per nascondere il problema. Nessun E2E provider reale.
