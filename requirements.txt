@@ -1,4 +1,4 @@
-alembic==1.18.5
+alembic==1.20.0
 APScheduler==3.11.3
 asyncpg==0.31.0
 crewai[litellm]==1.15.4
