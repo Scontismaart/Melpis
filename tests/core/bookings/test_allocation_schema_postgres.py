@@ -149,8 +149,16 @@ async def test_no_operational_runtime_import():
     root=Path(__file__).parents[3] / 'src'
     matches=[]
     for path in root.rglob('*.py'):
-        if path.name=='allocation_contracts.py': continue
-        if 'allocation_contracts' in path.read_text(encoding='utf-8'): matches.append(path)
+        # Only the disconnected engine may consume these contracts. Neither
+        # component may be imported by routes, workers, facades or old writers.
+        if path.relative_to(root).as_posix() in {
+            'core/bookings/allocation_contracts.py',
+            'core/db/repositories/booking_allocation_repo.py',
+        }: continue
+        text = path.read_text(encoding='utf-8')
+        if any(name in text for name in ('allocation_contracts', 'booking_allocation_repo',
+                                         'BookingAllocationRepository')):
+            matches.append(path)
     assert not matches
 
 
