@@ -157,7 +157,9 @@ async def test_nonempty_evidence_cannot_be_truncated(catalog_env):
     async with pool.acquire() as conn:
         for table in ('booking_catalog_requests','booking_catalog_publications'):
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
-                await conn.execute(f'TRUNCATE {table}')
+                # Include dependent dark allocation tables so the evidence
+                # trigger, rather than FK preflight, rejects the operation.
+                await conn.execute(f'TRUNCATE {table} CASCADE')
             assert await conn.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1',org)>0
             assert not await conn.fetchval("SELECT has_table_privilege('service_role',$1,'TRUNCATE')",table)
 
@@ -195,11 +197,16 @@ async def test_service_role_forced_truncate_cannot_erase_evidence(catalog_env):
         for table in ('booking_catalog_requests','booking_catalog_publications'):
             async with conn.transaction():
                 await conn.execute(f'GRANT TRUNCATE ON {table} TO service_role')
+                # Force access to FK dependants too, so trigger protection is
+                # tested rather than an unrelated missing table privilege.
+                children = 'booking_allocation_sets,booking_resource_allocations,booking_allocation_requests'
+                await conn.execute(f'GRANT TRUNCATE ON {children} TO service_role')
                 await conn.execute('SET LOCAL ROLE service_role')
-                with pytest.raises(asyncpg.InsufficientPrivilegeError):
-                    async with conn.transaction(): await conn.execute(f'TRUNCATE {table}')
+                with pytest.raises(asyncpg.InsufficientPrivilegeError, match='evidence cannot be truncated'):
+                    async with conn.transaction(): await conn.execute(f'TRUNCATE {table} CASCADE')
                 await conn.execute('RESET ROLE')
                 await conn.execute(f'REVOKE TRUNCATE ON {table} FROM service_role')
+                await conn.execute(f'REVOKE TRUNCATE ON {children} FROM service_role')
             assert await conn.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1',org)>0
 
 async def test_reapply_caps_broad_service_role_grants(catalog_env):
@@ -217,7 +224,7 @@ async def test_reapply_caps_broad_service_role_grants(catalog_env):
 async def test_owner_may_truncate_empty_evidence(catalog_env):
     pool,_,_,_,_,_=catalog_env
     async with pool.acquire() as conn:
-        await conn.execute('TRUNCATE booking_catalog_requests,booking_catalog_publications')
+        await conn.execute('TRUNCATE booking_catalog_requests,booking_catalog_publications CASCADE')
 
 async def wait_until_blocked(pool, blocker_pid):
     async def observe():

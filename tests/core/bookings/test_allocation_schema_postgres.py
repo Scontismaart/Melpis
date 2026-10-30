@@ -316,3 +316,29 @@ async def test_backend_cannot_regrant_client_access(allocation_data):
             # PostgreSQL may warn instead of error when no grant option exists.
             await c.execute('GRANT SELECT ON booking_allocation_sets TO authenticated')
         assert not await c.fetchval("SELECT has_table_privilege('authenticated','booking_allocation_sets','SELECT')")
+
+@pytest.mark.parametrize('actor,privilege',[('authenticated','SELECT'),('service_role','TRUNCATE')])
+@pytest.mark.parametrize('via_middle',[False,True])
+async def test_admin_membership_regrant_path_cannot_hide_privileges(allocation_data,actor,privilege,via_middle):
+    pool,*_=allocation_data
+    async with pool.acquire() as c:
+        tx=c.transaction(); await tx.start()
+        try:
+            helper='allocation_admin_'+uuid4().hex
+            middle='allocation_middle_'+uuid4().hex if via_middle else actor
+            await c.execute(f'CREATE ROLE {helper}')
+            if via_middle:
+                await c.execute(f'CREATE ROLE {middle}; GRANT {middle} TO {actor} WITH INHERIT FALSE, SET TRUE')
+            await c.execute(f'GRANT {helper} TO {middle} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE; GRANT {privilege} ON booking_allocation_sets TO {helper}')
+            assert not await c.fetchval("SELECT pg_has_role($1,$2,'SET')",actor,helper)
+            probe=c.transaction(); await probe.start()
+            try:
+                await c.execute(f'SET LOCAL ROLE {middle}')
+                await c.execute(f'GRANT {helper} TO {middle} WITH SET TRUE')
+                await c.execute(f'SET LOCAL ROLE {helper}')
+                assert await c.fetchval('SELECT current_user')==helper
+            finally: await probe.rollback()
+            assert not await c.fetchval("SELECT pg_has_role($1,$2,'SET')",actor,helper)
+            with pytest.raises(asyncpg.PostgresError,match='privilege requires review'):
+                async with c.transaction(): await c.execute(MIGRATION)
+        finally: await tx.rollback()

@@ -57,7 +57,7 @@ persistence; existing GDPR operational writers remain unchanged.
 
 ## Local evidence, 30 October 2026
 
-57 focused tests passed on PostgreSQL16 and57 on PostgreSQL18 with pgvector,
+61 focused allocation tests plus25 catalog regression tests passed on PostgreSQL16 and PostgreSQL18 (86 combined on each) with pgvector,
 using disposable loopback-only databases. They cover composite constraints,
 exclusive adjacency/collision across revisions, client grants and inherited
 SET ROLE paths, direct/helper backend ownership, inaccessible membership edges,
@@ -71,3 +71,5 @@ post-merge CI40924307235 passed4177 tests with36 skipped and audited203 packages
 API/web publications and amd64/arm64 manifests were verified independently.
 This resolves the old filelock audit blocker without changing its failed run.
 No remote069 migration, pool engine, live confirmation or provider E2E is certified.
+
+ADMIN-enabled membership paths are included in the role closure: a role may regrant its own membership with SET TRUE. Negative tests demonstrate that actual self-upgrade for direct and intermediate client/backend paths, then require atomic rejection; inaccessible SET FALSE/ADMIN FALSE membership remains allowed. The catalog truncate regressions explicitly include FK dependants and preserve the immutable-evidence error and row-count assertions.

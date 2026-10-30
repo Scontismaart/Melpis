@@ -88,7 +88,9 @@ BEGIN
   EXECUTE format('DROP TRIGGER IF EXISTS allocation_guard ON %s',target);
   EXECUTE format('CREATE TRIGGER allocation_guard BEFORE INSERT OR UPDATE ON %s FOR EACH ROW EXECUTE FUNCTION public.booking_allocation_guard()',target);
   FOR client IN SELECT oid FROM pg_roles WHERE rolname IN ('anon','authenticated') LOOP
-   FOR reachable IN SELECT r.* FROM pg_roles r WHERE r.oid=client.oid OR pg_has_role(client.oid,r.oid,'SET') LOOP
+   FOR reachable IN WITH RECURSIVE role_paths(oid) AS (
+    SELECT client.oid UNION SELECT m.roleid FROM pg_auth_members m JOIN role_paths p ON p.oid=m.member WHERE m.set_option OR m.admin_option
+   ) SELECT r.* FROM pg_roles r JOIN role_paths p ON p.oid=r.oid LOOP
     IF reachable.rolsuper OR reachable.rolbypassrls OR reachable.oid=(SELECT relowner FROM pg_class WHERE oid=target) THEN RAISE EXCEPTION 'Privileged client role path requires review'; END IF;
     FOREACH p IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
      IF has_table_privilege(reachable.oid,target,p) OR (p IN ('SELECT','INSERT','UPDATE','REFERENCES') AND has_any_column_privilege(reachable.oid,target,p)) THEN RAISE EXCEPTION 'Reachable client privilege requires review'; END IF;
@@ -98,7 +100,9 @@ BEGIN
     IF has_table_privilege(client.oid,target,p) OR (p IN ('SELECT','INSERT','UPDATE','REFERENCES') AND has_any_column_privilege(client.oid,target,p)) THEN RAISE EXCEPTION 'Inherited client privilege requires review'; END IF;
    END LOOP;
   END LOOP;
-  FOR reachable IN SELECT r.* FROM pg_roles r WHERE r.oid=(SELECT oid FROM pg_roles WHERE rolname='service_role') OR pg_has_role('service_role',r.oid,'SET') LOOP
+  FOR reachable IN WITH RECURSIVE role_paths(oid) AS (
+   SELECT oid FROM pg_roles WHERE rolname='service_role' UNION SELECT m.roleid FROM pg_auth_members m JOIN role_paths p ON p.oid=m.member WHERE m.set_option OR m.admin_option
+  ) SELECT r.* FROM pg_roles r JOIN role_paths p ON p.oid=r.oid LOOP
    -- A migration administrator may own tables; an application backend may not.
    -- Direct BYPASSRLS is expected for Supabase service_role, not ownership/super.
    IF reachable.rolsuper OR reachable.oid=(SELECT relowner FROM pg_class WHERE oid=target)
