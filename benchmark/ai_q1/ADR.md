@@ -1,0 +1,7 @@
+# ADR: conversational benchmark and future orchestration comparison
+
+Status: proposed evaluation only; production remains unchanged.
+
+The current path uses CrewAI and LiteLLM. A future candidate could call ObservedChatLLM directly with structured output. The candidate may reduce orchestration and parsing complexity, but this is a hypothesis: structured output does not authorize side effects or guarantee safety. Both paths must preserve tenant scope, deterministic validation, guardrails, escalation, A03/A04 checks, budget controls, per-organization/model token and cost accounting, trace attribution, and idempotency. Neither model output nor an unavailable source can authorize a booking.
+
+Compare the same 150 conversations, source snapshots and history under equivalent prompts, model settings, budgets, retry limits, and timeout policies. Record failures and retries, end-to-end and per-attempt latency, token usage and estimated cost with attribution. Report missing measurements as unknown. Score safety, extraction, provenance, human-reviewed clarity and grounding, and escalation separately, including denominators and confidence limitations. Examine maintenance cost and failure handling, including malformed structured output and retry amplification. Independently review any proposal against A03/A04 and security boundaries before any integration. Mock tests verify the benchmark only; no replacement or quality certification follows from them.
