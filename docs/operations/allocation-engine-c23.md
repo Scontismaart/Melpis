@@ -117,7 +117,7 @@ Existing legacy bookings are not backfilled into this engine, so dark tests do
 not certify operational capacity. SQL069 still requires a separate remote GO;
 GDPR export/retention/erasure integration and every writer cutover remain gates.
 
-Local PostgreSQL16 verification: 121 tests passed without skips (35 engine
+Local PostgreSQL16 and PostgreSQL18 verification: 121 tests passed on each without skips (35 engine
 scenarios plus the 86 contract/schema/catalog regressions). The engine cases
 include an actual terminated database backend before receipt/commit, complete
 rollback followed by retry, historical replay after a lost committed result,
@@ -125,3 +125,6 @@ publication and revocation waiters, multi-resource and last-capacity races,
 terminal parents and authority changes. Independent review identified the latter
 two admission gaps; both now have explicit fail-closed regressions. No remote
 database, live provider or operational booking was used by these tests.
+The overlap query binds the organization explicitly on every joined table as
+well as its composite join, preserving the static tenant-scope guard without
+exceptions or scanner changes.

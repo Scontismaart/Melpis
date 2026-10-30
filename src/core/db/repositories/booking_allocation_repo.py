@@ -363,7 +363,8 @@ class BookingAllocationRepository:
                 FROM booking_resource_allocations a JOIN booking_allocation_sets s
                   ON s.organization_id=a.organization_id AND s.booking_id=a.booking_id
                 JOIN bookings b ON b.organization_id=a.organization_id AND b.id=a.booking_id
-                WHERE a.organization_id=$1 AND a.resource_id=$2 AND a.starts_at<$4 AND a.ends_at>$3
+                WHERE a.organization_id=$1 AND s.organization_id=$1 AND b.organization_id=$1
+                  AND a.resource_id=$2 AND a.starts_at<$4 AND a.ends_at>$3
                   AND a.booking_id<>$5 ORDER BY a.starts_at,a.ends_at""", org, rid, start, end, booking_id)
             if any(row["booking_fingerprint"] != _booking_fingerprint(row) for row in rows):
                 return "unknown"
