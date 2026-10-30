@@ -286,3 +286,33 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             assert not await c.fetchval("SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='bookings'::regclass AND conname='bookings_org_id_unique')")
             assert await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")==before
         finally: await tx.rollback()
+
+@pytest.mark.parametrize('client,member_role', [('anon',None),('authenticated','staff'),('authenticated','manager'),('authenticated','owner')])
+@pytest.mark.parametrize('operation', ['SELECT * FROM booking_allocation_sets','INSERT INTO booking_allocation_sets DEFAULT VALUES','TRUNCATE booking_allocation_sets'])
+async def test_actual_client_operations_denied_despite_role_claims(allocation_data,client,member_role,operation):
+    pool,*_=allocation_data
+    async with pool.acquire() as c:
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            async with c.transaction():
+                # Supabase clients can resolve public; table access must still fail.
+                await c.execute('GRANT USAGE ON SCHEMA public TO anon,authenticated')
+                await c.execute("SELECT set_config('request.jwt.claims',$1,true)", '{"role":"authenticated","user_metadata":{"ruolo":"'+str(member_role)+'"}}')
+                await c.execute(f'SET LOCAL ROLE {client}')
+                await c.execute(operation)
+
+async def test_public_column_regrant_is_removed(allocation_data):
+    pool,*_=allocation_data
+    async with pool.acquire() as c:
+        await c.execute('GRANT SELECT(resource_id) ON booking_resource_allocations TO PUBLIC')
+        assert await c.fetchval("SELECT has_column_privilege('authenticated','booking_resource_allocations','resource_id','SELECT')")
+        await c.execute(MIGRATION)
+        assert not await c.fetchval("SELECT has_column_privilege('authenticated','booking_resource_allocations','resource_id','SELECT')")
+
+async def test_backend_cannot_regrant_client_access(allocation_data):
+    pool,*_=allocation_data
+    async with pool.acquire() as c:
+        async with c.transaction():
+            await c.execute('SET LOCAL ROLE service_role')
+            # PostgreSQL may warn instead of error when no grant option exists.
+            await c.execute('GRANT SELECT ON booking_allocation_sets TO authenticated')
+        assert not await c.fetchval("SELECT has_table_privilege('authenticated','booking_allocation_sets','SELECT')")

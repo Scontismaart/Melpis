@@ -30,7 +30,7 @@ The existing writers are not all in one allocation protocol. Do not claim interv
 
 Migration 069 and the pure contracts are dark, additive preparation only. They do not implement a pool capacity sweep, admission repository, operational enforcement, provider synchronization, booking confirmation or GDPR export/erasure integration. No live migration or activation is authorized. The future repository must follow the architecture blueprint lock order and recheck subject lineage, active membership, catalog health and revision after waits before returning even historical receipts. Receipt identity covers the original semantic request and trusted actor, independent of subsequently published catalog data. Structural cascade support is not a completed erasure integration.
 
-The later merge and issue 149 receipt must report the exact reviewed commit, local migration and test evidence, limitations and remaining activation gates; it must not imply that a production migration or allocation cutover occurred.
+The C23-A integration receipt must report the exact reviewed commit, local migration and test evidence, limitations and remaining activation gates; it must not imply that a production migration or allocation cutover occurred.
 
 ## Executable protocol for the later isolated repository
 
@@ -57,7 +57,7 @@ persistence; existing GDPR operational writers remain unchanged.
 
 ## Local evidence, 30 October 2026
 
-43 focused tests passed on PostgreSQL16 and43 on PostgreSQL18 with pgvector,
+57 focused tests passed on PostgreSQL16 and57 on PostgreSQL18 with pgvector,
 using disposable loopback-only databases. They cover composite constraints,
 exclusive adjacency/collision across revisions, client grants and inherited
 SET ROLE paths, direct/helper backend ownership, inaccessible membership edges,
