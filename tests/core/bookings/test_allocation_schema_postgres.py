@@ -278,7 +278,7 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             before=await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")
             helper='allocation_defaults_'+uuid4().hex
             await c.execute(f'CREATE ROLE {helper}; GRANT {helper} TO service_role WITH INHERIT FALSE, SET TRUE; ALTER DEFAULT PRIVILEGES GRANT TRUNCATE ON TABLES TO {helper}')
-            with pytest.raises(asyncpg.PostgresError):
+            with pytest.raises(asyncpg.PostgresError, match='backend.*privilege'):
                 async with c.transaction(): await c.execute(MIGRATION)
             for table in ('booking_allocation_sets','booking_resource_allocations','booking_allocation_requests'):
                 assert await c.fetchval('SELECT to_regclass($1)',table) is None

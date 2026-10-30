@@ -1,3 +1,6 @@
+-- One statement: atomic even when applied by psql without --single-transaction.
+DO $allocation_migration$
+BEGIN
 -- Dark allocation schema only: no runtime admission or writer integration.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 DO $$ BEGIN
@@ -122,3 +125,6 @@ END $$;
 
 
 
+
+END;
+$allocation_migration$;
