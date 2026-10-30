@@ -1,0 +1,13 @@
+{
+  "tenant_id": "synthetic-tenant-a",
+  "scope": "All values are fictional and belong only to this tenant. Availability is deliberately unknown.",
+  "catalog": {
+    "restaurant": {"menu degustazione": "42 EUR", "terrazza": "available seating area"},
+    "hair": {"taglio": "25 EUR", "piega": "18 EUR"},
+    "spa": {"massaggio relax": "50 EUR", "trattamento viso": "45 EUR"},
+    "hotel": {"camera doppia": "90 EUR per night", "camera singola": "70 EUR per night"},
+    "medical_admin": {"visita amministrativa": "30 EUR", "controllo amministrativo": "20 EUR"}
+  },
+  "hours": {"monday": "09:00-17:00", "friday": "09:00-16:00"},
+  "availability": null
+}
