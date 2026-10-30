@@ -73,3 +73,55 @@ This resolves the old filelock audit blocker without changing its failed run.
 No remote069 migration, pool engine, live confirmation or provider E2E is certified.
 
 ADMIN-enabled membership paths are included in the role closure: a role may regrant its own membership with SET TRUE. Negative tests demonstrate that actual self-upgrade for direct and intermediate client/backend paths, then require atomic rejection; inaccessible SET FALSE/ADMIN FALSE membership remains allowed. The catalog truncate regressions explicitly include FK dependants and preserve the immutable-evidence error and row-count assertions.
+
+## C23-B isolated engine
+
+`BookingAllocationRepository.apply(organization_id, auth_user_id, request)` and
+`observe(...)` are internal, disconnected entry points. Neither is exported by
+the production facade or imported by a route, worker or operational writer.
+Both return `runtime_enabled=false` and `confirmation_authorized=false`.
+They require an existing scoped canonical booking and derive the current
+owner/manager profile from active account and membership records in PostgreSQL.
+They do not create, confirm or edit that booking, send messages, call providers,
+write an outbox or consume A04 quota.
+
+Each operation owns a READ COMMITTED transaction and the lock order documented
+above. Resource identity includes the tenant and spans catalog revisions.
+Resource locks use the sorted union of old and proposed claims. Pool admission
+sweeps all overlap boundaries over the entire half-open interval; it does not
+sum mutually disjoint occupants. Replacement preserves all old claims on failure.
+Cancellation releases allocation claims only, with revision fencing. A change to
+unsupported external authority yields UNKNOWN even for cancellation and cannot
+release capacity. No timeout releases claims automatically.
+
+Only pending or confirmed parents without completion/no-show markers may receive
+new allocations. Changes to the parent fingerprint retain capacity and yield
+UNKNOWN; explicit authorized cancellation can release those local claims while
+the authority remains internal. Unknown opening schedules, malformed catalog
+evidence, resource repurposing and unresolved parent drift never imply FREE.
+Hotel intervals preserve civil nights across DST, and all five sectors share
+the same transaction and tenant fences. Medical proposals accept administrative
+catalog identifiers and times, never clinical fields or consent grants.
+
+Request hashes bind the strict normalized semantic request and database-derived
+actor/tenant, independently of later catalog contents. Same-key changed payloads
+conflict. Exact replay returns historical outcome plus current state/revisions;
+it never restores cancelled claims. Current account, membership, GDPR barriers,
+catalog health and supported authority are checked before returning a receipt.
+Observed availability is advisory only and is rechecked by a separate apply.
+
+Crash before commit rolls back claims, header and receipt together. A lost result
+after commit is recovered through the immutable receipt without duplicate writes.
+PostgreSQL/resource admission is not atomic with Google or another provider.
+Existing legacy bookings are not backfilled into this engine, so dark tests do
+not certify operational capacity. SQL069 still requires a separate remote GO;
+GDPR export/retention/erasure integration and every writer cutover remain gates.
+
+Local PostgreSQL16 verification: 121 tests passed without skips (35 engine
+scenarios plus the 86 contract/schema/catalog regressions). The engine cases
+include an actual terminated database backend before receipt/commit, complete
+rollback followed by retry, historical replay after a lost committed result,
+publication and revocation waiters, multi-resource and last-capacity races,
+terminal parents and authority changes. Independent review identified the latter
+two admission gaps; both now have explicit fail-closed regressions. No remote
+database, live provider or operational booking was used by these tests.
