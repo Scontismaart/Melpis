@@ -206,7 +206,11 @@ async def test_confirmation_requires_live_sent_prompt_and_explicit_later_reply(s
     assert stale['state'].details_confirmed and stale['catalog_stale']
     assert stale['current_catalog_revision']==4 and stale['details_confirmed_current'] is False
     await pool.execute('UPDATE messages SET deleted_at=now() WHERE organization_id=$1 AND id=$2',oid,prompt)
-    with pytest.raises(ConversationStateUnavailable): await env['repo'].read(oid,env['auth'],env['conv'])
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2',oid,env['conv']) == 0
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND conversation_id=$2',oid,env['conv']) == 0
+    assert (await env['repo'].read(oid,env['auth'],env['conv']))['state'] is None
+    with pytest.raises(ConversationStateDenied):
+        await env['repo'].confirm(oid,env['auth'],env['conv'],reply,prompt,request_id=uuid4(),expected_revision=0,expected_catalog_revision=4)
 
 
 async def test_wrong_catalog_revision_does_not_persist_or_charge_again(state_env):
@@ -286,8 +290,9 @@ async def test_backend_can_insert_read_and_update_scoped_state(state_env):
             await conn.execute('ALTER ROLE service_role BYPASSRLS; GRANT SELECT ON conversations,contacts,messages,gdpr_erasure_barriers,booking_catalog_publications TO service_role')
             await conn.execute('SET LOCAL ROLE service_role')
             await conn.execute('''INSERT INTO booking_conversation_states
-                (organization_id,conversation_id,revision,catalog_revision,source_message_id,provider_timestamp,snapshot,snapshot_hash)
-                VALUES($1,$2,1,2,$3,1700000000,$4::jsonb,$5)''',env['org'],env['conv'],env['message'],state.model_dump_json(),state_digest(state))
+                (organization_id,conversation_id,revision,catalog_revision,source_message_id,provider_timestamp,snapshot,snapshot_hash,subject_id)
+                VALUES($1,$2,1,2,$3,1700000000,$4::jsonb,$5,
+                  (SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2))''',env['org'],env['conv'],env['message'],state.model_dump_json(),state_digest(state))
             assert await conn.fetchval('SELECT revision FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2',env['org'],env['conv'])==1
             await conn.execute('UPDATE booking_conversation_states SET updated_at=now() WHERE organization_id=$1 AND conversation_id=$2',env['org'],env['conv'])
         finally: await tx.rollback()
@@ -341,6 +346,9 @@ async def test_withdrawn_consent_denies_read_and_historical_replay(state_env):
     await env['pool'].execute("UPDATE contacts SET consent_status='withdrawn' WHERE organization_id=$1 AND id=$2",env['org'],subject)
     with pytest.raises(PermissionError): await env['repo'].read(env['org'],env['auth'],env['conv'])
     with pytest.raises(PermissionError): await apply(env,env['message'],request=request)
+    await env['pool'].execute("UPDATE contacts SET consent_status='granted' WHERE organization_id=$1 AND id=$2",env['org'],subject)
+    assert (await env['repo'].read(env['org'],env['auth'],env['conv']))['state'] is None
+    with pytest.raises(ConversationStateDenied): await apply(env,env['message'],request=request)
     assert await _used(env['pool'],env['org'])==1
 
 
@@ -386,3 +394,15 @@ async def test_a04_validator_rejects_unsealed_tamper_and_accepts_guardrail_trim(
     assert saved['booking_state_proposal']['intent']=='booking'
     assert saved['risposta']=='Richiesta ricevuta.'
     assert await _used(pool,oid)==1
+
+
+async def test_removing_proposal_cache_revokes_state_and_replay(state_env):
+    env=state_env; pool=env['pool']; org=env['org']; conv=env['conv']
+    await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
+    await apply(env,env['message'])
+    await pool.execute("UPDATE messages SET ai_reply_cache=ai_reply_cache - 'booking_state_proposal' WHERE organization_id=$1 AND id=$2",org,env['message'])
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2',org,conv)==0
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND conversation_id=$2',org,conv)==0
+    assert await pool.fetchval('SELECT reason FROM booking_conversation_revocations WHERE organization_id=$1 AND conversation_id=$2',org,conv)=='proposal_removed'
+    assert (await env['repo'].read(org,env['auth'],conv))['state'] is None
+    with pytest.raises(ConversationStateDenied): await apply(env,env['message'])
