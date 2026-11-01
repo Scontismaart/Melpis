@@ -57,8 +57,37 @@ class Deletion:
             )
             policies = {p['category']: dict(p) for p in policies}
             required = {'contact_content', 'transient_content', 'cutover'}
+            if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
+                SELECT 1 FROM simulation_requests WHERE organization_id=$1
+                  AND response ? 'booking_state_proposal' AND c24_subject_id IS NULL)''', org):
+                # A historical or orphaned proposal cannot be attributed using
+                # today's contact linkage. Controller reconciliation is required.
+                blockers.append('unattributed_conversation_copy_review_required')
             if op['scope'] == 'organization':
                 required |= {'knowledge_content', 'organization_profile'}
+            conversation_counts = await conn.fetchrow(
+                '''SELECT
+                  (SELECT count(*) FROM booking_conversation_states s
+                   WHERE s.organization_id=$1 AND ($2::uuid IS NULL OR s.subject_id=$2)) AS states,
+                  (SELECT count(*) FROM booking_conversation_requests r
+                   JOIN booking_conversation_states s ON s.organization_id=r.organization_id
+                     AND s.conversation_id=r.conversation_id
+                   WHERE r.organization_id=$1 AND s.organization_id=$1
+                     AND ($2::uuid IS NULL OR s.subject_id=$2)) AS receipts''', org, op['subject_id'],
+            )
+            # The policy covers *all* new copies, including a canonical response
+            # which was persisted before any state repository call occurred.
+            if conversation_counts['states'] or await conn.fetchval(
+                '''SELECT EXISTS(SELECT 1 FROM messages m
+                   JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
+                   WHERE m.organization_id=$1 AND c.organization_id=$1
+                     AND ($2::uuid IS NULL OR c.contact_id=$2)
+                     AND m.ai_reply_cache ? 'booking_state_proposal')
+                 OR EXISTS(SELECT 1 FROM simulation_requests
+                   WHERE organization_id=$1 AND response ? 'booking_state_proposal'
+                     AND ($2::uuid IS NULL OR c24_subject_id=$2))''', org, op['subject_id'],
+            ):
+                required.add('booking_conversation_content')
             for category in sorted(required):
                 p = policies.get(category)
                 if not p or not p['valid'] or p['legal_hold'] or not p['erasure_allowed']:
@@ -160,6 +189,7 @@ class Deletion:
                 await conn.execute('DELETE FROM onboarding_profiles WHERE organization_id=$1', org)
                 await conn.execute('UPDATE organizations SET business_profile=NULL WHERE id=$1', org)
             else:
+                await conn.execute('DELETE FROM simulation_requests WHERE organization_id=$1 AND c24_subject_id=$2', org, subject)
                 await conn.execute(
                     '''DELETE FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id IN
                        (SELECT id FROM bookings WHERE organization_id=$1 AND contact_id=$2)''', org, subject,
@@ -234,7 +264,8 @@ class Deletion:
             )
             manifest = {'version': 'a06-v1', 'local_erasure': 'approved_relational_data_erased',
                         'external_copies': 'pending_verified_receipts',
-                        'retained': ['billing', 'audit', 'provider_accounting', 'shared_auth_accounts', 'backups'],
+                        'retained': ['billing', 'audit', 'provider_accounting', 'shared_auth_accounts', 'backups',
+                                     'conversation_revocation_fences_pending_policy'],
                         'subject_unstructured_data': 'controller_review_required' if subject else 'tenant_scoped',
                         'policies': {k: {'version': p['version'], 'reference': p['approval_reference']} for k,p in policies.items()}}
             await conn.execute(
@@ -251,7 +282,9 @@ class Deletion:
                         '''UPDATE meta_webhook_inbox SET payload=$3::jsonb,last_error=NULL
                            WHERE organization_id=$1 AND id=$2''', org, row['id'], encode(clean or {}),
                     )
-            await event(conn, org, oid, 'erase.local_committed', count=contacts_count)
+            await event(conn, org, oid, 'erase.local_committed', count=contacts_count,
+                        conversation_states=conversation_counts['states'],
+                        conversation_receipts=conversation_counts['receipts'])
         # Process-local simulator data has no direct contact provenance. For an
         # organization erasure clear this process immediately; other worker
         # copies remain an explicit independently verified stage.
