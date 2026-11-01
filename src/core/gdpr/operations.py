@@ -46,7 +46,8 @@ async def refresh_provider_coverage(conn, org, oid):
 
 async def event(conn, org, operation_id, code, **details):
     # The only accepted details are technical codes/counts/digests, not free text.
-    allowed = {'count', 'fence', 'attempts', 'category', 'reason', 'digest', 'provider'}
+    allowed = {'count', 'fence', 'attempts', 'category', 'reason', 'digest', 'provider',
+               'conversation_states', 'conversation_receipts'}
     if set(details) - allowed:
         raise ValueError('Unsupported GDPR audit detail')
     for key, value in details.items():

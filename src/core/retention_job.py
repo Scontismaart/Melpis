@@ -36,7 +36,7 @@ async def _retention_policies(pool):
             '''SELECT DISTINCT ON(organization_id,category) organization_id,category,version,
                       retention_days,legal_hold,erasure_allowed,valid_until>NOW() AS valid
                FROM gdpr_policies WHERE approved_at<=NOW()
-               AND category IN ('messages_content','simulator_responses')
+               AND category IN ('messages_content','simulator_responses','booking_conversation_content')
                ORDER BY organization_id,category,approved_at DESC,version DESC''',
         )
 
@@ -63,13 +63,43 @@ async def run_retention(pool):
                     or current['version'] != policy['version'] or current['retention_days'] is None):
                 continue
             days = current['retention_days']
-            if policy['category'] == 'messages_content':
+            c24_policy = await conn.fetchrow('''SELECT erasure_allowed,legal_hold,
+                    valid_until>NOW() AS valid FROM gdpr_policies
+                WHERE organization_id=$1 AND category='booking_conversation_content'
+                  AND approved_at<=NOW() ORDER BY approved_at DESC,version DESC LIMIT 1''', org)
+            c24_allowed = bool(c24_policy and c24_policy['valid']
+                               and c24_policy['erasure_allowed'] and not c24_policy['legal_hold'])
+            if policy['category'] == 'booking_conversation_content':
+                # Only the typed proposal is expired here. The final response,
+                # commercial receipt and counter are governed independently.
+                # Removing a source proposal invokes SQL070's bounded trigger,
+                # atomically purging derived snapshots/receipts and fencing replay.
+                await conn.execute('''WITH expired AS (
+                    SELECT id FROM messages WHERE organization_id=$1
+                      AND created_at<NOW()-make_interval(days=>$2)
+                      AND ai_reply_cache ? 'booking_state_proposal'
+                      AND status IN ('handled','sent','delivered','read','failed')
+                    ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED)
+                    UPDATE messages SET ai_reply_cache=ai_reply_cache-'booking_state_proposal'
+                    WHERE organization_id=$1 AND id IN (SELECT id FROM expired)''', org, days)
+                await conn.execute('''WITH expired AS (
+                    SELECT organization_id,auth_user_id,request_id FROM simulation_requests
+                    WHERE organization_id=$1 AND response ? 'booking_state_proposal'
+                      AND status='completed' AND completed_at<NOW()-make_interval(days=>$2)
+                    ORDER BY completed_at,request_id LIMIT 500 FOR UPDATE SKIP LOCKED)
+                    UPDATE simulation_requests SET response=response-'booking_state_proposal'
+                    WHERE organization_id=$1 AND (organization_id,auth_user_id,request_id)
+                      IN (SELECT organization_id,auth_user_id,request_id FROM expired)''', org, days)
+            elif policy['category'] == 'messages_content':
                 rows = await conn.fetch(
                     '''SELECT id FROM messages WHERE organization_id=$1
                        AND created_at<NOW()-make_interval(days=>$2)
                        AND status IN ('handled','sent','delivered','read','failed')
                        AND deleted_at IS NULL AND billed_at IS NULL
-                       ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED''', org, days,
+                       AND ($3 OR (NOT COALESCE(ai_reply_cache ? 'booking_state_proposal',false)
+                         AND NOT EXISTS(SELECT 1 FROM booking_conversation_states s
+                             WHERE s.organization_id=$1 AND s.conversation_id=messages.conversation_id)))
+                       ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED''', org, days, c24_allowed,
                 )
                 ids = [r['id'] for r in rows]
                 if ids:
@@ -90,7 +120,8 @@ async def run_retention(pool):
                          SELECT organization_id,auth_user_id,request_id FROM simulation_requests
                          WHERE organization_id=$1 AND status IN ('completed','failed')
                            AND completed_at<NOW()-make_interval(days=>$2)
-                         ORDER BY completed_at LIMIT 500 FOR UPDATE SKIP LOCKED)''', org, days,
+                           AND ($3 OR NOT COALESCE(response ? 'booking_state_proposal',false))
+                         ORDER BY completed_at LIMIT 500 FOR UPDATE SKIP LOCKED)''', org, days, c24_allowed,
                 )
                 counts['simulator_purged'] += int(result.split()[-1])
     logger.info('gdpr_retention exports_expired=%d messages_redacted=%d simulator_purged=%d', *counts.values())

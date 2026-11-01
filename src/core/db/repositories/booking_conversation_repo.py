@@ -71,11 +71,14 @@ class BookingConversationRepository:
     @staticmethod
     async def _source(conn, org, conversation, source_message_id):
         source = await conn.fetchrow('''SELECT id,conversation_id,wam_id,content,content_text,
-            direction,deleted_at,status,billed_at,ai_reply_cache,claimed_at,heartbeat_at,
+            direction,deleted_at,status,billed_at,ai_reply_cache,claimed_at,heartbeat_at,c24_original_subject_id,
             clock_timestamp() AS verified_now FROM messages
             WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''', org, conversation, source_message_id)
         if not source or source['direction'] != 'inbound' or source['deleted_at'] is not None:
             raise ConversationStateDenied('Live inbound source required')
+        if source['c24_original_subject_id'] is None or source['c24_original_subject_id'] != await conn.fetchval(
+                'SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2', org, conversation):
+            raise ConversationStateDenied('Original source subject requires reconciliation')
         try:
             body = decode(source['content'])
             stamp = body['timestamp']
@@ -125,6 +128,7 @@ class BookingConversationRepository:
         try:
             state = ConversationState.model_validate_json(canonical(decode(row['snapshot'])))
             if (state.organization_id != org or state.conversation_id != conversation
+                    or row['subject_id'] != await conn.fetchval('SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2', org, conversation)
                     or state.revision != row['revision'] or state.catalog_revision != row['catalog_revision']
                     or state.last_source_message_id != row['source_message_id']
                     or state_digest(state) != row['snapshot_hash']):
@@ -132,7 +136,9 @@ class BookingConversationRepository:
         except (ValueError, TypeError, KeyError):
             raise ConversationStateUnavailable('Stored state requires reconciliation') from None
         # Deletion, tenant transfer or source reassignment cannot make replay safe.
-        source_ids = {state.last_source_message_id} | {s.source_message_id for s in state.slots}
+        source_ids = ({state.last_source_message_id} | {s.source_message_id for s in state.slots}
+                      | {s.source_message_id for s in state.superseded}
+                      | ({state.confirmation.source_message_id} if state.confirmation else set()))
         for source_id in sorted(source_ids, key=str):
             await BookingConversationRepository._source(conn, org, conversation, source_id)
         if state.confirmation:
@@ -175,6 +181,9 @@ class BookingConversationRepository:
         async with self._scope(organization_id, auth_user_id, conversation_id) as context:
             conn, org, conversation, actor, scoped, _authority = context
             catalog = scoped.catalog
+            if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_conversation_revocations WHERE organization_id=$1 AND conversation_id=$2)
+                OR EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND deleted_at IS NOT NULL)''', org, conversation):
+                raise ConversationStateDenied('Conversation metadata was revoked')
             source, provider_time, source_hash = await self._source(conn, org, conversation, source_id)
             action = 'proposal' if prompt_message_id is None else 'confirmation'
             canonical_hash, proposal, prompt_hash = None, None, None
@@ -233,8 +242,9 @@ class BookingConversationRepository:
                 updated = confirm_details(state, source_message_id=source_id, prompt_message_id=prompt_message_id,
                     prompt_body_hash=prompt_hash, expected_revision=expected_revision)
             stored_revision = await conn.fetchval('''INSERT INTO booking_conversation_states
-                (organization_id,conversation_id,revision,catalog_revision,source_message_id,provider_timestamp,snapshot,snapshot_hash)
-                VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+                (organization_id,conversation_id,revision,catalog_revision,source_message_id,provider_timestamp,snapshot,snapshot_hash,subject_id)
+                VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,
+                  (SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2))
                 ON CONFLICT(organization_id,conversation_id) DO UPDATE SET revision=EXCLUDED.revision,
                   catalog_revision=EXCLUDED.catalog_revision,source_message_id=EXCLUDED.source_message_id,
                   provider_timestamp=EXCLUDED.provider_timestamp,snapshot=EXCLUDED.snapshot,
