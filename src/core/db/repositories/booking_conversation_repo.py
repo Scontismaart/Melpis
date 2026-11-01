@@ -155,6 +155,115 @@ class BookingConversationRepository:
             state, _ = await self._load(conn, org, conversation)
             return self._result(state, state.revision if state else None, False, catalog.catalog.revision)
 
+    async def observe_candidate(self, organization_id, auth_user_id, conversation_id,
+                                *, expected_state_revision, expected_catalog_revision,
+                                expected_state_digest):
+        """Diagnostic only. Own no writes and grant no operational admission."""
+        from src.core.bookings.allocation_contracts import AllocationCandidate, derive_candidate
+        from src.core.bookings.auto_policy import validate_auto_booking_configuration
+        if (type(expected_state_revision) is not int or expected_state_revision < 1
+                or type(expected_catalog_revision) is not int or expected_catalog_revision < 1
+                or type(expected_state_digest) is not str
+                or not re.fullmatch(r'[a-f0-9]{64}', expected_state_digest)):
+            raise ValueError('Strict observation expectations required')
+        async with self._scope(organization_id, auth_user_id, conversation_id) as context:
+            conn, org, conversation, _actor, scoped, authority = context
+            catalog = scoped.catalog
+            state, row = await self._load(conn, org, conversation)
+            if (not state or state.revision != expected_state_revision
+                    or state.catalog_revision != expected_catalog_revision
+                    or catalog.revision != expected_catalog_revision
+                    or state_digest(state) != expected_state_digest):
+                raise StateConflict('Observation snapshot changed')
+            # All surviving slot sources, not just the most recent turn, must
+            # still have the same committed canonical proposal and source body.
+            proposals = {}
+            source_ids = {slot.source_message_id for slot in state.slots}
+            latest_receipt = await conn.fetchrow('''SELECT action FROM booking_conversation_requests
+                WHERE organization_id=$1 AND conversation_id=$2 AND source_message_id=$3''',
+                org, conversation, state.last_source_message_id)
+            if not latest_receipt:
+                raise ConversationStateUnavailable('Observation receipt unavailable')
+            if latest_receipt['action'] == 'proposal':
+                source_ids.add(state.last_source_message_id)
+            for source_id in sorted(source_ids, key=str):
+                source, _stamp, source_hash = await self._source(conn, org, conversation, source_id)
+                cached, canonical_hash = await self._canonical_response(conn, org, source)
+                receipt = await conn.fetchrow('''SELECT * FROM booking_conversation_requests
+                    WHERE organization_id=$1 AND conversation_id=$2 AND source_message_id=$3''',
+                    org, conversation, source_id)
+                if (not receipt or receipt['action'] != 'proposal'
+                        or receipt['canonical_response_hash'] != canonical_hash
+                        or cached.get('booking_catalog_revision') != catalog.revision
+                        or type(cached.get('booking_catalog_revision')) is not int
+                        or cached.get('richiede_umano') is not False):
+                    raise ConversationStateUnavailable('Observation canonical evidence changed')
+                operation_hash = digest({'actor':str(receipt['actor_user_id']),
+                    'conversation':str(conversation), 'source':str(source_id), 'source_hash':source_hash,
+                    'canonical_hash':canonical_hash, 'expected_revision':receipt['applied_revision']-1,
+                    'catalog':catalog.revision, 'action':'proposal', 'prompt':None, 'prompt_hash':None})
+                if operation_hash != receipt['payload_hash']:
+                    raise ConversationStateUnavailable('Observation source evidence changed')
+                proposal = parse_proposal_json(canonical(cached.get('booking_state_proposal')))
+                validate_proposal_catalog(proposal, catalog)
+                proposals[source_id] = (proposal, receipt['applied_revision'],
+                    explicit_customer_fields(proposal, source['content_text'], catalog))
+            values = {slot.field:slot.value for slot in state.slots}
+            for slot in state.slots:
+                proposal, revision, explicit = proposals[slot.source_message_id]
+                if slot.source_revision != revision or slot.catalog_revision != catalog.revision:
+                    raise ConversationStateUnavailable('Slot evidence revision changed')
+                if slot.origin == 'backend_derived':
+                    from datetime import date, timedelta
+                    if (slot.field != 'departure_date' or slot.derived_from != ('arrival_date','stay_nights')
+                            or 'arrival_date' not in values or 'stay_nights' not in values
+                            or slot.value != (date.fromisoformat(values['arrival_date'])
+                                + timedelta(days=values['stay_nights'])).isoformat()):
+                        raise ConversationStateUnavailable('Derived slot evidence changed')
+                elif (slot.derived_from or not any(c.field == slot.field and c.value == slot.value for c in proposal.slots)
+                        or (slot.origin == 'customer_provided' and slot.field not in explicit)):
+                    raise ConversationStateUnavailable('Slot canonical provenance changed')
+            settings = await conn.fetchrow('SELECT * FROM booking_settings WHERE organization_id=$1', org)
+            organization = await conn.fetchrow('SELECT timezone,business_profile FROM organizations WHERE id=$1', org)
+            config = decode(settings['config']) if settings else {}
+            policy = config.get('a05', {}) if isinstance(config, dict) else {}
+            opt_in = (isinstance(policy, dict) and policy.get('enabled') is True
+                and validate_auto_booking_configuration({**dict(settings), 'config':config,
+                    'capienze_orarie':decode(settings['capienze_orarie'])}, organization['timezone'], catalog.sector).valid)
+            result = {'state_revision':state.revision, 'state_digest':state_digest(state),
+                'catalog_revision':catalog.revision, 'allocation_observation':'unknown',
+                'operational_availability':'unknown', 'opt_in_authorized':bool(opt_in),
+                'authority':authority, 'reason':'legacy_occupancy_unreconciled' if opt_in else 'opt_in_missing',
+                'runtime_enabled':False, 'confirmation_authorized':False}
+            if state.intent != 'booking' or state.handoff_reason or state.missing_fields or state.ambiguous_fields:
+                return {**result, 'reason':'state_requires_clarification'}
+            # Newer/tied or malformed inbound order cannot silently reuse an old
+            # state. This bounded diagnostic never substitutes created_at order.
+            sources = await conn.fetch('''SELECT id,content FROM messages WHERE organization_id=$1
+                AND conversation_id=$2 AND direction='inbound' AND deleted_at IS NULL LIMIT 257''', org, conversation)
+            if len(sources) > 256:
+                return {**result, 'reason':'source_order_uncertain'}
+            for source in sources:
+                if source['id'] == state.last_source_message_id: continue
+                body = decode(source['content'])
+                stamp = body.get('timestamp') if isinstance(body, dict) else None
+                if (type(stamp) is not str or not re.fullmatch(r'[0-9]{1,12}', stamp)
+                        or int(stamp) >= row['provider_timestamp']):
+                    return {**result, 'reason':'source_order_uncertain'}
+            try:
+                candidate = AllocationCandidate.model_validate_json(canonical({
+                    'expected_catalog_revision':catalog.revision,
+                    **{key:value for key,value in values.items() if key in AllocationCandidate.model_fields}}))
+                start, end, claims = derive_candidate(candidate, catalog)
+            except (ValueError, TypeError, OverflowError):
+                return {**result, 'reason':'candidate_unavailable'}
+            # Explicit None means a new candidate: exclude no existing booking.
+            # _availability is read-only and stays on this scoped connection.
+            observation = await self._allocation._observe_candidate_locked(conn, org, catalog, candidate)
+            return {**result, 'allocation_observation':observation,
+                    'candidate':{'service_id':candidate.service_id, 'starts_at':start.isoformat(),
+                                 'ends_at':end.isoformat(), 'claims':claims}}
+
     async def apply_from_a04(self, organization_id, auth_user_id, conversation_id, source_message_id,
                              *, request_id, expected_revision, expected_catalog_revision):
         return await self._apply(organization_id, auth_user_id, conversation_id, source_message_id,
