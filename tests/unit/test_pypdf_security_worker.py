@@ -102,4 +102,3 @@ async def test_rejected_pdf_then_healthy_pdf_uses_bounded_owned_workers(monkeypa
             assert worker.job is None
             if worker.owned_process is not None:
                 assert worker.owned_process.returncode is not None
-
