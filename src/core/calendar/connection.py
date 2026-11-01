@@ -179,8 +179,16 @@ class CalendarConnection:
                 if not marked:
                     raise CalendarUnavailable("connection_changed")
                 request = GoogleAuthRequest()
+                transport_started = False
 
                 def bounded_request(*args, **kwargs):
+                    nonlocal transport_started
+                    # The SDK can retry token POSTs internally after HTTP 5xx.
+                    # The durable outer marker is not a transport-level fence:
+                    # an uncertain first exchange must not trigger a second one.
+                    if transport_started:
+                        raise CalendarUnavailable("refresh_outcome_unknown")
+                    transport_started = True
                     kwargs["timeout"] = 10
                     return request(*args, **kwargs)
 

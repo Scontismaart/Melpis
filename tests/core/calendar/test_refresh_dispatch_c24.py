@@ -79,6 +79,29 @@ async def test_timeout_is_unknown_and_never_retried(pg_pool,sample_org,monkeypat
     assert row['refresh_dispatch_id'] and row['connection_status']=='reconnect_required' and calls==['refresh']
 
 
+async def test_actual_google_sdk_cannot_retry_uncertain_token_post(pg_pool, sample_org, monkeypatch):
+    from src.core.calendar import connection as module
+    org = sample_org['id']
+    connection = await prepare(pg_pool, org, monkeypatch)
+    calls = []
+
+    def transport(*args, **kwargs):
+        calls.append((kwargs.get('method'), kwargs.get('timeout')))
+        return SimpleNamespace(status=500, data=b'{"error":"temporarily_unavailable"}', headers={})
+
+    monkeypatch.setattr(module, 'GoogleAuthRequest', lambda: transport)
+    # Credentials.refresh is the actual installed SDK, not a synthetic success.
+    with pytest.raises(CalendarUnavailable, match='refresh_unavailable'):
+        await connection.credentials(org)
+    assert calls == [('POST', 10)]
+    row = await connection.row(org)
+    assert row['connection_status'] == 'reconnect_required' and row['refresh_dispatch_id']
+    assert connection.fernet.decrypt(row['refresh_token'].encode()) == b'old-refresh'
+    with pytest.raises(CalendarUnavailable, match='reconnect_required'):
+        await connection.credentials(org)
+    assert len(calls) == 1
+
+
 async def test_reauthorization_fences_old_thread_and_consumes_generation(pg_pool,sample_org,monkeypatch):
     org=sample_org['id']; connection=await prepare(pg_pool,org,monkeypatch)
     entered=threading.Event(); release=threading.Event(); finished=threading.Event()
