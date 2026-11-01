@@ -57,6 +57,8 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "booking_allocation_sets": ("direct", "Dark allocation sets carry organization_id."),
     "booking_resource_allocations": ("direct", "Dark resource claims carry organization_id."),
     "booking_allocation_requests": ("direct", "Dark allocation receipts carry organization_id."),
+    "booking_conversation_states": ("direct", "Draft conversation snapshots carry organization_id."),
+    "booking_conversation_requests": ("direct", "Draft conversation receipts carry organization_id."),
     "reviews": ("direct", "Review carries its organization_id."),
     "documents": ("direct", "Document metadata carries its organization_id."),
     "document_index_requests": ("direct", "Index request identities and deletion tombstones belong to one organization."),
