@@ -54,12 +54,14 @@ class GoogleCalendarService:
                     AND table_name='external_booking_sync' AND column_name='calendar_lease_token')
                 AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
                     AND table_name='google_calendar_credentials' AND column_name='connection_epoch')
+                AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+                    AND table_name='google_calendar_credentials' AND column_name='refresh_dispatch_id')
                 AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.bookings'::regclass
                     AND tgname='calendar_queue_booking' AND tgenabled='O')
                 AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.bookings'::regclass
                     AND tgname='calendar_track_booking' AND tgenabled='O')""")
         if not ready:
-            raise CalendarUnavailable("calendar_schema_064_required")
+            raise CalendarUnavailable("calendar_schema_072_required")
 
     def encrypt_secret(self, value):
         return self.fernet.encrypt(value.encode()).decode()
