@@ -41,7 +41,7 @@ class BookingMutation:
     expected_stay_revision: int | None = None
 
     def __post_init__(self):
-        if self.operation not in {"create", "edit_contact", "reschedule", "cancel", "reject", "no_show", "create_stay", "reschedule_stay"}:
+        if self.operation not in {"create", "edit_contact", "reschedule", "cancel", "reject", "no_show", "create_stay", "reschedule_stay", "confirm", "complete", "reactivate"}:
             raise BookingMutationRejected("Unsupported booking operation")
         if any(type(v) is not str for v in (self.nome_cliente, self.telefono, self.note)) or type(self.notice) is not bool:
             raise ValueError("Invalid mutation fields")
@@ -59,6 +59,8 @@ class BookingMutation:
             raise ValueError("Contact edit cannot change scheduling")
         if self.operation in {'cancel', 'reject', 'no_show'} and (self.notice or any((self.nome_cliente, self.telefono, self.note))):
             raise ValueError('Status operation cannot change contact or send notice')
+        if self.operation in {'confirm', 'complete', 'reactivate'} and (any((self.nome_cliente, self.telefono, self.note)) or (self.operation != 'confirm' and self.notice)):
+            raise ValueError('Occupied transition cannot change contact or send completion notice')
         if self.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import date
             if (type(self.arrival_date) is not str or type(self.departure_date) is not str
@@ -121,7 +123,9 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         else:
             lineage_row = before
         conversation, subject = await engine._lineage(conn, org, lineage_row)
-        if mutation.operation in {'create_stay', 'reschedule_stay'}:
+        stay_transition = mutation.operation in {'confirm', 'complete', 'reactivate'} and await conn.fetchval(
+            'SELECT EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)', org, request.booking_id)
+        if mutation.operation in {'create_stay', 'reschedule_stay'} or stay_transition:
             source = new_booking.source_message_id if new_booking else await conn.fetchval(
                 'SELECT source_message_id FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', org, request.booking_id)
             proof = await conn.fetchrow('''SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3
@@ -148,7 +152,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         await conn.fetchval('SELECT pg_advisory_xact_lock_shared(hashtext($1))', f'booking-capacity|{org}')
         settings = await conn.fetchrow('SELECT config FROM booking_settings WHERE organization_id=$1 FOR SHARE', org)
         catalog, sector, authority = await engine._catalog(conn, org, orgrow, settings)
-        if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority != 'internal':
+        if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority not in {'internal', 'internal_calendar_sync'}:
             raise AllocationUnavailable('Catalog authority unavailable')
         if mutation.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import time
@@ -209,6 +213,51 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                     VALUES($1,$2,$3,$4,$5,$6,$7,1)''', org, request.booking_id, new_booking.contact_id,
                     new_booking.conversation_id, new_booking.source_message_id,
                     date.fromisoformat(mutation.arrival_date), date.fromisoformat(mutation.departure_date))
+        elif mutation.operation in {'confirm', 'complete', 'reactivate'}:
+            reactivating = mutation.operation == 'reactivate'
+            if request.action != ('allocate' if reactivating else 'replace'):
+                raise BookingMutationRejected('Occupied transition requires matching allocation action')
+            allocation = await conn.fetchrow('''SELECT * FROM booking_allocation_sets
+                WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE''', org, request.booking_id)
+            if (not allocation or allocation['state'] != ('cancelled' if reactivating else 'active')
+                or allocation['allocation_revision'] != request.expected_allocation_revision
+                or allocation['catalog_revision'] != catalog.revision or request.expected_catalog_revision != catalog.revision
+                or allocation['booking_fingerprint'] != _booking_fingerprint(locked)
+                or allocation['booking_calendar_revision'] != locked['calendar_revision']
+                or allocation['timezone'] != catalog.timezone or allocation['service_id'] != request.service_id
+                or locked['stato'] not in ({'cancellata','cancellato','rifiutata'} if reactivating else {'in_attesa', 'confermata', 'da_verificare'})
+                or locked['completata_at'] is not None or locked['no_show_at'] is not None
+                or (request.party_size is not None and request.party_size != locked['coperti'])):
+                raise AllocationConflict('Occupied allocation preimage changed')
+            if allocation['temporal_kind'] == 'civil_nights':
+                stay = await conn.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
+                if (not stay or stay['original_subject_id'] != subject or stay['original_conversation_id'] != conversation
+                    or (stay['arrival_date'],stay['departure_date']) != (allocation['arrival_date'],allocation['departure_date'])
+                    or (request.arrival_date,request.departure_date) != (stay['arrival_date'],stay['departure_date'])):
+                    raise AllocationConflict('Stay preimage changed')
+            elif (allocation['temporal_kind'] != 'minutes' or request.appointment_date != locked['data']
+                  or request.appointment_time != locked['ora']):
+                raise AllocationConflict('Booking schedule changed')
+            try:
+                start, end, derived = derive_allocation(request, catalog)
+            except (ValueError, TypeError, OverflowError):
+                raise AllocationUnavailable('Allocation proposal is invalid') from None
+            claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at
+                FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id''', org, request.booking_id)
+            await engine._take_locks(conn, org, request, claims, derived)
+            claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at
+                FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id''', org, request.booking_id)
+            if ((bool(claims) if reactivating else not claims) or (allocation['starts_at'],allocation['ends_at']) != (start,end)
+                or (not reactivating and [(c['resource_id'],c['resource_kind'],c['exclusive'],c['quantity']) for c in claims] != list(derived))
+                or any((c['starts_at'],c['ends_at']) != (start,end) for c in claims)):
+                raise AllocationConflict('Occupied allocation claims changed')
+            contact_preimage = await engine._seal_contact_preimage(conn, org, request, mutation=mutation)
+            if mutation.operation == 'complete':
+                await conn.execute('''UPDATE bookings SET stato='completata',completata_at=NOW(),updated_at=NOW()
+                    WHERE organization_id=$1 AND id=$2''', org, request.booking_id)
+            else:
+                await conn.execute('''UPDATE bookings SET stato=$3,updated_at=NOW()
+                    WHERE organization_id=$1 AND id=$2''', org, request.booking_id, 'in_attesa' if reactivating else 'confermata')
         elif mutation.operation == 'reschedule_stay':
             from datetime import date, time
             stay = await conn.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
@@ -304,6 +353,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                     date.fromisoformat(mutation.data), time.fromisoformat(mutation.ora), mutation.coperti)
             else:
                 await engine._take_locks(conn, org, request, claims, ())
+                contact_preimage = await engine._seal_contact_preimage(conn, org, request, mutation=mutation)
                 status = {'cancel': 'cancellata', 'reject': 'rifiutata', 'no_show': 'no_show'}[mutation.operation]
                 await conn.execute('''UPDATE bookings SET stato=$3,
                     no_show_at=CASE WHEN $3='no_show' THEN NOW() ELSE no_show_at END,updated_at=NOW()

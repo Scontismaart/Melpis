@@ -107,7 +107,7 @@ async def test_new_booking_commit_and_replay(pg_pool):
         assert await pg_pool.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1 AND {field}=$2', env.org, booking) == 1
 
 
-@pytest.mark.parametrize('operation', ['confirm', 'complete', 'reactivate', 'invented'])
+@pytest.mark.parametrize('operation', ['invented', 'force_release', 'set_consent', 'clinical_decision'])
 async def test_unsupported_status_fails_closed(operation):
     with pytest.raises(BookingMutationRejected):
         BookingMutation(operation, '', '', '')
