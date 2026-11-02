@@ -3,9 +3,9 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from src.core.bookings.allocation_contracts import AllocationRequest, semantic_request_hash
+from src.core.bookings.allocation_contracts import AllocationRequest, derive_allocation, semantic_request_hash
 from src.core.db.repositories.booking_allocation_repo import (
-    AllocationConflict, AllocationDenied, AllocationUnavailable, BookingAllocationRepository, _uuid,
+    AllocationConflict, AllocationDenied, AllocationUnavailable, BookingAllocationRepository, _booking_fingerprint, _uuid,
 )
 from src.core.db.repositories.booking_repo import BookingRepository
 
@@ -130,6 +130,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                                   previous['catalog_revision'], catalog.revision, True)
         if before is not None and new_booking is not None:
             raise AllocationConflict('Booking already exists')
+        contact_preimage = None
         if mutation.operation == 'create':
             from datetime import date, time
             if (request.action != 'allocate' or request.appointment_date != date.fromisoformat(mutation.data)
@@ -143,14 +144,44 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 mutation.nome_cliente, mutation.telefono, date.fromisoformat(mutation.data),
                 time.fromisoformat(mutation.ora), mutation.coperti, mutation.note)
         else:
-            if (request.action != 'allocate' or request.appointment_date != locked['data']
+            if (request.action not in {'allocate', 'replace'} or request.appointment_date != locked['data']
                     or request.appointment_time != locked['ora']
                     or (request.party_size is not None and request.party_size != locked['coperti'])):
                 raise BookingMutationRejected('Allocation and existing booking differ')
+            if request.action == 'replace':
+                allocation = await conn.fetchrow('''SELECT * FROM booking_allocation_sets
+                    WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE''', org, request.booking_id)
+                if (not allocation or allocation['state'] != 'active'
+                    or allocation['allocation_revision'] != request.expected_allocation_revision
+                    or allocation['catalog_revision'] != catalog.revision
+                    or request.expected_catalog_revision != catalog.revision
+                    or allocation['booking_fingerprint'] != _booking_fingerprint(locked)
+                    or allocation['booking_calendar_revision'] != locked['calendar_revision']
+                    or allocation['timezone'] != catalog.timezone or allocation['temporal_kind'] != 'minutes'
+                    or locked['stato'] not in {'in_attesa', 'confermata'}
+                    or locked['completata_at'] is not None or locked['no_show_at'] is not None):
+                    raise AllocationConflict('Active allocation preimage changed')
+                try:
+                    start, end, derived = derive_allocation(request, catalog)
+                except (ValueError, TypeError, OverflowError):
+                    raise AllocationUnavailable('Allocation proposal is invalid') from None
+                claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at
+                    FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id''', org, request.booking_id)
+                await engine._take_locks(conn, org, request, claims, derived)
+                claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at
+                    FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id''', org, request.booking_id)
+                actual = [(c['resource_id'], c['resource_kind'], c['exclusive'], c['quantity']) for c in claims]
+                if (allocation['service_id'] != request.service_id or allocation['starts_at'] != start
+                    or allocation['ends_at'] != end or allocation['arrival_date'] != request.arrival_date
+                    or allocation['departure_date'] != request.departure_date or actual != list(derived)
+                    or any(c['starts_at'] != start or c['ends_at'] != end for c in claims)):
+                    raise BookingMutationRejected('Allocation preimage differs')
+                contact_preimage = await engine._seal_contact_preimage(conn, org, request)
             await conn.execute("""UPDATE bookings SET nome_cliente=$3,telefono=$4,note=$5,updated_at=NOW()
                 WHERE organization_id=$1 AND id=$2""", org, request.booking_id,
                 mutation.nome_cliente, mutation.telefono, mutation.note)
-        result = await engine._apply_on_connection(conn, org, auth, request, mutation_hash=mutation_hash)
+        result = await engine._apply_on_connection(conn, org, auth, request, mutation_hash=mutation_hash,
+                                                   contact_preimage=contact_preimage)
         if result['replayed'] or result['outcome'] != expected[request.action]:
             raise BookingMutationRejected('Allocation was not applied')
         if mutation.notice:
