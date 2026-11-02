@@ -31,7 +31,7 @@ Use real Postgres transactions and deterministic barriers: last resource across 
 
 ## PR3 draft boundary and outstanding limitations
 
-The private draft preauthorizes an active owner/manager and locks organization and erasure scope, subject conversation, catalog/capacity, existing booking and request receipt before a typed local mutation. New bookings use declared lineage. The complete typed booking/notice command and lineage are hashed in a nullable receipt column; legacy allocation requests cannot replay a typed mutation receipt. The draft supports only creation and contact-only editing with allocation. Schedule changes, status transitions, and other booking writers fail closed; a sealed locked preimage and complete status/resource policy are still needed. The draft is not wired to routes or workers, and real PostgreSQL concurrency, rollback and authorization verification remains necessary before any release.
+The private draft preauthorizes an active owner/manager and locks organization and erasure scope, subject conversation, catalog/capacity, existing booking and request receipt before a typed local mutation. New bookings use declared lineage. The complete typed booking/notice command and lineage are hashed in a nullable receipt column; legacy allocation requests cannot replay a typed mutation receipt. The draft supports creation, initial allocation/adoption, and contact-only editing of a currently active minute-based allocation through the existing replacement protocol. Schedule changes, status transitions, civil-night booking edits, and other booking writers remain unsupported. General schedule/status preimages and the complete state/resource policy are still needed. The draft is not wired to routes or workers, and real PostgreSQL concurrency, rollback and authorization verification remains necessary before any release.
 
 Local PostgreSQL 16 evidence: 45 tests passed across the new transaction tests and
 the existing allocation-engine suite. These include real rollback after durable
@@ -40,3 +40,44 @@ denial, schedule mismatch and suppression fingerprints even when no contact is
 linked. No provider was contacted. The same cases still require PostgreSQL 18
 and complete CI on the final commit. Passing this bounded suite does not prove
 adoption by all existing writers or authorize a new worker identity.
+
+## Active contact-only edit: transaction proof
+
+An active edit requires `replace` with the current allocation/catalog revisions.
+Before any write, the transaction validates the real locked booking and allocation
+fingerprint, explicit Calendar revision, eligibility, service, timezone, minute
+interval and every resource claim against the unchanged requested allocation.
+A private one-use capability is minted from database rows, never caller-supplied
+fingerprints; it is bound to the engine instance, connection, PostgreSQL
+transaction, tenant and exact request.
+
+SQL064 also increments Calendar revision for name/phone/note changes. Therefore
+ignoring that revision or simply recalculating the old fingerprint would be
+unsafe. The capability permits only that transaction's contact-only postimage
+and zero/one trigger revision increment; every schedule/status/subject field
+must remain equal. The normal allocator still replaces the complete allocation,
+advances its revision and every claim revision atomically, and stores the actual
+post-trigger fingerprint. Matching replay precedes mutation and never increments
+Calendar/allocation revisions or emits another notice. Ordinary allocation calls
+retain their stale-state check. This is not a generic stale-state override.
+
+Default edits emit no confirmation notice. Existing SQL064 may enqueue a
+versioned Google synchronization when a tenant has a configured integration;
+that queue remains local and transactional, with no direct provider call or new
+worker wiring. No operational caller is connected by this draft.
+
+The first active-edit prototype failed its actual PostgreSQL regression because
+it omitted the Calendar trigger interaction. That local failure is retained in
+the evidence and is not treated as a passing result. The corrected implementation
+requires fresh PostgreSQL 16/18 and exact-head CI receipts.
+
+Corrected active-edit proof (2 November 2026): PostgreSQL 16.3 and 18.6 each
+passed 145 tests across transaction mutations, the existing allocator, and
+tenant-scope guard regressions. Assertions cover the real SQL064 revision bump,
+post-trigger allocation fingerprint, preserved claim contents with revision
+advancement, no default confirmation notice, replay, stale explicit revision,
+forged token/raw-fingerprint denial, concurrent CAS and outbox-failure rollback.
+These suites overlap previous integration evidence and are not additive unique
+test counts. Independent final static review found no P0/P1 in this bounded dark
+scope. General writer/worker integration and whole-system five-sector runtime
+remain unfinished.

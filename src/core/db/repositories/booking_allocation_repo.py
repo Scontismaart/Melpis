@@ -57,6 +57,26 @@ def _booking_fingerprint(row):
 class BookingAllocationRepository:
     def __init__(self, pool):
         self.pool = pool
+        self.__contact_preimage = None
+
+    async def _seal_contact_preimage(self, conn, org, request):
+        """Seal a locked, already validated contact-edit preimage for this transaction."""
+        if not conn.is_in_transaction() or request.action != 'replace' or self.__contact_preimage is not None:
+            raise AllocationDenied('Contact preimage unavailable')
+        # Observe the actual locked rows here. A supplied fingerprint or snapshot
+        # is not authority to bypass the normal allocator's stale-state check.
+        booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, request.booking_id)
+        allocation = await conn.fetchrow('SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
+        if (not booking or not allocation or allocation['state'] != 'active'
+            or allocation['allocation_revision'] != request.expected_allocation_revision
+            or allocation['catalog_revision'] != request.expected_catalog_revision
+            or allocation['booking_fingerprint'] != _booking_fingerprint(booking)
+            or allocation['booking_calendar_revision'] != booking['calendar_revision']):
+            raise AllocationConflict('Contact preimage changed')
+        token = object()
+        txid = await conn.fetchval('SELECT txid_current()')
+        self.__contact_preimage = (token, conn, txid, org, request, dict(booking), dict(allocation))
+        return token
 
     async def apply(self, organization_id: UUID, auth_user_id: UUID, request: AllocationRequest):
         return await self._run(organization_id, auth_user_id, request, observe=False)
@@ -72,15 +92,15 @@ class BookingAllocationRepository:
             async with conn.transaction(isolation="read_committed"):
                 return await self._run_on_connection(conn, org, auth, request, observe=observe)
 
-    async def _apply_on_connection(self, conn, organization_id, auth_user_id, request, *, mutation_hash=None):
+    async def _apply_on_connection(self, conn, organization_id, auth_user_id, request, *, mutation_hash=None, contact_preimage=None):
         """Apply inside an existing caller-owned transaction; no commit or provider calls."""
         if not conn.is_in_transaction():
             raise RuntimeError("Allocation requires an active transaction")
         if not isinstance(request, AllocationRequest):
             raise ValueError("AllocationRequest required")
-        return await self._run_on_connection(conn, _uuid(organization_id), _uuid(auth_user_id), request, observe=False, mutation_hash=mutation_hash)
+        return await self._run_on_connection(conn, _uuid(organization_id), _uuid(auth_user_id), request, observe=False, mutation_hash=mutation_hash, contact_preimage=contact_preimage)
 
-    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None):
+    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None, contact_preimage=None):
         orgrow = await conn.fetchrow(
             "SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE", org)
         if not orgrow:
@@ -154,6 +174,25 @@ class BookingAllocationRepository:
             "SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id",
             org, request.booking_id)
         stale = bool(old and old["booking_fingerprint"] != fingerprint)
+        if contact_preimage is not None:
+            sealed, self.__contact_preimage = self.__contact_preimage, None
+            if not sealed:
+                raise AllocationDenied('Contact preimage unavailable')
+            token, original_conn, original_txid, original_org, original_request, original_booking, original_set = sealed
+            keys = ('data', 'ora', 'coperti', 'stato', 'contact_id', 'id_conversazione', 'completata_at', 'no_show_at')
+            prior_revision = original_booking['calendar_revision'] or 0
+            if (token is not contact_preimage or conn is not original_conn or org != original_org
+                or request != original_request or request.action != 'replace' or not conn.is_in_transaction()
+                or await conn.fetchval('SELECT txid_current()') != original_txid
+                or not old or old['state'] != 'active'
+                or old['allocation_revision'] != original_set['allocation_revision']
+                or old['catalog_revision'] != original_set['catalog_revision']
+                or old['booking_calendar_revision'] != original_booking['calendar_revision']
+                or old['booking_fingerprint'] != _booking_fingerprint(original_booking)
+                or any(booking[k] != original_booking[k] for k in keys)
+                or (booking['calendar_revision'] or 0) not in (prior_revision, prior_revision + 1)):
+                raise AllocationConflict('Contact preimage changed')
+            stale = False
         ineligible = (booking["stato"] not in {"in_attesa", "confermata"}
                       or booking.get("completata_at") is not None
                       or booking.get("no_show_at") is not None)

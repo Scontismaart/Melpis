@@ -8,7 +8,7 @@ import pytest
 from src.core.bookings.booking_mutation_contract import (
     BookingMutation, BookingMutationRejected, NewBookingLineage, apply_booking_mutation,
 )
-from src.core.db.repositories.booking_allocation_repo import AllocationConflict, AllocationDenied
+from src.core.db.repositories.booking_allocation_repo import AllocationConflict, AllocationDenied, AllocationUnavailable
 from src.core.db.repositories.booking_repo import BookingRepository
 from tests.core.bookings.test_allocation_engine_postgres import create_environment
 
@@ -214,3 +214,139 @@ async def test_concurrent_changed_command_same_key_has_one_winner_and_no_duplica
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2',
         env.org, booking) == 1
+
+async def test_active_contact_edit_replaces_revision_preserving_claims_and_replays(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    before_booking = await pg_pool.fetchrow('''SELECT data,ora,coperti,stato,calendar_revision
+        FROM bookings WHERE organization_id=$1 AND id=$2''', env.org, booking)
+    prior_calendar_revision = before_booking['calendar_revision']
+    before_claims = await pg_pool.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,
+        starts_at,ends_at,allocation_revision,catalog_revision,state
+        FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2
+        ORDER BY resource_id''', env.org, booking)
+    request = env.request(booking, action='replace', allocation_revision=1)
+    result = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
+    assert result['outcome'] == 'replaced' and result['applied_allocation_revision'] == 2
+    from src.core.db.repositories.booking_allocation_repo import _booking_fingerprint
+    post = await pg_pool.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
+    assert post['calendar_revision'] == prior_calendar_revision + 1
+    assert tuple(post[k] for k in ('data', 'ora', 'coperti', 'stato')) == tuple(
+        before_booking[k] for k in ('data', 'ora', 'coperti', 'stato'))
+    allocation = await pg_pool.fetchrow('SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
+    assert allocation['booking_fingerprint'] == _booking_fingerprint(post)
+    assert allocation['booking_calendar_revision'] == post['calendar_revision']
+    assert allocation['catalog_revision'] == request.expected_catalog_revision
+    after_claims = await pg_pool.fetch('''SELECT resource_id,resource_kind,exclusive,quantity,
+        starts_at,ends_at,allocation_revision,catalog_revision,state
+        FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2
+        ORDER BY resource_id''', env.org, booking)
+    assert len(after_claims) == len(before_claims)
+    for before, after in zip(before_claims, after_claims):
+        assert (after['resource_id'], after['resource_kind'], after['exclusive'], after['quantity'],
+                after['starts_at'], after['ends_at'], after['catalog_revision'], after['state']) == (
+            before['resource_id'], before['resource_kind'], before['exclusive'], before['quantity'],
+            before['starts_at'], before['ends_at'], before['catalog_revision'], before['state'])
+        assert after['allocation_revision'] == 2
+        assert after['catalog_revision'] == allocation['catalog_revision']
+        assert after['state'] == 'active'
+    assert await pg_pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+        WHERE organization_id=$1 AND booking_id=$2''', env.org, booking) == 0
+    assert await pg_pool.fetchval('''SELECT count(*) FROM messages
+        WHERE organization_id=$1 AND handling_type='booking_confirmation' ''', env.org) == 0
+    replay = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
+    assert replay['replayed']
+    assert await pg_pool.fetchval('SELECT calendar_revision FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == post['calendar_revision']
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 1
+
+
+async def test_active_contact_edit_rejects_stale_and_changed_preimages(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    request = env.request(booking, action='replace', allocation_revision=1)
+    for changed in (request.model_copy(update={'service_id': 'other'}), request.model_copy(update={'appointment_date': date(2026, 10, 29)}), request.model_copy(update={'party_size': 2})):
+        with pytest.raises((BookingMutationRejected, AllocationConflict, AllocationUnavailable)):
+            await apply_booking_mutation(pg_pool, env.org, env.auth, changed, mutation=edit())
+    await pg_pool.execute("UPDATE bookings SET stato='confermata' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    with pytest.raises(AllocationConflict):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
+    assert await pg_pool.fetchval('SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == ''
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+
+
+async def test_active_contact_edit_rejects_stale_booking_calendar_revision(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    await pg_pool.execute('''UPDATE booking_allocation_sets SET booking_calendar_revision=0
+        WHERE organization_id=$1 AND booking_id=$2''', env.org, booking)
+    request = env.request(booking, action='replace', allocation_revision=1)
+    with pytest.raises(AllocationConflict):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
+    assert await pg_pool.fetchval('SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == ''
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
+
+
+async def test_generic_allocation_replace_fails_closed_after_unsealed_contact_edit(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    await pg_pool.execute('''UPDATE bookings SET telefono='3900000099'
+        WHERE organization_id=$1 AND id=$2''', env.org, booking)
+    request = env.request(booking, action='replace', allocation_revision=1)
+    result = await env.apply(request)
+    assert result['outcome'] == 'unknown'
+    assert result['applied_allocation_revision'] is None
+    assert await pg_pool.fetchval('SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == '3900000099'
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+
+
+async def test_forged_contact_preimage_cannot_bypass_fingerprint_staleness(pg_pool):
+    from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
+
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    request = env.request(booking, action='replace', allocation_revision=1)
+    raw_fingerprint = await pg_pool.fetchval('''SELECT booking_fingerprint FROM booking_allocation_sets
+        WHERE organization_id=$1 AND booking_id=$2''', env.org, booking)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        for forged_preimage in (object(), raw_fingerprint):
+            engine = BookingAllocationRepository(pg_pool)
+            with pytest.raises(AllocationDenied, match='Contact preimage unavailable'):
+                await engine._apply_on_connection(
+                    conn, env.org, env.auth, request, contact_preimage=forged_preimage)
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
+
+
+async def test_active_contact_edit_concurrent_revision_has_one_winner(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    requests = [env.request(booking, action='replace', allocation_revision=1) for _ in range(2)]
+    results = await asyncio.gather(*(apply_booking_mutation(pg_pool, env.org, env.auth, r, mutation=edit()) for r in requests), return_exceptions=True)
+    assert sum(isinstance(r, dict) for r in results) == 1
+    assert sum(isinstance(r, AllocationConflict) for r in results) == 1
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
+
+
+async def test_active_contact_edit_rolls_back_after_replacement(pg_pool, monkeypatch):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await pg_pool.execute("UPDATE bookings SET stato='confermata' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    await env.apply(env.request(booking))
+    original = BookingRepository.enqueue_calendar_confirmation
+    async def fault(self, *args, **kwargs):
+        await original(self, *args, **kwargs)
+        raise RuntimeError('fault after outbox')
+    monkeypatch.setattr(BookingRepository, 'enqueue_calendar_confirmation', fault)
+    request = env.request(booking, action='replace', allocation_revision=1)
+    with pytest.raises(RuntimeError, match='fault after outbox'):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit(notice=True))
+    assert await pg_pool.fetchval('SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == ''
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
