@@ -99,6 +99,10 @@ async def test_concurrent_publishers_and_reader_observe_only_complete_index(repo
         document_id=claim["document"]["id"],
     )
     assert claim["status"] == "claimed"
+    # A pending replacement retains the previous certified, active index until
+    # the new complete revision commits atomically.
+    before_publish = await repo.search_similar(org_id, [0.1] * 384, k=5)
+    assert [row["content"] for row in before_publish] == ["baseline"]
 
     async def publish():
         try:
@@ -118,12 +122,15 @@ async def test_concurrent_publishers_and_reader_observe_only_complete_index(repo
     failures = [item for item in outcomes[:2] if isinstance(item, ValueError)]
     assert len(successes) == 1
     assert len(failures) == 1
+    assert str(failures[0]) == "index_claim_lost"
 
     read_during_publish = outcomes[2]
     observed = {row["content"] for row in read_during_publish}
-    assert observed in (set(), set(chunks))
+    assert observed in ({"baseline"}, set(chunks))
+    assert len(read_during_publish) == len(observed)
     final = await repo.search_similar(org_id, [0.1] * 384, k=5)
     assert {row["content"] for row in final} == set(chunks)
+    assert len(final) == len(chunks)
 
 
 @pytest.mark.asyncio
