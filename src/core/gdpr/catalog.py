@@ -19,6 +19,27 @@ class Category:
 
 
 CATEGORIES: tuple[Category, ...] = (
+    Category("booking_stay_tombstones", """
+        SELECT request_id,booking_id,original_subject_id,purpose,operation_id,policy_version,created_at
+        FROM booking_stay_tombstones WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT request_id,booking_id,purpose,operation_id,policy_version,created_at FROM booking_stay_tombstones
+        WHERE organization_id=$1::uuid AND original_subject_id=$2::uuid
+    """, exclusion_reason="Replay fences remain subject-linked pending an approved lifecycle."),
+    Category("booking_stay_purge_fences", """
+        SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count,created_at
+        FROM booking_stay_purge_fences WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT booking_id,purpose,operation_id,policy_version,receipt_count,created_at FROM booking_stay_purge_fences
+        WHERE organization_id=$1::uuid AND original_subject_id=$2::uuid
+    """, exclusion_reason="Replay fences remain subject-linked pending an approved lifecycle."),
+    Category("booking_stays", """
+        SELECT booking_id,original_subject_id,arrival_date,departure_date,revision
+        FROM booking_stays WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT booking_id,arrival_date,departure_date,revision FROM booking_stays
+        WHERE organization_id=$1::uuid AND original_subject_id=$2::uuid
+    """, exclusion_reason="Source-message and conversation identifiers are excluded from subject exports."),
     Category("booking_conversation_revocations", """
         SELECT organization_id, conversation_id, subject_id, reason, created_at
         FROM booking_conversation_revocations WHERE organization_id = $1::uuid

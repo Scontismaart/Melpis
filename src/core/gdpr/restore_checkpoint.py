@@ -31,9 +31,13 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
                 or not isinstance(checkpoint, dict) or set(checkpoint) != {'payload', 'signature'}):
             raise ValueError
         payload, signature = checkpoint['payload'], checkpoint['signature']
-        if (not isinstance(payload, dict) or set(payload) != {
-                'version', 'organization_id', 'backup_id', 'sequence', 'complete', 'erasures'}
-                or payload['version'] != 'c24-restore-v1' or payload['complete'] is not True
+        if not isinstance(payload, dict):
+            raise ValueError
+        expected = {'version', 'organization_id', 'backup_id', 'sequence', 'complete', 'erasures'}
+        if payload.get('version') == 'c24-restore-v2':
+            expected.add('stay_purges')
+        if (set(payload) != expected or payload.get('version') not in {'c24-restore-v1', 'c24-restore-v2'}
+                or payload['complete'] is not True
                 or payload['organization_id'] != str(org) or payload['backup_id'] != backup_id
                 or type(payload['sequence']) is not int or payload['sequence'] < minimum_sequence
                 or not isinstance(payload['erasures'], list) or len(payload['erasures']) > 10000
@@ -56,12 +60,54 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
                 raise ValueError
             seen.add(operation)
             entries.append((operation, scope, subject))
+        purges = []
+        if payload['version'] == 'c24-restore-v2':
+            if not isinstance(payload['stay_purges'], list) or len(payload['stay_purges']) > 10000:
+                raise ValueError
+            seen_bookings = set()
+            for item in payload['stay_purges']:
+                if not isinstance(item, dict) or set(item) != {'booking_id','subject_id','purpose','operation_id','policy_version','request_ids'}:
+                    raise ValueError
+                booking, subject = UUID(item['booking_id']), UUID(item['subject_id'])
+                operation = UUID(item['operation_id']) if item['operation_id'] is not None else None
+                purpose, version, ids = item['purpose'], item['policy_version'], item['request_ids']
+                if (booking in seen_bookings or purpose not in {'erasure','retention'}
+                    or (purpose == 'erasure') != (operation is not None)
+                    or not isinstance(version, str) or not 1 <= len(version) <= 80
+                    or not isinstance(ids, list) or len(ids) > 10000):
+                    raise ValueError
+                requests = {UUID(value) for value in ids}
+                if len(requests) != len(ids):
+                    raise ValueError
+                seen_bookings.add(booking)
+                purges.append((booking,subject,purpose,operation,version,requests))
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
         raise RestoreBlocked('Authenticated external restore checkpoint required') from None
 
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
+    if not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)', org):
+        raise RestoreBlocked('Restored organization is unavailable')
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))', str(org))
+    if payload['version'] == 'c24-restore-v1':
+        # v1 cannot authenticate the absence of later retention purges, including
+        # when an older backup has no local fence to reveal that loss.
+        raise RestoreBlocked('Authenticated stay purge journal required')
+    actual = await conn.fetch('''SELECT booking_id,original_subject_id,purpose,operation_id,policy_version
+        FROM booking_stay_purge_fences WHERE organization_id=$1''', org)
+    expected_fences = {(b,s,p,o,v) for b,s,p,o,v,_ in purges}
+    if {(r['booking_id'],r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) for r in actual} != expected_fences:
+        raise RestoreBlocked('Stay purge fences do not match authenticated journal')
+    if await conn.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1', org) != sum(len(p[5]) for p in purges):
+        raise RestoreBlocked('Stay purge tombstones do not match authenticated journal')
+    for booking, subject, purpose, operation, version, requests in purges:
+        rows = await conn.fetch('''SELECT request_id,original_subject_id,purpose,operation_id,policy_version
+            FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2''', org, booking)
+        if ({r['request_id'] for r in rows} != requests
+            or any((r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) != (subject,purpose,operation,version) for r in rows)
+            or await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)
+                OR EXISTS(SELECT 1 FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2)''', org, booking)):
+            raise RestoreBlocked('Stay purge copies do not match authenticated journal')
     for operation, scope, subject in entries:
         present = await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM gdpr_erasure_barriers
             WHERE organization_id=$1 AND operation_id=$2 AND scope=$3
@@ -69,7 +115,12 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
         if not present:
             raise RestoreBlocked('Newer erasure journal has not been replayed')
         remaining = await conn.fetchval('''SELECT
-            EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
+            EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1
+                   AND ($2::uuid IS NULL OR original_subject_id=$2))
+            OR EXISTS(SELECT 1 FROM booking_allocation_requests r
+                LEFT JOIN booking_stays s ON s.organization_id=r.organization_id AND s.organization_id=$1 AND s.booking_id=r.booking_id
+                WHERE r.organization_id=$1 AND ($2::uuid IS NULL OR s.original_subject_id IS NULL OR s.original_subject_id=$2))
+            OR EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
                    AND ($2::uuid IS NULL OR subject_id=$2))
             OR EXISTS(SELECT 1 FROM booking_conversation_requests r
                 JOIN conversations c ON c.organization_id=r.organization_id AND c.id=r.conversation_id

@@ -21,8 +21,8 @@ def test_every_nonempty_frozen_projection_passes_runtime_validator():
                 count += 1
     # Three C24 categories each add organization/contact projections; the
     # durable canonical-response lineage also adds one contact projection.
-    assert count == 77
-    assert len({category.name for category in catalog.CATEGORIES}) == 54
+    assert count == 83
+    assert len({category.name for category in catalog.CATEGORIES}) == 57
 
 
 @pytest.mark.parametrize('name', [

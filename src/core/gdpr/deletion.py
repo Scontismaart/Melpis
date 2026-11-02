@@ -57,6 +57,12 @@ class Deletion:
             )
             policies = {p['category']: dict(p) for p in policies}
             required = {'contact_content', 'transient_content', 'cutover'}
+            if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays
+                WHERE organization_id=$1 AND ($2::uuid IS NULL OR original_subject_id=$2))''', org, op['subject_id']):
+                required.add('booking_stay_content')
+                # Receipts and original lineage need a reviewed deletion protocol.
+                # Never claim a successful erase while those copies remain.
+                blockers.append('administrative_stay_purge_required')
             if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
                 SELECT 1 FROM simulation_requests WHERE organization_id=$1
                   AND response ? 'booking_state_proposal' AND c24_subject_id IS NULL)''', org):
@@ -113,6 +119,19 @@ class Deletion:
                    AND ($2::uuid IS NULL OR contact_id=$2) AND stato IN ('in_attesa','confermata'))''', org, op['subject_id'],
             ):
                 blockers.append('active_booking_requires_controller_action')
+            if blockers == ['administrative_stay_purge_required']:
+                # Fence retries before the owner-only scoped purge. All other
+                # policy, active-booking and cutover checks have passed.
+                pending_subject = op['subject_id']
+                if pending_subject:
+                    pending_phone = await conn.fetchval('SELECT phone_number FROM contacts WHERE organization_id=$1 AND id=$2', org, pending_subject)
+                    pending_digest, pending_key = identifier_fingerprint(org, pending_phone)
+                else:
+                    pending_digest, pending_key = None, None
+                await conn.execute('''INSERT INTO gdpr_erasure_barriers
+                    (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
+                    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,operation_id) DO NOTHING''',
+                    org, oid, op['scope'], pending_subject, pending_digest, pending_key)
             if blockers:
                 await conn.execute(
                     '''UPDATE gdpr_operations SET status='blocked',manifest=$3::jsonb,updated_at=NOW()
@@ -255,7 +274,7 @@ class Deletion:
                 digest, key_id = None, None
             await conn.execute(
                 '''INSERT INTO gdpr_erasure_barriers(organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
-                   VALUES($1,$2,$3,$4,$5,$6)''', org, oid, op['scope'], subject, digest, key_id,
+                   VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,operation_id) DO NOTHING''', org, oid, op['scope'], subject, digest, key_id,
             )
             await conn.execute(
                 '''INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status,attempts)
@@ -265,7 +284,7 @@ class Deletion:
             manifest = {'version': 'a06-v1', 'local_erasure': 'approved_relational_data_erased',
                         'external_copies': 'pending_verified_receipts',
                         'retained': ['billing', 'audit', 'provider_accounting', 'shared_auth_accounts', 'backups',
-                                     'conversation_revocation_fences_pending_policy'],
+                                     'conversation_revocation_fences_pending_policy', 'booking_stay_replay_fences_pending_policy'],
                         'subject_unstructured_data': 'controller_review_required' if subject else 'tenant_scoped',
                         'policies': {k: {'version': p['version'], 'reference': p['approval_reference']} for k,p in policies.items()}}
             await conn.execute(

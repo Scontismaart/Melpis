@@ -81,3 +81,51 @@ These suites overlap previous integration evidence and are not additive unique
 test counts. Independent final static review found no P0/P1 in this bounded dark
 scope. General writer/worker integration and whole-system five-sector runtime
 remain unfinished.
+
+## Additional dark minute and civil-night commands
+
+The next draft implements minute rescheduling and cancel/reject/no-show with
+actual locked preimage validation, exact service/resource requirements,
+transaction-bound postimages and the existing allocation/receipt transaction.
+An unavailable target rolls the entire change back; the old claims remain.
+Rescheduling preserves service/resource selection and returns to `in_attesa`;
+confirmation/reconfirmation and compensation remain separate unfinished writers.
+No automatic provider send, A04 charge or runtime integration is introduced.
+
+`booking_stays` is a canonical civil arrival/departure record for verified
+original subject/conversation/source lineage. It does not count capacity; the
+existing allocator remains authoritative for complete room intervals and DST.
+Create/reschedule use the published check-in time, preserve source identity and
+advance stay/allocation revisions atomically. Missing historical/subjectless
+lineage is rejected; no checkout backfill or guessed identity is performed.
+
+Stay erasure/retention is an explicitly administrative workflow. An approved
+application erasure request first passes existing execution/policy/drain/booking
+checks and places its barrier, then reports `administrative_stay_purge_required`.
+The narrowly scoped database-owner purge function checks current policy, subject,
+operation/barrier (or approved retention age), terminal booking and released
+claims. Private transaction markers authorize only that exact receipt/stay
+cleanup, preserve the financial booking/A04 counters, append audit evidence and
+write replay fences/tombstones. Ordinary backend/client roles cannot execute
+this function, forge markers or delete the immutable receipts/stays. Both Python
+and database write guards reject purged booking/request recreation.
+
+This does not authorize an administrator operation, destructive job or new
+worker grant. The application retention worker deliberately cannot invoke the
+owner-only purge; an independently authorized operator is required. C01 must
+verify the ACTUAL application pool principal and absence of owner/SET paths:
+named-role ACL tests alone do not prove deployment separation. No credentials
+were inspected or changed. Tombstones, private audit references and fences are
+still personal metadata with unapproved retention, explicitly exported in
+curated form or excluded/retained; no anonymous or fully erased claim is made.
+
+Restore requires a bounded signed v2 journal including each stay purge and its
+request tombstones, held independently outside the restored database. v1 cannot
+prove absence of later retention purges and remains quarantined. Verified v2
+results still never authorize traffic or certify external copies. No external
+journal service, policy duration, remote migration or deployment was created.
+
+Still unfinished: occupied-state confirmation/completion/reactivation semantics,
+reconfirmation compensation, general adoption of every legacy/import/provider
+writer, private worker authority integration and full five-sector runtime traces.
+Existing A05 activation remains restaurant/table/60 minutes only.
