@@ -125,7 +125,32 @@ prove absence of later retention purges and remains quarantined. Verified v2
 results still never authorize traffic or certify external copies. No external
 journal service, policy duration, remote migration or deployment was created.
 
-Still unfinished: occupied-state confirmation/completion/reactivation semantics,
+Still unfinished: reconciliation of unsupported historical states,
 reconfirmation compensation, general adoption of every legacy/import/provider
 writer, private worker authority integration and full five-sector runtime traces.
 Existing A05 activation remains restaurant/table/60 minutes only.
+
+## Coherent occupied-state transitions
+
+Private owner/manager confirm and complete validate the exact active allocation
+and retain its resource claims. Completion records the actual server transaction
+timestamp and writes the matching postimage fingerprint; it does not release
+capacity. Coherent `da_verificare` records may pass the same checks. The fixed
+postimage capability never accepts a model-provided bypass flag.
+
+Typed cancel/reject/no-show also persist the real canceled postimage. Reactivation
+is limited to coherent canceled/rejected records with no completion/no-show
+timestamps, no claims and a matching current postimage/catalog/revision; admission
+rechecks capacity before returning to pending. Failure leaves the cancellation
+unchanged, while exact replay neither writes nor emits another notice. Unproven
+legacy cancellations and no-show/completed resurrection remain denied.
+
+`internal_calendar_sync` retains internal scheduling authority independently of
+external synchronization. Google/external authoritative modes are unsupported by
+this private local writer and remain fail-closed; no provider is contacted.
+These methods are not wired to routes, workers or legacy writers.
+
+Administrative erasure still requires a terminal released stay. Completed
+records with retained allocations require an explicitly reviewed archival/retention
+procedure; elapsed time alone does not bypass that prerequisite. No financial
+record, quota unit or unknown provider consumption is automatically released.

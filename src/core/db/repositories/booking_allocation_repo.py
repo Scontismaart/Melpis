@@ -61,13 +61,17 @@ class BookingAllocationRepository:
 
     async def _seal_contact_preimage(self, conn, org, request, *, mutation=None):
         """Seal a locked, already validated contact-edit preimage for this transaction."""
-        if not conn.is_in_transaction() or request.action != 'replace' or self.__contact_preimage is not None:
+        if not conn.is_in_transaction() or self.__contact_preimage is not None:
             raise AllocationDenied('Contact preimage unavailable')
+        operation = mutation.operation if mutation is not None else 'edit_contact'
+        expected_action = 'cancel' if operation in {'cancel','reject','no_show'} else 'allocate' if operation == 'reactivate' else 'replace'
+        if request.action != expected_action:
+            raise AllocationDenied('Preimage action unavailable')
         # Observe the actual locked rows here. A supplied fingerprint or snapshot
         # is not authority to bypass the normal allocator's stale-state check.
         booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, request.booking_id)
         allocation = await conn.fetchrow('SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
-        if (not booking or not allocation or allocation['state'] != 'active'
+        if (not booking or not allocation or allocation['state'] != ('cancelled' if operation == 'reactivate' else 'active')
             or allocation['allocation_revision'] != request.expected_allocation_revision
             or allocation['catalog_revision'] != request.expected_catalog_revision
             or allocation['booking_fingerprint'] != _booking_fingerprint(booking)
@@ -77,15 +81,25 @@ class BookingAllocationRepository:
         txid = await conn.fetchval('SELECT txid_current()')
         if mutation is not None:
             from src.core.bookings.booking_mutation_contract import BookingMutation
-            if type(mutation) is not BookingMutation or mutation.operation not in {'reschedule', 'reschedule_stay'}:
+            if type(mutation) is not BookingMutation or mutation.operation not in {'reschedule', 'reschedule_stay', 'confirm', 'complete', 'cancel', 'reject', 'no_show', 'reactivate'}:
                 raise AllocationDenied('Unsupported preimage command')
+            if mutation.operation in {'confirm', 'complete'} and (booking['stato'] not in {'in_attesa','confermata','da_verificare'}
+                or booking['completata_at'] is not None or booking['no_show_at'] is not None):
+                raise AllocationConflict('Occupied booking preimage changed')
+            if mutation.operation == 'reactivate' and (booking['stato'] not in {'cancellata','cancellato','rifiutata'}
+                or booking['completata_at'] is not None or booking['no_show_at'] is not None):
+                raise AllocationConflict('Reactivation preimage changed')
+            if mutation.operation in {'cancel','reject','no_show'} and (booking['stato'] not in {'in_attesa','confermata'}
+                or booking['completata_at'] is not None or booking['no_show_at'] is not None):
+                raise AllocationConflict('Release preimage changed')
         stay = None
         if mutation is not None and mutation.operation == 'reschedule_stay':
             stay = await conn.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
             if (not stay or stay['revision'] != mutation.expected_stay_revision
                 or (stay['arrival_date'], stay['departure_date']) != (allocation['arrival_date'], allocation['departure_date'])):
                 raise AllocationConflict('Stay preimage changed')
-        self.__contact_preimage = (token, conn, txid, org, request, dict(booking), dict(allocation), mutation, dict(stay) if stay else None)
+        transaction_now = await conn.fetchval('SELECT now()')
+        self.__contact_preimage = (token, conn, txid, org, request, dict(booking), dict(allocation), mutation, dict(stay) if stay else None, transaction_now)
         return token
 
     async def apply(self, organization_id: UUID, auth_user_id: UUID, request: AllocationRequest):
@@ -168,7 +182,7 @@ class BookingAllocationRepository:
                      FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2""",
                 org, request.request_id)
             if previous:
-                if authority != "internal":
+                if authority not in {"internal", "internal_calendar_sync"}:
                     raise AllocationUnavailable("Current authority is not supported")
                 if (previous["booking_id"] != request.booking_id or previous["actor_user_id"] != actor
                         or previous["action"] != request.action or previous["payload_hash"] != digest
@@ -187,23 +201,36 @@ class BookingAllocationRepository:
             "SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id",
             org, request.booking_id)
         stale = bool(old and old["booking_fingerprint"] != fingerprint)
+        occupied_transition = False
+        sealed_release = False
         if contact_preimage is not None:
             sealed, self.__contact_preimage = self.__contact_preimage, None
             if not sealed:
                 raise AllocationDenied('Contact preimage unavailable')
-            token, original_conn, original_txid, original_org, original_request, original_booking, original_set, mutation, original_stay = sealed
-            keys = ('contact_id', 'id_conversazione', 'completata_at', 'no_show_at', 'nome_cliente', 'telefono', 'note') if mutation else ('data', 'ora', 'coperti', 'stato', 'contact_id', 'id_conversazione', 'completata_at', 'no_show_at')
+            token, original_conn, original_txid, original_org, original_request, original_booking, original_set, mutation, original_stay, transaction_now = sealed
+            occupied_transition = bool(mutation and mutation.operation in {'confirm', 'complete', 'reactivate'})
+            sealed_release = bool(mutation and mutation.operation in {'cancel','reject','no_show'})
+            if occupied_transition or sealed_release:
+                keys = ('data','ora','coperti','contact_id','id_conversazione','nome_cliente','telefono','note')
+            else:
+                keys = ('contact_id', 'id_conversazione', 'completata_at', 'no_show_at', 'nome_cliente', 'telefono', 'note') if mutation else ('data', 'ora', 'coperti', 'stato', 'contact_id', 'id_conversazione', 'completata_at', 'no_show_at')
             prior_revision = original_booking['calendar_revision'] or 0
             if (token is not contact_preimage or conn is not original_conn or org != original_org
-                or request != original_request or request.action != 'replace' or not conn.is_in_transaction()
+                or request != original_request or request.action != ('cancel' if sealed_release else 'allocate' if mutation and mutation.operation == 'reactivate' else 'replace') or not conn.is_in_transaction()
                 or await conn.fetchval('SELECT txid_current()') != original_txid
-                or not old or old['state'] != 'active'
+                or not old or old['state'] != ('cancelled' if mutation and mutation.operation == 'reactivate' else 'active')
                 or old['allocation_revision'] != original_set['allocation_revision']
                 or old['catalog_revision'] != original_set['catalog_revision']
                 or old['booking_calendar_revision'] != original_booking['calendar_revision']
                 or old['booking_fingerprint'] != _booking_fingerprint(original_booking)
                 or any(booking[k] != original_booking[k] for k in keys)
-                or (mutation and (booking['data'] != date.fromisoformat(mutation.data)
+                or (occupied_transition and (booking['stato'] != {'confirm':'confermata','complete':'completata','reactivate':'in_attesa'}[mutation.operation]
+                    or booking['completata_at'] != (transaction_now if mutation.operation == 'complete' else None)
+                    or booking['no_show_at'] is not None))
+                or (sealed_release and (booking['stato'] != {'cancel':'cancellata','reject':'rifiutata','no_show':'no_show'}[mutation.operation]
+                    or booking['completata_at'] is not None
+                    or booking['no_show_at'] != (transaction_now if mutation.operation == 'no_show' else None)))
+                or (mutation and not occupied_transition and not sealed_release and (booking['data'] != date.fromisoformat(mutation.data)
                     or booking['ora'] != time.fromisoformat(mutation.ora)
                     or booking['coperti'] != mutation.coperti or booking['stato'] != 'in_attesa'
                     or (mutation.operation == 'reschedule' and (booking['data'] != request.appointment_date
@@ -223,6 +250,8 @@ class BookingAllocationRepository:
         ineligible = (booking["stato"] not in {"in_attesa", "confermata"}
                       or booking.get("completata_at") is not None
                       or booking.get("no_show_at") is not None)
+        if occupied_transition:
+            ineligible = False
         if not observe and request.expected_catalog_revision != current.revision:
             raise AllocationConflict("Published catalog revision changed")
         if not observe and request.expected_allocation_revision != (old["allocation_revision"] if old else 0):
@@ -231,7 +260,7 @@ class BookingAllocationRepository:
         # A change of authority must not silently release local capacity.
         # Cancellation is an admission operation too; no provider protocol
         # is implemented by this disconnected repository.
-        if authority != "internal" or current.sector not in {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"}:
+        if authority not in {"internal", "internal_calendar_sync"} or current.sector not in {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"}:
             if not observe:
                 await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash)
             return self._result("unknown", None, old, current.revision, current.revision, False)
@@ -287,9 +316,15 @@ class BookingAllocationRepository:
                 applied = old["allocation_revision"] + 1
                 if not observe:
                     await conn.execute("DELETE FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2", org, request.booking_id)
-                    await conn.execute(
-                        "UPDATE booking_allocation_sets SET state='cancelled',allocation_revision=$3,updated_at=NOW() WHERE organization_id=$1 AND booking_id=$2",
-                        org, request.booking_id, applied)
+                    if sealed_release:
+                        await conn.execute("""UPDATE booking_allocation_sets SET state='cancelled',allocation_revision=$3,
+                            booking_fingerprint=$4,booking_calendar_revision=$5,updated_at=NOW()
+                            WHERE organization_id=$1 AND booking_id=$2""", org, request.booking_id, applied,
+                            fingerprint, booking.get('calendar_revision') or 0)
+                    else:
+                        await conn.execute(
+                            "UPDATE booking_allocation_sets SET state='cancelled',allocation_revision=$3,updated_at=NOW() WHERE organization_id=$1 AND booking_id=$2",
+                            org, request.booking_id, applied)
         else:
             if request.action == "replace" and old and old["state"] == "active":
                 current_resources = {r.resource_id: r for r in current.resources}

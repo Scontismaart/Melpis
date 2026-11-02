@@ -286,6 +286,10 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
     async with pool.acquire() as c:
         tx=c.transaction(); await tx.start()
         try:
+            # Simulate the schema before 069, not a partial uninstall of 069
+            # beneath 071's dependent FK/trigger. The outer rollback restores
+            # the newer stay protections after the first-install failure proof.
+            await c.execute('DROP FUNCTION booking_stay_admin_purge(uuid,uuid,text,uuid,text); DROP TABLE booking_stays')
             await c.execute('DROP TABLE booking_resource_allocations,booking_allocation_requests,booking_allocation_sets; DROP FUNCTION booking_allocation_guard(); DROP FUNCTION booking_allocation_immutable(); ALTER TABLE bookings DROP CONSTRAINT bookings_org_id_unique')
             before=await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")
             helper='allocation_defaults_'+uuid4().hex
@@ -298,6 +302,9 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             assert not await c.fetchval("SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='bookings'::regclass AND conname='bookings_org_id_unique')")
             assert await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")==before
         finally: await tx.rollback()
+        assert await c.fetchval("SELECT to_regclass('booking_stays')") is not None
+        assert await c.fetchval("SELECT to_regprocedure('booking_stay_admin_purge(uuid,uuid,text,uuid,text)')") is not None
+        assert await c.fetchval("SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='booking_stays'::regclass AND tgname='booking_stay_immutable_delete' AND NOT tgisinternal AND tgenabled='O' AND tgfoid='booking_allocation_immutable()'::regprocedure)")
 
 @pytest.mark.parametrize('client,member_role', [('anon',None),('authenticated','staff'),('authenticated','manager'),('authenticated','owner')])
 @pytest.mark.parametrize('operation', ['SELECT * FROM booking_allocation_sets','INSERT INTO booking_allocation_sets DEFAULT VALUES','TRUNCATE booking_allocation_sets'])
