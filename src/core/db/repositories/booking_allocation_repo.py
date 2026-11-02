@@ -59,7 +59,7 @@ class BookingAllocationRepository:
         self.pool = pool
         self.__contact_preimage = None
 
-    async def _seal_contact_preimage(self, conn, org, request):
+    async def _seal_contact_preimage(self, conn, org, request, *, mutation=None):
         """Seal a locked, already validated contact-edit preimage for this transaction."""
         if not conn.is_in_transaction() or request.action != 'replace' or self.__contact_preimage is not None:
             raise AllocationDenied('Contact preimage unavailable')
@@ -75,7 +75,17 @@ class BookingAllocationRepository:
             raise AllocationConflict('Contact preimage changed')
         token = object()
         txid = await conn.fetchval('SELECT txid_current()')
-        self.__contact_preimage = (token, conn, txid, org, request, dict(booking), dict(allocation))
+        if mutation is not None:
+            from src.core.bookings.booking_mutation_contract import BookingMutation
+            if type(mutation) is not BookingMutation or mutation.operation not in {'reschedule', 'reschedule_stay'}:
+                raise AllocationDenied('Unsupported preimage command')
+        stay = None
+        if mutation is not None and mutation.operation == 'reschedule_stay':
+            stay = await conn.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
+            if (not stay or stay['revision'] != mutation.expected_stay_revision
+                or (stay['arrival_date'], stay['departure_date']) != (allocation['arrival_date'], allocation['departure_date'])):
+                raise AllocationConflict('Stay preimage changed')
+        self.__contact_preimage = (token, conn, txid, org, request, dict(booking), dict(allocation), mutation, dict(stay) if stay else None)
         return token
 
     async def apply(self, organization_id: UUID, auth_user_id: UUID, request: AllocationRequest):
@@ -107,6 +117,9 @@ class BookingAllocationRepository:
             raise AllocationDenied("Organization unavailable")
         await conn.execute(
             "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(org))
+        if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT 1 FROM booking_stay_tombstones WHERE organization_id=$1 AND request_id=$3)''', org, request.booking_id, request.request_id):
+            raise AllocationDenied('Purged booking or request cannot be replayed')
         actor = await self._actor(conn, org, auth)
         booking = await conn.fetchrow(
             "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2", org, request.booking_id)
@@ -178,8 +191,8 @@ class BookingAllocationRepository:
             sealed, self.__contact_preimage = self.__contact_preimage, None
             if not sealed:
                 raise AllocationDenied('Contact preimage unavailable')
-            token, original_conn, original_txid, original_org, original_request, original_booking, original_set = sealed
-            keys = ('data', 'ora', 'coperti', 'stato', 'contact_id', 'id_conversazione', 'completata_at', 'no_show_at')
+            token, original_conn, original_txid, original_org, original_request, original_booking, original_set, mutation, original_stay = sealed
+            keys = ('contact_id', 'id_conversazione', 'completata_at', 'no_show_at', 'nome_cliente', 'telefono', 'note') if mutation else ('data', 'ora', 'coperti', 'stato', 'contact_id', 'id_conversazione', 'completata_at', 'no_show_at')
             prior_revision = original_booking['calendar_revision'] or 0
             if (token is not contact_preimage or conn is not original_conn or org != original_org
                 or request != original_request or request.action != 'replace' or not conn.is_in_transaction()
@@ -190,8 +203,22 @@ class BookingAllocationRepository:
                 or old['booking_calendar_revision'] != original_booking['calendar_revision']
                 or old['booking_fingerprint'] != _booking_fingerprint(original_booking)
                 or any(booking[k] != original_booking[k] for k in keys)
+                or (mutation and (booking['data'] != date.fromisoformat(mutation.data)
+                    or booking['ora'] != time.fromisoformat(mutation.ora)
+                    or booking['coperti'] != mutation.coperti or booking['stato'] != 'in_attesa'
+                    or (mutation.operation == 'reschedule' and (booking['data'] != request.appointment_date
+                        or booking['ora'] != request.appointment_time
+                        or (request.party_size is not None and booking['coperti'] != request.party_size)))
+                    or (mutation.operation == 'reschedule_stay' and (str(request.arrival_date) != mutation.arrival_date
+                        or str(request.departure_date) != mutation.departure_date))))
                 or (booking['calendar_revision'] or 0) not in (prior_revision, prior_revision + 1)):
                 raise AllocationConflict('Contact preimage changed')
+            if original_stay is not None:
+                stay = await conn.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE', org, request.booking_id)
+                if (not stay or stay['revision'] != original_stay['revision'] + 1
+                    or (stay['arrival_date'], stay['departure_date']) != (request.arrival_date, request.departure_date)
+                    or any(stay[k] != original_stay[k] for k in ('original_subject_id', 'original_conversation_id', 'source_message_id'))):
+                    raise AllocationConflict('Stay postimage changed')
             stale = False
         ineligible = (booking["stato"] not in {"in_attesa", "confermata"}
                       or booking.get("completata_at") is not None

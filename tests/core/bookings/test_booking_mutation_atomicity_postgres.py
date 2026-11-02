@@ -107,9 +107,10 @@ async def test_new_booking_commit_and_replay(pg_pool):
         assert await pg_pool.fetchval(f'SELECT count(*) FROM {table} WHERE organization_id=$1 AND {field}=$2', env.org, booking) == 1
 
 
-async def test_unsupported_status_fails_closed():
+@pytest.mark.parametrize('operation', ['confirm', 'complete', 'reactivate', 'invented'])
+async def test_unsupported_status_fails_closed(operation):
     with pytest.raises(BookingMutationRejected):
-        BookingMutation('cancel', 'Synthetic', '', '')
+        BookingMutation(operation, '', '', '')
 
 
 async def test_foreign_tenant_lineage_and_erasure_barrier_fail_closed(pg_pool):
@@ -350,3 +351,116 @@ async def test_active_contact_edit_rolls_back_after_replacement(pg_pool, monkeyp
     assert await pg_pool.fetchval('SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == ''
     assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
+
+async def test_dark_reschedule_replay_and_changed_command(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    request = env.request(booking, action='replace', allocation_revision=1, appointment_time='11:00')
+    command = BookingMutation('reschedule', '', '', '', '2026-10-28', '11:00', 1)
+    result = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command)
+    assert result['outcome'] == 'replaced' and result['applied_allocation_revision'] == 2
+    assert (await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command))['replayed']
+    with pytest.raises(AllocationConflict):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=replace(command, coperti=2))
+    assert await pg_pool.fetchval('SELECT ora FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == __import__('datetime').time(11)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+
+
+@pytest.mark.parametrize('operation,status', [('cancel', 'cancellata'), ('reject', 'rifiutata'), ('no_show', 'no_show')])
+async def test_dark_status_releases_and_replays(pg_pool, operation, status):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    request = env.request(booking, action='cancel', allocation_revision=1)
+    command = BookingMutation(operation, '', '', '')
+    assert (await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command))['outcome'] == 'cancelled'
+    assert (await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command))['replayed']
+    row = await pg_pool.fetchrow('SELECT stato,no_show_at FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
+    assert row['stato'] == status and (row['no_show_at'] is not None) == (operation == 'no_show')
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+
+
+async def test_dark_status_failure_rolls_back(pg_pool, monkeypatch):
+    from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    original = BookingAllocationRepository._receipt
+    async def fault(*args, **kwargs):
+        await original(*args, **kwargs)
+        raise RuntimeError('receipt fault')
+    monkeypatch.setattr(BookingAllocationRepository, '_receipt', staticmethod(fault))
+    with pytest.raises(RuntimeError, match='receipt fault'):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, env.request(booking, action='cancel', allocation_revision=1), mutation=BookingMutation('cancel', '', '', ''))
+    assert await pg_pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'in_attesa'
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) > 0
+
+async def test_dark_reschedule_last_capacity_race_preserves_loser(pg_pool):
+    env = await create_environment(pg_pool, configure=lambda catalog: catalog['resources'][0].update(capacity=1))
+    first, second = await env.booking(), await env.booking()
+    await pg_pool.execute("UPDATE bookings SET ora='12:00' WHERE organization_id=$1 AND id=$2", env.org, second)
+    await env.apply(env.request(first))
+    await env.apply(env.request(second, appointment_time='12:00'))
+    requests = [env.request(b, action='replace', allocation_revision=1, appointment_time='14:00') for b in (first, second)]
+    command = BookingMutation('reschedule', '', '', '', '2026-10-28', '14:00', 1)
+    outcomes = await asyncio.gather(*(apply_booking_mutation(pg_pool, env.org, env.auth, r, mutation=command) for r in requests), return_exceptions=True)
+    assert sum(isinstance(x, dict) and x['outcome'] == 'replaced' for x in outcomes) == 1, repr(outcomes)
+    assert sum(isinstance(x, BookingMutationRejected) for x in outcomes) == 1
+    winner = first if isinstance(outcomes[0], dict) else second
+    loser = second if winner == first else first
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, loser) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, loser) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, requests[0 if loser == first else 1].request_id) == 0
+
+async def test_dark_reschedule_stale_preimage_has_no_mutation(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    await pg_pool.execute("UPDATE bookings SET stato='confermata' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    request = env.request(booking, action='replace', allocation_revision=1, appointment_time='11:00')
+    with pytest.raises(AllocationConflict):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=BookingMutation('reschedule', '', '', '', '2026-10-28', '11:00', 1))
+    assert await pg_pool.fetchval('SELECT allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
+
+
+@pytest.mark.parametrize('operation', ['cancel', 'reject', 'no_show'])
+async def test_status_command_cannot_smuggle_contact_changes_or_notice(operation):
+    with pytest.raises(ValueError):
+        BookingMutation(operation, 'Synthetic', '', '')
+    with pytest.raises(ValueError):
+        BookingMutation(operation, '', '', '', notice=True)
+
+
+@pytest.mark.parametrize('target_change', [{'service_id': 'alternative'}, {'room_count': 2}])
+async def test_reschedule_cannot_change_service_or_room_authority(pg_pool, target_change):
+    from copy import deepcopy
+    def configure(catalog):
+        alternative = deepcopy(catalog['services'][0])
+        alternative['service_id'] = 'alternative'
+        catalog['services'].append(alternative)
+    env = await create_environment(pg_pool, configure=configure)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    request = env.request(booking, action='replace', allocation_revision=1, appointment_time='11:00', **target_change)
+    before = await pg_pool.fetch('SELECT * FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id', env.org, booking)
+    with pytest.raises(BookingMutationRejected, match='cannot change service or room'):
+        await apply_booking_mutation(pg_pool, env.org, env.auth, request,
+            mutation=BookingMutation('reschedule', '', '', '', '2026-10-28', '11:00', 1))
+    assert await pg_pool.fetchval('SELECT ora FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == __import__('datetime').time(10)
+    assert await pg_pool.fetch('SELECT * FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id', env.org, booking) == before
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2', env.org, request.request_id) == 0
+
+
+async def test_legacy_command_digest_ignores_absent_new_stay_fields():
+    import hashlib
+    import json
+    contact, conversation = uuid4(), uuid4()
+    command = BookingMutation('create', 'Synthetic', '', '', '2026-10-28', '10:00', 1)
+    lineage = NewBookingLineage(contact, conversation)
+    legacy = {'version': 1, 'mutation': {'operation': 'create', 'nome_cliente': 'Synthetic',
+        'telefono': '', 'note': '', 'data': '2026-10-28', 'ora': '10:00',
+        'coperti': 1, 'notice': False}, 'lineage': {'contact_id': contact, 'conversation_id': conversation}}
+    expected = hashlib.sha256(json.dumps(legacy, sort_keys=True, separators=(',', ':'), default=str).encode()).hexdigest()
+    assert command.digest(lineage) == expected

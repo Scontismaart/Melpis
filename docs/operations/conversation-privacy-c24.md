@@ -55,3 +55,31 @@ are rejected. A successful result still says `traffic_authorized=false` and does
 not certify provider copies, backup expiry, shared accounts or global GDPR
 completion. The external checkpoint authority and quarantine/replay procedure
 require operational approval; no service or storage was purchased.
+
+## Dark stay and administrative purge categories (unapproved)
+
+The writer draft adds source-proven arrival/departure dates, original subject and
+source IDs, stay revisions, operation-key tombstones, booking purge fences and a
+private administrator audit. These remain personal data. All retention periods,
+lawful bases, holds and backup treatment remain **unset/unapproved**.
+
+Stay dates and curated fence/tombstone evidence are tenant/contact-exportable by
+immutable original subject, never by a reassigned current contact. Source IDs
+and staff/transaction identifiers are excluded from individual projections;
+private audit subject evidence is represented by the correlated fence projection.
+An approved inactive/released stay may be removed only through the owner-only
+administrative purge, preserving financial booking and billing records; erasure
+remains partial while retained financial, audit, suppression or external copies
+await their approved lifecycle. Marker rows have no committed lifetime outside
+the purge transaction; WAL/backups still require separate controller review.
+
+Administrative retention additionally requires a current non-held policy with an
+explicit approved duration; no runtime duration is seeded and no application
+worker is granted purge authority. Durable request/booking tombstones prevent
+retry or raw legacy writes from recreating purged data. Their own minimization,
+hold, retention and eventual disposal must be approved before deployment.
+
+Restoration requires independently authenticated v2 purge journals and exact
+fence/tombstone reconciliation. The verifier always leaves traffic unauthorized.
+C01 must also certify actual administrator/application role separation; code ACL
+tests cannot establish the credentials or permissions in any remote environment.

@@ -286,8 +286,8 @@ def checkpoint(env, operation, contact, key, sequence=2):
     import hashlib
     import hmac
     import json
-    payload = {'version': 'c24-restore-v1', 'organization_id': str(env['org']),
-               'backup_id': 'synthetic-backup', 'sequence': sequence, 'complete': True,
+    payload = {'version': 'c24-restore-v2', 'organization_id': str(env['org']),
+               'backup_id': 'synthetic-backup', 'sequence': sequence, 'complete': True, 'stay_purges': [],
                'erasures': [{'operation_id': str(operation), 'scope': 'contact', 'subject_id': str(contact)}]}
     signature = hmac.new(key, json.dumps(payload, sort_keys=True, separators=(',', ':')).encode(), hashlib.sha256).hexdigest()
     return {'payload': payload, 'signature': signature}
