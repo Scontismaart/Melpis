@@ -63,6 +63,7 @@ def _credential_row(fernet, *, scopes=None):
         "sync_enabled": True,
         "connection_epoch": EPOCH,
         "credential_version": 7,
+        "refresh_dispatch_id": None,
         "granted_scopes": list(SCOPES) if scopes is None else scopes,
         "access_token": fernet.encrypt(b"synthetic-access-token").decode(),
         "refresh_token": fernet.encrypt(b"synthetic-refresh-token").decode(),
@@ -140,7 +141,7 @@ async def test_disconnect_is_tenant_bound_invalidates_epoch_and_nonce_preserving
 
 
 @pytest.mark.asyncio
-async def test_retryable_refresh_error_keeps_connection_recoverable_and_sanitizes_details(
+async def test_retryable_refresh_error_keeps_unknown_dispatch_and_sanitizes_details(
     lifecycle_env, monkeypatch,
 ):
     lifecycle, conn, fernet = lifecycle_env
@@ -160,7 +161,13 @@ async def test_retryable_refresh_error_keeps_connection_recoverable_and_sanitize
     assert caught.value.code == "refresh_unavailable"
     assert "DO_NOT_LEAK" not in str(caught.value)
     assert "temporarily_unavailable" not in str(caught.value)
-    assert conn.fetchval.await_count == 0
+    assert conn.fetchval.await_count == 1
+    sql, org, epoch, version, dispatch = conn.fetchval.await_args.args
+    assert "refresh_dispatch_id=$4,connection_status='reconnect_required'" in sql
+    assert "WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3" in sql
+    assert "refresh_dispatch_id IS NULL" in sql
+    assert (org, epoch, version) == (ORG_A, EPOCH, 7)
+    assert isinstance(dispatch, UUID)
     assert not any("connection_status='revoked'" in call.args[0] for call in conn.execute.await_args_list)
 
 
@@ -182,7 +189,9 @@ async def test_nonretryable_invalid_grant_marks_only_current_tenant_epoch_revoke
     assert caught.value.code == "authorization_revoked"
     revoke = next(call for call in conn.execute.await_args_list if "connection_status='revoked'" in call.args[0])
     assert "WHERE organization_id=$1 AND connection_epoch=$2" in revoke.args[0]
-    assert revoke.args[1:] == (ORG_A, EPOCH)
+    dispatch = conn.fetchval.await_args.args[-1]
+    assert revoke.args[1:] == (ORG_A, EPOCH, 7, dispatch)
+    assert "refresh_dispatch_id=$4 AND connection_status='reconnect_required'" in revoke.args[0]
     assert "SENSITIVE_VALUE" not in str(caught.value)
 
 
@@ -237,7 +246,7 @@ async def test_refresh_compare_and_swap_rejects_stale_epoch_or_credential_versio
 ):
     lifecycle, conn, fernet = lifecycle_env
     conn.fetchrow.return_value = _credential_row(fernet)
-    conn.fetchval.return_value = False
+    conn.fetchval.side_effect = [True, False]
 
     def refresh(creds, _request):
         creds.token = "synthetic-refreshed-token"
@@ -250,9 +259,11 @@ async def test_refresh_compare_and_swap_rejects_stale_epoch_or_credential_versio
 
     assert caught.value.code == "connection_changed"
     cas = conn.fetchval.await_args
-    sql, bound_org, bound_epoch, bound_version, encrypted_token, _expiry, encrypted_refresh = cas.args
+    sql, bound_org, bound_epoch, bound_version, encrypted_token, _expiry, encrypted_refresh, dispatch = cas.args
     assert "WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3" in sql
-    assert "connection_status='connected' AND sync_enabled RETURNING TRUE" in sql
+    assert "connection_status='reconnect_required' AND refresh_dispatch_id=$7 AND sync_enabled RETURNING TRUE" in sql
+    assert conn.fetchval.await_count == 2
+    assert dispatch == conn.fetchval.await_args_list[0].args[-1]
     assert bound_org == ORG_A
     assert bound_epoch == EPOCH
     assert bound_version == 7
