@@ -31,14 +31,13 @@ Use real Postgres transactions and deterministic barriers: last resource across 
 
 ## PR3 draft boundary and outstanding limitations
 
-The private draft preauthorizes an active owner/manager and locks organization and erasure scope, subject conversation, catalog/capacity, existing booking and request receipt before a typed local mutation. New bookings use declared lineage. The complete typed booking/notice command and lineage are hashed in a nullable receipt column; legacy allocation requests cannot replay a typed mutation receipt. The draft supports creation, initial allocation/adoption, and contact-only editing of a currently active minute-based allocation through the existing replacement protocol. Schedule changes, status transitions, civil-night booking edits, and other booking writers remain unsupported. General schedule/status preimages and the complete state/resource policy are still needed. The draft is not wired to routes or workers, and real PostgreSQL concurrency, rollback and authorization verification remains necessary before any release.
+The private draft preauthorizes an active owner/manager and locks organization and erasure scope, subject conversation, catalog/capacity, existing booking and request receipt before a typed local mutation. New bookings use declared lineage. The complete typed booking/notice command and lineage are hashed in a nullable receipt column; legacy allocation requests cannot replay a typed mutation receipt. The draft supports creation, initial allocation/adoption, and contact-only editing of a currently active minute-based allocation through the existing replacement protocol. The current dark commands are described below, including validated rescheduling, coherent occupied-state transitions, and source-proven civil stays. Legacy/import/provider/worker adoption is not implemented; unsupported historical states remain fail-closed. The draft is not wired to routes or workers, and real PostgreSQL concurrency, rollback and authorization verification remains necessary before any release.
 
-Local PostgreSQL 16 evidence: 45 tests passed across the new transaction tests and
+Historical initial prototype evidence (superseded by later receipts): 45 PostgreSQL 16 tests passed across the new transaction tests and
 the existing allocation-engine suite. These include real rollback after durable
 outbox insertion, matching/mismatched concurrent replay, tenant/lifecycle/GDPR
 denial, schedule mismatch and suppression fingerprints even when no contact is
-linked. No provider was contacted. The same cases still require PostgreSQL 18
-and complete CI on the final commit. Passing this bounded suite does not prove
+linked. No provider was contacted. That early proof did not include PostgreSQL 18. Current exact-head receipts below replace that limitation; full CI remains mandatory on every new SHA. Passing this bounded suite does not prove
 adoption by all existing writers or authorize a new worker identity.
 
 ## Active contact-only edit: transaction proof
@@ -154,3 +153,23 @@ Administrative erasure still requires a terminal released stay. Completed
 records with retained allocations require an explicitly reviewed archival/retention
 procedure; elapsed time alone does not bypass that prerequisite. No financial
 record, quota unit or unknown provider consumption is automatically released.
+
+## Current bounded verification
+
+Runtime commit `ff218b2781e3569702c9172e7f3b6d31d21d2720`: PostgreSQL 16.3
+and 18.6 each passed 417 cases with one explicit full encrypted backup-drill
+skip. The suite includes schema-install rollback/ACL tests, actual stay/receipt
+purge effects, signed v2 restore journals, civil DST/adjacency, last-room races,
+occupied-state transitions, request replay, tenant isolation and the test-only
+private worker-proof design. Earlier red receipts are preserved.
+
+The pre-069 installation test now first removes 071's dependent stay objects
+inside its outer rollback; all original failure/ACL assertions remain and the
+test additionally verifies restoration of the actual enabled stay-delete guard.
+No application FK, role check, test, security workflow or audit policy was removed.
+
+The worker proof remains portable fixture code/schema under tests, not an app
+module, migration or grant. It verifies evidence and returns inert IDs/flags;
+its same-message identity is not a completed multi-turn booking executor or a
+substitute for deterministic intent, confirmation, medical handoff, all-writer
+compatibility and separately approved service-principal authority.
