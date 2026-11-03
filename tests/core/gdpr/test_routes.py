@@ -146,7 +146,8 @@ class TestDPA:
         assert resp.status_code == 200
         text = resp.text
         assert "Without undue delay" in text
-        assert "operational notification process and any contractual deadline require documented verification" in text
+        normalized_text = " ".join(text.split())
+        assert "operational notification process and any contractual deadline require documented verification" in normalized_text
         assert "48 hours" not in text
         assert "dpo@example.com" not in text
 

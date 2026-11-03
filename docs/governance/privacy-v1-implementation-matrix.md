@@ -18,6 +18,28 @@ free text and unverified subject relationships require review. See the [A06
 inventory](../operations/a06-data-inventory.md) and [C2.4 privacy
 contract](../operations/conversation-privacy-c24.md).
 
+The code-owned `src/core/gdpr/product_policy.py` registry now publishes the approved
+version and limits. Its worker guard rejects over-cap messages/C2.4 schedules at
+enumeration, latest-row recheck and the C2.4 cross-category gate. It never clamps
+or inserts tenant policy rows. Unknown simulator schedules are not automatically
+executed. The public endpoint distinguishes product maxima from uncertified
+effective tenant schedules; an environment flag alone is not operational GO.
+
+Legacy methods `MessageRepository.delete_expired_messages`,
+`purge_soft_deleted_messages` and `purge_simulation_requests` remain separate
+global mutation helpers exposed by repository wrappers. Static caller inspection
+found no current scheduling caller beyond those wrappers. They do not implement
+the new policy protocol and must be retired or routed through the approved
+tenant-scoped process before cutover; their existence is not retention enforcement.
+Likewise `gdpr_policies.retention_days` cannot represent twelve calendar months or
+document a complete bounded legal hold. Those are schema/lifecycle implementation
+tasks, not new founder preference decisions.
+
+Melpis support access is not granted by this policy or by the customer staff role.
+Actual support access requires verified scope, documented reason, authorization
+and traceability; its operational procedure and audit evidence must be established
+before use. No support user, privilege or remote access was created here.
+
 | Category and actual stores | Approved purpose and duration / trigger | Access and export | Erasure and current gap | Objective gate |
 | --- | --- | --- | --- | --- |
 | Conversation messages: `messages`, message-bearing `event_log`, related payloads and caches | Requested assistance and necessary booking administration. Ordinary availability at most 60 days; primary content purge within 90 days; earlier erasure when applicable. | Authorized tenant users; tenant export has selected content, subject export is narrower and excludes free text. | Source redaction must invalidate derived C2.4 content. The current worker is gated, processes bounded batches and excludes some records; a separate 60-day visibility control and complete 90-day primary purge are not established. | Map copies and visibility paths; resolve billed and other protected records without losing required counters; verify deadlines, backlog, isolation and replay barriers before GO. |

@@ -1,5 +1,6 @@
 """PostgreSQL integration tests for GDPR-gated retention behavior."""
 import hashlib
+import json
 import uuid
 
 import pytest
@@ -301,4 +302,6 @@ async def test_invalid_c24_cap_blocks_message_redaction_with_live_proposal(
         )
     assert row["content_text"] == "synthetic retained message"
     assert row["deleted_at"] is None
-    assert row["ai_reply_cache"] == {"booking_state_proposal": {"intent": "booking"}}
+    assert json.loads(row["ai_reply_cache"]) == {
+        "booking_state_proposal": {"intent": "booking"},
+    }
