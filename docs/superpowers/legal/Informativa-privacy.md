@@ -5,7 +5,7 @@
 > vanno compilati con i dati reali del Fornitore.
 
 # Informativa Privacy — WhatsApp AI Responder
-## Informativa sul trattamento dei dati relativi all'account del Cliente
+## Informativa sui trattamenti per finalità proprie del Fornitore
 
 **Versione bozza 0.1 — ultimo aggiornamento {{LEGAL_DOCUMENT_EFFECTIVE_DATE}}**
 
@@ -19,28 +19,39 @@ informativa è {{LEGAL_ENTITY_NAME}}, con sede in
 
 ## 2. Ambito della presente informativa
 
-La presente informativa riguarda esclusivamente i dati personali relativi
-all'account del cliente (dati di fatturazione, credenziali di accesso,
-configurazioni dell'organizzazione), rispetto ai quali il Fornitore agisce
-quale titolare autonomo del trattamento, come indicato al §2.2 dell'Accordo
-sul Trattamento dei Dati (DPA).
+La presente informativa riguarda i dati trattati dal Fornitore per le proprie
+finalità di gestione degli account e dei rapporti con i clienti,
+fatturazione, sicurezza del servizio e adempimento dei propri obblighi
+aziendali. Per tali finalità il Fornitore agisce quale titolare autonomo,
+nei limiti dei trattamenti effettivamente svolti.
 
-Con riferimento ai dati personali dei clienti finali dell'utente (contatti
-WhatsApp, contenuto dei messaggi, prenotazioni, recensioni), il Cliente
-agisce quale titolare del trattamento e il Fornitore quale responsabile: tale
-trattamento è disciplinato dal DPA e dall'informativa che il Cliente rilascia
-ai propri clienti finali, non dalla presente informativa.
+Per i dati dei clienti finali trattati per erogare le funzioni attivate
+(contatti WhatsApp, messaggi, prenotazioni, recensioni e dati correlati), il
+Cliente determina finalità e istruzioni e il Fornitore opera quale
+responsabile nei limiti delle attività effettivamente svolte per suo conto.
+Tale trattamento è disciplinato dal DPA e dall'informativa che il Cliente
+rende ai propri clienti finali. Il Fornitore può inoltre trattare dati
+strettamente necessari per proprie finalità di sicurezza o obblighi
+aziendali, nei limiti da precisare nell'inventario dei trattamenti e nella
+versione definitiva di questa informativa.
 
 ## 3. Categorie di dati trattati
 
 - Dati identificativi e di contatto dell'utente/gestore dell'account
   (nome, email);
-- Dati di fatturazione e di pagamento (identificativi Stripe, importi;
-  nessun dato di carta di pagamento transita o è conservato dal Fornitore);
+- Dati di fatturazione e pagamento pertinenti (ad esempio identificativi e
+  importi); i flussi effettivi, inclusi gli eventuali dati di pagamento,
+  devono essere verificati per il fornitore e la configurazione attivati;
 - Credenziali di accesso e log di autenticazione;
-- Configurazioni dell'organizzazione (profilo attività, regole di
-  escalation, documenti caricati);
-- Log di utilizzo e di audit.
+- Configurazioni dell'organizzazione necessarie alla gestione dell'account;
+- Dati tecnici e log di sicurezza, utilizzo e audit, limitati alle finalità
+  pertinenti e senza conservazione di testo conversazionale grezzo sotto
+  l'etichetta di log o audit.
+
+I dati di fatturazione e i dati di account sono mantenuti distinti dai dati
+conversazionali dei clienti finali. I documenti caricati e i contenuti dei
+clienti finali sono trattati nell'ambito e secondo le istruzioni delle
+funzioni attivate, come descritto nel DPA.
 
 ## 4. Fonti e finalità del trattamento
 
@@ -55,26 +66,53 @@ generati durante l'uso del Servizio. Sono trattati per le seguenti finalità:
 
 ## 5. Conservazione
 
-- Dati di account e configurazioni: per la durata del rapporto contrattuale
-  e, dopo la cancellazione, per i soli log tecnici/contabili privi di
-  riferimento identificativo diretto, per i periodi previsti dalla normativa
-  applicabile (si veda DPA §9.3).
-- Dati di fatturazione: per i termini di conservazione previsti dagli
-  obblighi fiscali/contabili.
+I dati relativi all'account sono conservati per il tempo necessario alla
+gestione del rapporto e delle finalità descritte. Dopo la cessazione,
+eventuali dati finanziari, documenti obbligatori e registri di sicurezza
+sono conservati soltanto nella categoria pertinente, per il periodo
+necessario o previsto da uno specifico obbligo documentato, con accessi
+limitati e separazione dai dati conversazionali. Questa bozza non stabilisce
+un termine generale né consente di conservare testo grezzo dei messaggi
+all'interno di registri tecnici, contabili o di audit.
+
+Per i dati trattati per conto del Cliente si applicano le durate della policy
+standard V1 descritte nel DPA: contenuto conversazionale con disponibilità
+ordinaria massima di 60 giorni e rimozione dal database primario entro 90;
+stato conversazionale C2.4 per massimo 30 giorni dall'ultima attività
+pertinente; ricevute tecniche e dati di idempotenza per 90 giorni dalla
+conclusione della richiesta; prenotazioni e soggiorni conclusi per massimo
+12 mesi dalla conclusione. Le durate non attestano purge, propagazione ai
+fornitori o cancellazione dai backup già eseguiti. Per i backup la policy
+prevede cifratura, accesso amministrativo ristretto e conservazione massima
+di 30 giorni, restore isolato e verifica delle barriere contro il replay e
+la ricreazione dei dati cancellati; l'effettiva attuazione deve essere
+verificata prima di poterla dichiarare completata.
 
 ## 6. Destinatari e trasferimenti
 
-I dati possono essere comunicati a soggetti terzi che trattano dati per conto
-del Fornitore (sub-responsabili ai sensi dell'Allegato B del DPA): Meta
-(WhatsApp Business API), Groq e fornitori LLM configurati, Google, Stripe,
-Supabase, Sentry (se configurato), provider SMTP, Airtable/Softr (solo
-propagazione cancellazione GDPR).
+I destinatari e i loro ruoli dipendono dalle funzioni effettivamente attivate.
+Alcuni fornitori possono operare come responsabili o sub-responsabili per
+specifiche attività; altri possono agire come titolari autonomi per proprie
+finalità, quali gestione dell'account, fatturazione o sicurezza. Il ruolo va
+determinato per ciascun trattamento in base alle attività reali e agli
+accordi applicabili. L'Allegato B del DPA è un inventario da verificare:
+include categorie di fornitori candidati o utilizzabili, ma non dichiara che
+siano tutti attivi, contrattualizzati o già autorizzati.
 
-Alcuni destinatari trattano dati al di fuori dello Spazio Economico Europeo
-(in particolare negli Stati Uniti). I trasferimenti avvengono sulla base di
-Clausole Contrattuali Tipo e/o meccanismi di adeguatezza applicabili, come
-disponibili per ciascun fornitore. `{{LEGAL_DPA_REVIEW_APPROVAL}}` — verifica puntuale dello strumento di
-trasferimento alla data di sottoscrizione, come richiesto dal DPA §6.3]
+Prima di abilitare un fornitore occorre verificare la sua identità, la
+funzione svolta, gli eventuali upstream, gli accordi, le misure, le
+condizioni d'uso, la conservazione e i paesi in cui avviene il trattamento.
+La localizzazione dei servizi e gli eventuali trasferimenti fuori dallo
+Spazio Economico Europeo non sono ancora verificati per tutti i fornitori e
+configurazioni. Prima di ciascuna attivazione devono essere individuati i
+paesi interessati e verificati gli strumenti e le garanzie applicabili,
+ove necessari. Questa bozza non afferma che un meccanismo di trasferimento
+sia già perfezionato.
+
+Un fornitore non verificato resta disabilitato o produce un esito
+UNKNOWN/fail-closed quando necessario. La tabella definitiva dei destinatari,
+dei ruoli, delle localizzazioni e delle garanzie deve essere completata
+prima della pubblicazione.
 
 ## 7. Diritti dell'interessato
 
@@ -90,3 +128,10 @@ del Servizio indicati in sede di sottoscrizione o scrivendo a
 Per la disciplina completa del trattamento dei dati nell'ambito del Servizio,
 si rinvia ai [Termini di Servizio] e all'[Accordo sul Trattamento dei Dati
 (DPA)] del Fornitore.
+
+Il Servizio non è destinato a diagnosi, anamnesi, prescrizioni, gestione di
+referti o decisioni mediche automatiche. Le funzioni per il settore medico o
+dentistico sono limitate ad attività amministrative; l'attivazione reale del
+settore sanitario resta bloccata fino alla verifica dei requisiti specifici
+per i dati sanitari e del perimetro autorizzato. Messaggi clinici o urgenti
+devono essere indirizzati al percorso di escalation appropriato.

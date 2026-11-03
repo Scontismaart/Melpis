@@ -11,8 +11,8 @@ frozen category per table, explicit selected columns, and no `SELECT *`.
 
 **A06 status: technical partial.** The catalog contains 51 unique categories
 and 70 executable projections, including narrow subject views. This is not a
-legal sign-off or issue closure. C05 policy/legal approval and C01 operational
-cutover remain pending, as do shared authentication-account disposition,
+legal sign-off or issue closure. The five Privacy V1.0 product decisions are founder-approved; effective
+tenant records, contractual/provider verification and C01 operational cutover remain pending, as do shared authentication-account disposition,
 subject-level review of unstructured content, verified external-provider
 erasure, backup and other-worker-copy handling, and rollout evidence.
 
@@ -112,8 +112,9 @@ indexing policy.
 - `src/core/retention_job.py` always expires encrypted GDPR snapshots. Primary
   data mutation is separately gated by `GDPR_RETENTION_EXECUTION_ENABLED` and
   valid per-tenant policy records. The route `/api/gdpr/retention-policy`
-  reports `policy_version=tenant-approval-required`; retention-day fields are
-  `null`, and automatic erasure reflects the execution flag. Its
+  reports `policy_version=melpis-privacy-v1.0` with approved product maxima.
+  Legacy effective-retention fields remain `null`; the legacy execution
+  boolean reports only an environment flag, not operational authorization. Its
   `simulator_history_idle_hours=24` value is not a retention period. The legacy
   `organizations.message_retention_days` column is not approval evidence.
 - `src/core/db/migrations/014_contact_fk_strategy.sql` specifies the contact
@@ -136,9 +137,9 @@ indexing policy.
   re-erasure must be confirmed operationally. No other persistent document
   object store was confirmed in this static review.
 - Do not infer legal retention periods from code defaults, examples, or the
-  DPA technical template. C05 legal/controller policy approval and C01 cutover
-  remain pending; no approved retention schedule is established by this
-  inventory. The DPA content is a technical template and does not constitute
+  DPA technical template. The founder-approved standards are recorded in
+  [Privacy V1.0](../governance/privacy-data-governance-v1.0.md); compatible tenant
+  records, implemented lifecycle controls and operational GO remain necessary. The DPA content is a technical template and does not constitute
   executed legal approval.
 
 ## External providers and unresolved evidence

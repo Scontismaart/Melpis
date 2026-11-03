@@ -25,6 +25,7 @@ def set_env():
     from cryptography.fernet import Fernet
     os.environ["ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
     os.environ["REDIS_URL"] = "redis://gdpr-test.invalid/0"
+    os.environ.pop("GDPR_RETENTION_EXECUTION_ENABLED", None)
     os.environ.pop("AIRTABLE_API_KEY", None)
     os.environ.pop("AIRTABLE_BASE_ID", None)
     os.environ.pop("SOFTR_WEBHOOK_URL", None)
@@ -125,9 +126,10 @@ class TestDPA:
         resp = await async_client.get("/api/gdpr/dpa")
         assert resp.status_code == 200
         text = resp.text
-        assert "versioned, per-tenant policy" in text
-        assert "No primary-data" in text
-        assert "schedule is activated by this template" in text
+        assert "melpis-privacy-v1.0" in text
+        assert "Product approval does not activate" in text
+        assert "Effective versioned tenant instructions" in text
+        assert "environment verification and operational GO remain required" in text
         assert "message_retention_days" not in text
         assert "30-day grace period" not in text
         assert "do not certify deletion or recoverability" in text
@@ -139,11 +141,14 @@ class TestDPA:
         assert "whitelist" not in text
         assert "regex" in text
 
-    async def test_dpa_has_breach_notification_and_no_placeholder_contact(self, async_client):
+    async def test_dpa_breach_notice_has_no_fabricated_deadline_or_placeholder_contact(self, async_client):
         resp = await async_client.get("/api/gdpr/dpa")
         assert resp.status_code == 200
         text = resp.text
-        assert "48 hours" in text
+        assert "Without undue delay" in text
+        normalized_text = " ".join(text.split())
+        assert "operational notification process and any contractual deadline require documented verification" in normalized_text
+        assert "48 hours" not in text
         assert "dpo@example.com" not in text
 
 
@@ -345,5 +350,11 @@ class TestDataRights:
         data = resp.json()
         assert data["retention_days"] is None
         assert data["purge_after_days"] is None
+        assert data["product_retention_days"] == 60
+        assert data["product_purge_after_days"] == 90
         assert data["automatic_erasure_enabled"] is False
-        assert data["policy_version"] == "tenant-approval-required"
+        assert data["automatic_erasure_enabled_scope"] == "legacy_environment_flag_only_not_authorization"
+        assert data["policy_version"] == "melpis-privacy-v1.0"
+        assert data["product_approval"] == "founder_approved_product_standard"
+        assert data["enforcement_status"] == "not_certified_operational_go_required"
+        assert data["legacy_days_scope"] == "effective_tenant_schedule_not_certified"
