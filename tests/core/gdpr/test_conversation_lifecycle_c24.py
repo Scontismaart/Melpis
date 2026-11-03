@@ -319,7 +319,11 @@ async def test_restore_checkpoint_requires_replay_and_rejects_stale_content(stat
 
 
 async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env, monkeypatch):
-    from src.core.gdpr.restore_checkpoint import verify_restore_checkpoint
+    from hashlib import sha256
+    import json
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint, verify_restore_journal_replay
+    from src.core.gdpr.restore_journal import JournalCheckpoint
     env = state_env
     await populated(env)
     contact = await subject(env)
@@ -334,6 +338,28 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
     async with env['pool'].acquire() as conn, conn.transaction():
         proof = await verify_restore_checkpoint(conn, env['org'], journal, verification_key=key,
                                                 backup_id='synthetic-backup', minimum_sequence=2)
+        barrier = await conn.fetchrow('''SELECT identifier_digest,key_id FROM gdpr_erasure_barriers
+            WHERE organization_id=$1 AND operation_id=$2''', env['org'], erased['id'])
+        signer, installation = Ed25519PrivateKey.generate(), uuid4()
+        anchor = JournalCheckpoint(0, '0' * 64)
+        record = {'sequence': 1, 'organization_id': str(env['org']),
+                  'operation_id': str(erased['id']), 'scope': 'contact', 'subject_id': str(contact),
+                  'identifier_digest': barrier['identifier_digest'], 'key_id': barrier['key_id']}
+        async def verify_signed():
+            raw = json.dumps({'version': 1, 'installation_id': str(installation),
+                              'previous_sha256': anchor.sha256, 'entries': [record]}).encode()
+            signature = signer.sign(b'melpis.restore.erasure-journal.v1\0' + raw)
+            return await verify_restore_journal_replay(
+                conn, env['org'], raw, signature, installation_id=installation,
+                trusted_public_key=signer.public_key(), backup_checkpoint=anchor,
+                independent_tip=JournalCheckpoint(1, sha256(raw).hexdigest()),
+            )
+        signed_proof = await verify_signed()
+        assert signed_proof['verified_erasures'] == 1
+        assert signed_proof['traffic_authorized'] is False
+        record['identifier_digest'] = '0' * 64
+        with pytest.raises(RestoreBlocked, match='does not match the journal'):
+            await verify_signed()
     assert proof['scope'] == 'primary_c24_only'
     assert proof['traffic_authorized'] is False
     assert proof['external_copies_certified'] is False

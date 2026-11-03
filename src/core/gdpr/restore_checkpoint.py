@@ -10,6 +10,8 @@ import hmac
 import json
 from uuid import UUID
 
+from src.core.gdpr.restore_journal import RestoreJournalInvalid, verify_erasure_segment
+
 
 class RestoreBlocked(RuntimeError):
     pass
@@ -59,6 +61,25 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
         raise RestoreBlocked('Authenticated external restore checkpoint required') from None
 
+    return await _verify_replayed_erasures(conn, org, entries, payload['sequence'])
+
+
+async def verify_restore_journal_replay(conn, organization_id, payload, signature, **trust):
+    """Check scoped replay against signed evidence and an independently pinned tip."""
+    org = UUID(str(organization_id))
+    try:
+        verified = verify_erasure_segment(payload, signature, **trust)
+    except RestoreJournalInvalid:
+        raise RestoreBlocked('Authenticated external restore journal required') from None
+    scoped = tuple(entry for entry in verified if entry.organization_id == org)
+    return await _verify_replayed_erasures(
+        conn, org, [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped],
+        trust['independent_tip'].sequence,
+        fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped},
+    )
+
+
+async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None):
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))', str(org))
@@ -68,6 +89,18 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
               AND subject_id IS NOT DISTINCT FROM $4::uuid)''', org, operation, scope, subject)
         if not present:
             raise RestoreBlocked('Newer erasure journal has not been replayed')
+        if fingerprints is not None:
+            digest, key_id = fingerprints[operation]
+            reconciled = await conn.fetchval('''SELECT EXISTS(
+                SELECT 1 FROM gdpr_erasure_barriers b
+                JOIN gdpr_operation_steps s ON s.organization_id=b.organization_id AND s.operation_id=b.operation_id
+                WHERE b.organization_id=$1 AND b.operation_id=$2 AND b.scope=$3
+                  AND b.subject_id IS NOT DISTINCT FROM $4::uuid
+                  AND b.identifier_digest IS NOT DISTINCT FROM $5
+                  AND b.key_id IS NOT DISTINCT FROM $6
+                  AND s.name='local' AND s.status='confirmed')''', org, operation, scope, subject, digest, key_id)
+            if not reconciled:
+                raise RestoreBlocked('Replayed erasure evidence does not match the journal')
         remaining = await conn.fetchval('''SELECT
             EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
                    AND ($2::uuid IS NULL OR subject_id=$2))
@@ -95,6 +128,6 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
                     remaining = True
         if remaining:
             raise RestoreBlocked('Restored C2.4 content still requires erasure replay')
-    return {'organization_id': str(org), 'sequence': payload['sequence'],
+    return {'organization_id': str(org), 'sequence': sequence,
             'verified_erasures': len(entries), 'scope': 'primary_c24_only',
             'traffic_authorized': False, 'external_copies_certified': False}
