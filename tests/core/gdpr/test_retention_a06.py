@@ -19,7 +19,8 @@ async def approve_message_retention(pool, org, *, days=1):
         )
 
 
-async def seed_messages(pool, org, *, count=1, status="handled", billed=False, text="synthetic retained message"):
+async def seed_messages(pool, org, *, count=1, status="handled", billed=False,
+                        text="synthetic retained message", age_days=5):
     contact_id, conversation_id = uuid.uuid4(), uuid.uuid4()
     async with pool.acquire() as conn:
         await conn.execute(
@@ -35,8 +36,8 @@ async def seed_messages(pool, org, *, count=1, status="handled", billed=False, t
             """INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
                    content,content_text,status,handling_type,billed_at,created_at)
                VALUES($1,$2,$3,'inbound','text','{}'::jsonb,$4,$5,'human',
-                      CASE WHEN $6 THEN NOW() END,NOW()-INTERVAL '5 days')""",
-            [(mid, org, conversation_id, text, status, billed) for mid in ids],
+                   CASE WHEN $6 THEN NOW() END,NOW()-make_interval(days=>$7))""",
+            [(mid, org, conversation_id, text, status, billed, age_days) for mid in ids],
         )
     return ids
 
@@ -142,7 +143,8 @@ async def test_export_snapshot_expiry_cleans_at_most_one_hundred_chunks(pg_pool,
         assert await conn.fetchval("SELECT count(*) FROM gdpr_operations WHERE organization_id=$1 AND status='ready'", org) == 1
 
 
-async def insert_message_policy(pool, org, *, version, hold=False, valid=True, approved_offset="0 seconds"):
+async def insert_message_policy(pool, org, *, version, days=1, hold=False, valid=True,
+                                approved_offset="0 seconds"):
     valid_until = "NOW()+INTERVAL '1 day'" if valid else "NOW()-INTERVAL '1 second'"
     approved_at = (
         f"NOW()+INTERVAL '{approved_offset}'" if valid else "NOW()-INTERVAL '2 seconds'"
@@ -151,9 +153,9 @@ async def insert_message_policy(pool, org, *, version, hold=False, valid=True, a
         await conn.execute(
             f"""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
                     retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
-                VALUES($1,'messages_content',$2,TRUE,1,$3,'test:synthetic-retention','qa-a06',
+                VALUES($1,'messages_content',$2,TRUE,$4,$3,'test:synthetic-retention','qa-a06',
                        {approved_at},{valid_until})""",
-            org, version, hold,
+            org, version, hold, days,
         )
 
 
@@ -201,3 +203,102 @@ async def test_expired_newer_policy_does_not_fall_back_to_older_approval(
         row = await conn.fetchrow("SELECT content_text,deleted_at FROM messages WHERE id=$1", message_id)
     assert row["content_text"] == "synthetic retained message"
     assert row["deleted_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_product_cap_allows_90_days_rejects_91_and_remains_tenant_scoped(
+    pg_pool, sample_org, other_org, monkeypatch,
+):
+    org_a = sample_org["id"]
+    org_b = other_org["id"]
+    await approve_message_retention(pg_pool, org_a, days=90)
+    await approve_message_retention(pg_pool, org_b, days=91)
+    message_a = (await seed_messages(
+        pg_pool, org_a, age_days=120, text="synthetic tenant A old message",
+    ))[0]
+    message_b = (await seed_messages(
+        pg_pool, org_b, age_days=120, text="synthetic tenant B old message",
+    ))[0]
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
+
+    counts = await run_retention(pg_pool)
+
+    assert counts["messages_redacted"] == 1
+    async with pg_pool.acquire() as conn:
+        row_a = await conn.fetchrow(
+            "SELECT content_text,deleted_at FROM messages WHERE id=$1", message_a,
+        )
+        row_b = await conn.fetchrow(
+            "SELECT content_text,deleted_at FROM messages WHERE id=$1", message_b,
+        )
+    assert row_a["content_text"] is None
+    assert row_a["deleted_at"] is not None
+    assert row_b["content_text"] == "synthetic tenant B old message"
+    assert row_b["deleted_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_latest_over_cap_policy_inserted_after_enumeration_prevents_redaction(
+    pg_pool, sample_org, monkeypatch,
+):
+    org = sample_org["id"]
+    await approve_message_retention(pg_pool, org, days=1)
+    message_id = (await seed_messages(
+        pg_pool, org, age_days=120,
+    ))[0]
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
+    original = retention_job._retention_policies
+
+    async def stale_rows_then_over_cap_policy(pool):
+        policies = await original(pool)
+        await insert_message_policy(
+            pool, org, version="synthetic-new-over-cap", days=91,
+            approved_offset="0 seconds",
+        )
+        return policies
+
+    monkeypatch.setattr(retention_job, "_retention_policies", stale_rows_then_over_cap_policy)
+    counts = await run_retention(pg_pool)
+
+    assert counts["messages_redacted"] == 0
+    async with pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT content_text,deleted_at FROM messages WHERE id=$1", message_id,
+        )
+    assert row["content_text"] == "synthetic retained message"
+    assert row["deleted_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_c24_cap_blocks_message_redaction_with_live_proposal(
+    pg_pool, sample_org, monkeypatch,
+):
+    org = sample_org["id"]
+    await approve_message_retention(pg_pool, org, days=1)
+    message_id = (await seed_messages(
+        pg_pool, org, age_days=120,
+    ))[0]
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE messages SET ai_reply_cache=$2::jsonb WHERE organization_id=$1 AND id=$3",
+            org, '{"booking_state_proposal":{"intent":"booking"}}', message_id,
+        )
+        await conn.execute(
+            """INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+                   retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+               VALUES($1,'booking_conversation_content','synthetic-c24-over-cap',TRUE,31,FALSE,
+                      'test:synthetic-retention','qa-a06',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""",
+            org,
+        )
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
+
+    counts = await run_retention(pg_pool)
+
+    assert counts["messages_redacted"] == 0
+    async with pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT content_text,deleted_at,ai_reply_cache FROM messages WHERE id=$1", message_id,
+        )
+    assert row["content_text"] == "synthetic retained message"
+    assert row["deleted_at"] is None
+    assert row["ai_reply_cache"] == {"booking_state_proposal": {"intent": "booking"}}

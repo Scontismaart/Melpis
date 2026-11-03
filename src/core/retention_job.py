@@ -1,13 +1,15 @@
 """Bounded export expiry and explicitly approved, tenant-scoped retention.
 
-Legacy constants are not legal approval. Primary-data retention is disabled
-until C05 and cutover approve a versioned policy for each category.
+Founder-approved product limits are not operational execution authority.
+Primary retention still needs effective tenant records and authorized cutover;
+legacy constants and sample values cannot substitute for either.
 """
 import logging
 import os
 
 from src.core.db.scoping import system_scope
 from src.core.gdpr.operations import event
+from src.core.gdpr.product_policy import retention_days_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ async def run_retention(pool):
         return counts
     for policy in await _retention_policies(pool):
         if (not policy['valid'] or policy['legal_hold'] or not policy['erasure_allowed']
-                or policy['retention_days'] is None):
+                or not retention_days_allowed(policy['category'], policy['retention_days'])):
             continue
         org, days = policy['organization_id'], policy['retention_days']
         async with pool.acquire() as conn, conn.transaction():
@@ -60,15 +62,17 @@ async def run_retention(pool):
                    ORDER BY approved_at DESC,version DESC LIMIT 1''', org, policy['category'],
             )
             if (not current or not current['valid'] or current['legal_hold'] or not current['erasure_allowed']
-                    or current['version'] != policy['version'] or current['retention_days'] is None):
+                    or current['version'] != policy['version']
+                    or not retention_days_allowed(policy['category'], current['retention_days'])):
                 continue
             days = current['retention_days']
-            c24_policy = await conn.fetchrow('''SELECT erasure_allowed,legal_hold,
+            c24_policy = await conn.fetchrow('''SELECT erasure_allowed,legal_hold,retention_days,
                     valid_until>NOW() AS valid FROM gdpr_policies
                 WHERE organization_id=$1 AND category='booking_conversation_content'
                   AND approved_at<=NOW() ORDER BY approved_at DESC,version DESC LIMIT 1''', org)
             c24_allowed = bool(c24_policy and c24_policy['valid']
-                               and c24_policy['erasure_allowed'] and not c24_policy['legal_hold'])
+                               and c24_policy['erasure_allowed'] and not c24_policy['legal_hold']
+                               and retention_days_allowed('booking_conversation_content', c24_policy['retention_days']))
             if policy['category'] == 'booking_conversation_content':
                 # Only the typed proposal is expired here. The final response,
                 # commercial receipt and counter are governed independently.

@@ -1,7 +1,7 @@
 # A06 data inventory and export projection
 
 This inventory is a static review of `src/whatsapp/schema.sql`,
-`src/core/db/schema.sql`, and data tables introduced through migrations 002–063. It describes SQL declarations
+`src/core/db/schema.sql`, and data tables introduced through migrations 002-072 in this draft chain. It describes SQL declarations
 and checked-in code; it is not confirmation of the deployed database or of
 external provider configuration. The export query allowlist is
 [`src/core/gdpr/catalog.py`](../../src/core/gdpr/catalog.py). It contains one
@@ -9,12 +9,12 @@ frozen category per table, explicit selected columns, and no `SELECT *`.
 
 ## Scope and identity keys
 
-**A06 status: technical partial.** The catalog contains 51 unique categories
-and 70 executable projections, including narrow subject views. This is not a
-legal sign-off or issue closure. C05 policy/legal approval and C01 operational
-cutover remain pending, as do shared authentication-account disposition,
-subject-level review of unstructured content, verified external-provider
-erasure, backup and other-worker-copy handling, and rollout evidence.
+**A06 status: technical partial.** The current catalogue includes C2.4 state,
+stays and purge evidence as well as narrow subject views. The founder's five
+product decisions are approved in `melpis-privacy-v1.0`; this is not legal
+sign-off or issue closure. Effective tenant records, provider/contractual
+verification, C01 cutover, shared-account disposition, unstructured subject
+content, external erasure, backups and worker copies remain operational gates.
 
 - **Organization** means the tenant UUID (`organization_id`). Tenant export
   queries bind it as `$1`; derived rows join through a declared organization
@@ -113,8 +113,10 @@ indexing policy.
 - `src/core/retention_job.py` always expires encrypted GDPR snapshots. Primary
   data mutation is separately gated by `GDPR_RETENTION_EXECUTION_ENABLED` and
   valid per-tenant policy records. The route `/api/gdpr/retention-policy`
-  reports `policy_version=tenant-approval-required`; retention-day fields are
-  `null`, and automatic erasure reflects the execution flag. Its
+  reports `policy_version=melpis-privacy-v1.0`, approved category maxima and
+  enforcement-pending status. Legacy effective-retention fields remain `null`;
+  named product fields contain 60/90 days. The legacy automatic-erasure boolean
+  reports only an environment flag, not operational authorization. Its
   `simulator_history_idle_hours=24` value is not a retention period. The legacy
   `organizations.message_retention_days` column is not approval evidence.
 - `src/core/db/migrations/014_contact_fk_strategy.sql` specifies the contact
@@ -137,10 +139,12 @@ indexing policy.
   re-erasure must be confirmed operationally. No other persistent document
   object store was confirmed in this static review.
 - Do not infer legal retention periods from code defaults, examples, or the
-  DPA technical template. C05 legal/controller policy approval and C01 cutover
-  remain pending; no approved retention schedule is established by this
-  inventory. The DPA content is a technical template and does not constitute
-  executed legal approval.
+  DPA technical template. Approved product standards are in
+  [Privacy V1.0](../governance/privacy-data-governance-v1.0.md) and its
+  [implementation matrix](../governance/privacy-v1-implementation-matrix.md).
+  Those five decisions are closed; effective controls, compatible tenant
+  records and operational GO remain necessary. The DPA remains a draft, not
+  a signed agreement or certification of provider compliance.
 
 ## External providers and unresolved evidence
 
