@@ -3,13 +3,21 @@
 ## Status and authority
 
 A06 is a technical partial, not issue closure or a legal certification. The
-DPA content is a technical template pending C05 review and approval. A06 does
-not approve a retention schedule. Migration 063 seeds no policies;
+DPA remains an unpublished contractual draft. The founder has approved the
+five product decisions in [Privacy V1.0](../governance/privacy-data-governance-v1.0.md),
+registered as `melpis-privacy-v1.0`; those decisions are closed, not pending
+preference choices. This is not proof of effective enforcement. Migration 063 seeds no policies;
 policy and operation-event records are immutable, and the application
 `service_role` cannot insert, update, or delete policy rows. A controller or
-founder must provide the C05 approval and an authorized operational cutover
+authorized administrator must establish compatible effective tenant instructions,
+versioned records and an authorized operational cutover
 before primary-data erasure or retention can run. Do not infer periods from
-legacy constants or sample values.
+legacy constants or sample values. The product registry now checks supported
+worker day schedules against the approved maxima, including the locked latest
+row and cross-category C2.4 permission. Unsupported schedules fail closed;
+they are never silently clamped. Visibility, complete expiry coverage and
+last-pertinent-activity timing still require implementation and verification;
+see the [category matrix](../governance/privacy-v1-implementation-matrix.md).
 
 All three execution flags default to off and must be set explicitly to the
 literal string `true` for their separate work:
