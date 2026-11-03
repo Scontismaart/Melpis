@@ -44,14 +44,20 @@ effettuato dal Responsabile per conto del Titolare nell'ambito dell'uso del
 Servizio, ai sensi dell'art. 28 GDPR.
 
 2.2 **Ruoli.** Con riferimento ai dati dei contatti/clienti finali del
-Titolare (numeri WhatsApp, messaggi, dati raccolti tramite prenotazioni,
-recensioni, documenti caricati), il Titolare agisce quale Titolare del
-trattamento e il Fornitore quale Responsabile.
+Titolare trattati per erogare le funzioni attivate (ad esempio numeri
+WhatsApp, messaggi, prenotazioni, recensioni e documenti forniti dal
+Titolare), il Titolare determina finalità e istruzioni; il Fornitore opera
+quale Responsabile nei limiti delle attività effettivamente svolte per suo
+conto.
 
-Con riferimento ai dati relativi all'account del Titolare stesso (dati di
-fatturazione, credenziali di accesso, configurazioni dell'organizzazione),
-il Fornitore agisce quale Titolare autonomo del trattamento, secondo quanto
-descritto nell'Informativa Privacy del Fornitore.
+Il Fornitore opera quale Titolare autonomo limitatamente alle proprie
+finalità di gestione degli account e dei rapporti con i clienti, fatturazione,
+sicurezza del servizio e adempimento dei propri obblighi aziendali. La
+presente ripartizione non estende il ruolo di Responsabile ai trattamenti
+che il Fornitore determina per finalità proprie, né esclude obblighi
+inderogabili previsti dalla legge. I trattamenti e i dati effettivamente
+coinvolti per ciascuna finalità devono risultare dall'Informativa Privacy e
+dall'inventario aggiornato dei trattamenti.
 
 2.3 Il Responsabile tratta i Dati Personali esclusivamente per l'erogazione
 del Servizio e secondo le istruzioni documentate del Titolare, che si
@@ -121,24 +127,30 @@ i) informare tempestivamente il Titolare qualora, a proprio giudizio,
 
 ## 6. Sub-responsabili e trasferimenti extra-UE
 
-6.1 Il Titolare autorizza in via generale il Responsabile ad avvalersi dei
-Sub-responsabili elencati nell'**Allegato B**, necessari all'erogazione del
-Servizio. Il Responsabile informa il Titolare di eventuali modifiche
-(aggiunta/sostituzione) con ragionevole anticipo, dando al Titolare la
-possibilità di opporsi per motivi legittimi.
+6.1 L'**Allegato B** descrive le categorie e i fornitori candidati o
+effettivamente utilizzati per le funzioni attivate. La sua inclusione in
+questa bozza non costituisce attestazione che un fornitore sia già abilitato,
+contrattualizzato o verificato, né autorizzazione a trasferimenti non
+documentati. Prima di attivare un fornitore quale Sub-responsabile devono
+essere verificati il trattamento effettivo, il ruolo, l'accordo applicabile,
+le misure, le condizioni d'uso, la conservazione, gli eventuali upstream e
+la localizzazione dei dati. Solo dopo tale verifica si applicano la previa
+autorizzazione generale e la procedura di informazione e opposizione qui
+previste; i dettagli operativi della procedura vanno completati prima della
+sottoscrizione.
 
-6.2 Il Responsabile impone a ciascun Sub-responsabile, mediante contratto
-scritto, obblighi di protezione dei dati non meno stringenti di quelli
-previsti dal presente Accordo.
+6.2 Per ciascun Sub-responsabile effettivamente autorizzato, il Responsabile
+si impegna a imporre mediante accordo scritto obblighi di protezione dei
+dati coerenti con l'art. 28(4) GDPR e non meno stringenti di quelli
+applicabili al trattamento affidato.
 
-6.3 **Trasferimenti extra-UE.** Alcuni Sub-responsabili elencati
-nell'Allegato B trattano dati al di fuori dello Spazio Economico Europeo
-(in particolare negli Stati Uniti). Tali trasferimenti avvengono sulla base
-di strumenti da verificare singolarmente con ciascun fornitore prima della
-sottoscrizione (ad esempio SCC o una decisione di adeguatezza applicabile).
-**Nessun meccanismo è qui dichiarato già perfezionato.** Occorre verificare
-regioni, data-residency, termini dei sub-responsabili e trasferimenti di
-Meta, del provider AI realmente selezionato, di Supabase e dei servizi opzionali.
+6.3 **Trasferimenti internazionali.** La localizzazione dei trattamenti e
+gli eventuali trasferimenti al di fuori dello Spazio Economico Europeo,
+incluse le catene di subfornitura, non sono ancora verificati per tutti i
+servizi e le configurazioni. Prima di ogni attivazione devono essere
+identificati i paesi interessati e verificati gli strumenti e le garanzie
+applicabili, ove necessari. Questa bozza non afferma che un trasferimento o
+un relativo meccanismo sia già autorizzato, disponibile o perfezionato.
 
 ## 7. Violazioni di Dati Personali (Data Breach)
 
@@ -162,9 +174,11 @@ fornitori non sono ancora verificate; fino ad allora è necessario un processo
 assistito e documentato:
 
 - **Esportazione dati** di un contatto (`GET /api/gdpr/export`);
-- **Cancellazione** dei dati dell'organizzazione (`POST /api/gdpr/delete`),
-  con effetto sulle tabelle collegate; la cancellazione presso i fornitori
-  esterni e nei backup richiede verifica e intervento operativo;
+- **Richiesta di cancellazione** dell'organizzazione
+  (`POST /api/gdpr/delete`); perimetro, effetti sulle relazioni e completezza
+  dell'esecuzione devono essere verificati prima di dichiarare l'erasure
+  conclusa. Fornitori esterni e backup richiedono verifica e intervento
+  operativo;
 - **Gestione delle preferenze di consenso** dei contatti
   (`GET/PUT /api/gdpr/consent-prefs`).
 
@@ -175,33 +189,51 @@ complessità della richiesta.
 
 ## 9. Conservazione e cancellazione dei dati
 
-9.1 **Messaggi WhatsApp.** I messaggi vengono conservati per un periodo di
-90 giorni dalla ricezione/invio, articolato in due fasi: contrassegnati
-come cancellati (soft-delete) dopo 60 giorni, e rimossi fisicamente dal
-database dopo ulteriori 30 giorni. Questa politica è attualmente fissa per
-tutte le organizzazioni e non ancora configurabile per singolo Titolare.
+9.1 Le durate seguenti sono la policy standard di prodotto V1. Si applicano
+alle categorie operative quando compatibili con le istruzioni documentate
+del Titolare e con gli obblighi di legge applicabili. Non attestano che i
+job di cancellazione, la propagazione ai fornitori o la rotazione dei backup
+siano già stati eseguiti o verificati. Eventuali policy specifiche per
+Titolare devono essere versionate e non possono estendere arbitrariamente
+queste durate.
 
-9.2 **Cancellazione su richiesta del Titolare.** L'esercizio della funzione
-di cancellazione (§8.1) elimina in modo definitivo, con cascata sulle
-tabelle collegate, i dati dell'organizzazione e dei relativi contatti, e
-propaga la richiesta ai Sub-responsabili indicati nell'Allegato B per cui
-tale propagazione è tecnicamente prevista.
+| Categoria | Durata standard | Ambito e cancellazione |
+|---|---|---|
+| Contenuto dei messaggi conversazionali | Disponibilità ordinaria massima di 60 giorni; rimozione dal database primario entro 90 giorni | La finestra fino a 90 giorni è un termine massimo di rimozione dal primario, non una promessa di cancellazione da copie di terzi. Non prolungare indiscriminatamente o indefinitamente il contenuto personale usando un'etichetta di audit. Eventuali documenti soggetti a uno specifico obbligo restano separati, limitati e motivati. |
+| Stato conversazionale strutturato C2.4 | Massimo 30 giorni dall'ultima attività pertinente | Eliminazione anticipata quando termina la finalità o quando è dovuta l'erasure. Non deve essere ricostruito automaticamente da copie obsolete. |
+| Ricevute tecniche e dati di idempotenza | 90 giorni dalla conclusione della richiesta | Conservare solo identificativi e prove strettamente necessari; distinguere eventuali dati personali da contabilità soggetta a un obbligo separato. Nessuna conservazione indefinita di contenuti personali come audit. |
+| Prenotazioni e soggiorni conclusi | Massimo 12 mesi dalla conclusione | L'archivio operativo non contiene testo conversazionale grezzo. Documenti soggetti a obblighi legali restano in categorie separate, limitate e motivate. Nessun periodo operativo autorizza conservazione indiscriminata di dati sanitari. |
+| Dati finanziari e documentazione obbligatoria | Durata prevista per la specifica categoria e il relativo obbligo documentato | Separazione tecnica dai dati conversazionali. Nessuna estensione generale dei termini; contatori e audit non autorizzano la conservazione indiscriminata di testo grezzo. Eventuali documenti obbligatori richiedono categoria, necessità e periodo specifici. |
 
-9.3 **Dati conservati oltre la cancellazione per obblighi legali.**
-Determinati registri tecnici e contabili (registro eventi, log di utilizzo
-per finalità di fatturazione, log di audit) possono sopravvivere alla
-cancellazione dell'organizzazione, privati del riferimento identificativo
-diretto all'organizzazione ove tecnicamente possibile, per l'adempimento di
-obblighi contabili, fiscali e di gestione di eventuali contestazioni di
-pagamento, per i periodi previsti dalla normativa applicabile. **Il
-Titolare prende atto che tali registri possono contenere, in forma
-derivata, porzioni del contenuto dei messaggi elaborati** (testo originale
-e risposta generata dall'IA), e che pertanto la cancellazione dei messaggi
-di cui al §9.1 non comporta l'eliminazione di tali copie derivate entro gli
-stessi termini.
+9.2 **Richieste di cancellazione e cessazione.** Le richieste sono gestite
+secondo le funzionalità e le relazioni dati effettivamente verificate. La
+presenza di un endpoint non attesta cancellazione completa o propagazione
+automatica. Prima di dichiarare conclusa un'erasure occorre verificare le
+tabelle e le copie pertinenti, le ricevute C2.4, le barriere contro replay o
+ricreazione, e gli eventuali passaggi esterni ancora pendenti. Alla
+cessazione del Servizio il Responsabile restituisce o cancella i dati
+secondo la scelta del Titolare e le condizioni dell'art. 28(3)(g) GDPR,
+salvi gli obblighi di conservazione effettivamente applicabili e documentati.
 
-9.4 Alla cessazione del Servizio, il Responsabile cancella i Dati Personali
-secondo quanto previsto al §5(g), salvo quanto previsto al §9.3.
+9.3 **Obblighi separati e trattenimenti eccezionali.** Dati finanziari o
+documenti obbligatori possono essere conservati solo nella categoria
+pertinente, per il periodo richiesto e con accessi limitati. Non è prevista
+alcuna eccezione generica o permanente. Un eventuale legal hold richiede
+motivo e autorità documentati, ambito minimo, accessi limitati e una data di
+scadenza o revisione. Non autorizza una conservazione generica o indefinita
+di contenuti personali come audit o contabilità. Eventuali documenti
+legalmente necessari restano in categorie separate, limitate e motivate.
+
+9.4 **Backup.** La policy standard prevede backup cifrati, accesso
+amministrativo ristretto e rotazione con conservazione massima di 30 giorni,
+salvo obbligo specifico documentato. Il ripristino deve avvenire in ambiente
+isolato, con riconciliazione delle cancellazioni intervenute dopo il backup
+e verifica di barriere indipendenti contro replay e ricreazione dei dati
+cancellati prima di riaprire il traffico. Le evidenze necessarie a preservare
+tali barriere devono essere custodite indipendentemente dal backup. Questa
+descrizione definisce la policy e non attesta configurazione, restore o
+verifiche già eseguiti. I job distruttivi richiedono una policy registrata,
+verifica dell'ambiente e GO operativo.
 
 ## 10. Nota su intelligenza artificiale e trasparenza (AI Act)
 
@@ -267,39 +299,47 @@ WhatsApp; utenti dell'organizzazione del Titolare (staff).
 
 | Categoria | Esempi | Finalità |
 |---|---|---|
-| Identità e contatto | numero WhatsApp, nome contatto, nome/email staff | Erogazione del Servizio, gestione account |
-| Contenuto comunicazioni | testo messaggi, cronologia conversazione | Generazione risposta automatica, storicizzazione conversazione |
-| Prenotazioni | nome, telefono, note libere (possono contenere dati particolari, es. allergie) | Gestione prenotazioni e promemoria |
-| Recensioni | autore, testo recensione, bozza di risposta IA | Gestione reputazione online |
-| Documenti caricati dal Titolare | testo e relativa rappresentazione vettoriale | Risposte automatiche basate sui contenuti del Titolare (RAG) |
-| Consensi | stato opt-in/opt-out, log eventi di consenso | Rispetto delle preferenze di contatto |
-| Trasparenza IA | timestamp del primo invio della disclosure (ai_disclosure_sent_at) | Adempimento obblighi di trasparenza AI Act art. 50(1) |
-| Credenziali di integrazione | token OAuth Google, token WhatsApp (cifrati a riposo) | Integrazioni Calendar/Business Profile/WhatsApp |
-| Dati tecnici | timestamp, stato di consegna, log di utilizzo/fatturazione | Funzionamento e fatturazione del Servizio |
+| Identità e contatto | numero WhatsApp, nome contatto, nome/email staff | Erogazione del Servizio per conto del Titolare; gestione dell'account per le finalità proprie del Fornitore |
+| Contenuto comunicazioni | testo messaggi, cronologia conversazione | Risposta alla richiesta e gestione della conversazione; disponibilità ordinaria massima 60 giorni e rimozione dal database primario entro 90 giorni |
+| Stato conversazionale C2.4 | dati strutturati strettamente necessari allo stato del flusso | Continuità operativa; massimo 30 giorni dall'ultima attività pertinente |
+| Prenotazioni e soggiorni | dati necessari alla prenotazione; evitare note libere non necessarie | Gestione della prenotazione; massimo 12 mesi dalla conclusione per l'archivio operativo |
+| Ricevute tecniche/idempotenza | identificativi e prove minime della richiesta | Affidabilità e prevenzione di duplicati; 90 giorni dalla conclusione della richiesta |
+| Recensioni | autore, testo recensione, bozza di risposta AI | Gestione della reputazione, se la funzione è attivata; conservazione limitata alla finalità e alle policy applicabili |
+| Documenti caricati dal Titolare | contenuti forniti e rappresentazioni derivate, se utilizzate | Risposte basate sulle informazioni dell'attività; necessità, durata e cancellazione da definire nelle istruzioni e nel registro della funzione attivata |
+| Consensi e preferenze | stato e prove minime dell'evento | Applicazione delle preferenze e prova degli adempimenti; termini specifici da documentare senza trattenere contenuti conversazionali grezzi |
+| Trasparenza AI | eventuale timestamp della disclosure | Gestione della funzione e prova minima ove necessaria; durata e accessi da documentare |
+| Credenziali di integrazione | token OAuth o credenziali equivalenti, se attivati | Funzionamento dell'integrazione; protezione e cancellazione al termine della finalità |
+| Dati tecnici, account e finanziari | timestamp, stati, contatori, dati di fatturazione pertinenti | Sicurezza, gestione account e obblighi propri del Fornitore; durate specifiche per categoria e obbligo documentato, separati dal testo dei messaggi |
 
-**Nota sui dati particolari (art. 9 GDPR):** i campi di testo libero
-(note di prenotazione, contenuto messaggi) possono incidentalmente
-contenere dati relativi alla salute o altre categorie particolari (es.
-allergie alimentari comunicate per una prenotazione al ristorante). Il
-Servizio non richiede né elabora sistematicamente tali dati per finalità
-proprie; il Titolare è responsabile di limitarne la raccolta a quanto
-necessario e di informarne gli interessati.
+**Dati relativi alla salute e altre categorie particolari.** L'uso sanitario
+è limitato alle funzioni amministrative. Il Servizio non è destinato a
+diagnosi, anamnesi, prescrizioni, gestione di referti o decisioni mediche
+automatiche. L'attivazione reale del settore medico o dentistico resta
+bloccata finché non siano stati verificati i requisiti specifici e il
+perimetro autorizzato. Messaggi clinici o urgenti devono essere indirizzati
+al percorso di escalation appropriato. Il Titolare deve istruire il
+Responsabile sul trattamento effettivamente necessario e sulla relativa
+condizione di liceità; la presente bozza non autorizza una raccolta
+indiscriminata di dati sanitari.
 
 ## Allegato B — Sub-responsabili
 
 | Fornitore | Funzione | Dati trattati | Sede / trasferimento extra-UE |
 |---|---|---|---|
-| Meta Platforms (WhatsApp Business API) | Invio/ricezione messaggi WhatsApp | Numero telefono, testo messaggio, identificativi messaggio, nome profilo, stato consegna | USA — verificare strumento di trasferimento |
-| Provider AI effettivamente selezionato (Groq oppure OpenRouter e relativo provider di inferenza) | Generazione risposte automatiche, bozze recensioni, report, Q&A documenti | Profilo attività, testo messaggio cliente, estratti di documenti (RAG), testo recensione | Endpoint, retention, subfornitore e trasferimento da verificare per il modello scelto prima del go-live |
-| Google (Business Profile, Calendar) | Recensioni, sincronizzazione calendario | Testo/autore recensione; eventi calendario con nome/telefono/note cliente | USA — verificare strumento di trasferimento |
-| Stripe | Pagamenti, abbonamento, depositi prenotazione | Solo identificativi Stripe e importi; **nessun dato di pagamento (numero carta) transita o è conservato dal Fornitore** | USA/UE secondo configurazione Stripe |
-| Supabase | Autenticazione e hosting PostgreSQL/pgvector | Account e dati applicativi ospitati nel database | Il progetto Selecta SaaS risulta in eu-central-1; verificare contratti, backup e ogni ulteriore trattamento |
-| Sentry | Monitoraggio errori (attivo solo se configurato) | Tracce di errore, che possono incidentalmente includere frammenti di testo dei messaggi | USA/UE secondo configurazione |
-| Provider SMTP del Titolare/Fornitore | Notifiche email di escalation e sospensione account | Numero di telefono del contatto, identificativo conversazione (nessun testo del messaggio) | Secondo il provider SMTP configurato |
-| Airtable, Softr (solo se collegati dal Titolare) | Integrazioni opzionali e gestione delle relative richieste di cancellazione | Dati sincronizzati/configurati dal Titolare, non solo l'identificativo dell'organizzazione | Da verificare prima dell'attivazione |
+| Meta Platforms (WhatsApp Business API) | Candidato per invio/ricezione WhatsApp, se abilitato | Da confermare in base ai flussi effettivi; potenzialmente numero, contenuto e identificativi messaggio | Entità, paesi, condizioni, retention e trasferimenti da verificare |
+| Provider AI e upstream effettivamente selezionati | Candidati per generazione AI, se abilitati | Da confermare; potenzialmente prompt, testo messaggio, profilo attività ed estratti documentali | Provider, upstream, endpoint, retention, condizioni e trasferimenti da verificare |
+| Google (Business Profile, Calendar) | Integrazioni opzionali, se abilitate | Da confermare in base alle funzioni e ai dati sincronizzati effettivi | Entità, paesi, condizioni e trasferimenti da verificare |
+| Stripe | Pagamenti o abbonamenti, se abilitati | Flussi effettivi, categorie e dati della transazione da confermare; non presumere che un dato non transiti senza verifica | Entità, paesi, condizioni e trasferimenti da verificare |
+| Supabase e infrastruttura | Hosting/database/autenticazione, se effettivamente utilizzati | Da confermare per database, backup, log e servizi collegati | Progetto, regione, contratti, backup, subfornitori e trasferimenti da verificare |
+| Sentry | Monitoraggio errori, solo se configurato | Da confermare; verificare contenuto di tracce e regole di redazione | Attivazione, configurazione, paesi e trasferimenti da verificare |
+| Provider email, monitoraggio, backup e altri servizi tecnici | Solo se effettivamente configurati | Da censire secondo il flusso reale e il principio di minimizzazione | Identità, contratto, localizzazione, retention e trasferimenti da verificare |
+| Airtable, Softr e altre integrazioni opzionali | Solo se effettivamente attivate | Da censire per i dati realmente sincronizzati | Verifica completa prima dell'attivazione |
 
-*Sentry è disattivato di default e viene attivato solo tramite apposita
-configurazione del Fornitore.*
+L'Allegato B è un inventario da completare, non una dichiarazione che i
+fornitori elencati siano tutti attivi o già autorizzati. Nessuna regione,
+ubicazione o condizione contrattuale è considerata verificata sulla sola
+base di questa bozza. Un fornitore non verificato resta disabilitato o deve
+produrre un esito UNKNOWN/fail-closed quando necessario.
 
 ## Allegato C — Misure tecniche e organizzative (art. 32 GDPR)
 
