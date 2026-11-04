@@ -359,3 +359,10 @@ async def test_receipt_erasure_policy_hold_and_release(state_env, monkeypatch):
     assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',org,request)==0
     assert await pool.fetchval('SELECT count(*) FROM c24_receipt_cleanup_audit WHERE organization_id=$1 AND request_id=$2',org,request)==1
     assert await pool.fetchval('SELECT count(*) FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2',org,request)==1
+
+
+@pytest.mark.parametrize('function_name', ['c24_expire_idle', 'c24_purge_source'])
+async def test_content_retention_rejects_stale_transaction_snapshot(state_env, function_name):
+    with pytest.raises(asyncpg.InvalidTransactionStateError, match='read committed'):
+        async with state_env['pool'].acquire() as conn, conn.transaction(isolation='repeatable_read'):
+            await conn.fetchval(f'SELECT {function_name}($1,$2)', state_env['org'], uuid4())
