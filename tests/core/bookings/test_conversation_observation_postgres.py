@@ -187,11 +187,12 @@ async def test_valid_a05_opt_in_does_not_authorize_observation(state_env):
     assert await snapshot(env) == before
 
 
-async def test_newer_unprocessed_message_makes_observation_unknown(state_env):
+@pytest.mark.parametrize('timestamp', ['1700000001', '1700000000', 'malformed', None])
+async def test_unprocessed_message_with_uncertain_order_makes_observation_unknown(state_env, timestamp):
     env = state_env
     state, _ = await ready(env)
     source = uuid4(); wam = f'synthetic-{uuid4()}'
-    body = {'id': wam, 'timestamp': '1700000001', 'type': 'text', 'text': {'body': '11:00'}}
+    body = {'id': wam, 'timestamp': timestamp, 'type': 'text', 'text': {'body': '11:00'}}
     await env['pool'].execute("""INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content,content_text,wam_id,status)
         VALUES($1,$2,$3,'inbound','text',$4::jsonb,'11:00',$5,'processing')""",
         source, env['org'], env['conv'], json.dumps(body), wam)

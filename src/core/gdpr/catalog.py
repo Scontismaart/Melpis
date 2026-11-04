@@ -69,10 +69,11 @@ CATEGORIES: tuple[Category, ...] = (
         SELECT r.organization_id, r.request_id, r.conversation_id, r.source_message_id,
                r.action, r.applied_revision, r.prompt_message_id, r.created_at
         FROM booking_conversation_requests AS r
-        JOIN booking_conversation_states AS s
+        LEFT JOIN booking_conversation_states AS s
           ON s.organization_id = r.organization_id AND s.conversation_id = r.conversation_id
-        WHERE r.organization_id = $1::uuid AND s.organization_id = $1::uuid
-          AND s.subject_id = $2::uuid
+         AND s.organization_id = $1::uuid
+        WHERE r.organization_id = $1::uuid
+          AND COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid
     """, exclusion_reason="Individual export excludes staff identity and integrity hashes; no unproved account content projection."),
     Category("organizations", """
         SELECT id, name, created_at, updated_at, subscription_status, plan,

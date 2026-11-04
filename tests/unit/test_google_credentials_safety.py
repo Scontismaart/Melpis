@@ -49,6 +49,7 @@ def credentials_env(request, monkeypatch):
                 "sync_enabled": True,
                 "connection_epoch": UUID("33333333-3333-3333-3333-333333333333"),
                 "credential_version": 2,
+                "last_error_code": None,
                 "granted_scopes": list(CALENDAR_SCOPES),
             })
 
@@ -58,7 +59,7 @@ def credentials_env(request, monkeypatch):
 
     conn.fetchrow.side_effect = fetch
     if is_calendar:
-        conn.fetchval = AsyncMock(return_value=True)
+        conn.fetchval = AsyncMock(side_effect=[3, True])
     return service, conn, org_a, org_b, unowned_org
 
 
@@ -77,13 +78,14 @@ async def test_refresh_is_encrypted_and_updates_only_requested_tenant(credential
     if isinstance(service, GoogleCalendarService):
         query, org, epoch, version, encrypted, _expiry, encrypted_refresh = conn.fetchval.await_args.args
         assert "WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3" in query
-        assert org == org_a and epoch == UUID("33333333-3333-3333-3333-333333333333") and version == 2
+        assert org == org_a and epoch == UUID("33333333-3333-3333-3333-333333333333") and version == 3
+        assert "connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'" in query
         assert encrypted != f"refreshed-{org_a}"
         assert service.fernet.decrypt(encrypted.encode()).decode() == f"refreshed-{org_a}"
         assert encrypted_refresh != f"refresh-{org_a}"
         assert service.fernet.decrypt(encrypted_refresh.encode()).decode() == f"refresh-{org_a}"
         assert await service._get_credentials(unowned_org) is None
-        assert conn.fetchval.await_count == 1
+        assert conn.fetchval.await_count == 2
     else:
         query, org, encrypted, _expiry = conn.execute.await_args.args
         assert "WHERE organization_id = $1" in query
@@ -107,13 +109,15 @@ async def test_revoked_refresh_fails_closed_without_secret_logs(credentials_env,
     assert await service._get_credentials(org_a) is None
     assert "synthetic-sensitive-token" not in caplog.text
     if isinstance(service, GoogleCalendarService):
-        query, org, epoch = next(
-            call.args for call in conn.execute.await_args_list
+        query, org, epoch, version = next(
+            call.args for call in conn.fetchval.await_args_list
             if "connection_status='revoked'" in call.args[0]
         )
         assert "WHERE organization_id=$1 AND connection_epoch=$2" in query
         assert org == org_a
         assert epoch == UUID("33333333-3333-3333-3333-333333333333")
+        assert version == 3
+        assert "connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'" in query
     else:
         query, org = conn.execute.await_args.args
         assert "WHERE organization_id = $1" in query
@@ -139,6 +143,7 @@ async def test_cross_tenant_ciphertext_key_is_not_accepted(credentials_env):
             "sync_enabled": True,
             "connection_epoch": UUID("33333333-3333-3333-3333-333333333333"),
             "credential_version": 2,
+            "last_error_code": None,
             "granted_scopes": list(CALENDAR_SCOPES),
         })
         assert await service._get_credentials(org_a) is None

@@ -72,9 +72,9 @@ class BookingConversationRepository:
     async def _source(conn, org, conversation, source_message_id):
         source = await conn.fetchrow('''SELECT id,conversation_id,wam_id,content,content_text,
             direction,deleted_at,status,billed_at,ai_reply_cache,claimed_at,heartbeat_at,c24_original_subject_id,
-            clock_timestamp() AS verified_now FROM messages
+            clock_timestamp() AS verified_now, to_jsonb(messages)->>'content_purged_at' AS content_purged_at FROM messages
             WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''', org, conversation, source_message_id)
-        if not source or source['direction'] != 'inbound' or source['deleted_at'] is not None:
+        if not source or source['direction'] != 'inbound' or source['deleted_at'] is not None or source['content_purged_at'] is not None:
             raise ConversationStateDenied('Live inbound source required')
         if source['c24_original_subject_id'] is None or source['c24_original_subject_id'] != await conn.fetchval(
                 'SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2', org, conversation):
@@ -123,8 +123,10 @@ class BookingConversationRepository:
     @staticmethod
     async def _load(conn, org, conversation):
         # Parent source locks precede the child row lock, matching FK erasure.
-        row = await conn.fetchrow('SELECT * FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2', org, conversation)
+        row = await conn.fetchrow("SELECT *, updated_at <= clock_timestamp() - interval '30 days' AS idle_expired FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2", org, conversation)
         if not row: return None, None
+        if row['idle_expired']:
+            raise ConversationStateUnavailable('Idle state requires lifecycle cleanup')
         try:
             state = ConversationState.model_validate_json(canonical(decode(row['snapshot'])))
             if (state.organization_id != org or state.conversation_id != conversation
@@ -140,13 +142,22 @@ class BookingConversationRepository:
                       | {s.source_message_id for s in state.superseded}
                       | ({state.confirmation.source_message_id} if state.confirmation else set()))
         for source_id in sorted(source_ids, key=str):
-            await BookingConversationRepository._source(conn, org, conversation, source_id)
+            provenance = await conn.fetchrow('''SELECT direction,deleted_at,c24_original_subject_id,
+                to_jsonb(messages)->>'content_purged_at' AS content_purged_at FROM messages
+                WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''', org, conversation, source_id)
+            if (not provenance or provenance['direction'] != 'inbound' or provenance['deleted_at'] is not None
+                    or provenance['c24_original_subject_id'] != row['subject_id']):
+                raise ConversationStateUnavailable('Stored source provenance is unavailable')
+            if provenance['content_purged_at'] is None:
+                await BookingConversationRepository._source(conn, org, conversation, source_id)
         if state.confirmation:
             proof = state.confirmation
-            prompt = await conn.fetchrow('''SELECT direction,status,sent_at,deleted_at,content_text
-                FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''',
+            prompt = await conn.fetchrow('''SELECT direction,status,sent_at,deleted_at,content_text,
+                to_jsonb(messages)->>'content_purged_at' AS content_purged_at FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''',
                 org, conversation, proof.prompt_message_id)
-            if (not prompt or prompt['direction'] != 'outbound' or prompt['status'] not in {'sent','delivered','read'}
+            if prompt and prompt['content_purged_at'] is not None and prompt['deleted_at'] is None:
+                state = state.model_copy(update={'confirmation': None})
+            elif (not prompt or prompt['direction'] != 'outbound' or prompt['status'] not in {'sent','delivered','read'}
                     or prompt['sent_at'] is None or prompt['deleted_at'] is not None
                     or hashlib.sha256((prompt['content_text'] or '').encode()).hexdigest() != proof.prompt_body_hash):
                 raise ConversationStateUnavailable('Confirmation evidence is no longer live')
@@ -327,6 +338,8 @@ class BookingConversationRepository:
             if previous:
                 if any(p['payload_hash'] != operation_hash or p['actor_user_id'] != actor for p in previous):
                     raise StateConflict('State request or source was used for another operation')
+                if row is None or any(p.get('state_generation') != row.get('state_generation') for p in previous):
+                    raise StateConflict('State request belongs to an expired conversation generation')
                 return self._result(state, previous[0]['applied_revision'], True, catalog.revision)
             if expected_catalog_revision != catalog.revision:
                 raise StateConflict('Published catalog revision changed')

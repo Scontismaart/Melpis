@@ -7,6 +7,7 @@ copies and legally retained records are reported separately and never guessed.
 import os
 from uuid import UUID
 
+from src.core.gdpr.c24_schema import conversation_schema
 from src.core.gdpr.guard import identifier_fingerprint
 from src.core.gdpr.operations import Operations, document, encode, event
 
@@ -41,7 +42,16 @@ class Deletion:
             )
             if prior == 'confirmed':
                 return  # Never rerun committed mutations or provider calls.
+            schema = await conversation_schema(conn)
             blockers = []
+            if schema == 'partial':
+                blockers.append('conversation_schema_incomplete')
+            if schema == 'absent' and await conn.fetchval("""SELECT
+                EXISTS(SELECT 1 FROM messages WHERE organization_id=$1
+                       AND ai_reply_cache ? 'booking_state_proposal')
+                OR EXISTS(SELECT 1 FROM simulation_requests WHERE organization_id=$1
+                          AND response ? 'booking_state_proposal')""", org):
+                blockers.append('unattributed_conversation_copy_review_required')
             if await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM external_booking_sync
                 WHERE organization_id=$1 AND provider='google' AND calendar_dispatch_state='possibly_sent')""", org):
                 blockers.append('calendar_sync_unresolved')
@@ -57,43 +67,54 @@ class Deletion:
             )
             policies = {p['category']: dict(p) for p in policies}
             required = {'contact_content', 'transient_content', 'cutover'}
-            if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays
-                WHERE organization_id=$1 AND ($2::uuid IS NULL OR original_subject_id=$2))''', org, op['subject_id']):
-                required.add('booking_stay_content')
-                # Receipts and original lineage need a reviewed deletion protocol.
-                # Never claim a successful erase while those copies remain.
-                blockers.append('administrative_stay_purge_required')
-            if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
-                SELECT 1 FROM simulation_requests WHERE organization_id=$1
-                  AND response ? 'booking_state_proposal' AND c24_subject_id IS NULL)''', org):
-                # A historical or orphaned proposal cannot be attributed using
-                # today's contact linkage. Controller reconciliation is required.
-                blockers.append('unattributed_conversation_copy_review_required')
+            if await conn.fetchval("SELECT to_regclass('public.booking_stays') IS NOT NULL"):
+                if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays
+                    WHERE organization_id=$1 AND ($2::uuid IS NULL OR original_subject_id=$2))''', org, op['subject_id']):
+                    required.add('booking_stay_content')
+                    blockers.append('administrative_stay_purge_required')
             if op['scope'] == 'organization':
                 required |= {'knowledge_content', 'organization_profile'}
-            conversation_counts = await conn.fetchrow(
-                '''SELECT
-                  (SELECT count(*) FROM booking_conversation_states s
-                   WHERE s.organization_id=$1 AND ($2::uuid IS NULL OR s.subject_id=$2)) AS states,
-                  (SELECT count(*) FROM booking_conversation_requests r
-                   JOIN booking_conversation_states s ON s.organization_id=r.organization_id
-                     AND s.conversation_id=r.conversation_id
-                   WHERE r.organization_id=$1 AND s.organization_id=$1
-                     AND ($2::uuid IS NULL OR s.subject_id=$2)) AS receipts''', org, op['subject_id'],
-            )
-            # The policy covers *all* new copies, including a canonical response
-            # which was persisted before any state repository call occurred.
-            if conversation_counts['states'] or await conn.fetchval(
-                '''SELECT EXISTS(SELECT 1 FROM messages m
-                   JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
-                   WHERE m.organization_id=$1 AND c.organization_id=$1
-                     AND ($2::uuid IS NULL OR c.contact_id=$2)
-                     AND m.ai_reply_cache ? 'booking_state_proposal')
-                 OR EXISTS(SELECT 1 FROM simulation_requests
-                   WHERE organization_id=$1 AND response ? 'booking_state_proposal'
-                     AND ($2::uuid IS NULL OR c24_subject_id=$2))''', org, op['subject_id'],
-            ):
-                required.add('booking_conversation_content')
+            if schema == 'ready':
+                if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
+                    SELECT 1 FROM simulation_requests WHERE organization_id=$1
+                      AND response ? 'booking_state_proposal' AND c24_subject_id IS NULL)''', org):
+                    # A historical or orphaned proposal cannot be attributed using
+                    # today's contact linkage. Controller reconciliation is required.
+                    blockers.append('unattributed_conversation_copy_review_required')
+                conversation_counts = await conn.fetchrow(
+                    '''SELECT
+                      (SELECT count(*) FROM booking_conversation_states s
+                       WHERE s.organization_id=$1 AND ($2::uuid IS NULL OR s.subject_id=$2)) AS states,
+                      (SELECT count(*) FROM booking_conversation_requests r
+                       LEFT JOIN booking_conversation_states s ON s.organization_id=r.organization_id
+                         AND s.conversation_id=r.conversation_id AND s.organization_id=$1
+                       WHERE r.organization_id=$1
+                         AND ($2::uuid IS NULL OR COALESCE((to_jsonb(r)->>'original_subject_id')::uuid,s.subject_id)=$2)) AS receipts''', org, op['subject_id'],
+                )
+                if conversation_counts['receipts'] and await conn.fetchval(
+                    '''SELECT EXISTS(SELECT 1 FROM pg_attribute
+                       WHERE attrelid='public.booking_conversation_requests'::regclass
+                         AND attname='original_subject_id' AND NOT attisdropped)''',
+                ):
+                    required.add('technical_receipts')
+                    if not await conn.fetchval('''SELECT current_user=pg_get_userbyid(relowner)
+                        FROM pg_class WHERE oid='public.c24_receipt_cleanup_capability'::regclass'''):
+                        blockers.append('receipt_lifecycle_owner_required')
+                    if await conn.fetchval('SELECT public.c24_receipts_held($1,$2)', org, op['subject_id']):
+                        blockers.append('technical_receipts_held')
+                # The policy covers *all* new copies, including a canonical response
+                # which was persisted before any state repository call occurred.
+                if conversation_counts['states'] or await conn.fetchval(
+                    '''SELECT EXISTS(SELECT 1 FROM messages m
+                       JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
+                       WHERE m.organization_id=$1 AND c.organization_id=$1
+                         AND ($2::uuid IS NULL OR c.contact_id=$2)
+                         AND m.ai_reply_cache ? 'booking_state_proposal')
+                     OR EXISTS(SELECT 1 FROM simulation_requests
+                       WHERE organization_id=$1 AND response ? 'booking_state_proposal'
+                         AND ($2::uuid IS NULL OR c24_subject_id=$2))''', org, op['subject_id'],
+                ):
+                    required.add('booking_conversation_content')
             for category in sorted(required):
                 p = policies.get(category)
                 if not p or not p['valid'] or p['legal_hold'] or not p['erasure_allowed']:
@@ -208,7 +229,8 @@ class Deletion:
                 await conn.execute('DELETE FROM onboarding_profiles WHERE organization_id=$1', org)
                 await conn.execute('UPDATE organizations SET business_profile=NULL WHERE id=$1', org)
             else:
-                await conn.execute('DELETE FROM simulation_requests WHERE organization_id=$1 AND c24_subject_id=$2', org, subject)
+                if schema == 'ready':
+                    await conn.execute('DELETE FROM simulation_requests WHERE organization_id=$1 AND c24_subject_id=$2', org, subject)
                 await conn.execute(
                     '''DELETE FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id IN
                        (SELECT id FROM bookings WHERE organization_id=$1 AND contact_id=$2)''', org, subject,

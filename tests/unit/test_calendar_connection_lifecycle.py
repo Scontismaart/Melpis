@@ -33,7 +33,7 @@ class _Connection:
     def __init__(self):
         self.execute = AsyncMock()
         self.fetchrow = AsyncMock()
-        self.fetchval = AsyncMock()
+        self.fetchval = AsyncMock(return_value=8)
         self.transaction = MagicMock(side_effect=lambda: _AsyncContext(None))
         self.is_closed = MagicMock(return_value=False)
 
@@ -63,6 +63,7 @@ def _credential_row(fernet, *, scopes=None):
         "sync_enabled": True,
         "connection_epoch": EPOCH,
         "credential_version": 7,
+        "last_error_code": None,
         "granted_scopes": list(SCOPES) if scopes is None else scopes,
         "access_token": fernet.encrypt(b"synthetic-access-token").decode(),
         "refresh_token": fernet.encrypt(b"synthetic-refresh-token").decode(),
@@ -140,7 +141,7 @@ async def test_disconnect_is_tenant_bound_invalidates_epoch_and_nonce_preserving
 
 
 @pytest.mark.asyncio
-async def test_retryable_refresh_error_keeps_connection_recoverable_and_sanitizes_details(
+async def test_retryable_refresh_error_keeps_unknown_dispatch_and_sanitizes_details(
     lifecycle_env, monkeypatch,
 ):
     lifecycle, conn, fernet = lifecycle_env
@@ -160,7 +161,12 @@ async def test_retryable_refresh_error_keeps_connection_recoverable_and_sanitize
     assert caught.value.code == "refresh_unavailable"
     assert "DO_NOT_LEAK" not in str(caught.value)
     assert "temporarily_unavailable" not in str(caught.value)
-    assert conn.fetchval.await_count == 0
+    assert conn.fetchval.await_count == 1
+    sql, org, epoch, version = conn.fetchval.await_args.args
+    assert "credential_version=credential_version+1,connection_status='reconnect_required'" in sql
+    assert "WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3" in sql
+    assert "RETURNING credential_version" in sql
+    assert (org, epoch, version) == (ORG_A, EPOCH, 7)
     assert not any("connection_status='revoked'" in call.args[0] for call in conn.execute.await_args_list)
 
 
@@ -170,6 +176,7 @@ async def test_nonretryable_invalid_grant_marks_only_current_tenant_epoch_revoke
 ):
     lifecycle, conn, fernet = lifecycle_env
     conn.fetchrow.return_value = _credential_row(fernet)
+    conn.fetchval.side_effect = [8, True]
 
     def refresh(_creds, _request):
         raise RefreshError({"error": "invalid_grant", "refresh_token": "SENSITIVE_VALUE"})
@@ -180,9 +187,10 @@ async def test_nonretryable_invalid_grant_marks_only_current_tenant_epoch_revoke
         await lifecycle.credentials(ORG_A)
 
     assert caught.value.code == "authorization_revoked"
-    revoke = next(call for call in conn.execute.await_args_list if "connection_status='revoked'" in call.args[0])
+    revoke = next(call for call in conn.fetchval.await_args_list if "connection_status='revoked'" in call.args[0])
     assert "WHERE organization_id=$1 AND connection_epoch=$2" in revoke.args[0]
-    assert revoke.args[1:] == (ORG_A, EPOCH)
+    assert revoke.args[1:] == (ORG_A, EPOCH, 8)
+    assert "connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'" in revoke.args[0]
     assert "SENSITIVE_VALUE" not in str(caught.value)
 
 
@@ -237,7 +245,7 @@ async def test_refresh_compare_and_swap_rejects_stale_epoch_or_credential_versio
 ):
     lifecycle, conn, fernet = lifecycle_env
     conn.fetchrow.return_value = _credential_row(fernet)
-    conn.fetchval.return_value = False
+    conn.fetchval.side_effect = [8, False]
 
     def refresh(creds, _request):
         creds.token = "synthetic-refreshed-token"
@@ -252,10 +260,11 @@ async def test_refresh_compare_and_swap_rejects_stale_epoch_or_credential_versio
     cas = conn.fetchval.await_args
     sql, bound_org, bound_epoch, bound_version, encrypted_token, _expiry, encrypted_refresh = cas.args
     assert "WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3" in sql
-    assert "connection_status='connected' AND sync_enabled RETURNING TRUE" in sql
+    assert "connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'" in sql
+    assert conn.fetchval.await_count == 2
     assert bound_org == ORG_A
     assert bound_epoch == EPOCH
-    assert bound_version == 7
+    assert bound_version == 8
     assert encrypted_token != "synthetic-refreshed-token"
     assert fernet.decrypt(encrypted_token.encode()).decode() == "synthetic-refreshed-token"
     assert encrypted_refresh != "synthetic-refresh"

@@ -36,7 +36,7 @@ def postgres_container():
 
 
 @pytest.fixture
-async def pg_pool(postgres_container):
+async def pg_pool(postgres_container, request):
     dsn = postgres_container.get_connection_url().replace("+psycopg2", "")
     pool = await asyncpg.create_pool(
         dsn=dsn,
@@ -87,7 +87,10 @@ async def pg_pool(postgres_container):
         # La lista esplicita era andata fuori sync col repo producendo
         # errori "column does not exist" (PR #31): ogni migrazione DEVE
         # restare idempotente su un DB gia' inizializzato con schema.sql.
+        migration_limit = request.node.get_closest_marker("migration_limit")
         for sql_path in sorted(glob.glob("src/core/db/migrations/0*.sql")):
+            if migration_limit and int(os.path.basename(sql_path).split("_", 1)[0]) > migration_limit.args[0]:
+                continue
             with open(sql_path, encoding="utf-8") as f:
                 sql = f.read()
             try:

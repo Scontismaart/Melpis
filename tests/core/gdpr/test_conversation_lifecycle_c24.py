@@ -17,7 +17,7 @@ from tests.core.bookings.test_conversation_state_postgres import (
 from tests.core.gdpr.test_deletion_a06 import approve_policies
 from tests.core.test_quota_reservation_lifecycle import _used, _organization, _auth_member
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.migration_limit(70)]
 
 
 @pytest.fixture(autouse=True)
@@ -118,6 +118,13 @@ async def approve_conversation(pool, org):
         retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
         VALUES($1,'booking_conversation_content','synthetic-c24',TRUE,30,FALSE,
         'test:synthetic','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
+
+
+async def approve_technical_receipts(pool, org):
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'technical_receipts','synthetic-c24',TRUE,90,FALSE,
+        'test:receipts','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
 
 
 async def test_erasure_requires_conversation_policy_then_removes_all_copies(state_env, monkeypatch):
@@ -318,22 +325,51 @@ async def test_restore_checkpoint_requires_replay_and_rejects_stale_content(stat
             await verify(journal)  # a replayed barrier alone cannot erase old content
 
 
+@pytest.mark.migration_limit(74)
 async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env, monkeypatch):
-    from src.core.gdpr.restore_checkpoint import verify_restore_checkpoint
+    from hashlib import sha256
+    import json
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint, verify_restore_journal_replay
+    from src.core.gdpr.restore_journal import JournalCheckpoint
     env = state_env
     await populated(env)
     contact = await subject(env)
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
     await approve_policies(env['pool'], env['org'])
     await approve_conversation(env['pool'], env['org'])
+    await approve_technical_receipts(env['pool'], env['org'])
     monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
     erased = await Deletion(env['pool']).request(env['org'], 'synthetic-restore', uuid4(), scope='contact', subject_id=contact)
     assert erased['status'] == 'partial'
+    assert await counts(env) == (0, 0)
     key = b'synthetic-key-32-bytes-0123456789'
     journal = checkpoint(env, erased['id'], contact, key)
     async with env['pool'].acquire() as conn, conn.transaction():
         proof = await verify_restore_checkpoint(conn, env['org'], journal, verification_key=key,
                                                 backup_id='synthetic-backup', minimum_sequence=2)
+        barrier = await conn.fetchrow('''SELECT identifier_digest,key_id FROM gdpr_erasure_barriers
+            WHERE organization_id=$1 AND operation_id=$2''', env['org'], erased['id'])
+        signer, installation = Ed25519PrivateKey.generate(), uuid4()
+        anchor = JournalCheckpoint(0, '0' * 64)
+        record = {'sequence': 1, 'organization_id': str(env['org']),
+                  'operation_id': str(erased['id']), 'scope': 'contact', 'subject_id': str(contact),
+                  'identifier_digest': barrier['identifier_digest'], 'key_id': barrier['key_id']}
+        async def verify_signed():
+            raw = json.dumps({'version': 1, 'installation_id': str(installation),
+                              'previous_sha256': anchor.sha256, 'entries': [record]}).encode()
+            signature = signer.sign(b'melpis.restore.erasure-journal.v1\0' + raw)
+            return await verify_restore_journal_replay(
+                conn, env['org'], raw, signature, installation_id=installation,
+                trusted_public_key=signer.public_key(), backup_checkpoint=anchor,
+                independent_tip=JournalCheckpoint(1, sha256(raw).hexdigest()),
+            )
+        signed_proof = await verify_signed()
+        assert signed_proof['verified_erasures'] == 1
+        assert signed_proof['traffic_authorized'] is False
+        record['identifier_digest'] = '0' * 64
+        with pytest.raises(RestoreBlocked, match='does not match the journal'):
+            await verify_signed()
     assert proof['scope'] == 'primary_c24_only'
     assert proof['traffic_authorized'] is False
     assert proof['external_copies_certified'] is False

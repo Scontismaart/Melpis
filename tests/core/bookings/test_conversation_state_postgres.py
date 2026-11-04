@@ -18,7 +18,7 @@ from tests.core.test_quota_reservation_lifecycle import (
     _auth_member, _inbound_message, _inbound_operation, _organization, _used,
 )
 
-pytestmark=pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.migration_limit(70)]
 CATALOG=json.loads((Path(__file__).parent / 'fixtures/catalogs_v2.json').read_text(encoding='utf-8'))['ristorante']
 
 

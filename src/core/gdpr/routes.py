@@ -19,8 +19,9 @@ from src.core.auth.dependencies import (
 from src.core.db.repository import CoreRepository
 from src.core.gdpr import token_store
 from src.core.gdpr.exporter import Exporter
-from src.core.gdpr.operations import Operations, OperationUnavailable, RequestConflict
+from src.core.gdpr.operations import Operations, RequestConflict
 from src.core.gdpr.deletion import Deletion
+from src.core.gdpr.product_policy import product_policy_payload
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,10 @@ DPA_HTML = """<!DOCTYPE html>
 <head><meta charset="UTF-8"><title>Data Processing Agreement</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:2em auto;line-height:1.6">
 <h1>Data Processing Agreement (DPA)</h1>
-<p><strong>Technical template pending legal approval under C05 #100.</strong>
-This page does not approve a retention schedule or certify external deletion.</p>
-<p><strong>Last updated:</strong> July 2026</p>
+<p><strong>Draft technical template, not a signed agreement or operational certification.</strong>
+The founder has approved product policy melpis-privacy-v1.0; contract completion,
+provider verification and operational execution remain separate gates.</p>
+<p><strong>Product decision registered:</strong> 3 November 2026</p>
 
 <h2>1. Parties</h2>
 <p><strong>Data Controller:</strong> The organization subscribing to the WhatsApp AI Responder service.</p>
@@ -44,12 +46,18 @@ This page does not approve a retention schedule or certify external deletion.</p
 
 <h2>2. Scope &amp; Purpose</h2>
 <p>This DPA governs the processing of personal data by the Processor on behalf of the Controller in connection with the WhatsApp AI Responder service, including automated message handling, AI-driven responses, booking management, and customer communication.</p>
+<p>The provider acts as an independent controller for its own account, billing,
+security and documented business obligations. Customer data is not used by Melpis
+for model training, autonomous marketing, unauthorized profiling or resale.
+Healthcare functionality is administrative only; real activation remains blocked
+pending verification of specific processing requirements. Clinical or urgent
+messages require appropriate human escalation.</p>
 
 <h2>3. Categories of Data Processed</h2>
 <ul>
   <li>Contact information: phone numbers, names</li>
   <li>Message content: text, timestamps, delivery status</li>
-  <li>Conversation metadata: conversation history, interaction patterns</li>
+  <li>Necessary administrative conversation state and verified provenance</li>
   <li>Booking details: dates, times, party size, special requests</li>
   <li>Consent records: opt-in/opt-out status, timestamps</li>
 </ul>
@@ -66,13 +74,20 @@ This page does not approve a retention schedule or certify external deletion.</p
 <tr><td>SMTP provider</td><td>Escalation and account-suspension email notifications</td><td>Per configured SMTP provider</td></tr>
 <tr><td>Airtable, Softr</td><td>GDPR deletion propagation only</td><td>To be verified</td></tr>
 </table>
-<p>Transfer mechanisms (Standard Contractual Clauses and/or applicable adequacy decisions such as the EU-U.S. Data Privacy Framework) apply where data is transferred outside the EEA, as available for each provider at the time of signing.</p>
+<p>Actual providers and upstreams, roles, locations, transfers, retention and
+no-training terms must be verified before activation. No signed agreement or
+completed transfer safeguard is certified by this template.</p>
 
 <h2>5. Data Retention</h2>
-<p>Primary-data retention requires an explicit, versioned, per-tenant policy
-approved by the Controller and an authorized operational cutover. No primary-data
-schedule is activated by this template. Billing records, security evidence,
-provider copies and backup retention require separate approved dispositions.</p>
+<p>Product maxima and category-specific anchors are recorded in
+<code>melpis-privacy-v1.0</code> and exposed by
+<code>GET /api/gdpr/retention-policy</code>. Product approval does not activate
+primary-data retention. Effective versioned tenant instructions, implemented
+lifecycle controls, environment verification and operational GO remain required.
+Ordinary tenant overrides cannot extend the standards. Documented legal
+obligations and bounded holds are separate; neither permits indefinite raw
+personal content under an audit label. External deletion and backup rotation
+are not certified by this page.</p>
 
 <h2>6. Security Measures</h2>
 <ul>
@@ -97,9 +112,10 @@ provider copies and backup retention require separate approved dispositions.</p>
 </ul>
 
 <h2>8. Data Breach Notification</h2>
-<p>Without undue delay and in any case within 48 hours of becoming aware of a
-personal data breach affecting the Controller's data, the Processor notifies
-the Controller, providing the information available to enable the Controller
+<p>Without undue delay after becoming aware of a personal data breach affecting
+the Controller's data, the Processor notifies the Controller. The operational
+notification process and any contractual deadline require documented verification
+before signing. The Processor provides the information available to enable the Controller
 to comply with its notification obligations under Article 33 GDPR and, where
 applicable, communication to data subjects under Article 34 GDPR.</p>
 
@@ -439,15 +455,9 @@ async def gdpr_operation_retry(operation_id: UUID, request: Request,
 
 @router.get("/retention-policy")
 async def retention_policy():
-    return {
-        "policy_version": "tenant-approval-required",
-        "automatic_erasure_enabled": os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') == 'true',
-        "approval_gate": "C05 #100: versioned per-tenant policy and operational cutover required",
-        "retention_days": None,
-        "purge_after_days": None,
-        "simulator_response_days": None,
-        "simulator_history_idle_hours": 24,
-    }
+    return product_policy_payload(
+        execution_flag=os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') == 'true',
+    )
 
 
 async def _export_tenant_data(repo: CoreRepository, org_id: str, requester: str) -> dict:
