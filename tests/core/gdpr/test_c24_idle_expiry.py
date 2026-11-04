@@ -340,6 +340,20 @@ async def test_receipt_erasure_policy_hold_and_release(state_env, monkeypatch):
     await pool.execute("""INSERT INTO gdpr_retention_hold_events
       (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
       VALUES($1,$2,$3,'released','case:release','qa',clock_timestamp())""",org,hold,uuid4())
+    from src.core.gdpr.operations import Operations
+    operation = await Operations(pool).create(
+        org, 'test-forged-barrier', uuid4(), kind='erase', scope='contact', subject_id=contact,
+    )
+    # Model a backend able to insert barriers despite RLS, as in a
+    # deployment whose service role has BYPASSRLS.
+    await pool.execute('''CREATE POLICY synthetic_barrier_insert ON gdpr_erasure_barriers
+        FOR INSERT TO service_role WITH CHECK (true)''')
+    with pytest.raises(asyncpg.InsufficientPrivilegeError, match='lifecycle owner'):
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute('SET LOCAL ROLE service_role')
+            await conn.execute('''INSERT INTO gdpr_erasure_barriers
+               (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
+               VALUES($1,$2,'contact',$3,$4,'synthetic')''', org, operation, contact, '0'*64)
     result=await Deletion(pool).request(org,'test-receipt',uuid4(),scope='contact',subject_id=contact)
     assert result['status']=='partial'
     assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',org,request)==0

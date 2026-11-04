@@ -92,6 +92,9 @@ class Deletion:
                          AND attname='original_subject_id' AND NOT attisdropped)''',
                 ):
                     required.add('technical_receipts')
+                    if not await conn.fetchval('''SELECT current_user=pg_get_userbyid(relowner)
+                        FROM pg_class WHERE oid='public.c24_receipt_cleanup_capability'::regclass'''):
+                        blockers.append('receipt_lifecycle_owner_required')
                     if await conn.fetchval('SELECT public.c24_receipts_held($1,$2)', org, op['subject_id']):
                         blockers.append('technical_receipts_held')
                 # The policy covers *all* new copies, including a canonical response

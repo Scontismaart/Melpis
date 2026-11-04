@@ -623,13 +623,18 @@ BEGIN
    AND o.subject_id IS NOT DISTINCT FROM NEW.subject_id) THEN
   RAISE EXCEPTION 'Barrier does not match erasure operation' USING ERRCODE='42501';
  END IF;
- IF NOT EXISTS (SELECT 1 FROM public.booking_conversation_requests x
-   WHERE x.organization_id=NEW.organization_id
-   AND (NEW.scope='organization' OR x.original_subject_id=NEW.subject_id)) THEN RETURN NEW; END IF;
  IF current_setting('transaction_isolation') <> 'read committed' THEN
   RAISE EXCEPTION 'Receipt erasure requires read committed isolation' USING ERRCODE='25000';
  END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text,606));
+ IF NOT EXISTS (SELECT 1 FROM public.booking_conversation_requests x
+   WHERE x.organization_id=NEW.organization_id
+   AND (NEW.scope='organization' OR x.original_subject_id=NEW.subject_id)) THEN RETURN NEW; END IF;
+ IF COALESCE(NULLIF(current_setting('role'),'none'),session_user::text) IS DISTINCT FROM
+    (SELECT pg_get_userbyid(relowner)::text FROM pg_class
+     WHERE oid='public.c24_receipt_cleanup_capability'::regclass) THEN
+  RAISE EXCEPTION 'Receipt erasure requires the lifecycle owner' USING ERRCODE='42501';
+ END IF;
  IF EXISTS (SELECT 1 FROM public.contacts c WHERE c.organization_id=NEW.organization_id
    AND (NEW.scope='organization' OR c.id=NEW.subject_id)
    AND (c.deleted_at IS NULL OR c.phone_number IS DISTINCT FROM 'erased:'||c.id::text)) THEN
