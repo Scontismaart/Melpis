@@ -148,3 +148,28 @@ async def test_medical_attestation_is_tenant_bound_and_read_only(pg_pool, sample
         assert not await conn.fetchval(
             "SELECT has_table_privilege(current_user,'booking_privacy_classifications','SELECT,INSERT,UPDATE,DELETE')",
         )
+
+@pytest.mark.asyncio
+async def test_medical_admin_booking_preserves_structure_and_strips_notes(pg_pool, sample_org, other_org):
+    from src.core.db.repositories.booking_repo import BookingRepository
+
+    medical, other = sample_org["id"], other_org["id"]
+    await pg_pool.execute("""INSERT INTO booking_privacy_classifications
+        (organization_id,sector,revision,evidence_reference)
+        VALUES($1,'medical_disabled',1,'synthetic:medical')""", medical)
+    repo = BookingRepository(pg_pool)
+    booking = await repo.create_booking(
+        medical, "Synthetic Customer", "2026-12-01", "10:30", 1,
+        note="synthetic restricted text", tipo_evento="synthetic clinical event",
+    )
+    assert booking["nome_cliente"] == "Synthetic Customer"
+    assert booking["note"] == booking["tipo_evento"] == ""
+    edited = await repo.update_booking_details(
+        medical, booking["id"], "Synthetic Customer", "", "2026-12-01", "11:30", 1,
+        "synthetic restricted update", "confermata",
+    )
+    assert edited["stato"] == "confermata" and edited["note"] == ""
+    ordinary = await repo.create_booking(
+        other, "Synthetic Customer", "2026-12-01", "10:30", 1, note="ordinary operational note",
+    )
+    assert ordinary["note"] == "ordinary operational note"
