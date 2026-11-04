@@ -1,5 +1,8 @@
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +14,16 @@ from src.core.gdpr.product_policy import (
     product_policy_payload,
     retention_days_allowed,
 )
+
+
+def test_approval_record_distinguishes_original_source_and_canonical_document():
+    governance = Path(__file__).resolve().parents[2] / "docs" / "governance"
+    decision = json.loads((governance / "privacy-data-governance-v1.0-decision.json").read_text("utf-8"))
+    canonical = (governance / decision["canonical_document"]).read_bytes().replace(b"\r\n", b"\n")
+    assert sha256(canonical).hexdigest() == decision["canonical_document_sha256"]
+    assert decision["source_sha256"] == "10fae00fec96e050bb36cfc0cec37863668574ce1d2487162a5c9f7acf20377d"
+    assert "original bytes" in decision["source_artifact"]
+    assert decision["source_sha256"] != decision["canonical_document_sha256"]
 
 
 def test_product_policy_registry_is_immutable_and_payload_is_detached():
