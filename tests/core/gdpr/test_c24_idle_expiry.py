@@ -82,6 +82,24 @@ async def test_receipt_record_hold_preserves_receipt_but_not_expired_state(state
     assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM booking_conversation_requests WHERE organization_id=$1 AND conversation_id=$2 AND request_id=$3)',env['org'],env['conv'],request)
 
 
+async def test_source_deletion_cannot_cascade_to_receipt(state_env):
+    env = state_env
+    pool = env['pool']
+    request = uuid4()
+    await commit_source(env, env['message'], '2026-11-12', {'service_id': 'standard'}, 1700000000)
+    await apply(env, env['message'], request=request)
+    await pool.execute('DELETE FROM messages WHERE organization_id=$1 AND id=$2', env['org'], env['message'])
+    assert await pool.fetchval(
+        'SELECT EXISTS(SELECT 1 FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2)',
+        env['org'], request,
+    )
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await pool.execute(
+            'DELETE FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',
+            env['org'], request,
+        )
+
+
 async def test_delayed_provider_message_cannot_restart_expired_state(state_env):
     env=state_env; pool=env['pool']
     await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)

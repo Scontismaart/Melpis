@@ -151,7 +151,9 @@ DECLARE constraint_name name;
 BEGIN
  FOR constraint_name IN SELECT conname FROM pg_constraint
   WHERE conrelid='public.booking_conversation_requests'::regclass AND (
-   (contype='f' AND confrelid='public.booking_conversation_states'::regclass)
+   (contype='f' AND confrelid IN (
+    'public.booking_conversation_states'::regclass,'public.messages'::regclass
+   ))
    OR (contype='u' AND pg_get_constraintdef(oid)='UNIQUE (organization_id, conversation_id, applied_revision)')
   )
  LOOP
@@ -159,6 +161,15 @@ BEGIN
  END LOOP;
 END
 $receipt_constraints$;
+
+-- Source and prompt lineage are validated at insert. Losing a parent never
+-- authorizes deleting the independently governed receipt.
+CREATE OR REPLACE FUNCTION public.booking_conversation_immutable() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+BEGIN
+ RAISE EXCEPTION 'Conversation receipt is immutable' USING ERRCODE='42501';
+END $$;
+REVOKE ALL ON FUNCTION public.booking_conversation_immutable() FROM PUBLIC,anon,authenticated,service_role;
 
 -- Preserve already accepted sources when this additive migration is installed.
 INSERT INTO public.c24_source_fences(organization_id,conversation_id,subject_id,request_id,source_message_id)
