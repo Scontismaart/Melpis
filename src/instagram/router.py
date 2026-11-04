@@ -69,9 +69,14 @@ def create_router(app_config: AppConfig, wrepo, igrepo, security: MetaWebhookSec
                 org = await igrepo.get_org_by_instagram_user_id(event.recipient.id)
                 if not org:
                     continue
+                from src.core.bookings.privacy_boundary import inbound_classification_status, minimize_instagram_event
+                payload = event.model_dump(exclude_none=True)
+                classification = await inbound_classification_status(wrepo, org["organization_id"])
+                if classification != "unknown":
+                    payload = minimize_instagram_event(payload, quarantine=classification == "error")
                 await inbox.enqueue(org["organization_id"], "instagram", {
-                    "object": webhook.object,
-                    "entry": [{"id": entry.id, "messaging": [event.model_dump(exclude_none=True)]}],
+                    "object": webhook.object if classification == "unknown" else "instagram",
+                    "entry": [{"id": entry.id if classification == "unknown" else None, "messaging": [payload]}],
                 }, trace_id)
 
         return Response(status_code=200)
@@ -100,6 +105,11 @@ async def _handle_dm(wrepo, igrepo, entry_id, event, trace_id=None, expected_org
     if not await dedup_check(wrepo.pool, f"ig:{mid}", "message", ""):
         return
 
+    from src.core.bookings.privacy_boundary import inbound_classification_status, minimize_instagram_event
+    classification = await inbound_classification_status(wrepo, org_id)
+    if classification != "unknown":
+        from src.instagram.models import IgMessagingEvent
+        event = IgMessagingEvent.model_validate(minimize_instagram_event(event.model_dump(exclude_none=True), quarantine=classification == "error"))
     sender_ig_id = event.sender.id
     contact = await wrepo.get_or_create_contact(org_id, sender_ig_id)
     conv = await wrepo.get_or_create_conversation(org_id, contact["id"], canale="instagram")
