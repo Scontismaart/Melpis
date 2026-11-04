@@ -90,7 +90,7 @@ class WorkerBookingAuthority:
         if not await conn.fetchrow('''SELECT o.operation_id FROM inbound_worker_operations o
             JOIN inbound_worker_receipts r ON r.organization_id=o.organization_id AND r.inbox_id=o.inbox_id AND r.message_id=o.message_id
             JOIN meta_webhook_inbox i ON i.id=r.inbox_id AND i.organization_id=r.organization_id
-            WHERE o.organization_id=$1 AND o.message_id=$2 AND o.operation_id=$3
+            WHERE o.organization_id=$1 AND r.organization_id=$1 AND i.organization_id=$1 AND o.message_id=$2 AND o.operation_id=$3
               AND i.status='completed' AND i.channel='whatsapp' FOR SHARE OF o, r, i''', org, message, operation.id):
             raise WorkerProofDenied('Trusted inbound provenance unavailable')
         claim_id = uuid4()
@@ -176,7 +176,7 @@ class WorkerBookingAuthority:
         if not await conn.fetchrow('''SELECT o.operation_id FROM inbound_worker_operations o
             JOIN inbound_worker_receipts r ON r.organization_id=o.organization_id AND r.inbox_id=o.inbox_id AND r.message_id=o.message_id
             JOIN meta_webhook_inbox i ON i.id=r.inbox_id AND i.organization_id=r.organization_id
-            WHERE o.organization_id=$1 AND o.message_id=$2 AND o.operation_id=$3
+            WHERE o.organization_id=$1 AND r.organization_id=$1 AND i.organization_id=$1 AND o.message_id=$2 AND o.operation_id=$3
               AND i.status='completed' AND i.channel='whatsapp' FOR SHARE OF o, r, i''', org, message, operation.id):
             raise WorkerProofDenied('Trusted inbound provenance unavailable')
         await conn.fetchval('SELECT pg_advisory_xact_lock_shared(hashtext($1))', f'booking-capacity|{org}')
