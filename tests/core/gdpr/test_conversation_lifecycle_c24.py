@@ -17,7 +17,7 @@ from tests.core.bookings.test_conversation_state_postgres import (
 from tests.core.gdpr.test_deletion_a06 import approve_policies
 from tests.core.test_quota_reservation_lifecycle import _used, _organization, _auth_member
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.migration_limit(70)]
 
 
 @pytest.fixture(autouse=True)
@@ -318,6 +318,7 @@ async def test_restore_checkpoint_requires_replay_and_rejects_stale_content(stat
             await verify(journal)  # a replayed barrier alone cannot erase old content
 
 
+@pytest.mark.migration_limit(74)
 async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env, monkeypatch):
     from hashlib import sha256
     import json
@@ -330,9 +331,14 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
     await approve_policies(env['pool'], env['org'])
     await approve_conversation(env['pool'], env['org'])
+    await env['pool'].execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'technical_receipts','synthetic-c24',TRUE,90,FALSE,
+        'test:receipts','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", env['org'])
     monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
     erased = await Deletion(env['pool']).request(env['org'], 'synthetic-restore', uuid4(), scope='contact', subject_id=contact)
     assert erased['status'] == 'partial'
+    assert await counts(env) == (0, 0)
     key = b'synthetic-key-32-bytes-0123456789'
     journal = checkpoint(env, erased['id'], contact, key)
     async with env['pool'].acquire() as conn, conn.transaction():
