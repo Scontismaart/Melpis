@@ -3,11 +3,17 @@
 -- history. A completed booking remains completed; cancelled is the existing
 -- allocation-set representation for a released set.
 CREATE OR REPLACE FUNCTION public.archive_completed_hotel_allocation(p_org uuid,p_booking uuid)
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE b public.bookings%ROWTYPE; s public.booking_stays%ROWTYPE;
  a public.booking_allocation_sets%ROWTYPE; e public.booking_stay_completion_evidence%ROWTYPE;
  p public.gdpr_policies%ROWTYPE; claim record; claim_count integer; observed timestamptz := clock_timestamp();
 BEGIN
+ IF current_user IS DISTINCT FROM pg_get_userbyid(
+  (SELECT relowner FROM pg_class WHERE oid='public.booking_stay_completion_evidence'::regclass)
+ ) THEN RAISE EXCEPTION 'Hotel archive requires the lifecycle owner' USING ERRCODE='42501'; END IF;
+ IF current_setting('transaction_isolation') <> 'read committed' THEN
+  RAISE EXCEPTION 'Hotel archive requires read committed isolation' USING ERRCODE='25000';
+ END IF;
  IF p_org IS NULL OR p_booking IS NULL THEN RAISE EXCEPTION 'Archive scope required' USING ERRCODE='55000'; END IF;
  PERFORM 1 FROM public.organizations WHERE id=p_org FOR NO KEY UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Organization unavailable' USING ERRCODE='55000'; END IF;

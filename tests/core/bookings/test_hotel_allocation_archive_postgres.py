@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+import asyncpg
 import pytest
 
 from src.core.bookings.booking_mutation_contract import BookingMutation, apply_booking_mutation
@@ -83,4 +84,10 @@ async def test_archive_cannot_be_called_by_backend_role(pg_pool):
     async with pg_pool.acquire() as conn, conn.transaction():
         await conn.execute('SET LOCAL ROLE service_role')
         with pytest.raises(Exception, match='permission denied'):
+            await conn.fetchval('SELECT public.archive_completed_hotel_allocation($1,$2)', uuid4(), uuid4())
+
+
+async def test_archive_rejects_stale_transaction_snapshot(pg_pool):
+    with pytest.raises(asyncpg.InvalidTransactionStateError, match='read committed'):
+        async with pg_pool.acquire() as conn, conn.transaction(isolation='repeatable_read'):
             await conn.fetchval('SELECT public.archive_completed_hotel_allocation($1,$2)', uuid4(), uuid4())
