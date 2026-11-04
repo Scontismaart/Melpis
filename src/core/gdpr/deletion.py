@@ -91,7 +91,9 @@ class Deletion:
                        WHERE attrelid='public.booking_conversation_requests'::regclass
                          AND attname='original_subject_id' AND NOT attisdropped)''',
                 ):
-                    blockers.append('independent_conversation_receipt_erasure_required')
+                    required.add('technical_receipts')
+                    if await conn.fetchval('SELECT public.c24_receipts_held($1,$2)', org, op['subject_id']):
+                        blockers.append('technical_receipts_held')
                 # The policy covers *all* new copies, including a canonical response
                 # which was persisted before any state repository call occurred.
                 if conversation_counts['states'] or await conn.fetchval(

@@ -308,3 +308,40 @@ async def test_receipt_cleanup_rejects_stale_transaction_snapshot(state_env):
         async with conn.transaction(isolation='repeatable_read'):
             with pytest.raises(asyncpg.InvalidTransactionStateError, match='read committed'):
                 await conn.fetchval('SELECT c24_cleanup_receipt($1,$2)', state_env['org'], uuid4())
+
+async def test_receipt_erasure_policy_hold_and_release(state_env, monkeypatch):
+    from src.core.gdpr.deletion import Deletion
+    from tests.core.gdpr.test_conversation_lifecycle_c24 import populated, subject, approve_conversation
+    from tests.core.gdpr.test_deletion_a06 import approve_policies
+    env=state_env; pool=env['pool']; org=env['org']; request=await populated(env)
+    contact=await subject(env)
+    await pool.execute("UPDATE messages SET status='handled',handling_type='ai' WHERE organization_id=$1 AND id=$2",org,env['message'])
+    await approve_policies(pool,org)
+    await approve_conversation(pool,org)
+    monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED','true')
+    result=await Deletion(pool).request(org,'test-receipt',uuid4(),scope='contact',subject_id=contact)
+    assert 'policy_required.technical_receipts' in result['manifest']['blockers']
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+      retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+      VALUES($1,'technical_receipts','erase-test',true,90,false,'test:receipt','qa',
+       clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""",org)
+    hold=uuid4()
+    await pool.execute("""INSERT INTO gdpr_retention_holds
+      (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
+      VALUES($1,$2,'technical_receipts','record',$3,'litigation','case:receipt','qa',
+       clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day')""",org,hold,request)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute('SET LOCAL ROLE service_role')
+        assert await conn.fetchval('SELECT c24_receipts_held($1,$2)',org,contact)
+        assert not await conn.fetchval("SELECT has_table_privilege(current_user,'booking_conversation_requests','DELETE')")
+    result=await Deletion(pool).request(org,'test-receipt',uuid4(),scope='contact',subject_id=contact)
+    assert 'technical_receipts_held' in result['manifest']['blockers']
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',org,request)==1
+    await pool.execute("""INSERT INTO gdpr_retention_hold_events
+      (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
+      VALUES($1,$2,$3,'released','case:release','qa',clock_timestamp())""",org,hold,uuid4())
+    result=await Deletion(pool).request(org,'test-receipt',uuid4(),scope='contact',subject_id=contact)
+    assert result['status']=='partial'
+    assert await pool.fetchval('SELECT count(*) FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',org,request)==0
+    assert await pool.fetchval('SELECT count(*) FROM c24_receipt_cleanup_audit WHERE organization_id=$1 AND request_id=$2',org,request)==1
+    assert await pool.fetchval('SELECT count(*) FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2',org,request)==1

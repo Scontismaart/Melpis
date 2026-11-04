@@ -610,3 +610,75 @@ BEGIN
  RETURN true;
 END $$;
 REVOKE ALL ON FUNCTION public.c24_cleanup_receipt(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+-- A barrier is inserted only after the application's local erasure stages.  It
+-- also provides a transaction-bound authorization for independently retained
+-- receipts; it does not grant the caller a general DELETE capability.
+CREATE OR REPLACE FUNCTION public.c24_erase_receipts_at_barrier() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE r public.booking_conversation_requests%ROWTYPE; p public.gdpr_policies%ROWTYPE;
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM public.gdpr_operations o WHERE o.organization_id=NEW.organization_id
+   AND o.id=NEW.operation_id AND o.kind='erase' AND o.scope=NEW.scope
+   AND o.subject_id IS NOT DISTINCT FROM NEW.subject_id) THEN
+  RAISE EXCEPTION 'Barrier does not match erasure operation' USING ERRCODE='42501';
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM public.booking_conversation_requests x
+   WHERE x.organization_id=NEW.organization_id
+   AND (NEW.scope='organization' OR x.original_subject_id=NEW.subject_id)) THEN RETURN NEW; END IF;
+ IF current_setting('transaction_isolation') <> 'read committed' THEN
+  RAISE EXCEPTION 'Receipt erasure requires read committed isolation' USING ERRCODE='25000';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text,606));
+ IF EXISTS (SELECT 1 FROM public.contacts c WHERE c.organization_id=NEW.organization_id
+   AND (NEW.scope='organization' OR c.id=NEW.subject_id)
+   AND (c.deleted_at IS NULL OR c.phone_number IS DISTINCT FROM 'erased:'||c.id::text)) THEN
+  RAISE EXCEPTION 'Erasure contacts are not redacted' USING ERRCODE='42501';
+ END IF;
+ SELECT * INTO p FROM public.gdpr_policies WHERE organization_id=NEW.organization_id
+  AND category='technical_receipts' AND approved_at<=clock_timestamp()
+  ORDER BY approved_at DESC,version DESC LIMIT 1;
+ IF NOT FOUND OR p.valid_until<=clock_timestamp() OR p.legal_hold OR NOT p.erasure_allowed THEN
+  RAISE EXCEPTION 'Receipt erasure policy required' USING ERRCODE='55000';
+ END IF;
+ FOR r IN SELECT * FROM public.booking_conversation_requests x
+  WHERE x.organization_id=NEW.organization_id
+   AND (NEW.scope='organization' OR x.original_subject_id=NEW.subject_id) FOR UPDATE
+ LOOP
+  IF EXISTS(SELECT 1 FROM public.gdpr_retention_holds h WHERE h.organization_id=NEW.organization_id
+   AND h.category='technical_receipts' AND (h.scope='organization'
+    OR (h.scope='subject' AND h.scope_id=r.original_subject_id)
+    OR (h.scope='conversation' AND h.scope_id=r.conversation_id)
+    OR (h.scope='record' AND h.scope_id=r.request_id))
+   AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events e
+    WHERE e.organization_id=h.organization_id AND e.hold_id=h.hold_id AND e.kind='released')) THEN
+   RAISE EXCEPTION 'Receipt erasure held' USING ERRCODE='55000';
+  END IF;
+  INSERT INTO public.c24_receipt_cleanup_capability VALUES(pg_backend_pid(),txid_current(),NEW.organization_id,r.request_id);
+  DELETE FROM public.booking_conversation_requests WHERE organization_id=NEW.organization_id AND request_id=r.request_id;
+  DELETE FROM public.c24_receipt_cleanup_capability WHERE backend_pid=pg_backend_pid()
+   AND transaction_id=txid_current() AND organization_id=NEW.organization_id AND request_id=r.request_id;
+  INSERT INTO public.c24_receipt_cleanup_audit(organization_id,request_id) VALUES(NEW.organization_id,r.request_id);
+ END LOOP;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.c24_erase_receipts_at_barrier() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS c24_erase_receipts_at_barrier ON public.gdpr_erasure_barriers;
+CREATE TRIGGER c24_erase_receipts_at_barrier AFTER INSERT ON public.gdpr_erasure_barriers
+ FOR EACH ROW EXECUTE FUNCTION public.c24_erase_receipts_at_barrier();
+
+-- Only the existence of a relevant hold is exposed to the service runtime.
+CREATE OR REPLACE FUNCTION public.c24_receipts_held(p_org uuid,p_subject uuid) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+ SELECT EXISTS(SELECT 1 FROM public.booking_conversation_requests r
+  JOIN public.gdpr_retention_holds h ON h.organization_id=r.organization_id
+   AND h.category='technical_receipts' AND (h.scope='organization'
+    OR (h.scope='subject' AND h.scope_id=r.original_subject_id)
+    OR (h.scope='conversation' AND h.scope_id=r.conversation_id)
+    OR (h.scope='record' AND h.scope_id=r.request_id))
+  WHERE r.organization_id=p_org AND (p_subject IS NULL OR r.original_subject_id=p_subject)
+   AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events e
+    WHERE e.organization_id=h.organization_id AND e.hold_id=h.hold_id AND e.kind='released'))
+$$;
+REVOKE ALL ON FUNCTION public.c24_receipts_held(uuid,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.c24_receipts_held(uuid,uuid) TO service_role;
