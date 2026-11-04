@@ -2,14 +2,14 @@
 
 ## Status and authority
 
-A06 is a technical partial, not issue closure or a legal certification. The
-DPA content is a technical template pending C05 review and approval. A06 does
-not approve a retention schedule. Migration 063 seeds no policies;
-policy and operation-event records are immutable, and the application
-`service_role` cannot insert, update, or delete policy rows. A controller or
-founder must provide the C05 approval and an authorized operational cutover
-before primary-data erasure or retention can run. Do not infer periods from
-legacy constants or sample values.
+A06 remains technical partial, not issue closure or legal certification. The
+five founder product decisions in [Privacy V1.0](../governance/privacy-data-governance-v1.0.md)
+are approved and closed. Effective tenant instructions/immutable policy records,
+actual lifecycle coverage, documented exceptions and an authorized operational
+cutover remain necessary. No new policy rows, execution flags, jobs or grants
+are introduced here. The foundation adds main-compatible day caps only; C2.4
+schema and cross-category work remain with #153 and later stacked changes.
+The DPA stays an unpublished draft, not proof of signed provider agreements.
 
 All three execution flags default to off and must be set explicitly to the
 literal string `true` for their separate work:

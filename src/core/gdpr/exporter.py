@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from src.core.gdpr.catalog import CATEGORIES
+from src.core.gdpr.c24_schema import conversation_schema
 from src.core.gdpr.operations import Operations, OperationUnavailable, document, encode, event
 from src.core.gdpr.token_store import _fernet
 from src.core.db.scoping import extract_tables, has_explicit_org_scope, TABLE_SCOPE_CLASSIFICATION, TENANT_SCOPED_TABLES, INDIRECT_SCOPED_TABLES
@@ -15,12 +16,25 @@ from src.core.db.scoping import extract_tables, has_explicit_org_scope, TABLE_SC
 _BLOCK = 65536
 _MAX_ROW = 524288
 _MAX_BYTES = 512 * 1024 * 1024
+_C24_ONLY = {
+    'booking_conversation_states', 'booking_conversation_requests',
+    'booking_conversation_revocations',
+}
+_LEGACY_SIMULATION_QUERY = """
+    SELECT request_id, status, created_at, reserved_at, completed_at
+    FROM simulation_requests WHERE organization_id = $1::uuid
+"""
 
 
-def catalogue_query(category, scope):
+def catalogue_query(category, scope, *, schema='ready'):
     if category not in CATEGORIES or scope not in {'organization', 'contact', 'account'}:
         raise ValueError('Only the frozen GDPR catalogue is executable')
     query = category.query if scope == 'organization' else getattr(category, scope + '_query')
+    if schema != 'ready':
+        if category.name in _C24_ONLY:
+            return None
+        if category.name == 'simulation_requests':
+            query = _LEGACY_SIMULATION_QUERY if scope == 'organization' else category.account_query if scope == 'account' else None
     if not query:
         return None
     if (not query.lstrip().upper().startswith('SELECT ') or ';' in query or '--' in query
@@ -117,14 +131,20 @@ class Exporter:
                 manifest = {'version': 'a06-v1', 'scope': scope, 'categories': [],
                             'external_copies': 'not_included', 'backups': 'not_included',
                             'legal_policy_approval': 'C05-100-pending'}
-                partial = False
+                schema = await conversation_schema(conn)
+                partial = schema == 'partial'
                 await append(('{"organization_id":' + encode(str(org)) + ',"exported_at":' +
                               encode(datetime.now(timezone.utc).isoformat())).encode())
                 for category in CATEGORIES:
-                    query = catalogue_query(category, scope)
+                    query = catalogue_query(category, scope, schema=schema)
                     item = {'category': category.name, 'count': 0}
                     if not query:
-                        item.update(status='excluded', reason=category.exclusion_reason or 'no_verified_subject_relation')
+                        reason = (
+                            'conversation_schema_' + schema
+                            if category.name in _C24_ONLY and schema != 'ready'
+                            else category.exclusion_reason or 'no_verified_subject_relation'
+                        )
+                        item.update(status='excluded', reason=reason)
                         # Credential-only/system data are intentionally non-portable;
                         # an unproved subject relation needs controller review.
                         partial |= scope != 'organization'
