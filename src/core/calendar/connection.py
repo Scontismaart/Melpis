@@ -1,7 +1,7 @@
 """Server-only Calendar credentials and explicit owner-selected authority."""
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import timezone
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -21,6 +21,13 @@ class CalendarUnavailable(RuntimeError):
     def __init__(self, code="provider_unavailable"):
         self.code = code
         super().__init__(code)
+
+
+class _CalendarAccessCredentials(Credentials):
+    """Resource requests must never initiate a second token exchange."""
+
+    def refresh(self, request):
+        raise RefreshError("calendar_refresh_requires_coordinator")
 
 
 def resources_for(row):
@@ -107,11 +114,11 @@ class CalendarConnection:
             return bool(await conn.fetchval("""UPDATE google_calendar_credentials
                 SET access_token=$3,refresh_token=$4,token_expiry=$5,connection_epoch=$6,
                     connection_status='connected',granted_scopes=$7::jsonb,credential_version=credential_version+1,
-                    sync_enabled=oauth_sync_enabled,last_error_code=NULL,last_verified_at=NULL,updated_at=NOW()
+                    sync_enabled=oauth_sync_enabled,oauth_generation=$8,last_error_code=NULL,last_verified_at=NULL,updated_at=NOW()
                 WHERE organization_id=$1 AND oauth_generation=$2 RETURNING TRUE""",
                 UUID(str(org_id)), generation,
                 self.fernet.encrypt(creds.token.encode()).decode(),
-                self.fernet.encrypt(creds.refresh_token.encode()).decode(), expiry, uuid4(), json.dumps(SCOPES)))
+                self.fernet.encrypt(creds.refresh_token.encode()).decode(), expiry, uuid4(), json.dumps(SCOPES), uuid4()))
 
     async def disconnect(self, org_id):
         # Invalidate callbacks, refresh writes and worker epochs atomically.
@@ -143,6 +150,8 @@ class CalendarConnection:
             row = await conn.fetchrow("SELECT * FROM google_calendar_credentials WHERE organization_id=$1", UUID(str(org_id)))
             if not row or row["connection_status"] != "connected" or not row["sync_enabled"]:
                 raise CalendarUnavailable("not_connected" if not row else row["connection_status"])
+            if row.get("last_error_code") == "refresh_outcome_unknown":
+                raise CalendarUnavailable("reconnect_required")
             if expected_epoch is not None and str(row["connection_epoch"]) != str(expected_epoch):
                 raise CalendarUnavailable("connection_changed")
             scopes = row["granted_scopes"]
@@ -164,9 +173,31 @@ class CalendarConnection:
             if not creds.refresh_token:
                 raise CalendarUnavailable("reconnect_required")
             if creds.expired:
+                # Commit uncertainty before dispatch; a cancelled coroutine may
+                # leave its worker thread running. No lease or elapsed time can
+                # prove that the provider did not consume a rotating token.
+                # The epoch and monotonically increasing credential version
+                # already exist in migration 064. Reuse them as the dispatch
+                # fence so rolling deployments never require SQL072.
+                dispatch_version = await conn.fetchval("""UPDATE google_calendar_credentials
+                    SET credential_version=credential_version+1,connection_status='reconnect_required',
+                        last_error_code='refresh_outcome_unknown',updated_at=NOW()
+                    WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3
+                      AND connection_status='connected' AND sync_enabled
+                    RETURNING credential_version""", UUID(str(org_id)), row["connection_epoch"], row["credential_version"])
+                if type(dispatch_version) is not int or dispatch_version != row["credential_version"] + 1:
+                    raise CalendarUnavailable("connection_changed")
                 request = GoogleAuthRequest()
+                transport_started = False
 
                 def bounded_request(*args, **kwargs):
+                    nonlocal transport_started
+                    # The SDK can retry token POSTs internally after HTTP 5xx.
+                    # The durable outer marker is not a transport-level fence:
+                    # an uncertain first exchange must not trigger a second one.
+                    if transport_started:
+                        raise CalendarUnavailable("refresh_outcome_unknown")
+                    transport_started = True
                     kwargs["timeout"] = 10
                     return request(*args, **kwargs)
 
@@ -176,24 +207,31 @@ class CalendarConnection:
                     details = next((value for value in exc.args if isinstance(value, dict)), {})
                     if getattr(exc, "retryable", False) or details.get("error") != "invalid_grant":
                         raise CalendarUnavailable("refresh_unavailable") from None
-                    await conn.execute("""UPDATE google_calendar_credentials SET connection_status='revoked',
+                    revoked = await conn.fetchval("""UPDATE google_calendar_credentials SET connection_status='revoked',
                         last_error_code='authorization_revoked',updated_at=NOW()
-                        WHERE organization_id=$1 AND connection_epoch=$2""", UUID(str(org_id)), row["connection_epoch"])
-                    raise CalendarUnavailable("authorization_revoked") from None
+                        WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3
+                          AND connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'
+                        RETURNING TRUE""",
+                        UUID(str(org_id)), row["connection_epoch"], dispatch_version)
+                    raise CalendarUnavailable("authorization_revoked" if revoked else "connection_changed") from None
                 except Exception:
                     raise CalendarUnavailable("refresh_unavailable") from None
                 refreshed_expiry = creds.expiry
-                if not isinstance(creds.token, str) or not creds.token or refreshed_expiry is None:
+                if (not isinstance(creds.token, str) or not creds.token.strip()
+                        or not isinstance(creds.refresh_token, str) or not creds.refresh_token.strip()
+                        or not isinstance(refreshed_expiry, datetime)):
                     raise CalendarUnavailable("invalid_token_response")
                 if refreshed_expiry.tzinfo is None:
                     refreshed_expiry = refreshed_expiry.replace(tzinfo=timezone.utc)
                 updated = await conn.fetchval("""UPDATE google_calendar_credentials SET access_token=$4,
-                    token_expiry=$5,refresh_token=$6,credential_version=credential_version+1,updated_at=NOW()
+                    token_expiry=$5,refresh_token=$6,
+                    connection_status='connected',last_error_code=NULL,updated_at=NOW()
                     WHERE organization_id=$1 AND connection_epoch=$2 AND credential_version=$3
-                      AND connection_status='connected' AND sync_enabled RETURNING TRUE""",
-                    UUID(str(org_id)), row["connection_epoch"], row["credential_version"],
+                      AND connection_status='reconnect_required' AND last_error_code='refresh_outcome_unknown'
+                      AND sync_enabled RETURNING TRUE""",
+                    UUID(str(org_id)), row["connection_epoch"], dispatch_version,
                     self.fernet.encrypt(creds.token.encode()).decode(), refreshed_expiry,
                     self.fernet.encrypt(creds.refresh_token.encode()).decode())
                 if not updated:
                     raise CalendarUnavailable("connection_changed")
-            return creds, dict(row)
+            return _CalendarAccessCredentials(token=creds.token, expiry=creds.expiry, scopes=SCOPES), dict(row)
