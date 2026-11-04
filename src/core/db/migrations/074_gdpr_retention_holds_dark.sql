@@ -524,3 +524,81 @@ CREATE TRIGGER c24_purged_copy_guard BEFORE INSERT OR UPDATE ON public.outbound_
 DROP TRIGGER IF EXISTS c24_purged_copy_guard ON public.message_delivery_attempts;
 CREATE TRIGGER c24_purged_copy_guard BEFORE INSERT OR UPDATE ON public.message_delivery_attempts
  FOR EACH ROW EXECUTE FUNCTION public.c24_purged_copy_guard();
+
+-- Receipt cleanup is a dark, owner-only capability. Legacy created_at values
+-- were writable by callers and are not evidence of request conclusion.
+ALTER TABLE public.booking_conversation_requests ADD COLUMN IF NOT EXISTS c24_concluded_at timestamptz;
+CREATE OR REPLACE FUNCTION public.c24_stamp_receipt_conclusion() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+BEGIN
+ NEW.c24_concluded_at := clock_timestamp();
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.c24_stamp_receipt_conclusion() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS c24_stamp_receipt_conclusion ON public.booking_conversation_requests;
+CREATE TRIGGER c24_stamp_receipt_conclusion BEFORE INSERT ON public.booking_conversation_requests
+ FOR EACH ROW EXECUTE FUNCTION public.c24_stamp_receipt_conclusion();
+
+-- This transactional capability is private to the database owner. It cannot be
+-- forged with caller-controlled session settings and rolls back with the delete.
+CREATE TABLE IF NOT EXISTS public.c24_receipt_cleanup_capability (
+ backend_pid integer NOT NULL, transaction_id bigint NOT NULL,
+ organization_id uuid NOT NULL, request_id uuid NOT NULL,
+ PRIMARY KEY(backend_pid,transaction_id,organization_id,request_id)
+);
+ALTER TABLE public.c24_receipt_cleanup_capability ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.c24_receipt_cleanup_capability FROM PUBLIC,anon,authenticated,service_role;
+CREATE TABLE IF NOT EXISTS public.c24_receipt_cleanup_audit (
+ organization_id uuid NOT NULL, request_id uuid NOT NULL,
+ cleaned_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(organization_id,request_id)
+);
+ALTER TABLE public.c24_receipt_cleanup_audit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.c24_receipt_cleanup_audit FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS c24_receipt_cleanup_audit_immutable ON public.c24_receipt_cleanup_audit;
+CREATE TRIGGER c24_receipt_cleanup_audit_immutable BEFORE UPDATE OR DELETE ON public.c24_receipt_cleanup_audit
+ FOR EACH ROW EXECUTE FUNCTION public.gdpr_immutable_record();
+
+CREATE OR REPLACE FUNCTION public.booking_conversation_immutable() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF TG_OP='DELETE' AND EXISTS (SELECT 1 FROM public.c24_receipt_cleanup_capability c
+   WHERE c.backend_pid=pg_backend_pid() AND c.transaction_id=txid_current()
+    AND c.organization_id=OLD.organization_id AND c.request_id=OLD.request_id) THEN
+  RETURN OLD;
+ END IF;
+ RAISE EXCEPTION 'Conversation receipt is immutable' USING ERRCODE='42501';
+END $$;
+REVOKE ALL ON FUNCTION public.booking_conversation_immutable() FROM PUBLIC,anon,authenticated,service_role;
+
+CREATE OR REPLACE FUNCTION public.c24_cleanup_receipt(p_org uuid,p_request uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE r public.booking_conversation_requests%ROWTYPE; p public.gdpr_policies%ROWTYPE;
+BEGIN
+ -- The same exclusive tenant lock serializes policy and hold changes.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_org::text,606));
+ SELECT * INTO r FROM public.booking_conversation_requests
+  WHERE organization_id=p_org AND request_id=p_request FOR UPDATE;
+ IF NOT FOUND OR r.c24_concluded_at IS NULL THEN RETURN false; END IF;
+ SELECT * INTO p FROM public.gdpr_policies WHERE organization_id=p_org AND category='technical_receipts'
+  AND approved_at<=clock_timestamp() ORDER BY approved_at DESC,version DESC LIMIT 1;
+ IF NOT FOUND OR p.valid_until<=clock_timestamp() OR p.legal_hold OR NOT p.erasure_allowed
+    OR p.retention_days IS NULL OR p.retention_days<1 OR p.retention_days>90
+    OR r.c24_concluded_at>clock_timestamp()-make_interval(days=>p.retention_days) THEN RETURN false; END IF;
+ IF EXISTS(SELECT 1 FROM public.gdpr_retention_holds h WHERE h.organization_id=p_org
+  AND h.category='technical_receipts' AND (h.scope='organization'
+   OR (h.scope='subject' AND h.scope_id=r.original_subject_id)
+   OR (h.scope='conversation' AND h.scope_id=r.conversation_id)
+   OR (h.scope='record' AND h.scope_id=r.request_id))
+  AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events e
+   WHERE e.organization_id=h.organization_id AND e.hold_id=h.hold_id AND e.kind='released')) THEN
+  RETURN false;
+ END IF;
+ INSERT INTO public.c24_receipt_cleanup_capability VALUES(pg_backend_pid(),txid_current(),p_org,p_request);
+ DELETE FROM public.booking_conversation_requests WHERE organization_id=p_org AND request_id=p_request;
+ DELETE FROM public.c24_receipt_cleanup_capability WHERE backend_pid=pg_backend_pid()
+  AND transaction_id=txid_current() AND organization_id=p_org AND request_id=p_request;
+ INSERT INTO public.c24_receipt_cleanup_audit(organization_id,request_id) VALUES(p_org,p_request);
+ RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.c24_cleanup_receipt(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;

@@ -272,3 +272,31 @@ async def test_owner_source_cleanup_holds_fences_and_billing(state_env):
     assert not await pool.fetchval("SELECT has_function_privilege('service_role','c24_purge_source(uuid,uuid)','EXECUTE')")
     with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
         await pool.execute("UPDATE outbound_dedup SET response_text='restored' WHERE message_id=$1",source)
+
+async def test_receipt_cleanup_requires_policy_and_respects_record_hold(state_env):
+    env=state_env; pool=env['pool']; request=uuid4(); hold=uuid4()
+    await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
+    await apply(env,env['message'],request=request)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute('ALTER TABLE booking_conversation_requests DISABLE TRIGGER conversation_immutable')
+        await conn.execute("UPDATE booking_conversation_requests SET c24_concluded_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND request_id=$2",env['org'],request)
+        await conn.execute('ALTER TABLE booking_conversation_requests ENABLE TRIGGER conversation_immutable')
+    assert not await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',env['org'],request)
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+      retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+      VALUES($1,'technical_receipts','test',true,90,false,'test:receipt','qa',
+       clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""",env['org'])
+    await pool.execute("""INSERT INTO gdpr_retention_holds
+      (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
+      VALUES($1,$2,'technical_receipts','record',$3,'litigation','case:receipt','qa',
+       clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')""",env['org'],hold,request)
+    assert not await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',env['org'],request)
+    assert not await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',uuid4(),request)
+    assert not await pool.fetchval("SELECT has_function_privilege('service_role','c24_cleanup_receipt(uuid,uuid)','EXECUTE')")
+    await pool.execute("""INSERT INTO gdpr_retention_hold_events
+      (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
+      VALUES($1,$2,$3,'released','case:release','qa',clock_timestamp())""",env['org'],hold,uuid4())
+    assert await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',env['org'],request)
+    assert not await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',env['org'],request)
+    assert await pool.fetchval('SELECT count(*) FROM c24_receipt_cleanup_audit WHERE organization_id=$1 AND request_id=$2',env['org'],request)==1
+    assert await pool.fetchval('SELECT count(*) FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2',env['org'],request)==1
