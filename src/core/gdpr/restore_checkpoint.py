@@ -94,7 +94,7 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
             reconciled = await conn.fetchval('''SELECT EXISTS(
                 SELECT 1 FROM gdpr_erasure_barriers b
                 JOIN gdpr_operation_steps s ON s.organization_id=b.organization_id AND s.operation_id=b.operation_id
-                WHERE b.organization_id=$1 AND b.operation_id=$2 AND b.scope=$3
+                WHERE b.organization_id=$1 AND s.organization_id=$1 AND b.operation_id=$2 AND b.scope=$3
                   AND b.subject_id IS NOT DISTINCT FROM $4::uuid
                   AND b.identifier_digest IS NOT DISTINCT FROM $5
                   AND b.key_id IS NOT DISTINCT FROM $6
@@ -105,7 +105,7 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
             EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
                    AND ($2::uuid IS NULL OR subject_id=$2))
             OR EXISTS(SELECT 1 FROM booking_conversation_requests r
-                LEFT JOIN conversations c ON c.organization_id=r.organization_id AND c.id=r.conversation_id
+                LEFT JOIN conversations c ON c.organization_id=r.organization_id AND c.id=r.conversation_id AND c.organization_id=$1
                 WHERE r.organization_id=$1 AND ($2::uuid IS NULL
                     OR COALESCE((to_jsonb(r)->>'original_subject_id')::uuid,c.contact_id)=$2))
             OR EXISTS(SELECT 1 FROM messages m

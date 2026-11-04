@@ -82,7 +82,7 @@ class Deletion:
                        WHERE s.organization_id=$1 AND ($2::uuid IS NULL OR s.subject_id=$2)) AS states,
                       (SELECT count(*) FROM booking_conversation_requests r
                        LEFT JOIN booking_conversation_states s ON s.organization_id=r.organization_id
-                         AND s.conversation_id=r.conversation_id
+                         AND s.conversation_id=r.conversation_id AND s.organization_id=$1
                        WHERE r.organization_id=$1
                          AND ($2::uuid IS NULL OR COALESCE((to_jsonb(r)->>'original_subject_id')::uuid,s.subject_id)=$2)) AS receipts''', org, op['subject_id'],
                 )

@@ -118,7 +118,7 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/retention_job.py::_expired_exports", "78b2481fd729638ce87ca4abc5bc58025e7c1d7c3597c276cf1979cbd9a8d8cb"):
         "bounded expiration of derived encrypted export artifacts, not source data",
-    ("src/core/retention_job.py::_retention_policies", "672e839eec8bb38ab3c9c981b8e7aff866b18b10f656c5140476015fd979ed86"):
+    ("src/core/retention_job.py::_retention_policies", "e13365bd7b3c0fb5c2722f7601bbb785c8a8cf55d69f3fb7274a0ac9cb08d327"):
         "reviewed fixed-category policy inventory including C24 metadata only; no content/credentials; every mutation revalidates the exact tenant policy under its fence",
     ("src/core/calendar/repository.py::claim", "ca49781fa9e8cc26c388a66f2dbb7256dcd072bed1493150c5c3255bd4693c5e"): "bounded global claim joins credentials by tenant and epoch, locks only queue rows; each downstream operation revalidates tenant/fence; wall-clock lease expiry",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "5639484c3963e6f369b37c9d105964bc2155a57dbdc5de2ab8a98e162e1e85ee"): "bounded claim requires same-tenant outbound and confirmed exact booking revision; optional inbound is only absent for explicit staff confirmation",
