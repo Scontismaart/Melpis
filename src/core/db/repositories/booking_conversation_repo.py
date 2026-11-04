@@ -229,6 +229,8 @@ class BookingConversationRepository:
             if previous:
                 if any(p['payload_hash'] != operation_hash or p['actor_user_id'] != actor for p in previous):
                     raise StateConflict('State request or source was used for another operation')
+                if row is None or any(p.get('state_generation') != row.get('state_generation') for p in previous):
+                    raise StateConflict('State request belongs to an expired conversation generation')
                 return self._result(state, previous[0]['applied_revision'], True, catalog.revision)
             if expected_catalog_revision != catalog.revision:
                 raise StateConflict('Published catalog revision changed')

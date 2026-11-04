@@ -81,11 +81,17 @@ class Deletion:
                       (SELECT count(*) FROM booking_conversation_states s
                        WHERE s.organization_id=$1 AND ($2::uuid IS NULL OR s.subject_id=$2)) AS states,
                       (SELECT count(*) FROM booking_conversation_requests r
-                       JOIN booking_conversation_states s ON s.organization_id=r.organization_id
+                       LEFT JOIN booking_conversation_states s ON s.organization_id=r.organization_id
                          AND s.conversation_id=r.conversation_id
-                       WHERE r.organization_id=$1 AND s.organization_id=$1
-                         AND ($2::uuid IS NULL OR s.subject_id=$2)) AS receipts''', org, op['subject_id'],
+                       WHERE r.organization_id=$1
+                         AND ($2::uuid IS NULL OR COALESCE((to_jsonb(r)->>'original_subject_id')::uuid,s.subject_id)=$2)) AS receipts''', org, op['subject_id'],
                 )
+                if conversation_counts['receipts'] and await conn.fetchval(
+                    '''SELECT EXISTS(SELECT 1 FROM pg_attribute
+                       WHERE attrelid='public.booking_conversation_requests'::regclass
+                         AND attname='original_subject_id' AND NOT attisdropped)''',
+                ):
+                    blockers.append('independent_conversation_receipt_erasure_required')
                 # The policy covers *all* new copies, including a canonical response
                 # which was persisted before any state repository call occurred.
                 if conversation_counts['states'] or await conn.fetchval(

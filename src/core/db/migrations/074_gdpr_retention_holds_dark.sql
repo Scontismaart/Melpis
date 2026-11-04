@@ -113,11 +113,57 @@ DO $$ DECLARE t text; BEGIN
   EXECUTE format('CREATE TRIGGER c24_immutable BEFORE UPDATE OR DELETE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.booking_revocation_immutable()',t);
  END LOOP;
 END $$;
+-- Capture original subject on the receipt while the source state is locked.
+-- Legacy receipts can only be backfilled while their SQL070 parent still exists.
+ALTER TABLE public.booking_conversation_states ADD COLUMN IF NOT EXISTS state_generation uuid NOT NULL DEFAULT gen_random_uuid();
+ALTER TABLE public.booking_conversation_requests ADD COLUMN IF NOT EXISTS original_subject_id uuid;
+ALTER TABLE public.booking_conversation_requests ADD COLUMN IF NOT EXISTS state_generation uuid;
+DROP TRIGGER IF EXISTS conversation_immutable ON public.booking_conversation_requests;
+UPDATE public.booking_conversation_requests r SET original_subject_id=s.subject_id,state_generation=s.state_generation
+ FROM public.booking_conversation_states s
+ WHERE r.organization_id=s.organization_id AND r.conversation_id=s.conversation_id
+   AND (r.original_subject_id IS NULL OR r.state_generation IS NULL);
+ALTER TABLE public.booking_conversation_requests ALTER COLUMN original_subject_id SET NOT NULL, ALTER COLUMN state_generation SET NOT NULL;
+CREATE TRIGGER conversation_immutable BEFORE UPDATE OR DELETE ON public.booking_conversation_requests
+ FOR EACH ROW EXECUTE FUNCTION public.booking_conversation_immutable();
+CREATE OR REPLACE FUNCTION public.c24_stamp_receipt_subject() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+DECLARE subject uuid; generation uuid;
+BEGIN
+ SELECT subject_id,state_generation INTO STRICT subject,generation FROM public.booking_conversation_states
+ WHERE organization_id=NEW.organization_id AND conversation_id=NEW.conversation_id FOR SHARE;
+ IF NEW.original_subject_id IS NOT NULL AND NEW.original_subject_id IS DISTINCT FROM subject THEN
+  RAISE EXCEPTION 'Receipt subject does not match original state' USING ERRCODE='55000';
+ END IF;
+ NEW.original_subject_id := subject;
+ NEW.state_generation := generation;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.c24_stamp_receipt_subject() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS c24_stamp_receipt_subject ON public.booking_conversation_requests;
+CREATE TRIGGER c24_stamp_receipt_subject BEFORE INSERT ON public.booking_conversation_requests
+ FOR EACH ROW EXECUTE FUNCTION public.c24_stamp_receipt_subject();
+
+-- State revisions restart after expiry. Request IDs and source IDs remain
+-- unique across generations; neither relies on the lifetime of the snapshot.
+DO $receipt_constraints$
+DECLARE constraint_name name;
+BEGIN
+ FOR constraint_name IN SELECT conname FROM pg_constraint
+  WHERE conrelid='public.booking_conversation_requests'::regclass AND (
+   (contype='f' AND confrelid='public.booking_conversation_states'::regclass)
+   OR (contype='u' AND pg_get_constraintdef(oid)='UNIQUE (organization_id, conversation_id, applied_revision)')
+  )
+ LOOP
+  EXECUTE format('ALTER TABLE public.booking_conversation_requests DROP CONSTRAINT %I',constraint_name);
+ END LOOP;
+END
+$receipt_constraints$;
+
 -- Preserve already accepted sources when this additive migration is installed.
 INSERT INTO public.c24_source_fences(organization_id,conversation_id,subject_id,request_id,source_message_id)
- SELECT r.organization_id,r.conversation_id,s.subject_id,r.request_id,r.source_message_id
- FROM public.booking_conversation_requests r JOIN public.booking_conversation_states s
- ON s.organization_id=r.organization_id AND s.conversation_id=r.conversation_id
+ SELECT r.organization_id,r.conversation_id,r.original_subject_id,r.request_id,r.source_message_id
+ FROM public.booking_conversation_requests r
  ON CONFLICT DO NOTHING;
 CREATE OR REPLACE FUNCTION public.c24_fence_request() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
@@ -142,6 +188,9 @@ BEGIN
  PERFORM 1 FROM public.conversations WHERE organization_id=NEW.organization_id AND id=NEW.conversation_id FOR UPDATE;
  SELECT snapshot INTO prior_snapshot FROM public.booking_conversation_states
   WHERE organization_id=NEW.organization_id AND conversation_id=NEW.conversation_id;
+ IF TG_OP='UPDATE' AND NEW.state_generation IS DISTINCT FROM OLD.state_generation THEN
+  RAISE EXCEPTION 'State generation is immutable' USING ERRCODE='55000';
+ END IF;
  IF TG_OP='UPDATE' AND NEW.source_message_id=OLD.source_message_id THEN
   NEW.updated_at := OLD.updated_at;
   IF NEW IS DISTINCT FROM OLD THEN
@@ -243,20 +292,6 @@ BEGIN
    OR (h.scope='record' AND h.scope_id=p_conversation))
   AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events e WHERE e.organization_id=h.organization_id
    AND e.hold_id=h.hold_id AND e.kind='released')) THEN RETURN false; END IF;
- -- SQL070 cascades request receipts on state deletion. A receipt hold must
- -- therefore stop this cleanup until the two lifecycles are independent.
- IF EXISTS (
-   SELECT 1 FROM public.gdpr_retention_holds h
-   WHERE h.organization_id=p_org AND h.category='technical_receipts'
-     AND NOT EXISTS (SELECT 1 FROM public.gdpr_retention_hold_events e
-       WHERE e.organization_id=p_org AND e.hold_id=h.hold_id AND e.kind='released')
-     AND EXISTS (SELECT 1 FROM public.booking_conversation_requests r
-       WHERE r.organization_id=p_org AND r.conversation_id=p_conversation
-         AND (h.scope='organization'
-           OR (h.scope='subject' AND h.scope_id=s.subject_id)
-           OR (h.scope='conversation' AND h.scope_id=p_conversation)
-           OR (h.scope='record' AND h.scope_id=r.request_id)))
- ) THEN RETURN false; END IF;
  SELECT COALESCE(max(generation),0)+1 INTO next_generation FROM public.c24_idle_watermarks
   WHERE organization_id=p_org AND conversation_id=p_conversation;
  INSERT INTO public.c24_idle_watermarks(organization_id,conversation_id,subject_id,generation,cutoff,provider_timestamp)

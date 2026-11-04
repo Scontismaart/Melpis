@@ -105,8 +105,9 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
             EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
                    AND ($2::uuid IS NULL OR subject_id=$2))
             OR EXISTS(SELECT 1 FROM booking_conversation_requests r
-                JOIN conversations c ON c.organization_id=r.organization_id AND c.id=r.conversation_id
-                WHERE r.organization_id=$1 AND c.organization_id=$1 AND ($2::uuid IS NULL OR c.contact_id=$2))
+                LEFT JOIN conversations c ON c.organization_id=r.organization_id AND c.id=r.conversation_id
+                WHERE r.organization_id=$1 AND ($2::uuid IS NULL
+                    OR COALESCE((to_jsonb(r)->>'original_subject_id')::uuid,c.contact_id)=$2))
             OR EXISTS(SELECT 1 FROM messages m
                 JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
                 WHERE m.organization_id=$1 AND c.organization_id=$1 AND ($2::uuid IS NULL OR c.contact_id=$2)

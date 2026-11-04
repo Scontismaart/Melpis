@@ -3,7 +3,7 @@ import asyncpg
 import pytest
 from uuid import uuid4
 
-from src.core.db.repositories.booking_conversation_repo import ConversationStateUnavailable
+from src.core.db.repositories.booking_conversation_repo import ConversationStateUnavailable, StateConflict
 from tests.core.bookings.test_conversation_state_postgres import state_env, commit_source, apply, second_source
 from tests.core.gdpr.test_conversation_lifecycle_c24 import approve_conversation
 from tests.core.test_quota_reservation_lifecycle import _used
@@ -22,6 +22,12 @@ async def test_idle_expiry_fences_old_source_and_allows_fresh_source(state_env):
     env=state_env; pool=env['pool']; old_request=uuid4()
     await commit_source(env, env['message'], '2026-11-12', {'service_id':'standard'}, 1700000000)
     await apply(env, env['message'], request=old_request)
+    assert await pool.fetchval(
+        '''SELECT r.original_subject_id = c.contact_id
+           FROM booking_conversation_requests r JOIN conversations c
+             ON c.organization_id=r.organization_id AND c.id=r.conversation_id
+           WHERE r.organization_id=$1 AND r.request_id=$2''', env['org'], old_request,
+    )
     before=await _used(pool, env['org'])
     assert not await pool.fetchval('SELECT c24_expire_idle($1,$2)', env['org'], env['conv'])
     await approve_conversation(pool, env['org'])
@@ -31,12 +37,14 @@ async def test_idle_expiry_fences_old_source_and_allows_fresh_source(state_env):
     assert await pool.fetchval('SELECT c24_expire_idle($1,$2)', env['org'], env['conv'])
     assert not await pool.fetchval('SELECT c24_expire_idle($1,$2)', env['org'], env['conv'])
     assert await pool.fetchval('SELECT count(*) FROM c24_source_fences WHERE organization_id=$1', env['org']) == 1
-    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError):
+    with pytest.raises(StateConflict, match='expired conversation generation'):
         await apply(env, env['message'], request=old_request)
     stamp=await pool.fetchval('SELECT floor(extract(epoch FROM clock_timestamp()))::bigint')
     fresh=await second_source(env, stamp)
     result=await apply(env, fresh)
     assert result['state'].revision == 1
+    with pytest.raises(StateConflict, match='expired conversation generation'):
+        await apply(env, env['message'], request=old_request)
     assert all(slot.source_message_id == fresh for slot in result['state'].slots)
     assert await _used(pool, env['org']) == before + 1
     subject=await pool.fetchval('SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2', env['org'],env['conv'])
@@ -46,8 +54,7 @@ async def test_idle_expiry_fences_old_source_and_allows_fresh_source(state_env):
         await apply(env, fresh)
 
 
-@pytest.mark.parametrize('category', ['booking_conversation_content', 'technical_receipts'])
-async def test_hold_and_service_role_block_idle_cleanup(state_env, category):
+async def test_hold_and_service_role_block_idle_cleanup(state_env):
     env=state_env; pool=env['pool']
     await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
     await apply(env,env['message'])
@@ -55,9 +62,24 @@ async def test_hold_and_service_role_block_idle_cleanup(state_env, category):
     await age_state(env,31)
     await pool.execute("""INSERT INTO gdpr_retention_holds
       (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
-      VALUES($1,$2,$4,'conversation',$3,'litigation','case:1','qa',clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')""",env['org'],uuid4(),env['conv'],category)
+      VALUES($1,$2,'booking_conversation_content','conversation',$3,'litigation','case:1','qa',clock_timestamp()-interval '2 days',clock_timestamp()-interval '1 day')""",env['org'],uuid4(),env['conv'])
     assert not await pool.fetchval('SELECT c24_expire_idle($1,$2)',env['org'],env['conv'])
     assert not await pool.fetchval("SELECT has_function_privilege('service_role','c24_expire_idle(uuid,uuid)','EXECUTE')")
+
+
+async def test_receipt_record_hold_preserves_receipt_but_not_expired_state(state_env):
+    env=state_env; pool=env['pool']; request=uuid4()
+    await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
+    await apply(env,env['message'],request=request)
+    await approve_conversation(pool,env['org'])
+    await age_state(env,31)
+    await pool.execute("""INSERT INTO gdpr_retention_holds
+      (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
+      VALUES($1,$2,'technical_receipts','record',$3,'litigation','case:receipt','qa',clock_timestamp()-interval '1 day',clock_timestamp()+interval '1 day')""",env['org'],uuid4(),request)
+
+    assert await pool.fetchval('SELECT c24_expire_idle($1,$2)',env['org'],env['conv'])
+    assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2)',env['org'],env['conv'])
+    assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM booking_conversation_requests WHERE organization_id=$1 AND conversation_id=$2 AND request_id=$3)',env['org'],env['conv'],request)
 
 
 async def test_delayed_provider_message_cannot_restart_expired_state(state_env):
