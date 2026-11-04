@@ -126,3 +126,25 @@ async def test_unclassified_healthy_old_schema_retains_ordinary_message(monkeypa
     msg = MessageEntry.model_validate({'id':'mid', 'from':'123', 'type':'text', 'text':{'body':'Che orari fate?'}})
     await router._handle_inbound_message(repo, uuid.uuid4(), msg, [])
     assert repo.upsert_message.await_args.kwargs['content_text'] == 'Che orari fate?'
+
+@pytest.mark.asyncio
+async def test_medical_attestation_is_tenant_bound_and_read_only(pg_pool, sample_org, other_org):
+    from src.core.bookings.privacy_boundary import inbound_classification_status
+    from src.whatsapp.repository import Repository
+
+    org, other = sample_org["id"], other_org["id"]
+    await pg_pool.execute("""INSERT INTO booking_privacy_classifications
+        (organization_id,sector,revision,evidence_reference)
+        VALUES($1,'medical_disabled',1,'synthetic:medical')""", org)
+    repo = Repository(pg_pool)
+    assert await inbound_classification_status(repo, org) == "restricted"
+    assert await inbound_classification_status(repo, other) == "unknown"
+
+    async with pg_pool.acquire() as conn, conn.transaction():
+        await conn.execute("SET LOCAL ROLE service_role")
+        assert await conn.fetchval(
+            "SELECT sector FROM booking_privacy_classification_reader WHERE organization_id=$1", org,
+        ) == "medical_disabled"
+        assert not await conn.fetchval(
+            "SELECT has_table_privilege(current_user,'booking_privacy_classifications','SELECT,INSERT,UPDATE,DELETE')",
+        )
