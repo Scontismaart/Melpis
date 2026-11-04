@@ -14,14 +14,14 @@ from tests.core import conftest as core_fixtures
 
 
 @pytest.fixture
-async def legacy_pool(postgres_container, monkeypatch):
+async def legacy_pool(postgres_container, monkeypatch, request):
     glob = core_fixtures.glob.glob
     # Run the real fixture bootstrap, restricted to the distributed schema.
     def through_069(pattern):
         return [path for path in glob(pattern) if int(Path(path).name[:3]) <= 69]
     with monkeypatch.context() as patch:
         patch.setattr(core_fixtures, 'glob', SimpleNamespace(glob=through_069))
-        source = core_fixtures.pg_pool.__wrapped__(postgres_container)
+        source = core_fixtures.pg_pool.__wrapped__(postgres_container, request)
         pool = await anext(source)
     try:
         yield pool
