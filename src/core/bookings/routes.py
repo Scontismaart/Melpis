@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 from src.core.bookings.catalog_api import router as catalog_router
 router.include_router(catalog_router)
+from src.core.bookings.owner_mutation_api import router as owner_mutation_router
+router.include_router(owner_mutation_router)
 
 
 def _get_booking_service(request: Request):
