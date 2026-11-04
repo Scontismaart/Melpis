@@ -300,3 +300,11 @@ async def test_receipt_cleanup_requires_policy_and_respects_record_hold(state_en
     assert not await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',env['org'],request)
     assert await pool.fetchval('SELECT count(*) FROM c24_receipt_cleanup_audit WHERE organization_id=$1 AND request_id=$2',env['org'],request)==1
     assert await pool.fetchval('SELECT count(*) FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2',env['org'],request)==1
+
+
+
+async def test_receipt_cleanup_rejects_stale_transaction_snapshot(state_env):
+    async with state_env['pool'].acquire() as conn:
+        async with conn.transaction(isolation='repeatable_read'):
+            with pytest.raises(asyncpg.InvalidTransactionStateError, match='read committed'):
+                await conn.fetchval('SELECT c24_cleanup_receipt($1,$2)', state_env['org'], uuid4())

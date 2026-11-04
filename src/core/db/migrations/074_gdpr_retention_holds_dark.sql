@@ -572,9 +572,17 @@ END $$;
 REVOKE ALL ON FUNCTION public.booking_conversation_immutable() FROM PUBLIC,anon,authenticated,service_role;
 
 CREATE OR REPLACE FUNCTION public.c24_cleanup_receipt(p_org uuid,p_request uuid) RETURNS boolean
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE r public.booking_conversation_requests%ROWTYPE; p public.gdpr_policies%ROWTYPE;
 BEGIN
+ IF current_user IS DISTINCT FROM pg_get_userbyid(
+    (SELECT relowner FROM pg_class WHERE oid='public.c24_receipt_cleanup_capability'::regclass)
+ ) THEN RAISE EXCEPTION 'Receipt cleanup requires the lifecycle owner' USING ERRCODE='42501'; END IF;
+ -- After waiting on the tenant lock, policy reads must see newly committed
+ -- holds. An earlier transaction snapshot cannot prove their absence.
+ IF current_setting('transaction_isolation') <> 'read committed' THEN
+  RAISE EXCEPTION 'Receipt cleanup requires read committed isolation' USING ERRCODE='25000';
+ END IF;
  -- The same exclusive tenant lock serializes policy and hold changes.
  PERFORM pg_advisory_xact_lock(hashtextextended(p_org::text,606));
  SELECT * INTO r FROM public.booking_conversation_requests
