@@ -120,6 +120,13 @@ async def approve_conversation(pool, org):
         'test:synthetic','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
 
 
+async def approve_technical_receipts(pool, org):
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'technical_receipts','synthetic-c24',TRUE,90,FALSE,
+        'test:receipts','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
+
+
 async def test_erasure_requires_conversation_policy_then_removes_all_copies(state_env, monkeypatch):
     env = state_env
     request = await populated(env)
@@ -331,10 +338,7 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
     await approve_policies(env['pool'], env['org'])
     await approve_conversation(env['pool'], env['org'])
-    await env['pool'].execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
-        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
-        VALUES($1,'technical_receipts','synthetic-c24',TRUE,90,FALSE,
-        'test:receipts','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", env['org'])
+    await approve_technical_receipts(env['pool'], env['org'])
     monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
     erased = await Deletion(env['pool']).request(env['org'], 'synthetic-restore', uuid4(), scope='contact', subject_id=contact)
     assert erased['status'] == 'partial'

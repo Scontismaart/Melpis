@@ -22,7 +22,7 @@ from src.core.gdpr.operations import Operations
 from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_journal_replay
 from src.core.gdpr.restore_journal import JournalCheckpoint
 from tests.core.gdpr.test_conversation_lifecycle_c24 import (
-    approve_conversation, approve_policies, populated, state_env, subject,
+    approve_conversation, approve_policies, approve_technical_receipts, populated, state_env, subject,
 )
 
 
@@ -70,6 +70,7 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     )
     await approve_policies(env["pool"], org)
     await approve_conversation(env["pool"], org)
+    await approve_technical_receipts(env["pool"], org)
     requester = "synthetic-restore"
     operation = await Operations(env["pool"]).create(
         org, requester, uuid4(), kind="erase", scope="contact", subject_id=person,

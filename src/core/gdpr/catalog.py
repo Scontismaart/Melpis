@@ -50,6 +50,7 @@ CATEGORIES: tuple[Category, ...] = (
         FROM booking_conversation_requests AS r
         LEFT JOIN booking_conversation_states AS s
           ON s.organization_id = r.organization_id AND s.conversation_id = r.conversation_id
+         AND s.organization_id = $1::uuid
         WHERE r.organization_id = $1::uuid
           AND COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid
     """, exclusion_reason="Individual export excludes staff identity and integrity hashes; no unproved account content projection."),
