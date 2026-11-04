@@ -287,6 +287,9 @@ CREATE OR REPLACE FUNCTION public.c24_expire_idle(p_org uuid,p_conversation uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
 DECLARE s public.booking_conversation_states%ROWTYPE; p public.gdpr_policies%ROWTYPE; next_generation bigint;
 BEGIN
+ IF current_setting('transaction_isolation') <> 'read committed' THEN
+  RAISE EXCEPTION 'Content retention requires read committed isolation' USING ERRCODE='25000';
+ END IF;
  PERFORM pg_advisory_xact_lock_shared(hashtextextended(p_org::text,606));
  PERFORM 1 FROM public.conversations WHERE organization_id=p_org AND id=p_conversation FOR UPDATE;
  IF NOT FOUND THEN RETURN false; END IF;
@@ -447,6 +450,9 @@ CREATE OR REPLACE FUNCTION public.c24_purge_source(p_org uuid,p_message uuid) RE
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
 DECLARE m public.messages%ROWTYPE; p public.gdpr_policies%ROWTYPE; conv uuid; subj uuid;
 BEGIN
+ IF current_setting('transaction_isolation') <> 'read committed' THEN
+  RAISE EXCEPTION 'Content retention requires read committed isolation' USING ERRCODE='25000';
+ END IF;
  PERFORM pg_advisory_xact_lock(hashtextextended(p_org::text,606));
  SELECT conversation_id INTO conv FROM public.messages WHERE organization_id=p_org AND id=p_message;
  IF NOT FOUND THEN RETURN false; END IF;
