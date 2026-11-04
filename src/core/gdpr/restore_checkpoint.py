@@ -25,6 +25,14 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
     No journal, wrong signature, missing tombstone, or restored content fails
     closed. A successful result is evidence for C2.4 only, never a global GO.
     """
+    org, entries, sequence, purges = _authenticate_checkpoint(
+        organization_id, checkpoint, verification_key=verification_key,
+        backup_id=backup_id, minimum_sequence=minimum_sequence,
+    )
+    return await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges)
+
+
+def _authenticate_checkpoint(organization_id, checkpoint, *, verification_key, backup_id, minimum_sequence):
     try:
         org = UUID(str(organization_id))
         if (not isinstance(verification_key, bytes) or len(verification_key) < 32
@@ -86,29 +94,41 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
         raise RestoreBlocked('Authenticated external restore checkpoint required') from None
 
-    return await _verify_replayed_erasures(
-        conn, org, entries, payload['sequence'], purges=purges if payload['version']=='c24-restore-v2' else None,
-    )
+    return org, entries, payload['sequence'], purges if payload['version']=='c24-restore-v2' else None
 
 
-async def verify_restore_journal_replay(conn, organization_id, payload, signature, **trust):
+async def verify_restore_journal_replay(conn, organization_id, payload, signature, *,
+                                        stay_checkpoint=None, checkpoint_verification_key=None,
+                                        backup_id=None, minimum_sequence=None, **trust):
     """Check scoped replay against signed evidence and an independently pinned tip."""
     org = UUID(str(organization_id))
     try:
         verified = verify_erasure_segment(payload, signature, **trust)
     except RestoreJournalInvalid:
         raise RestoreBlocked('Authenticated external restore journal required') from None
+    purges = None
+    if stay_checkpoint is not None:
+        _, checkpoint_entries, checkpoint_sequence, purges = _authenticate_checkpoint(
+            org, stay_checkpoint, verification_key=checkpoint_verification_key,
+            backup_id=backup_id, minimum_sequence=minimum_sequence,
+        )
+        if purges is None:
+            raise RestoreBlocked('Authenticated stay purge journal required')
+        await _verify_replayed_erasures(conn, org, checkpoint_entries, checkpoint_sequence, purges=purges)
     scoped = tuple(entry for entry in verified if entry.organization_id == org)
     return await _verify_replayed_erasures(
         conn, org, [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped],
         trust['independent_tip'].sequence,
         fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped},
+        purges=purges,
     )
 
 
 async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None, purges=None):
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
+    if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
+        raise RestoreBlocked('Restore verification requires read committed isolation')
     if not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)', org):
         raise RestoreBlocked('Restored organization is unavailable')
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))', str(org))
