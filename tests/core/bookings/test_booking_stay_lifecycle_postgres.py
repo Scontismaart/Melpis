@@ -184,10 +184,11 @@ async def test_owner_erasure_purge_requires_barrier_matching_operation_scope_and
         subject_id=lineage.contact_id,
     )
     # This mismatched organization barrier must not authorize a contact purge.
-    await pg_pool.execute(
-        '''INSERT INTO gdpr_erasure_barriers(organization_id,operation_id,scope,subject_id)
-           VALUES($1,$2,'organization',NULL)''', env.org, operation,
-    )
+    with pytest.raises(Exception, match='Barrier does not match erasure operation'):
+        await pg_pool.execute(
+            '''INSERT INTO gdpr_erasure_barriers(organization_id,operation_id,scope,subject_id)
+               VALUES($1,$2,'organization',NULL)''', env.org, operation,
+        )
 
     with pytest.raises(Exception, match='Scoped erasure barrier required'):
         await pg_pool.fetchval(
