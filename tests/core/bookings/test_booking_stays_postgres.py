@@ -137,3 +137,67 @@ async def test_owner_retention_purges_only_one_stay_and_fences_replay(pg_pool):
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 1
     with pytest.raises(AllocationDenied):
         await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command, new_booking=lineage)
+
+async def test_completed_stay_records_immutable_transactional_evidence(pg_pool):
+    env, lineage = await hotel_setup(pg_pool)
+    booking = uuid4()
+    await apply_booking_mutation(
+        pg_pool, env.org, env.auth, env.request(booking),
+        mutation=BookingMutation('create_stay', 'Synthetic', '', '', '2026-10-28', '14:00', 1,
+                                 arrival_date='2026-10-28', departure_date='2026-10-29'),
+        new_booking=lineage,
+    )
+    request = env.request(booking, action='replace', allocation_revision=1)
+    command = BookingMutation('complete', '', '', '')
+    await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command)
+    evidence = await pg_pool.fetchrow('''SELECT e.*,b.completata_at,a.timezone AS allocation_timezone
+        FROM booking_stay_completion_evidence e
+        JOIN bookings b ON b.organization_id=e.organization_id AND b.id=e.booking_id
+        JOIN booking_allocation_sets a ON a.organization_id=e.organization_id AND a.booking_id=e.booking_id
+        WHERE e.organization_id=$1 AND e.booking_id=$2''', env.org, booking)
+    assert evidence['completed_at'] >= evidence['completata_at']
+    assert evidence['timezone'] == evidence['allocation_timezone']
+    assert (await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command))['replayed']
+    with pytest.raises(Exception, match='immutable'):
+        await pg_pool.execute('UPDATE booking_stay_completion_evidence SET timezone=\'UTC\' WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
+    with pytest.raises(Exception, match='immutable'):
+        await pg_pool.execute('DELETE FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
+
+
+async def test_legacy_completed_stay_cannot_mint_evidence(pg_pool):
+    env, lineage = await hotel_setup(pg_pool)
+    booking = uuid4()
+    await apply_booking_mutation(
+        pg_pool, env.org, env.auth, env.request(booking),
+        mutation=BookingMutation('create_stay', 'Synthetic', '', '', '2026-10-28', '14:00', 1,
+                                 arrival_date='2026-10-28', departure_date='2026-10-29'),
+        new_booking=lineage,
+    )
+    await pg_pool.execute("UPDATE bookings SET stato='completata',completata_at=now()-interval '3 years' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+
+async def test_completion_evidence_erased_by_approved_scoped_barrier(pg_pool):
+    from src.core.gdpr.operations import Operations
+    env, lineage = await hotel_setup(pg_pool)
+    booking = uuid4()
+    await apply_booking_mutation(
+        pg_pool, env.org, env.auth, env.request(booking),
+        mutation=BookingMutation('create_stay', 'Synthetic', '', '', '2026-10-28', '14:00', 1,
+                                 arrival_date='2026-10-28', departure_date='2026-10-29'),
+        new_booking=lineage,
+    )
+    await apply_booking_mutation(pg_pool, env.org, env.auth,
+        env.request(booking, action='replace', allocation_revision=1),
+        mutation=BookingMutation('complete', '', '', ''))
+    for category in ('booking_stay_content', 'contact_content', 'cutover'):
+        await pg_pool.execute('''INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+            retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+            VALUES($1,$2,'v1',true,NULL,false,'test:stay','qa',now()-interval '1 day',now()+interval '1 day')''',
+            env.org, category)
+    operation = await Operations(pg_pool).create(env.org, 'synthetic-admin', uuid4(),
+        kind='erase', scope='contact', subject_id=lineage.contact_id)
+    await pg_pool.execute('''INSERT INTO gdpr_erasure_barriers
+        (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
+        VALUES($1,$2,'contact',$3,$4,'test')''', env.org, operation, lineage.contact_id, 'a' * 64)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
