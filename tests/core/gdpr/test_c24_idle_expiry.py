@@ -4,6 +4,7 @@ import pytest
 from uuid import uuid4
 
 from src.core.db.repositories.booking_conversation_repo import ConversationStateUnavailable, StateConflict
+from src.core.gdpr.catalog import CATEGORIES
 from tests.core.bookings.test_conversation_state_postgres import state_env, commit_source, apply, second_source
 from tests.core.gdpr.test_conversation_lifecycle_c24 import approve_conversation
 from tests.core.test_quota_reservation_lifecycle import _used
@@ -93,6 +94,16 @@ async def test_source_deletion_cannot_cascade_to_receipt(state_env):
         'SELECT EXISTS(SELECT 1 FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2)',
         env['org'], request,
     )
+    subject = await pool.fetchval(
+        'SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2',
+        env['org'], env['conv'],
+    )
+    projection = next(category.contact_query for category in CATEGORIES
+                      if category.name == 'booking_conversation_requests')
+    receipts = await pool.fetch(projection, env['org'], subject)
+    assert [receipt['request_id'] for receipt in receipts] == [request]
+    assert not await pool.fetch(projection, env['org'], uuid4())
+    assert not await pool.fetch(projection, uuid4(), subject)
     with pytest.raises(asyncpg.InsufficientPrivilegeError):
         await pool.execute(
             'DELETE FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2',
