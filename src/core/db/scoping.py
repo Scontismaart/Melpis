@@ -92,6 +92,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "airtable_webhook_events": ("direct", "Webhook event ledger is keyed by organization and webhook."),
     "inbound_worker_receipts": ("direct", "Verified ingress evidence is organization-scoped."),
     "inbound_worker_operations": ("direct", "Committed worker evidence is organization-scoped."),
+    "booking_privacy_classification_reader": ("direct", "Minimal attestation belongs to one organization."),
     "meta_webhook_inbox": ("direct", "Accepted webhook event is assigned to one organization before persistence."),
     "billing_checkout_intents": ("direct", "Checkout retry intent is keyed by organization and request key."),
     "governance_outbox": ("direct", "Governance event is attributed to one organization."),

@@ -100,10 +100,15 @@ def create_router(app_config: AppConfig = None, repo = None, security: MetaWebho
                     continue
                 org_id = org_data["organization_id"]
 
-                # Only durable acceptance here. Ingestion runs in the inbox worker.
+                # Minimize positively identified medical input before durable inbox storage.
+                from src.core.bookings.privacy_boundary import inbound_classification_status, minimize_whatsapp_change
+                payload = change.model_dump(by_alias=True, exclude_none=True)
+                classification = await inbound_classification_status(active_repo, org_id)
+                if classification != "unknown":
+                    payload = minimize_whatsapp_change(payload, quarantine=classification == "error")
                 await inbox.enqueue(org_id, "whatsapp", {
-                    "object": webhook.object,
-                    "entry": [{"id": entry.id, "changes": [change.model_dump(by_alias=True, exclude_none=True)]}],
+                    "object": webhook.object if classification == "unknown" else "whatsapp_business_account",
+                    "entry": [{"id": entry.id if classification == "unknown" else None, "changes": [payload]}],
                 }, trace_id)
 
         return Response(status_code=200)
@@ -183,7 +188,12 @@ async def _handle_inbound_message(repo, org_id, msg, contacts, trace_id=None):
     if not contacts:
         logger.warning("message_id=%s trace_id=%s event=contacts_empty", msg.id, trace_id)
 
-    contact_name = contacts[0].profile.name if contacts and contacts[0].profile else None
+    from src.core.bookings.privacy_boundary import inbound_classification_status, minimize_whatsapp_change
+    classification = await inbound_classification_status(repo, org_id)
+    if classification != "unknown":
+        from src.whatsapp.models import MessageEntry
+        clean = minimize_whatsapp_change({"value": {"messages": [msg.model_dump(by_alias=True, exclude_none=True)]}}, quarantine=classification == "error")
+        msg = MessageEntry.model_validate(clean["value"]["messages"][0])
     from_number = msg.from_
     contact = await repo.get_or_create_contact(org_id, from_number)
     conv = await repo.get_or_create_conversation(org_id, contact["id"])
