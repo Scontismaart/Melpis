@@ -214,6 +214,9 @@ def validate_final_response(
         _deny()
     if response._guardrail_blocked:
         raise AIGenerationBlocked("Final AI response did not pass guardrails")
+    from src.core.bookings.conversation_state import StructuredConversationResponse
+    if isinstance(response, StructuredConversationResponse):
+        response.assert_catalog_organization(operation.organization_id)
     verdict = valida_risposta(response, context_chunks, profile)
     if verdict.azione == "block":
         raise AIGenerationBlocked("Final AI response did not pass guardrails")

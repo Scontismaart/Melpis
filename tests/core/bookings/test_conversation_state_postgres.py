@@ -377,6 +377,11 @@ async def test_a04_validator_rejects_unsealed_tamper_and_accepts_guardrail_trim(
     raw={'risposta':'**Richiesta ricevuta.**','richiede_umano':False,'motivo':'',
          'booking_state_proposal':{'intent':'booking','slots':[{'field':'service_id','value':'standard'}]}}
     valid=parse_structured_response_json(json.dumps(raw),catalog=env['catalog'],organization_id=oid)
+    other_org = uuid4()
+    other_catalog = validate_catalog_json(env['catalog'].catalog.model_dump_json(), organization_id=other_org)
+    foreign_response = parse_structured_response_json(json.dumps(raw), catalog=other_catalog, organization_id=other_org)
+    with pytest.raises(ValueError, match='different organization'):
+        validate_final_response(operation, ticket, foreign_response)
     with pytest.raises(ValidationError):
         StructuredConversationResponse(risposta='OK',richiede_umano=False,motivo='',booking_state_proposal=valid.booking_state_proposal,booking_catalog_revision=2)
     with pytest.raises(ValidationError): valid.booking_catalog_revision=3
