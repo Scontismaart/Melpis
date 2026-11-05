@@ -48,10 +48,11 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         assert retry.generation == first.generation + 1
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('ticket_status', 'closed_date'), [
-    ('AI_ACTIVE', False), ('PENDING_STAFF', False), ('CLAIMED', False), ('AI_ACTIVE', True),
+@pytest.mark.parametrize(('ticket_status', 'closed_date', 'entrypoint'), [
+    ('AI_ACTIVE', False, False), ('PENDING_STAFF', False, False),
+    ('CLAIMED', False, False), ('AI_ACTIVE', True, False), ('AI_ACTIVE', False, True),
 ])
-async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date, monkeypatch):
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date, entrypoint, monkeypatch):
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
@@ -90,6 +91,14 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
     await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
         WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
     await _persist_ingress(pool, org, reply_wam)
+    if entrypoint:
+        authority = WorkerBookingAuthority()
+        with pytest.raises(WorkerProofDenied, match='Confirmed proposal unavailable'):
+            await authority.process_confirmation(pool, uuid4(), conversation, reply)
+        booking = await authority.process_confirmation(pool, org, conversation, reply)
+        assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
+        return
     async with pool.acquire() as conn, conn.transaction():
         authority = WorkerBookingAuthority()
         claim = await authority.claim(conn, org, message)

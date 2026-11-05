@@ -74,6 +74,32 @@ class WorkerBookingAuthority:
         self._issued = WeakSet()
         self._allocation = BookingAllocationRepository(None)
 
+    async def process_confirmation(self, pool, organization_id, conversation_id, confirmation_id):
+        """Resolve one persisted customer confirmation and commit its booking."""
+        if not private_booking_worker_enabled():
+            raise WorkerProofDenied('Private booking worker disabled')
+        org, conversation, confirmation = map(
+            _trusted_uuid, (organization_id, conversation_id, confirmation_id),
+        )
+        async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+            candidate = await conn.fetchrow("""SELECT p.source_message_id,s.revision,s.catalog_revision
+                FROM booking_conversation_states s
+                JOIN booking_conversation_requests p
+                  ON p.organization_id=s.organization_id AND p.conversation_id=s.conversation_id
+                 AND p.state_generation=s.state_generation
+                WHERE s.organization_id=$1 AND p.organization_id=$1 AND s.conversation_id=$2
+                  AND s.source_message_id=$3 AND p.action='proposal' AND p.applied_revision=s.revision-1""",
+                org, conversation, confirmation,
+            )
+            if not candidate:
+                raise WorkerProofDenied('Confirmed proposal unavailable')
+            claim = await self.claim(conn, org, candidate['source_message_id'])
+            capability = await self.mint(
+                conn, claim, conversation, expected_state_revision=candidate['revision'],
+                expected_catalog_revision=candidate['catalog_revision'],
+            )
+            return await self.create_booking(conn, capability)
+
     async def claim(self, conn, org, message, *, lease_seconds=30):
         """Acquire a fenced lease only for persisted, committed inbound evidence."""
         if not conn.is_in_transaction() or type(lease_seconds) is not int or not 1 <= lease_seconds <= 60:
