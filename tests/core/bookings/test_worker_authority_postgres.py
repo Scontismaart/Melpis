@@ -51,14 +51,14 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
 @pytest.mark.parametrize(('ticket_status', 'closed_date'), [
     ('AI_ACTIVE', False), ('PENDING_STAFF', False), ('CLAIMED', False), ('AI_ACTIVE', True),
 ])
-async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date):
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date, monkeypatch):
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
     env = state_env
     org, message, pool, conversation = env["org"], env["message"], env["pool"], env["conv"]
     appointment = (date.today() + timedelta(days=7)).isoformat()
-    proposal = await commit_source(env, message, f"{appointment} 10:00", {
+    proposal = await commit_source(env, message, f"Mi chiamo Mario Rossi. {appointment} 10:00", {
         "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
     }, 1700000000)
@@ -114,3 +114,37 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         proof = await authority.revalidate(conn, capability)
         assert proof["request_id"] and proof["booking_id"]
         assert not proof["runtime_enabled"]
+        capability = await authority.mint(conn, claim, conversation,
+                                          expected_state_revision=2, expected_catalog_revision=2)
+        monkeypatch.delenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', raising=False)
+        with pytest.raises(WorkerProofDenied, match='disabled'):
+            await authority.create_booking(conn, capability)
+        monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+        from src.core.db.repositories.booking_repo import BookingRepository
+
+        async def unavailable(*_args):
+            raise RuntimeError('synthetic outbox failure')
+
+        with monkeypatch.context() as patch:
+            patch.setattr(BookingRepository, 'enqueue_calendar_confirmation', unavailable)
+            with pytest.raises(RuntimeError, match='synthetic outbox failure'):
+                await authority.create_booking(conn, capability)
+        assert not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1 AND id=$2)',
+                                       org, proof['booking_id'])
+        assert not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_allocation_requests
+            WHERE organization_id=$1 AND booking_id=$2)''', org, proof['booking_id'])
+        capability = await authority.mint(conn, claim, conversation,
+                                          expected_state_revision=2, expected_catalog_revision=2)
+        booking = await authority.create_booking(conn, capability)
+        assert booking == proof['booking_id']
+        assert await conn.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2',
+                                   org, booking) == 'confermata'
+        assert await conn.fetchval('''SELECT actor_kind FROM booking_allocation_requests
+            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 'inbound_worker'
+        assert await conn.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
+        replay = await authority.mint(conn, claim, conversation,
+                                      expected_state_revision=2, expected_catalog_revision=2)
+        assert await authority.create_booking(conn, replay) == booking
+        assert await conn.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
