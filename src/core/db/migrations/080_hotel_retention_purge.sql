@@ -55,7 +55,7 @@ REVOKE ALL ON FUNCTION public.booking_allocation_immutable() FROM PUBLIC,anon,au
 CREATE OR REPLACE FUNCTION public.booking_stay_admin_purge(p_org uuid,p_booking uuid,p_purpose text,p_operation uuid,p_policy_version text)
 RETURNS integer LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE stay public.booking_stays%ROWTYPE; booking public.bookings%ROWTYPE; pol public.gdpr_policies%ROWTYPE; cat text; count_deleted integer;
- a public.booking_allocation_sets%ROWTYPE; e public.booking_stay_completion_evidence%ROWTYPE;
+ a public.booking_allocation_sets%ROWTYPE; completion public.booking_stay_completion_evidence%ROWTYPE;
  claim record; claim_count integer; observed timestamptz := clock_timestamp();
 BEGIN
  IF current_user IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='public.booking_stay_purge_markers'::regclass)) THEN RAISE EXCEPTION 'Hotel purge requires lifecycle owner' USING ERRCODE='42501'; END IF;
@@ -109,11 +109,11 @@ BEGIN
  -- still requires a separately archived stay and its twelve-month evidence.
  SELECT * INTO a FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
  IF p_purpose='erasure' AND a.state='active' THEN
-  SELECT * INTO e FROM public.booking_stay_completion_evidence WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
+  SELECT * INTO completion FROM public.booking_stay_completion_evidence WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
   IF booking.stato<>'completata' OR booking.completata_at IS NULL OR booking.no_show_at IS NOT NULL
-   OR e.booking_id IS NULL OR a.temporal_kind<>'civil_nights' OR a.timezone<>e.timezone
+   OR completion.booking_id IS NULL OR a.temporal_kind<>'civil_nights' OR a.timezone<>completion.timezone
    OR (a.arrival_date,a.departure_date) IS DISTINCT FROM (stay.arrival_date,stay.departure_date)
-   OR a.ends_at>e.completed_at OR a.ends_at>observed THEN
+   OR a.ends_at>completion.completed_at OR a.ends_at>observed THEN
    RAISE EXCEPTION 'Completed stay release evidence unavailable' USING ERRCODE='55000'; END IF;
   SELECT count(*) INTO claim_count FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking;
   IF claim_count<1 OR claim_count>128 THEN RAISE EXCEPTION 'Bounded allocation claims required' USING ERRCODE='55000'; END IF;
