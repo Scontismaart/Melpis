@@ -698,15 +698,6 @@ class InboundProcessingService:
             return await self._escalate(org_id, msg, content, tenant_config,
                                         HUMAN_WAIT_REPLY, "classification_quarantine")
 
-        # A positive medical signal only restricts processing. No freeform
-        # inbound text goes to the model for known medical organizations.
-        from src.core.bookings.privacy_boundary import medical_restricted_for_inbound
-        if await medical_restricted_for_inbound(self.repo, org_id):
-            cfg_loader = _get_proc_symbol("load_tenant_config", load_tenant_config)
-            tenant_config = await cfg_loader(org_id, self.app_config, self.repo)
-            return await self._escalate(org_id, msg, content, tenant_config,
-                                        HUMAN_WAIT_REPLY, "medical_handoff")
-
         # ── STEP 3: Richiesta Operatore Umano (Invariante 11) ─────────────────
         if self.service:
             wants_human = await self.service.check_human_request(text)
@@ -812,6 +803,14 @@ class InboundProcessingService:
                 business_profile_raw = {}
         if not isinstance(business_profile_raw, dict):
             business_profile_raw = {}
+
+        # Privacy gates AI and replay. Deterministic operator requests,
+        # reminders and feedback retain their established handling.
+        from src.core.bookings.privacy_boundary import medical_restricted_for_inbound
+        if await medical_restricted_for_inbound(self.repo, org_id, business_profile_raw):
+            return await self._escalate(
+                org_id, msg, content, tenant_config, HUMAN_WAIT_REPLY, "medical_handoff",
+            )
 
         # Keep the old outbound-dedup marker for compatibility checks, but
         # never deliver it as an authority. Any cache/dedup marker means this
