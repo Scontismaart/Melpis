@@ -345,8 +345,9 @@ async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, 
     await pg_pool.execute("""INSERT INTO gdpr_retention_holds
         (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
         VALUES($1,$2,'booking_stay_content',$3,$4,'test','test:hold','qa',now(),now()+interval '1 month')""", env.org, hold, scope, scope_id)
-    await pg_pool.execute("""INSERT INTO gdpr_erasure_barriers(organization_id,operation_id,scope,subject_id)
-        VALUES($1,$2,'contact',$3)""", env.org, operation, lineage.contact_id)
+    await pg_pool.execute("""INSERT INTO gdpr_erasure_barriers
+        (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
+        VALUES($1,$2,'contact',$3,$4,'synthetic')""", env.org, operation, lineage.contact_id, 'a' * 64)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
     with pytest.raises(Exception, match='Stay content held'):
         await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation)
