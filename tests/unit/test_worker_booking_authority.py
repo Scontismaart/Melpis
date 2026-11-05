@@ -110,3 +110,17 @@ async def test_claim_rejects_repeatable_read_snapshot():
     conn.isolation = 'repeatable read'
     with pytest.raises(WorkerProofDenied, match='read committed'):
         await WorkerBookingAuthority().claim(conn, uuid4(), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_poll_advances_past_failed_confirmation(monkeypatch):
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+    org = uuid4()
+    jobs = [dict(organization_id=org, conversation_id=uuid4(), source_message_id=uuid4())
+            for _ in range(2)]
+    authority = WorkerBookingAuthority()
+    authority._confirmed_jobs = AsyncMock(return_value=(org, jobs))
+    authority.process_confirmation = AsyncMock(side_effect=[RuntimeError('synthetic'), uuid4()])
+    assert await authority.process_next_batch(None) == 1
+    assert authority.process_confirmation.await_count == 2
+    assert authority._cursor == (org, jobs[1]['conversation_id'])

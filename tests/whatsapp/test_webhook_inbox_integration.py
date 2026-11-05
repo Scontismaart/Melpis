@@ -44,7 +44,12 @@ def _payload(phone_number_id: str):
     }
 
 
-async def test_ack_commits_inbox_before_worker_creates_ai_queue(pg_pool, repo, app_config):
+@pytest.mark.parametrize("booking_worker_enabled", [False, True])
+async def test_ack_commits_inbox_before_worker_creates_ai_queue(pg_pool, repo, app_config, monkeypatch, booking_worker_enabled):
+    if booking_worker_enabled:
+        monkeypatch.setenv("C24_PRIVATE_BOOKING_WORKER_ENABLED", "true")
+    else:
+        monkeypatch.delenv("C24_PRIVATE_BOOKING_WORKER_ENABLED", raising=False)
     org_id = uuid.uuid4()
     phone_number_id = "987654321001"
     async with pg_pool.acquire() as conn:
@@ -97,6 +102,11 @@ async def test_ack_commits_inbox_before_worker_creates_ai_queue(pg_pool, repo, a
         message = await conn.fetchrow(
             "SELECT * FROM messages WHERE organization_id = $1", org_id
         )
+        receipt = await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM inbound_worker_receipts
+            WHERE organization_id=$1 AND inbox_id=$2 AND message_id=$3)""",
+            org_id, inbox["id"], message["id"],
+        )
     assert inbox_status == "completed"
     assert message["wam_id"] == "wamid.durable.inbox.1"
     assert message["status"] == "received_pending_ai"
+    assert receipt is booking_worker_enabled

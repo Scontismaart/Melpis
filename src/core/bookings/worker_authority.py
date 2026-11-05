@@ -4,6 +4,7 @@ The claim table has no runtime grants; enabling it requires a separate review.
 Claim expiry never grants an AI call, quota renewal, or refund.
 """
 import asyncio
+import logging
 from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID, uuid4, uuid5
@@ -19,6 +20,8 @@ from src.core.db.repositories.booking_conversation_repo import BookingConversati
 from src.core.db.repositories.booking_repo import BookingRepository
 from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
 from src.core.bookings.allocation_contracts import AllocationRequest
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerProofDenied(PermissionError):
@@ -121,6 +124,10 @@ class WorkerBookingAuthority:
             except WorkerProofDenied:
                 # A denial is safe to reconsider after a later policy/state change.
                 pass
+            except Exception as exc:
+                # Retry on a later scan without starving other conversations.
+                logger.error('Private booking job failed organization_id=%s conversation_id=%s error_type=%s',
+                             org, conversation, type(exc).__name__)
             else:
                 created += 1
             self._cursor = org, conversation
