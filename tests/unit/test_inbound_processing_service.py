@@ -23,6 +23,8 @@ def base_config():
 @pytest.fixture
 def mock_deps(monkeypatch):
     repo = AsyncMock()
+    repo.pool = MagicMock()
+    repo.pool.acquire.return_value.__aenter__.return_value.fetchrow = AsyncMock(return_value=None)
     service = AsyncMock()
     booking_service = AsyncMock()
 
