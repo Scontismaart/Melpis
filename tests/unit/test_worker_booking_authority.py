@@ -1,4 +1,6 @@
 import asyncio
+import gc
+from weakref import ref
 from uuid import uuid4
 from unittest.mock import AsyncMock
 
@@ -11,10 +13,11 @@ class Connection:
     def __init__(self):
         self.active = True
         self.txid = 1
+        self.isolation = 'read committed'
     def is_in_transaction(self):
         return self.active
     async def fetchval(self, query, *args):
-        return self.txid
+        return self.isolation if query == 'SHOW transaction_isolation' else self.txid
 
 
 @pytest.mark.asyncio
@@ -87,3 +90,23 @@ async def test_claim_requires_persisted_ingress_even_with_valid_a04(monkeypatch)
     monkeypatch.setattr(BookingConversationRepository, '_canonical_response', AsyncMock(return_value=({}, 'a'*64)))
     with pytest.raises(WorkerProofDenied, match='provenance'):
         await WorkerBookingAuthority().claim(ClaimConnection(), org, message)
+
+
+@pytest.mark.asyncio
+async def test_abandoned_capability_is_not_retained_by_authority():
+    authority, conn = WorkerBookingAuthority(), Connection()
+    org, conversation, message = uuid4(), uuid4(), uuid4()
+    authority._proof = AsyncMock(return_value=(org, conversation, message, uuid4(), 1, 'x', 'a'*64, 1, 'x', 1))
+    token = await authority.mint(conn, object(), conversation, expected_state_revision=1, expected_catalog_revision=1)
+    token_ref = ref(token)
+    del token
+    gc.collect()
+    assert token_ref() is None
+
+
+@pytest.mark.asyncio
+async def test_claim_rejects_repeatable_read_snapshot():
+    conn = Connection()
+    conn.isolation = 'repeatable read'
+    with pytest.raises(WorkerProofDenied, match='read committed'):
+        await WorkerBookingAuthority().claim(conn, uuid4(), uuid4())

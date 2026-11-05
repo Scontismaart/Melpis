@@ -7,6 +7,7 @@ import asyncio
 from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID, uuid4, uuid5
+from weakref import WeakSet
 
 from src.core.bookings.auto_policy import validate_auto_booking_configuration
 from src.core.bookings.conversation_state import ConversationState, canonical, state_digest
@@ -58,7 +59,7 @@ class _Claim:
 
 
 class _Capability:
-    __slots__ = ('_owner', '_connection', '_transaction_id', '_task', '_claim', '_proof')
+    __slots__ = ('_owner', '_connection', '_transaction_id', '_task', '_claim', '_proof', '__weakref__')
     def __init__(self, owner, connection, transaction_id, task, claim, proof):
         self._owner, self._connection, self._transaction_id, self._task = owner, connection, transaction_id, task
         self._claim, self._proof = claim, proof
@@ -67,13 +68,15 @@ class _Capability:
 class WorkerBookingAuthority:
     """Private capability mint. This object cannot execute a booking."""
     def __init__(self):
-        self._issued = set()
+        self._issued = WeakSet()
         self._allocation = BookingAllocationRepository(None)
 
     async def claim(self, conn, org, message, *, lease_seconds=30):
         """Acquire a fenced lease only for persisted, committed inbound evidence."""
         if not conn.is_in_transaction() or type(lease_seconds) is not int or not 1 <= lease_seconds <= 60:
             raise WorkerProofDenied('Invalid claim scope')
+        if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
+            raise WorkerProofDenied('Worker proof requires read committed isolation')
         org, message = _trusted_uuid(org), _trusted_uuid(message)
         if not await conn.fetchrow('SELECT id FROM organizations WHERE id=$1 FOR SHARE', org):
             raise WorkerProofDenied('Organization unavailable')
@@ -107,6 +110,8 @@ class WorkerBookingAuthority:
     async def _proof(self, conn, claim, conversation, expected_revision, expected_catalog):
         if not conn.is_in_transaction() or type(claim) is not _Claim:
             raise WorkerProofDenied('Scoped transaction required')
+        if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
+            raise WorkerProofDenied('Worker proof requires read committed isolation')
         conversation = _trusted_uuid(conversation)
         org, message = claim.organization_id, claim.message_id
         organization = await conn.fetchrow('SELECT * FROM organizations WHERE id=$1 FOR SHARE', org)
