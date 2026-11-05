@@ -63,6 +63,15 @@ BEGIN
       JOIN public.booking_stays s ON s.organization_id=e.organization_id AND s.booking_id=e.booking_id
       WHERE e.organization_id=NEW.organization_id
         AND (NEW.scope='organization' OR (NEW.scope='contact' AND s.original_subject_id=NEW.subject_id))
+        AND NOT EXISTS (SELECT 1 FROM public.gdpr_retention_holds h
+          WHERE h.organization_id=s.organization_id AND h.category='booking_stay_content'
+            AND (h.scope='organization' OR (h.scope='subject' AND h.scope_id=s.original_subject_id)
+              OR (h.scope='conversation' AND h.scope_id=s.original_conversation_id)
+              OR (h.scope='record' AND (h.scope_id=s.booking_id OR EXISTS
+                (SELECT 1 FROM public.booking_allocation_requests r WHERE r.organization_id=s.organization_id
+                  AND r.booking_id=s.booking_id AND r.request_id=h.scope_id))))
+            AND NOT EXISTS (SELECT 1 FROM public.gdpr_retention_hold_events v
+              WHERE v.organization_id=h.organization_id AND v.hold_id=h.hold_id AND v.kind='released'))
       ORDER BY e.booking_id FOR UPDATE OF e,s LOOP
         INSERT INTO public.booking_completion_erasure_markers VALUES(txid_current(),NEW.organization_id,item.booking_id);
         DELETE FROM public.booking_stay_completion_evidence
