@@ -330,10 +330,16 @@ async def test_owner_direct_stay_delete_without_purge_marker_is_denied(pg_pool):
 @pytest.mark.parametrize('scope', ['organization', 'subject', 'conversation', 'record'])
 async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, scope):
     from src.core.gdpr.operations import Operations
-    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
 
     env, lineage, booking = await _complete_with_old_evidence(pg_pool)
-    await _archive(pg_pool, env, booking)
+    # Erasure is independent of the twelve-month retention deadline.
+    async with pg_pool.acquire() as conn, conn.transaction():
+        await conn.execute('ALTER TABLE booking_stay_completion_evidence DISABLE TRIGGER completion_evidence_immutable')
+        await conn.execute('UPDATE booking_stay_completion_evidence SET completed_at=now() WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
+        await conn.execute('ALTER TABLE booking_stay_completion_evidence ENABLE TRIGGER completion_evidence_immutable')
+    with pytest.raises(Exception, match='Completed archived stay retention evidence required'):
+        await _purge_retention(pg_pool, env.org, booking)
     for category in ('contact_content', 'cutover'):
         await pg_pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
             retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
@@ -352,9 +358,11 @@ async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, 
     with pytest.raises(Exception, match='Stay content held'):
         await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) > 0
     await pg_pool.execute("""INSERT INTO gdpr_retention_hold_events
         (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
         VALUES($1,$2,$3,'released','test:release','qa',now())""", env.org, hold, uuid4())
     assert await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation) == 2
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
