@@ -154,6 +154,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         catalog, sector, authority = await engine._catalog(conn, org, orgrow, settings)
         if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority not in {'internal', 'internal_calendar_sync'}:
             raise AllocationUnavailable('Catalog authority unavailable')
+        if sector == 'studio_medico_dentista' and mutation.note:
+            raise BookingMutationRejected('Medical booking notes are not accepted')
         if mutation.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import time
             from src.core.bookings.catalog_contracts import CivilNightDuration
