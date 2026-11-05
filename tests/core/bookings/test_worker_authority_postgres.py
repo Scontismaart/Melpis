@@ -92,10 +92,21 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
     await _persist_ingress(pool, org, reply_wam)
     if entrypoint:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from src.core.workers.inbound_worker import InboundWorker
+
         authority = WorkerBookingAuthority()
         with pytest.raises(WorkerProofDenied, match='Confirmed proposal unavailable'):
             await authority.process_confirmation(pool, uuid4(), conversation, reply)
-        booking = await authority.process_confirmation(pool, org, conversation, reply)
+        repo = SimpleNamespace(pool=pool, reap_stale_claims=AsyncMock(),
+                               claim_inbound_messages=AsyncMock(return_value=[]))
+        worker = InboundWorker(repo, None)
+        await worker.process_next_batch()
+        await worker.process_next_batch()
+        booking = await pool.fetchval('SELECT id FROM bookings WHERE organization_id=$1 AND source_message_id=$2',
+                                      org, str(message))
+        assert booking is not None
         assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
             WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
         return

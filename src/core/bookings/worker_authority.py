@@ -73,6 +73,58 @@ class WorkerBookingAuthority:
     def __init__(self):
         self._issued = WeakSet()
         self._allocation = BookingAllocationRepository(None)
+        self._cursor = None
+
+    async def _confirmed_jobs(self, pool, limit):
+        async with pool.acquire() as conn:
+            if not await conn.fetchval("""SELECT current_user = pg_get_userbyid(relowner)
+                FROM pg_class WHERE oid='public.inbound_worker_operations'::regclass"""):
+                raise WorkerProofDenied('Private booking worker identity unavailable')
+            prior_org, prior_conversation = self._cursor or (None, None)
+            org = await conn.fetchval("""SELECT id FROM organizations
+                WHERE $1::uuid IS NULL OR id>$1 OR (id=$1 AND $2::uuid IS NOT NULL)
+                ORDER BY id LIMIT 1""", prior_org, prior_conversation)
+            if org is None:
+                return None, []
+            jobs = await conn.fetch("""SELECT s.organization_id,s.conversation_id,s.source_message_id
+                FROM booking_conversation_states s
+                JOIN booking_conversation_requests p ON p.organization_id=s.organization_id
+                 AND p.conversation_id=s.conversation_id AND p.state_generation=s.state_generation
+                 AND p.action='proposal' AND p.applied_revision=s.revision-1
+                WHERE s.organization_id=$1 AND p.organization_id=$1
+                  AND s.snapshot->>'intent'='booking' AND jsonb_typeof(s.snapshot->'confirmation')='object'
+                  AND ($2::uuid IS NULL OR s.conversation_id>$2)
+                  AND EXISTS(SELECT 1 FROM inbound_worker_receipts r
+                    WHERE r.organization_id=$1 AND r.message_id=s.source_message_id)
+                  AND NOT EXISTS(SELECT 1 FROM bookings b
+                    WHERE b.organization_id=$1 AND b.source_message_id=p.source_message_id::text)
+                ORDER BY s.conversation_id LIMIT $3""",
+                org, prior_conversation if org == prior_org else None, limit,
+            )
+            return org, jobs
+
+    async def process_next_batch(self, pool, *, limit=10):
+        """Process persisted confirmations independently of inbound AI generation."""
+        if not private_booking_worker_enabled():
+            return 0
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError('Invalid booking worker batch size')
+        org, jobs = await self._confirmed_jobs(pool, limit)
+        if not jobs:
+            self._cursor = (org, None) if org else None
+            return 0
+        created = 0
+        for job in jobs:
+            org, conversation = job['organization_id'], job['conversation_id']
+            try:
+                await self.process_confirmation(pool, org, conversation, job['source_message_id'])
+            except WorkerProofDenied:
+                # A denial is safe to reconsider after a later policy/state change.
+                pass
+            else:
+                created += 1
+            self._cursor = org, conversation
+        return created
 
     async def process_confirmation(self, pool, organization_id, conversation_id, confirmation_id):
         """Resolve one persisted customer confirmation and commit its booking."""
