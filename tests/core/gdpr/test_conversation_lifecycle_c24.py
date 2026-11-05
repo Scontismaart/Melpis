@@ -363,6 +363,8 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
                 conn, env['org'], raw, signature, installation_id=installation,
                 trusted_public_key=signer.public_key(), backup_checkpoint=anchor,
                 independent_tip=JournalCheckpoint(1, sha256(raw).hexdigest()),
+                stay_checkpoint=journal, checkpoint_verification_key=key,
+                backup_id='synthetic-backup', minimum_sequence=2,
             )
         signed_proof = await verify_signed()
         assert signed_proof['verified_erasures'] == 1
