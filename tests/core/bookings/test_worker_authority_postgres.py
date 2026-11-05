@@ -47,7 +47,8 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         assert retry.generation == first.generation + 1
 
 @pytest.mark.asyncio
-async def test_private_worker_validates_confirmed_a04_proposal(state_env):
+@pytest.mark.parametrize('ticket_status', ['AI_ACTIVE', 'PENDING_STAFF', 'CLAIMED'])
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status):
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
@@ -73,6 +74,8 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env):
         reply, org, conversation, json.dumps(reply_body), text, reply_wam)
     await env["repo"].confirm(org, env["auth"], conversation, reply, prompt, request_id=uuid4(),
                               expected_revision=1, expected_catalog_revision=2)
+    await pool.execute('UPDATE conversations SET ticket_status=$3 WHERE organization_id=$1 AND id=$2',
+                       org, conversation, ticket_status)
     await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
         WHERE organization_id=$1""", org, json.dumps(_policy("internal")), json.dumps({"10:00": 10}))
     proposal_wam = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, message)
@@ -89,6 +92,11 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env):
         await record_committed_operation(conn, proposal)
         authority = WorkerBookingAuthority()
         claim = await authority.claim(conn, org, message)
+        if ticket_status != 'AI_ACTIVE':
+            with pytest.raises(WorkerProofDenied, match='Conversation unavailable'):
+                await authority.mint(conn, claim, conversation,
+                                     expected_state_revision=2, expected_catalog_revision=2)
+            return
         capability = await authority.mint(conn, claim, conversation,
                                           expected_state_revision=2, expected_catalog_revision=2)
         proof = await authority.revalidate(conn, capability)

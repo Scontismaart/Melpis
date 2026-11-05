@@ -136,7 +136,9 @@ class WorkerBookingAuthority:
                 or state_digest(candidate) != pre['snapshot_hash']):
                 raise ValueError()
             confirmation = candidate.confirmation
-            if (not candidate.details_confirmed or confirmation is None
+            if (candidate.intent != 'booking' or candidate.missing_fields
+                    or candidate.ambiguous_fields or candidate.handoff_reason is not None
+                    or not candidate.details_confirmed or confirmation is None
                     or candidate.last_source_message_id != confirmation.source_message_id
                     or confirmation.source_message_id == message
                     or confirmation.prompt_revision != candidate.revision - 1):
@@ -158,7 +160,9 @@ class WorkerBookingAuthority:
         if not current:
             raise WorkerProofDenied('Booking claim expired or changed')
         conv = await conn.fetchrow('SELECT * FROM conversations WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, conversation)
-        if not conv or conv['deleted_at'] is not None or conv['status'] != 'active' or conv['canale'] != 'whatsapp' or conv['contact_id'] != source['c24_original_subject_id']:
+        if (not conv or conv['deleted_at'] is not None or conv['status'] != 'active'
+                or conv['ticket_status'] != 'AI_ACTIVE' or conv['canale'] != 'whatsapp'
+                or conv['contact_id'] != source['c24_original_subject_id']):
             raise WorkerProofDenied('Conversation unavailable')
         contact = await conn.fetchrow('SELECT * FROM contacts WHERE organization_id=$1 AND id=$2 FOR SHARE', org, conv['contact_id'])
         if not contact or contact['deleted_at'] is not None or contact['consent_status'] == 'withdrawn':
