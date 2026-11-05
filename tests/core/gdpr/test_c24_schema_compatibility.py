@@ -58,3 +58,30 @@ async def test_rights_on_legacy_or_partial_schema(legacy_pool, monkeypatch, part
     assert await legacy_pool.fetchval(
         'SELECT deleted_at IS NULL FROM contacts WHERE organization_id=$1 AND id=$2', org, contact,
     )
+
+
+@pytest.mark.asyncio
+async def test_approved_erasure_commits_before_conversation_schema(legacy_pool, monkeypatch):
+    from tests.core.gdpr.test_deletion_a06 import approve_policies, seed_contact_data
+
+    org = uuid4()
+    monkeypatch.setenv('ENCRYPTION_KEY', Fernet.generate_key().decode())
+    monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
+    await legacy_pool.execute("INSERT INTO organizations(id,name) VALUES($1,'Synthetic legacy erasure')", org)
+    await approve_policies(legacy_pool, org)
+    contact, _, message, _ = await seed_contact_data(legacy_pool, org)
+
+    result = await Deletion(legacy_pool).request(
+        org, 'synthetic', uuid4(), scope='contact', subject_id=contact,
+    )
+    assert result['manifest']['local_erasure'] == 'approved_relational_data_erased'
+    assert await legacy_pool.fetchval(
+        "SELECT status FROM gdpr_operation_steps WHERE organization_id=$1 AND operation_id=$2 AND name='local'",
+        org, result['id'],
+    ) == 'confirmed'
+    assert await legacy_pool.fetchval(
+        'SELECT deleted_at IS NOT NULL FROM contacts WHERE organization_id=$1 AND id=$2', org, contact,
+    )
+    assert await legacy_pool.fetchval(
+        'SELECT content_text FROM messages WHERE organization_id=$1 AND id=$2', org, message,
+    ) is None
