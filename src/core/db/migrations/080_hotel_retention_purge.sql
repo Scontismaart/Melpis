@@ -40,7 +40,7 @@ BEGIN
    OR EXISTS(SELECT 1 FROM public.booking_allocation_sets WHERE organization_id=OLD.organization_id AND booking_id=OLD.booking_id AND state='active')
    OR NOT EXISTS(SELECT 1 FROM public.booking_stays s JOIN public.bookings b ON b.organization_id=s.organization_id AND b.id=s.booking_id
       WHERE s.organization_id=OLD.organization_id AND s.booking_id=OLD.booking_id AND s.original_subject_id=marker.original_subject_id
-      AND ((marker.purpose='erasure' AND b.stato IN ('cancellata','cancellato','rifiutata','no_show')) OR (marker.purpose='retention' AND public.hotel_stay_purge_eligible(OLD.organization_id,OLD.booking_id)))) THEN
+      AND ((marker.purpose='erasure' AND b.stato IN ('cancellata','cancellato','rifiutata','no_show','completata')) OR (marker.purpose='retention' AND public.hotel_stay_purge_eligible(OLD.organization_id,OLD.booking_id)))) THEN
   RAISE EXCEPTION 'Scoped purge evidence unavailable' USING ERRCODE='55000'; END IF;
  IF marker.purpose='erasure' AND NOT EXISTS(SELECT 1 FROM public.gdpr_erasure_barriers e JOIN public.gdpr_operations o
    ON o.organization_id=e.organization_id AND o.id=e.operation_id WHERE e.organization_id=OLD.organization_id
@@ -75,7 +75,7 @@ BEGIN
   RAISE EXCEPTION 'Unresolved external or in-flight work' USING ERRCODE='55000'; END IF;
  SELECT * INTO booking FROM public.bookings WHERE organization_id=p_org AND id=p_booking FOR UPDATE;
  SELECT * INTO stay FROM public.booking_stays WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
- IF stay.booking_id IS NULL OR booking.id IS NULL OR (p_purpose='erasure' AND booking.stato NOT IN ('cancellata','cancellato','rifiutata','no_show'))
+ IF stay.booking_id IS NULL OR booking.id IS NULL OR (p_purpose='erasure' AND booking.stato NOT IN ('cancellata','cancellato','rifiutata','no_show','completata'))
    OR EXISTS(SELECT 1 FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking)
    OR EXISTS(SELECT 1 FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking AND state='active') THEN
   RAISE EXCEPTION 'Terminal released stay required' USING ERRCODE='55000'; END IF;
@@ -94,6 +94,15 @@ BEGIN
   RAISE EXCEPTION 'Scoped erasure barrier required' USING ERRCODE='55000'; END IF;
  IF p_purpose='retention' AND NOT public.hotel_stay_purge_eligible(p_org,p_booking) THEN
   RAISE EXCEPTION 'Completed archived stay retention evidence required' USING ERRCODE='55000'; END IF;
+ IF EXISTS(SELECT 1 FROM public.gdpr_retention_holds h WHERE h.organization_id=p_org
+  AND h.category='booking_stay_content' AND (h.scope='organization'
+   OR (h.scope='subject' AND h.scope_id=stay.original_subject_id)
+   OR (h.scope='conversation' AND h.scope_id=stay.original_conversation_id)
+   OR (h.scope='record' AND (h.scope_id=p_booking OR EXISTS(SELECT 1 FROM public.booking_allocation_requests r
+      WHERE r.organization_id=p_org AND r.booking_id=p_booking AND r.request_id=h.scope_id))))
+  AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events v
+   WHERE v.organization_id=h.organization_id AND v.hold_id=h.hold_id AND v.kind='released')) THEN
+  RAISE EXCEPTION 'Stay content held' USING ERRCODE='55000'; END IF;
  SELECT count(*) INTO count_deleted FROM public.booking_allocation_requests WHERE organization_id=p_org AND booking_id=p_booking;
  INSERT INTO public.booking_stay_purge_fences(organization_id,booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count) VALUES(p_org,p_booking,stay.original_subject_id,p_purpose,p_operation,p_policy_version,count_deleted);
  INSERT INTO public.booking_stay_tombstones(organization_id,request_id,booking_id,original_subject_id,purpose,operation_id,policy_version)
@@ -103,7 +112,7 @@ BEGIN
  GET DIAGNOSTICS count_deleted = ROW_COUNT;
  DELETE FROM public.booking_stays WHERE organization_id=p_org AND booking_id=p_booking;
  DELETE FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking AND state='cancelled';
- IF p_purpose='retention' THEN
+ IF p_purpose IN ('retention','erasure') THEN
   INSERT INTO public.booking_completion_erasure_markers VALUES(txid_current(),p_org,p_booking);
   DELETE FROM public.booking_stay_completion_evidence WHERE organization_id=p_org AND booking_id=p_booking;
   DELETE FROM public.booking_completion_erasure_markers WHERE transaction_id=txid_current() AND organization_id=p_org AND booking_id=p_booking;

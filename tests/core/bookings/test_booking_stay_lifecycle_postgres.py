@@ -326,3 +326,35 @@ async def test_owner_direct_stay_delete_without_purge_marker_is_denied(pg_pool):
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking,
     ) == 1
+
+@pytest.mark.parametrize('scope', ['organization', 'subject', 'conversation', 'record'])
+async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, scope):
+    from src.core.gdpr.operations import Operations
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
+
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, booking)
+    for category in ('contact_content', 'cutover'):
+        await pg_pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+            retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+            VALUES($1,$2,'erasure-v1',true,NULL,false,'test','qa',now()-interval '1 day',now()+interval '1 day')""", env.org, category)
+    operation = await Operations(pg_pool).create(env.org, 'qa', uuid4(), kind='erase', scope='contact', subject_id=lineage.contact_id)
+    hold = uuid4()
+    scope_id = {'organization': None, 'subject': lineage.contact_id,
+                'conversation': lineage.conversation_id, 'record': booking}[scope]
+    await pg_pool.execute("""INSERT INTO gdpr_retention_holds
+        (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
+        VALUES($1,$2,'booking_stay_content',$3,$4,'test','test:hold','qa',now(),now()+interval '1 month')""", env.org, hold, scope, scope_id)
+    await pg_pool.execute("""INSERT INTO gdpr_erasure_barriers
+        (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
+        VALUES($1,$2,'contact',$3,$4,'synthetic')""", env.org, operation, lineage.contact_id, 'a' * 64)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    with pytest.raises(Exception, match='Stay content held'):
+        await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    await pg_pool.execute("""INSERT INTO gdpr_retention_hold_events
+        (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
+        VALUES($1,$2,$3,'released','test:release','qa',now())""", env.org, hold, uuid4())
+    assert await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation) == 2
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
