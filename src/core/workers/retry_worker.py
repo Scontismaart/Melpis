@@ -137,13 +137,24 @@ class MultiChannelRetryWorker:
                     raise RuntimeError(result.error or "Instagram delivery failed")
             else:
                 # Default channel: WhatsApp
-                if self.service and hasattr(self.service, "attempt_delivery"):
+                delivery_service = self.service
+                if payload.get("handling_type") == "c24_confirmation_prompt" and not callable(
+                    getattr(delivery_service, "attempt_delivery", None)
+                ):
+                    from src.core.channels.whatsapp_adapter import WhatsAppOutboundAdapter
+                    adapter = self.channel_router.get_adapter("whatsapp") if self.channel_router else None
+                    if not isinstance(adapter, WhatsAppOutboundAdapter):
+                        raise RuntimeError("Confirmation prompt requires original-payload delivery")
+                    delivery_service = adapter.service
+                    if not callable(getattr(delivery_service, "attempt_delivery", None)):
+                        raise RuntimeError("Confirmation prompt requires original-payload delivery")
+                if delivery_service and hasattr(delivery_service, "attempt_delivery"):
                     import src.whatsapp.config as wa_config
                     tenant = await wa_config.load_tenant_config(org_id, self.app_config, self.repo)
                     from src.whatsapp.client import MetaClient
                     client = MetaClient(tenant)
                     try:
-                        result = await self.service.attempt_delivery(
+                        result = await delivery_service.attempt_delivery(
                             message_id=message_id,
                             phone_number_id=tenant.phone_number_id,
                             access_token=tenant.access_token,
