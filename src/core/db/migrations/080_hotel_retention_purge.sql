@@ -124,8 +124,10 @@ BEGIN
     RAISE EXCEPTION 'Allocation claims changed' USING ERRCODE='55000'; END IF;
   END LOOP;
   DELETE FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking;
-  UPDATE public.booking_allocation_sets SET state='cancelled',allocation_revision=allocation_revision+1,updated_at=observed
-   WHERE organization_id=p_org AND booking_id=p_booking;
+  -- The erasure barrier still rejects inserts and updates. Remove this
+  -- validated set directly instead of creating a replacement archive row.
+  DELETE FROM public.booking_allocation_sets
+   WHERE organization_id=p_org AND booking_id=p_booking AND allocation_revision=a.allocation_revision;
  END IF;
  IF EXISTS(SELECT 1 FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking)
   OR EXISTS(SELECT 1 FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking AND state='active') THEN
