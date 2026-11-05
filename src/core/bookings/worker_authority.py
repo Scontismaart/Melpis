@@ -4,7 +4,6 @@ The claim table has no runtime grants; enabling it requires a separate review.
 Claim expiry never grants an AI call, quota renewal, or refund.
 """
 import asyncio
-import os
 from dataclasses import dataclass
 from hashlib import sha256
 from uuid import UUID, uuid4, uuid5
@@ -18,6 +17,7 @@ from src.core.db.repositories.booking_allocation_repo import BookingAllocationRe
 from src.core.db.repositories.booking_catalog_repo import decode
 from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
 from src.core.db.repositories.booking_repo import BookingRepository
+from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
 from src.core.bookings.allocation_contracts import AllocationRequest
 
 
@@ -292,7 +292,7 @@ class WorkerBookingAuthority:
 
     async def create_booking(self, conn, capability):
         """Create a confirmed internal A05 booking from a single-use capability."""
-        if os.getenv('C24_PRIVATE_BOOKING_WORKER_ENABLED') != 'true':
+        if not private_booking_worker_enabled():
             raise WorkerProofDenied('Private booking worker disabled')
         prior = await self._consume(conn, capability)
         org, conversation, message, subject = prior[:4]

@@ -640,6 +640,12 @@ class QuotaReservations:
             if final.knowledge_epoch is not None:
                 metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
+            if operation.channel == "inbound" and "booking_state_proposal" in payload:
+                from src.core.db.inbound_worker_provenance import (
+                    private_booking_worker_enabled, record_committed_operation,
+                )
+                if private_booking_worker_enabled():
+                    await record_committed_operation(conn, operation)
             return payload
 
     async def renew(self, operation: QuotaOperation, ticket: QuotaTicket):

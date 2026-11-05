@@ -58,10 +58,14 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
     env = state_env
     org, message, pool, conversation = env["org"], env["message"], env["pool"], env["conv"]
     appointment = (date.today() + timedelta(days=7)).isoformat()
-    proposal = await commit_source(env, message, f"Mi chiamo Mario Rossi. {appointment} 10:00", {
+    proposal_wam = 'synthetic-proposal-' + uuid4().hex
+    await pool.execute('UPDATE messages SET wam_id=$3 WHERE organization_id=$1 AND id=$2', org, message, proposal_wam)
+    await _persist_ingress(pool, org, proposal_wam)
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+    await commit_source(env, message, f"Mi chiamo Mario Rossi. {appointment} 10:00", {
         "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
-    }, 1700000000)
+    }, 1700000000, provider_id=proposal_wam)
     state = (await apply(env, message))["state"]
     prompt, reply = uuid4(), uuid4()
     reply_wam = "synthetic-confirmation-" + uuid4().hex
@@ -85,18 +89,8 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         policy["a05"]["closed_dates"] = [appointment]
     await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
         WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
-    proposal_wam = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, message)
+    await _persist_ingress(pool, org, reply_wam)
     async with pool.acquire() as conn, conn.transaction():
-        for provider_id in (proposal_wam, reply_wam):
-            inbox, lease = uuid4(), uuid4()
-            payload = {"entry": [{"changes": [{"value": {"messages": [{"id": provider_id}]}}]}]}
-            await conn.execute("""INSERT INTO meta_webhook_inbox
-                (id,organization_id,channel,event_key,payload,trace_id,status,lease_token,lease_until)
-                VALUES($1,$2,'whatsapp',$3,$4::jsonb,'synthetic','processing',$5,now()+interval '1 minute')""",
-                inbox, org, provider_id, json.dumps(payload), lease)
-            await record_receipt(conn, {"id": inbox, "organization_id": org, "lease_token": lease}, provider_id)
-            await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)
-        await record_committed_operation(conn, proposal)
         authority = WorkerBookingAuthority()
         claim = await authority.claim(conn, org, message)
         if ticket_status != 'AI_ACTIVE':
@@ -148,3 +142,15 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         assert await authority.create_booking(conn, replay) == booking
         assert await conn.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
             WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
+
+
+async def _persist_ingress(pool, org, provider_id):
+    inbox, lease = uuid4(), uuid4()
+    payload = {"entry": [{"changes": [{"value": {"messages": [{"id": provider_id}]}}]}]}
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("""INSERT INTO meta_webhook_inbox
+            (id,organization_id,channel,event_key,payload,trace_id,status,lease_token,lease_until)
+            VALUES($1,$2,'whatsapp',$3,$4::jsonb,'synthetic','processing',$5,now()+interval '1 minute')""",
+            inbox, org, provider_id, json.dumps(payload), lease)
+        await record_receipt(conn, {"id": inbox, "organization_id": org, "lease_token": lease}, provider_id)
+        await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)

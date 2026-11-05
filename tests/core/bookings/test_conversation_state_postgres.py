@@ -38,8 +38,8 @@ async def state_env(pg_pool):
             'message':message,'repo':BookingConversationRepository(pg_pool)}
 
 
-async def commit_source(env, message, text, fields, timestamp):
-    pool,oid=env['pool'],env['org']; wam=f'synthetic-{uuid4()}'
+async def commit_source(env, message, text, fields, timestamp, *, provider_id=None):
+    pool,oid=env['pool'],env['org']; wam=provider_id or f'synthetic-{uuid4()}'
     await pool.execute("""UPDATE messages SET wam_id=$3,content_text=$4,content=$5::jsonb
         WHERE organization_id=$1 AND id=$2""",oid,message,wam,text,
         json.dumps({'id':wam,'timestamp':str(timestamp),'type':'text','text':{'body':text}}))
