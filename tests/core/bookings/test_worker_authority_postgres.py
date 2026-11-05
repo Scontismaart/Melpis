@@ -1,4 +1,5 @@
 import json
+from datetime import date, timedelta
 from uuid import uuid4
 
 import pytest
@@ -47,15 +48,18 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         assert retry.generation == first.generation + 1
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('ticket_status', ['AI_ACTIVE', 'PENDING_STAFF', 'CLAIMED'])
-async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status):
+@pytest.mark.parametrize(('ticket_status', 'closed_date'), [
+    ('AI_ACTIVE', False), ('PENDING_STAFF', False), ('CLAIMED', False), ('AI_ACTIVE', True),
+])
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date):
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
     env = state_env
     org, message, pool, conversation = env["org"], env["message"], env["pool"], env["conv"]
-    proposal = await commit_source(env, message, "2026-11-12 10:00", {
-        "service_id": "standard", "customer_name": True, "appointment_date": "2026-11-12",
+    appointment = (date.today() + timedelta(days=7)).isoformat()
+    proposal = await commit_source(env, message, f"{appointment} 10:00", {
+        "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
     }, 1700000000)
     state = (await apply(env, message))["state"]
@@ -76,8 +80,11 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
                               expected_revision=1, expected_catalog_revision=2)
     await pool.execute('UPDATE conversations SET ticket_status=$3 WHERE organization_id=$1 AND id=$2',
                        org, conversation, ticket_status)
+    policy = _policy("internal")
+    if closed_date:
+        policy["a05"]["closed_dates"] = [appointment]
     await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
-        WHERE organization_id=$1""", org, json.dumps(_policy("internal")), json.dumps({"10:00": 10}))
+        WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
     proposal_wam = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, message)
     async with pool.acquire() as conn, conn.transaction():
         for provider_id in (proposal_wam, reply_wam):
@@ -94,6 +101,11 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         claim = await authority.claim(conn, org, message)
         if ticket_status != 'AI_ACTIVE':
             with pytest.raises(WorkerProofDenied, match='Conversation unavailable'):
+                await authority.mint(conn, claim, conversation,
+                                     expected_state_revision=2, expected_catalog_revision=2)
+            return
+        if closed_date:
+            with pytest.raises(WorkerProofDenied, match='Current slot policy denied'):
                 await authority.mint(conn, claim, conversation,
                                      expected_state_revision=2, expected_catalog_revision=2)
             return

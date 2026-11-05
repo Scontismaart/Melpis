@@ -9,7 +9,7 @@ from hashlib import sha256
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakSet
 
-from src.core.bookings.auto_policy import validate_auto_booking_configuration
+from src.core.bookings.auto_policy import parse_and_validate_auto_booking, validate_auto_booking_configuration
 from src.core.bookings.conversation_state import ConversationState, canonical, state_digest
 from src.core.billing.quota_reservations import QuotaConflict, QuotaOperation, _period
 from src.core.bookings.conversation_state import digest
@@ -234,6 +234,17 @@ class WorkerBookingAuthority:
         if (not state or state.revision != expected_revision or state.catalog_revision != catalog.revision
                 or state.last_source_message_id != confirmation.source_message_id or not state.details_confirmed):
             raise WorkerProofDenied('Conversation state changed')
+        slots = {slot.field: slot.value for slot in state.slots}
+        slot_policy = parse_and_validate_auto_booking(
+            {'config': config, 'capienze_orarie': decode(settings['capienze_orarie'])},
+            organization['timezone'],
+            {'service': 'ristorante/tavolo', 'date': slots.get('appointment_date'),
+             'time': slots.get('appointment_time'), 'party_size': slots.get('party_size'),
+             'duration_minutes': state.derived.duration_minutes},
+            now=await conn.fetchval('SELECT clock_timestamp()'),
+        )
+        if not slot_policy.accepted:
+            raise WorkerProofDenied('Current slot policy denied')
         if not await conn.fetchrow('''SELECT request_id FROM booking_conversation_requests
             WHERE organization_id=$1 AND conversation_id=$2 AND source_message_id=$3
               AND action='proposal' AND applied_revision=$4 AND canonical_response_hash=$5
