@@ -36,6 +36,26 @@ def values(state):
     return {s.field:s.value for s in state.slots}
 
 
+def test_structured_crew_result_rejects_legacy_payload_and_duplicate_keys():
+    from types import SimpleNamespace
+    from src.core.crew_runner import _validate_structured_output
+
+    org, scoped = catalog()
+    base = {'risposta': 'Richiesta ricevuta.', 'richiede_umano': False, 'motivo': ''}
+    raw = {**base, 'booking_state_proposal': {
+        'intent': 'booking', 'slots': [{'field': 'service_id', 'value': 'standard'}],
+    }}
+    response = _validate_structured_output(SimpleNamespace(raw=json.dumps(raw)), scoped, org)
+    assert response.booking_catalog_revision == scoped.catalog.revision
+    assert response.prenotazione is None
+    plain = _validate_structured_output(SimpleNamespace(raw=json.dumps(base)), scoped, org)
+    assert plain.risposta == base['risposta']
+    with pytest.raises(ValueError):
+        _validate_structured_output(SimpleNamespace(raw=json.dumps({**raw, 'prenotazione': None})), scoped, org)
+    with pytest.raises(ValueError):
+        _validate_structured_output(SimpleNamespace(raw='{"risposta":"A","risposta":"B"}'), scoped, org)
+
+
 @pytest.mark.parametrize('sector', FIXTURES)
 def test_five_sectors_start_dark_and_unconfirmed(sector):
     org, cat = catalog(sector)
