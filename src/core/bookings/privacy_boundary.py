@@ -62,7 +62,12 @@ async def inbound_classification_status(repo, organization_id):
         return "error"
 
 
-async def medical_restricted_for_inbound(repo, organization_id):
+async def medical_restricted_for_inbound(repo, organization_id, business_profile):
+    if medical_restricted(business_profile):
+        return True
+    if getattr(repo, "pool", None) is None:
+        # Local/in-memory processing has no database attestation to consult.
+        return False
     return await inbound_classification_status(repo, organization_id) != "unknown"
 
 

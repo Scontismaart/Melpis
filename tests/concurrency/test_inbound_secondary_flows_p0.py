@@ -53,12 +53,12 @@ async def test_quota_exceeded_meta_failure_finalizes_persisted_escalation(base_a
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     # Current admission contract claims the inbound row first, then reports
     # quota exhaustion from A04 (the legacy pre-charge API is fenced).
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "quota_exceeded"})
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
-    mock_repo.pool = None
 
     mock_service = AsyncMock()
     mock_service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
@@ -92,11 +92,11 @@ async def test_wants_human_meta_failure_finalizes_persisted_escalation(base_app_
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
-    mock_repo.pool = None
 
     mock_service = AsyncMock()
     mock_service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
@@ -130,6 +130,7 @@ async def test_fast_reply_meta_failure_does_not_mark_replied(base_app_config, fa
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
@@ -166,6 +167,7 @@ async def test_org_suspended_meta_failure_does_not_mark_replied(base_app_config,
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "canceled"})
     mock_repo.try_mark_replied = AsyncMock()
@@ -199,6 +201,7 @@ async def test_opt_out_finalizes_safely_without_external_call(base_app_config, f
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_or_create_contact = AsyncMock(return_value={"id": contact_id})
     mock_repo.record_consent_event = AsyncMock()
@@ -229,6 +232,7 @@ async def test_all_successful_flows_finalize_properly(base_app_config, fake_tena
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
