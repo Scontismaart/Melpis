@@ -33,7 +33,10 @@ def test_conversation_categories_have_verified_subject_scope_without_account_con
     category = next(item for item in catalog.CATEGORIES if item.name == name)
     assert exporter.catalogue_query(category, 'organization')
     assert exporter.catalogue_query(category, 'contact')
-    assert 'subject_id = $2::uuid' in category.contact_query
+    if name == 'booking_conversation_requests':
+        assert "COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid" in category.contact_query
+    else:
+        assert 'subject_id = $2::uuid' in category.contact_query
     assert exporter.catalogue_query(category, 'account') is None
     assert category.exclusion_reason
 
