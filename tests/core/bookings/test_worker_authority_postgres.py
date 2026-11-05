@@ -67,19 +67,33 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
     }, 1700000000, provider_id=proposal_wam)
+    policy = _policy("internal")
+    if closed_date:
+        policy["a05"]["closed_dates"] = [appointment]
+    await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
+        WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
     if entrypoint:
         result = await env["repo"].apply_worker_source(org, conversation, message)
         assert not result["replayed"]
         assert (await env["repo"].apply_worker_source(org, conversation, message))["replayed"]
         state = result["state"]
+        prompts = await pool.fetch("""SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2
+            AND handling_type='c24_confirmation_prompt' AND status='queued'""", org, conversation)
+        assert len(prompts) == 1
+        prompt = prompts[0]["id"]
+        async with env["repo"].confirmation_prompt_delivery_guard(org, conversation, prompt) as eligible:
+            assert eligible
+        await pool.execute("""UPDATE messages SET status='sent',wam_id=$3,sent_at=clock_timestamp()-interval '2 minutes'
+            WHERE organization_id=$1 AND id=$2""", org, prompt, "synthetic-prompt-" + uuid4().hex)
     else:
         state = (await apply(env, message))["state"]
-    prompt, reply = uuid4(), uuid4()
+        prompt = uuid4()
+        await pool.execute("""INSERT INTO messages
+            (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id,sent_at)
+            VALUES($1,$2,$3,'outbound','text','{}','sent',$4,$5,clock_timestamp()-interval '2 minutes')""",
+            prompt, org, conversation, render_confirmation_prompt(state, prompt), "synthetic-prompt-" + uuid4().hex)
+    reply = uuid4()
     reply_wam = "synthetic-confirmation-" + uuid4().hex
-    await pool.execute("""INSERT INTO messages
-        (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id,sent_at)
-        VALUES($1,$2,$3,'outbound','text','{}','sent',$4,$5,clock_timestamp()-interval '2 minutes')""",
-        prompt, org, conversation, render_confirmation_prompt(state, prompt), "synthetic-prompt-" + uuid4().hex)
     stamp = await pool.fetchval("SELECT floor(extract(epoch from clock_timestamp()-interval '1 minute'))::bigint")
     text = f"CONFIRM {prompt}"
     reply_body = {"id": reply_wam, "type": "text", "timestamp": str(stamp), "text": {"body": text}}
@@ -99,11 +113,6 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
                                   expected_revision=1, expected_catalog_revision=2)
     await pool.execute('UPDATE conversations SET ticket_status=$3 WHERE organization_id=$1 AND id=$2',
                        org, conversation, ticket_status)
-    policy = _policy("internal")
-    if closed_date:
-        policy["a05"]["closed_dates"] = [appointment]
-    await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
-        WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
     if entrypoint:
         from types import SimpleNamespace
         from unittest.mock import AsyncMock

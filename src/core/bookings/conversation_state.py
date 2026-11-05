@@ -470,7 +470,7 @@ def medical_source_requires_handoff(text, catalog):
     return False
 
 
-def render_confirmation_prompt(state, prompt_message_id):
+def render_confirmation_prompt(state, prompt_message_id, *, legacy=False):
     if type(prompt_message_id) is not UUID or prompt_message_id.version != 4:
         raise ValueError('Random version4 prompt UUID required')
     labels = {'service_id':'Servizio', 'resource_id':'Risorsa richiesta',
@@ -480,9 +480,13 @@ def render_confirmation_prompt(state, prompt_message_id):
         'contact_phone':'Telefono fornito', 'contact_email':'Email fornita'}
     lines = ['Verifica i dati: nessuna prenotazione e ancora confermata.']
     for slot in state.slots:
+        if not legacy and slot.field in {'customer_name', 'contact_phone', 'contact_email'}:
+            continue
         value = ('presente' if slot.value else 'non presente') if type(slot.value) is bool else str(slot.value)
         lines.append(f'{labels[slot.field]}: {value}')
     lines.append(f'MELPIS-CONFIRM-v1 {state_digest(state)} {prompt_message_id}')
+    if not legacy:
+        lines.append(f'Per confermare questi dati, rispondi CONFIRM {prompt_message_id}')
     return '\n'.join(lines)
 
 

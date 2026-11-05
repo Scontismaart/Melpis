@@ -812,6 +812,27 @@ class InboundProcessingService:
                 org_id, msg, content, tenant_config, HUMAN_WAIT_REPLY, "medical_handoff",
             )
 
+        from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+        if (private_booking_worker_enabled() and canale == "whatsapp"
+                and re.fullmatch(r"CONFIRM [0-9a-f-]{36}", text)):
+            from src.core.bookings.conversation_state import StateConflict
+            from src.core.db.repositories.booking_allocation_repo import AllocationDenied, AllocationUnavailable
+            from src.core.db.repositories.booking_conversation_repo import (
+                BookingConversationRepository, ConversationStateDenied, ConversationStateUnavailable,
+            )
+            handling = "booking_details_confirmed"
+            try:
+                result = await BookingConversationRepository(self.repo.pool).apply_worker_source(
+                    org_id, msg["conversation_id"], msg["id"],
+                )
+                if not result["details_confirmed_current"]:
+                    handling = "booking_confirmation_rejected"
+            except (ConversationStateDenied, ConversationStateUnavailable, StateConflict,
+                    AllocationDenied, AllocationUnavailable):
+                handling = "booking_confirmation_rejected"
+            await self._finalize_message(msg["id"], handling_type=handling, organization_id=org_id)
+            return ProcessingOutcome(action="handled", handling_type=handling)
+
         # Keep the old outbound-dedup marker for compatibility checks, but
         # never deliver it as an authority. Any cache/dedup marker means this
         # can be a retry after a committed AI answer whose delivery failed;
@@ -1039,7 +1060,6 @@ class InboundProcessingService:
             await apply_structured_state(persisted)
 
         async def apply_structured_state(persisted):
-            from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
             if not private_booking_worker_enabled() or "booking_state_proposal" not in persisted:
                 return
             from src.core.db.repositories.booking_conversation_repo import (

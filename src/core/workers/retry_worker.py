@@ -51,7 +51,7 @@ class MultiChannelRetryWorker:
             except Exception as e:
                 logger.error("Error processing delivery attempt %s: %s", attempt["id"], e)
 
-    async def _process_one(self, attempt: dict, *, confirmation_guarded=False):
+    async def _process_one(self, attempt: dict, *, confirmation_guarded=False, prompt_guarded=False):
         message_id = attempt["message_id"]
         payload = await self.repo.reconstruct_payload_for_retry(message_id)
         if not payload:
@@ -88,6 +88,27 @@ class MultiChannelRetryWorker:
             logger.info(
                 "Delivery attempt %s skipped (sending_ambiguous, awaiting webhook) for %s",
                 attempt["id"], message_id,
+            )
+            return
+        if payload.get("handling_type") == "c24_confirmation_prompt" and not prompt_guarded:
+            from src.core.db.repositories.booking_allocation_repo import AllocationDenied, AllocationUnavailable
+            from src.core.db.repositories.booking_conversation_repo import (
+                BookingConversationRepository, ConversationStateDenied, ConversationStateUnavailable,
+            )
+            try:
+                repository = BookingConversationRepository(self.repo.pool)
+                async with repository.confirmation_prompt_delivery_guard(
+                    org_id, payload.get("conversation_id"), message_id,
+                ) as eligible:
+                    if eligible:
+                        return await self._process_one(attempt, prompt_guarded=True)
+            except (ConversationStateDenied, ConversationStateUnavailable, AllocationDenied, AllocationUnavailable):
+                pass
+            await self.repo.update_delivery_attempt(
+                attempt["id"], "failed", {"error": "booking_prompt_no_longer_current"},
+            )
+            await self.repo.update_message_status(
+                message_id, "failed", error_code="booking_prompt_no_longer_current", organization_id=org_id,
             )
             return
         channel = (payload.get("channel") or payload.get("canale") or "whatsapp").lower()
