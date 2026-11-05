@@ -67,7 +67,13 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
     }, 1700000000, provider_id=proposal_wam)
-    state = (await apply(env, message))["state"]
+    if entrypoint:
+        result = await env["repo"].apply_worker_source(org, conversation, message)
+        assert not result["replayed"]
+        assert (await env["repo"].apply_worker_source(org, conversation, message))["replayed"]
+        state = result["state"]
+    else:
+        state = (await apply(env, message))["state"]
     prompt, reply = uuid4(), uuid4()
     reply_wam = "synthetic-confirmation-" + uuid4().hex
     await pool.execute("""INSERT INTO messages
@@ -81,8 +87,16 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id)
         VALUES($1,$2,$3,'inbound','text',$4::jsonb,'processing',$5,$6)""",
         reply, org, conversation, json.dumps(reply_body), text, reply_wam)
-    await env["repo"].confirm(org, env["auth"], conversation, reply, prompt, request_id=uuid4(),
-                              expected_revision=1, expected_catalog_revision=2)
+    await _persist_ingress(pool, org, reply_wam)
+    if entrypoint:
+        confirmation = await env["repo"].apply_worker_source(org, conversation, reply)
+        assert confirmation["details_confirmed_current"]
+        assert await pool.fetchval('''SELECT count(*) FROM booking_conversation_requests
+            WHERE organization_id=$1 AND conversation_id=$2 AND actor_kind='inbound_worker' ''',
+            org, conversation) == 2
+    else:
+        await env["repo"].confirm(org, env["auth"], conversation, reply, prompt, request_id=uuid4(),
+                                  expected_revision=1, expected_catalog_revision=2)
     await pool.execute('UPDATE conversations SET ticket_status=$3 WHERE organization_id=$1 AND id=$2',
                        org, conversation, ticket_status)
     policy = _policy("internal")
@@ -90,7 +104,6 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
         policy["a05"]["closed_dates"] = [appointment]
     await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
         WHERE organization_id=$1""", org, json.dumps(policy), json.dumps({"10:00": 10}))
-    await _persist_ingress(pool, org, reply_wam)
     if entrypoint:
         from types import SimpleNamespace
         from unittest.mock import AsyncMock

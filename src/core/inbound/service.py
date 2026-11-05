@@ -1036,6 +1036,25 @@ class InboundProcessingService:
             apply_canonical(persisted)
             quota_ticket = None
             await lease.stop()
+            await apply_structured_state(persisted)
+
+        async def apply_structured_state(persisted):
+            from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+            if not private_booking_worker_enabled() or "booking_state_proposal" not in persisted:
+                return
+            from src.core.db.repositories.booking_conversation_repo import (
+                BookingConversationRepository, ConversationStateDenied, ConversationStateUnavailable,
+            )
+            from src.core.bookings.conversation_state import StateConflict
+            from src.core.db.repositories.booking_allocation_repo import AllocationDenied, AllocationUnavailable
+            try:
+                await BookingConversationRepository(self.repo.pool).apply_worker_source(
+                    org_id, msg["conversation_id"], msg["id"],
+                )
+            except (ConversationStateDenied, ConversationStateUnavailable, StateConflict,
+                    AllocationDenied, AllocationUnavailable) as exc:
+                logger.info("Structured state refused organization_id=%s message_id=%s reason=%s",
+                            org_id, msg["id"], type(exc).__name__)
 
         if outbound_dedup and reservation_status == "reserved":
             # A dedup row without a committed A04 record is a legacy or
@@ -1051,6 +1070,7 @@ class InboundProcessingService:
 
         if reservation_status == "replay":
             apply_canonical(reservation["response"])
+            await apply_structured_state(reservation["response"])
         elif self.use_orchestrator:
             ai_cached = claim_result.get("ai_reply_cache")
             if ai_cached:

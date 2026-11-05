@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from src.core.billing.quota_reservations import QuotaOperation, _decode, _hash
 from src.core.bookings.catalog_contracts import ScopedCatalog
@@ -19,6 +19,7 @@ from src.core.bookings.conversation_state import (
     validate_proposal_catalog,
 )
 from src.core.db.quota_provenance import require_quota_trust_epoch
+from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
 from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
 from src.core.db.repositories.booking_catalog_repo import decode
 
@@ -46,17 +47,27 @@ class BookingConversationRepository:
         self._allocation = BookingAllocationRepository(pool)
 
     @asynccontextmanager
-    async def _scope(self, organization_id, auth_user_id, conversation_id):
-        org, auth, conversation = map(_uuid, (organization_id, auth_user_id, conversation_id))
+    async def _scope(self, organization_id, auth_user_id, conversation_id, *, worker=False):
+        org, conversation = map(_uuid, (organization_id, conversation_id))
+        auth = None if worker else _uuid(auth_user_id)
         async with self.pool.acquire() as conn, conn.transaction(isolation='read_committed'):
             organization = await conn.fetchrow('SELECT * FROM organizations WHERE id=$1 FOR SHARE', org)
             if not organization:
                 raise ConversationStateDenied('Organization unavailable')
             await conn.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(org))
-            actor = await self._allocation._actor(conn, org, auth)
+            if worker:
+                if not private_booking_worker_enabled() or not await conn.fetchval("""SELECT
+                    current_user=pg_get_userbyid(relowner) FROM pg_class
+                    WHERE oid='public.inbound_worker_operations'::regclass"""):
+                    raise ConversationStateDenied('Private conversation worker unavailable')
+                actor = None
+            else:
+                actor = await self._allocation._actor(conn, org, auth)
             conv = await conn.fetchrow('SELECT * FROM conversations WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, conversation)
             if not conv or conv['deleted_at'] is not None or conv['status'] != 'active' or conv['canale'] != 'whatsapp':
                 raise ConversationStateDenied('Live WhatsApp conversation required')
+            if worker and conv['ticket_status'] != 'AI_ACTIVE':
+                raise ConversationStateDenied('Conversation is with staff')
             contact = await conn.fetchrow('SELECT id,deleted_at,consent_status FROM contacts WHERE organization_id=$1 AND id=$2 FOR SHARE', org, conv['contact_id'])
             if not contact or contact['deleted_at'] is not None or contact['consent_status'] == 'withdrawn':
                 raise ConversationStateDenied('Contact access unavailable')
@@ -293,19 +304,51 @@ class BookingConversationRepository:
             request_id=request_id, expected_revision=expected_revision,
             expected_catalog_revision=expected_catalog_revision, prompt_message_id=_uuid(prompt_message_id))
 
+    async def apply_worker_source(self, organization_id, conversation_id, source_message_id):
+        """Use only persisted inbound evidence and current server revisions."""
+        org, conversation, source = map(_uuid, (organization_id, conversation_id, source_message_id))
+        request = uuid5(NAMESPACE_URL, f'melpis:c24:conversation:{org}:{conversation}:{source}')
+        return await self._apply(org, None, conversation, source, request_id=request,
+                                 expected_revision=None, expected_catalog_revision=None,
+                                 prompt_message_id=None, worker=True)
+
     async def _apply(self, organization_id, auth_user_id, conversation_id, source_message_id,
-                     *, request_id, expected_revision, expected_catalog_revision, prompt_message_id):
+                     *, request_id, expected_revision, expected_catalog_revision, prompt_message_id, worker=False):
         source_id, request = map(_uuid, (source_message_id, request_id))
-        if type(expected_revision) is not int or expected_revision < 0 or type(expected_catalog_revision) is not int:
+        if not worker and (type(expected_revision) is not int or expected_revision < 0
+                           or type(expected_catalog_revision) is not int):
             raise ValueError('Strict expected revisions required')
-        async with self._scope(organization_id, auth_user_id, conversation_id) as context:
+        async with self._scope(organization_id, auth_user_id, conversation_id, worker=worker) as context:
             conn, org, conversation, actor, scoped, _authority = context
             catalog = scoped.catalog
             if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_conversation_revocations WHERE organization_id=$1 AND conversation_id=$2)
                 OR EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND deleted_at IS NOT NULL)''', org, conversation):
                 raise ConversationStateDenied('Conversation metadata was revoked')
             source, provider_time, source_hash = await self._source(conn, org, conversation, source_id)
+            if worker:
+                prior = await conn.fetchrow('''SELECT applied_revision FROM booking_conversation_requests
+                    WHERE organization_id=$1 AND conversation_id=$2 AND request_id=$3''', org, conversation, request)
+                expected_revision = (prior['applied_revision'] - 1 if prior else await conn.fetchval(
+                    'SELECT revision FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2',
+                    org, conversation,
+                ) or 0)
+                expected_catalog_revision = catalog.revision
+                match = re.fullmatch(r'CONFIRM ([0-9a-f-]{36})', source['content_text'])
+                if match:
+                    prompt_message_id = _uuid(match[1])
             action = 'proposal' if prompt_message_id is None else 'confirmation'
+            if worker:
+                provenance = await conn.fetch('''SELECT r.inbox_id,o.operation_id FROM inbound_worker_receipts r
+                    JOIN meta_webhook_inbox i ON i.organization_id=r.organization_id AND i.id=r.inbox_id
+                    LEFT JOIN inbound_worker_operations o ON o.organization_id=$1
+                      AND o.inbox_id=r.inbox_id AND o.message_id=r.message_id AND $3='proposal'
+                    WHERE r.organization_id=$1 AND i.organization_id=$1 AND r.message_id=$2
+                      AND i.channel='whatsapp' AND i.status='completed'
+                      AND ($3='confirmation' OR o.operation_id IS NOT NULL)
+                    LIMIT 2 FOR SHARE OF r,i''', org, source_id, action)
+                if len(provenance) != 1:
+                    raise ConversationStateDenied('Unambiguous worker source unavailable')
+                evidence = provenance[0]
             canonical_hash, proposal, prompt_hash = None, None, None
             prompt = None
             if action == 'proposal':
@@ -376,11 +419,21 @@ class BookingConversationRepository:
                 canonical(updated.model_dump(mode='json')), state_digest(updated), expected_revision)
             if stored_revision != updated.revision:
                 raise StateConflict('State compare-and-swap failed')
-            await conn.execute('''INSERT INTO booking_conversation_requests
+            if worker:
+                await conn.execute('''INSERT INTO booking_conversation_requests
+                    (organization_id,request_id,conversation_id,source_message_id,actor_user_id,actor_kind,
+                     service_inbox_id,service_operation_id,action,
+                     payload_hash,applied_revision,canonical_response_hash,prompt_message_id,prompt_body_hash)
+                    VALUES($1,$2,$3,$4,NULL,'inbound_worker',$5,$6,$7,$8,$9,$10,$11,$12)''',
+                    org, request, conversation, source_id, evidence['inbox_id'], evidence['operation_id'],
+                    action, operation_hash, updated.revision,
+                    canonical_hash, prompt_message_id, prompt_hash)
+            else:
+                await conn.execute('''INSERT INTO booking_conversation_requests
                 (organization_id,request_id,conversation_id,source_message_id,actor_user_id,action,
                  payload_hash,applied_revision,canonical_response_hash,prompt_message_id,prompt_body_hash)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)''', org, request, conversation, source_id,
-                actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
+                    actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
             return self._result(updated, updated.revision, False, catalog.revision)
 
     @staticmethod
