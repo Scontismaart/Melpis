@@ -38,53 +38,10 @@ CREATE TRIGGER completion_evidence_no_truncate BEFORE TRUNCATE
 ON public.booking_stay_completion_evidence FOR EACH STATEMENT
 EXECUTE FUNCTION public.booking_stay_completion_evidence_immutable();
 
--- An approved matching barrier removes evidence even while an occupied stay
--- remains pending separate administrative disposition. The evidence contains
--- only booking linkage, completion instant and zone, never contact fields.
-CREATE OR REPLACE FUNCTION public.erase_hotel_completion_evidence()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
-DECLARE cat text; pol public.gdpr_policies%ROWTYPE; item record;
-BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text,606));
-    IF NOT EXISTS (SELECT 1 FROM public.gdpr_operations o
-        WHERE o.organization_id=NEW.organization_id AND o.id=NEW.operation_id
-          AND o.kind='erase' AND o.status IN ('requested','running','blocked','partial')
-          AND o.scope=NEW.scope AND o.subject_id IS NOT DISTINCT FROM NEW.subject_id) THEN
-        RETURN NEW;
-    END IF;
-    FOR cat IN SELECT unnest(ARRAY['booking_stay_content','contact_content','cutover']) LOOP
-        SELECT * INTO pol FROM public.gdpr_policies WHERE organization_id=NEW.organization_id
-          AND category=cat AND approved_at<=now() ORDER BY approved_at DESC,version DESC LIMIT 1;
-        IF NOT FOUND OR pol.legal_hold OR NOT pol.erasure_allowed OR pol.valid_until<=now() THEN
-            RETURN NEW;
-        END IF;
-    END LOOP;
-    FOR item IN SELECT e.booking_id FROM public.booking_stay_completion_evidence e
-      JOIN public.booking_stays s ON s.organization_id=e.organization_id AND s.booking_id=e.booking_id
-      WHERE e.organization_id=NEW.organization_id
-        AND (NEW.scope='organization' OR (NEW.scope='contact' AND s.original_subject_id=NEW.subject_id))
-        AND NOT EXISTS (SELECT 1 FROM public.gdpr_retention_holds h
-          WHERE h.organization_id=s.organization_id AND h.category='booking_stay_content'
-            AND (h.scope='organization' OR (h.scope='subject' AND h.scope_id=s.original_subject_id)
-              OR (h.scope='conversation' AND h.scope_id=s.original_conversation_id)
-              OR (h.scope='record' AND (h.scope_id=s.booking_id OR EXISTS
-                (SELECT 1 FROM public.booking_allocation_requests r WHERE r.organization_id=s.organization_id
-                  AND r.booking_id=s.booking_id AND r.request_id=h.scope_id))))
-            AND NOT EXISTS (SELECT 1 FROM public.gdpr_retention_hold_events v
-              WHERE v.organization_id=h.organization_id AND v.hold_id=h.hold_id AND v.kind='released'))
-      ORDER BY e.booking_id FOR UPDATE OF e,s LOOP
-        INSERT INTO public.booking_completion_erasure_markers VALUES(txid_current(),NEW.organization_id,item.booking_id);
-        DELETE FROM public.booking_stay_completion_evidence
-          WHERE organization_id=NEW.organization_id AND booking_id=item.booking_id;
-        DELETE FROM public.booking_completion_erasure_markers
-          WHERE transaction_id=txid_current() AND organization_id=NEW.organization_id AND booking_id=item.booking_id;
-    END LOOP;
-    RETURN NEW;
-END $$;
-REVOKE ALL ON FUNCTION public.erase_hotel_completion_evidence() FROM PUBLIC,anon,authenticated,service_role;
+-- Completion evidence is retained until the scoped purge transaction.  A
+-- barrier alone cannot safely dispose of occupancy or its proof.
 DROP TRIGGER IF EXISTS erase_hotel_completion_evidence ON public.gdpr_erasure_barriers;
-CREATE TRIGGER erase_hotel_completion_evidence AFTER INSERT ON public.gdpr_erasure_barriers
-FOR EACH ROW EXECUTE FUNCTION public.erase_hotel_completion_evidence();
+DROP FUNCTION IF EXISTS public.erase_hotel_completion_evidence();
 
 -- Trigger records only a new terminal transition with an already-ended and
 -- coherent civil-night allocation. It cannot establish application actor

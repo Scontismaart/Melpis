@@ -55,6 +55,8 @@ REVOKE ALL ON FUNCTION public.booking_allocation_immutable() FROM PUBLIC,anon,au
 CREATE OR REPLACE FUNCTION public.booking_stay_admin_purge(p_org uuid,p_booking uuid,p_purpose text,p_operation uuid,p_policy_version text)
 RETURNS integer LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
 DECLARE stay public.booking_stays%ROWTYPE; booking public.bookings%ROWTYPE; pol public.gdpr_policies%ROWTYPE; cat text; count_deleted integer;
+ a public.booking_allocation_sets%ROWTYPE; e public.booking_stay_completion_evidence%ROWTYPE;
+ claim record; claim_count integer; observed timestamptz := clock_timestamp();
 BEGIN
  IF current_user IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='public.booking_stay_purge_markers'::regclass)) THEN RAISE EXCEPTION 'Hotel purge requires lifecycle owner' USING ERRCODE='42501'; END IF;
  IF current_setting('transaction_isolation') <> 'read committed' THEN RAISE EXCEPTION 'Hotel purge requires read committed isolation' USING ERRCODE='25000'; END IF;
@@ -76,9 +78,8 @@ BEGIN
  SELECT * INTO booking FROM public.bookings WHERE organization_id=p_org AND id=p_booking FOR UPDATE;
  SELECT * INTO stay FROM public.booking_stays WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
  IF stay.booking_id IS NULL OR booking.id IS NULL OR (p_purpose='erasure' AND booking.stato NOT IN ('cancellata','cancellato','rifiutata','no_show','completata'))
-   OR EXISTS(SELECT 1 FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking)
-   OR EXISTS(SELECT 1 FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking AND state='active') THEN
-  RAISE EXCEPTION 'Terminal released stay required' USING ERRCODE='55000'; END IF;
+ THEN
+  RAISE EXCEPTION 'Terminal stay required' USING ERRCODE='55000'; END IF;
  FOR cat IN SELECT unnest(CASE WHEN p_purpose='erasure' THEN ARRAY['booking_stay_content','contact_content','cutover'] ELSE ARRAY['booking_stay_content'] END) LOOP
   SELECT * INTO pol FROM public.gdpr_policies WHERE organization_id=p_org AND category=cat AND approved_at<=now()
     ORDER BY approved_at DESC,version DESC LIMIT 1;
@@ -103,6 +104,32 @@ BEGIN
   AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_hold_events v
    WHERE v.organization_id=h.organization_id AND v.hold_id=h.hold_id AND v.kind='released')) THEN
   RAISE EXCEPTION 'Stay content held' USING ERRCODE='55000'; END IF;
+ -- Erasure may release a completed, ended stay in this same transaction,
+ -- after the operation, policy and all hold checks have succeeded. Retention
+ -- still requires a separately archived stay and its twelve-month evidence.
+ SELECT * INTO a FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
+ IF p_purpose='erasure' AND a.state='active' THEN
+  SELECT * INTO e FROM public.booking_stay_completion_evidence WHERE organization_id=p_org AND booking_id=p_booking FOR UPDATE;
+  IF booking.stato<>'completata' OR booking.completata_at IS NULL OR booking.no_show_at IS NOT NULL
+   OR e.booking_id IS NULL OR a.temporal_kind<>'civil_nights' OR a.timezone<>e.timezone
+   OR (a.arrival_date,a.departure_date) IS DISTINCT FROM (stay.arrival_date,stay.departure_date)
+   OR a.ends_at>e.completed_at OR a.ends_at>observed THEN
+   RAISE EXCEPTION 'Completed stay release evidence unavailable' USING ERRCODE='55000'; END IF;
+  SELECT count(*) INTO claim_count FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking;
+  IF claim_count<1 OR claim_count>128 THEN RAISE EXCEPTION 'Bounded allocation claims required' USING ERRCODE='55000'; END IF;
+  FOR claim IN SELECT * FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking ORDER BY resource_id FOR UPDATE LOOP
+   PERFORM pg_advisory_xact_lock(hashtextextended('allocation-resource|'||p_org::text||'|'||claim.resource_id,725));
+   IF (claim.state,claim.allocation_revision,claim.catalog_revision,claim.starts_at,claim.ends_at)
+    IS DISTINCT FROM ('active',a.allocation_revision,a.catalog_revision,a.starts_at,a.ends_at) THEN
+    RAISE EXCEPTION 'Allocation claims changed' USING ERRCODE='55000'; END IF;
+  END LOOP;
+  DELETE FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking;
+  UPDATE public.booking_allocation_sets SET state='cancelled',allocation_revision=allocation_revision+1,updated_at=observed
+   WHERE organization_id=p_org AND booking_id=p_booking;
+ END IF;
+ IF EXISTS(SELECT 1 FROM public.booking_resource_allocations WHERE organization_id=p_org AND booking_id=p_booking)
+  OR EXISTS(SELECT 1 FROM public.booking_allocation_sets WHERE organization_id=p_org AND booking_id=p_booking AND state='active') THEN
+  RAISE EXCEPTION 'Terminal released stay required' USING ERRCODE='55000'; END IF;
  SELECT count(*) INTO count_deleted FROM public.booking_allocation_requests WHERE organization_id=p_org AND booking_id=p_booking;
  INSERT INTO public.booking_stay_purge_fences(organization_id,booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count) VALUES(p_org,p_booking,stay.original_subject_id,p_purpose,p_operation,p_policy_version,count_deleted);
  INSERT INTO public.booking_stay_tombstones(organization_id,request_id,booking_id,original_subject_id,purpose,operation_id,policy_version)

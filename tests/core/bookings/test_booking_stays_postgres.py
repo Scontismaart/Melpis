@@ -175,7 +175,7 @@ async def test_legacy_completed_stay_cannot_mint_evidence(pg_pool):
     await pg_pool.execute("UPDATE bookings SET stato='completata',completata_at=now()-interval '3 years' WHERE organization_id=$1 AND id=$2", env.org, booking)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
 
-async def test_completion_evidence_erased_by_approved_scoped_barrier(pg_pool):
+async def test_completion_evidence_erased_by_scoped_purge_after_barrier(pg_pool):
     from src.core.gdpr.operations import Operations
     env, lineage = await hotel_setup(pg_pool)
     booking = uuid4()
@@ -198,5 +198,9 @@ async def test_completion_evidence_erased_by_approved_scoped_barrier(pg_pool):
     await pg_pool.execute('''INSERT INTO gdpr_erasure_barriers
         (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
         VALUES($1,$2,'contact',$3,$4,'test')''', env.org, operation, lineage.contact_id, 'a' * 64)
-    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'v1')",
+                                  env.org, booking, operation) == 2
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
