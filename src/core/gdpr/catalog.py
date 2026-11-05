@@ -19,6 +19,41 @@ class Category:
 
 
 CATEGORIES: tuple[Category, ...] = (
+    Category("booking_conversation_revocations", """
+        SELECT organization_id, conversation_id, subject_id, reason, created_at
+        FROM booking_conversation_revocations WHERE organization_id = $1::uuid
+    """, contact_query="""
+        SELECT organization_id, conversation_id, subject_id, reason, created_at
+        FROM booking_conversation_revocations
+        WHERE organization_id = $1::uuid AND subject_id = $2::uuid
+    """, exclusion_reason="Pseudonymous suppression evidence remains policy-gated; no verified account content relation."),
+    Category("booking_conversation_states", """
+        SELECT organization_id, conversation_id, subject_id, revision,
+               catalog_revision, source_message_id, provider_timestamp, snapshot,
+               snapshot_hash, created_at, updated_at
+        FROM booking_conversation_states WHERE organization_id = $1::uuid
+    """, contact_query="""
+        SELECT organization_id, conversation_id, subject_id, revision,
+               catalog_revision, source_message_id, provider_timestamp, snapshot,
+               snapshot_hash, created_at, updated_at
+        FROM booking_conversation_states
+        WHERE organization_id = $1::uuid AND subject_id = $2::uuid
+    """, exclusion_reason="No verified account subject relation for conversation content; account export excludes it."),
+    Category("booking_conversation_requests", """
+        SELECT organization_id, request_id, conversation_id, source_message_id,
+               actor_user_id, action, payload_hash, applied_revision,
+               canonical_response_hash, prompt_message_id, prompt_body_hash, created_at
+        FROM booking_conversation_requests WHERE organization_id = $1::uuid
+    """, contact_query="""
+        SELECT r.organization_id, r.request_id, r.conversation_id, r.source_message_id,
+               r.action, r.applied_revision, r.prompt_message_id, r.created_at
+        FROM booking_conversation_requests AS r
+        LEFT JOIN booking_conversation_states AS s
+          ON s.organization_id = r.organization_id AND s.conversation_id = r.conversation_id
+         AND s.organization_id = $1::uuid
+        WHERE r.organization_id = $1::uuid
+          AND COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid
+    """, exclusion_reason="Individual export excludes staff identity and integrity hashes; no unproved account content projection."),
     Category("organizations", """
         SELECT id, name, created_at, updated_at, subscription_status, plan,
                messages_used_this_period, messages_limit, users_limit,
@@ -167,8 +202,14 @@ CATEGORIES: tuple[Category, ...] = (
         FROM event_log WHERE organization_id = $1::uuid
     """, exclusion_reason="Original text, AI response and details JSON are free-form and excluded."),
     Category("simulation_requests", """
-        SELECT request_id, status, created_at, reserved_at, completed_at
+        SELECT request_id, status, created_at, reserved_at, completed_at,
+               c24_subject_id, c24_conversation_id, c24_source_message_id
         FROM simulation_requests WHERE organization_id = $1::uuid
+    """, contact_query="""
+        SELECT request_id, status, created_at, reserved_at, completed_at,
+               c24_subject_id, c24_conversation_id, c24_source_message_id
+        FROM simulation_requests
+        WHERE organization_id = $1::uuid AND c24_subject_id = $2::uuid
     """, account_query="""
         SELECT request_id, status, created_at, reserved_at, completed_at
         FROM simulation_requests
