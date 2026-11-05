@@ -135,6 +135,12 @@ class WorkerBookingAuthority:
                 or candidate.organization_id != org or candidate.conversation_id != conversation
                 or state_digest(candidate) != pre['snapshot_hash']):
                 raise ValueError()
+            confirmation = candidate.confirmation
+            if (not candidate.details_confirmed or confirmation is None
+                    or candidate.last_source_message_id != confirmation.source_message_id
+                    or confirmation.source_message_id == message
+                    or confirmation.prompt_revision != candidate.revision - 1):
+                raise ValueError()
             source_ids = {candidate.last_source_message_id} | {slot.source_message_id for slot in candidate.slots} | {slot.source_message_id for slot in candidate.superseded}
             if candidate.confirmation:
                 source_ids |= {candidate.confirmation.source_message_id, candidate.confirmation.prompt_message_id}
@@ -162,17 +168,37 @@ class WorkerBookingAuthority:
             OR EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND deleted_at IS NOT NULL)
             ''', org, conversation):
             raise WorkerProofDenied('Conversation evidence no longer current')
+        confirmed, confirmed_stamp, _ = await BookingConversationRepository._source(
+            conn, org, conversation, confirmation.source_message_id,
+        )
+        prompt = await conn.fetchrow('''SELECT direction,deleted_at,status,sent_at,content_text,wam_id,c24_original_subject_id
+            FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 FOR SHARE''',
+            org, conversation, confirmation.prompt_message_id)
+        if (not prompt or prompt['direction'] != 'outbound' or prompt['deleted_at'] is not None
+                or prompt['status'] not in {'sent','delivered','read'} or not prompt['wam_id']
+                or prompt['sent_at'] is None or prompt['c24_original_subject_id'] != conv['contact_id']
+                or not isinstance(prompt['content_text'], str)
+                or sha256(prompt['content_text'].encode()).hexdigest() != confirmation.prompt_body_hash
+                or confirmed['content_text'] != f'CONFIRM {confirmation.prompt_message_id}'
+                or not stamp <= int(prompt['sent_at'].timestamp()) < confirmed_stamp):
+            raise WorkerProofDenied('Verified customer confirmation unavailable')
+        if not await conn.fetchrow('''SELECT r.message_id FROM inbound_worker_receipts r
+            JOIN meta_webhook_inbox i ON i.id=r.inbox_id AND i.organization_id=r.organization_id
+            WHERE r.organization_id=$1 AND i.organization_id=$1 AND r.message_id=$2
+              AND i.status='completed' AND i.channel='whatsapp' FOR SHARE OF r,i''',
+            org, confirmation.source_message_id):
+            raise WorkerProofDenied('Trusted customer confirmation ingress unavailable')
         import re
         other_sources = await conn.fetch('''SELECT id,content FROM messages WHERE organization_id=$1
             AND conversation_id=$2 AND direction='inbound' AND deleted_at IS NULL LIMIT 257 FOR SHARE''', org, conversation)
         if len(other_sources) > 256:
             raise WorkerProofDenied('Source ordering unavailable')
         for other in other_sources:
-            if other['id'] == message:
+            if other['id'] in {message, confirmation.source_message_id}:
                 continue
             body = decode(other['content'])
             other_stamp = body.get('timestamp') if isinstance(body, dict) else None
-            if type(other_stamp) is not str or not re.fullmatch(r'[0-9]{1,12}', other_stamp) or int(other_stamp) >= stamp:
+            if type(other_stamp) is not str or not re.fullmatch(r'[0-9]{1,12}', other_stamp) or int(other_stamp) >= confirmed_stamp:
                 raise WorkerProofDenied('Source ordering unavailable')
         cached, response_hash = await BookingConversationRepository._canonical_response(conn, org, source)
         payload_hash = digest({'organization_id': str(org), 'message_id': str(message),
@@ -200,9 +226,16 @@ class WorkerBookingAuthority:
             WHERE organization_id=$1 AND conversation_id=$2 FOR UPDATE''', org, conversation)
         if not post or any(post[k] != pre[k] for k in ('snapshot_hash','revision','catalog_revision')):
             raise WorkerProofDenied('State changed while locking')
-        state, _ = await BookingConversationRepository(None)._load(conn, org, conversation)
-        if not state or state.revision != expected_revision or state.catalog_revision != catalog.revision or state.last_source_message_id != message:
+        state, state_row = await BookingConversationRepository(None)._load(conn, org, conversation)
+        if (not state or state.revision != expected_revision or state.catalog_revision != catalog.revision
+                or state.last_source_message_id != confirmation.source_message_id or not state.details_confirmed):
             raise WorkerProofDenied('Conversation state changed')
+        if not await conn.fetchrow('''SELECT request_id FROM booking_conversation_requests
+            WHERE organization_id=$1 AND conversation_id=$2 AND source_message_id=$3
+              AND action='proposal' AND applied_revision=$4 AND canonical_response_hash=$5
+              AND state_generation=$6 FOR SHARE''',
+            org, conversation, message, confirmation.prompt_revision, response_hash, state_row['state_generation']):
+            raise WorkerProofDenied('Confirmed proposal receipt unavailable')
         if not await conn.fetchval('''SELECT lease_until>clock_timestamp() FROM booking_worker_claims
             WHERE organization_id=$1 AND message_id=$2 AND claim_id=$3 AND generation=$4''',
             org, message, claim.claim_id, claim.generation):

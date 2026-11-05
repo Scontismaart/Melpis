@@ -5,7 +5,7 @@ import pytest
 
 from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied
 from src.core.db.inbound_worker_provenance import record_committed_operation, record_receipt
-from tests.core.bookings.test_conversation_state_postgres import commit_source, state_env
+from tests.core.bookings.test_conversation_state_postgres import apply, commit_source, state_env
 from tests.core.test_quota_reservation_lifecycle import _inbound_operation
 
 
@@ -15,6 +15,7 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
     org, message, pool = env["org"], env["message"], env["pool"]
     text = "2026-11-12"
     await commit_source(env, message, text, {"service_id": "standard"}, 1700000000)
+    await apply(env, message)
     authority = WorkerBookingAuthority()
     async with pool.acquire() as conn, conn.transaction():
         with pytest.raises(WorkerProofDenied, match="provenance"):
@@ -34,6 +35,9 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)
         await record_committed_operation(conn, _inbound_operation(org, message, text=text))
         first = await authority.claim(conn, org, message)
+        with pytest.raises(WorkerProofDenied, match="State preimage"):
+            await authority.mint(conn, first, env["conv"],
+                                 expected_state_revision=1, expected_catalog_revision=1)
         with pytest.raises(WorkerProofDenied, match="already held"):
             await authority.claim(conn, org, message)
         await conn.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
