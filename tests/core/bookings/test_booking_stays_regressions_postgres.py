@@ -14,11 +14,8 @@ from src.core.bookings.booking_mutation_contract import (
     apply_booking_mutation,
 )
 from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint
-from tests.core.bookings.test_booking_stay_lifecycle_postgres import (
-    _approve_retention,
-    _create_stay,
-    _purge_retention,
-)
+from tests.core.bookings.test_booking_stay_lifecycle_postgres import _purge_retention
+from tests.core.bookings.test_hotel_allocation_archive_postgres import _archive, _complete_with_old_evidence
 from tests.core.bookings.test_booking_stays_postgres import hotel_setup
 
 pytestmark = pytest.mark.asyncio
@@ -46,29 +43,9 @@ def _signed_checkpoint(org, stay_purges, *, version="c24-restore-v2", sequence=7
     }
 
 
-async def _purged_stay(env):
-    lineage = NewBookingLineage(*[uuid4() for _ in range(3)])
-    # Build valid tenant-local source provenance, keeping the source synthetic.
-    await env.pool.execute(
-        "INSERT INTO contacts(id,organization_id,phone_number) VALUES($1,$2,$3)",
-        lineage.contact_id, env.org, str(uuid4()),
-    )
-    await env.pool.execute(
-        "INSERT INTO conversations(id,organization_id,contact_id) VALUES($1,$2,$3)",
-        lineage.conversation_id, env.org, lineage.contact_id,
-    )
-    await env.pool.execute(
-        """INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
-                  content,content_text,status,handling_type)
-           VALUES($1,$2,$3,'inbound','text','{}'::jsonb,'Synthetic request','handled','manual')""",
-        lineage.source_message_id, env.org, lineage.conversation_id,
-    )
-    booking = await _create_stay(env, lineage, terminal=True)
-    await env.pool.execute(
-        "UPDATE bookings SET updated_at=now()-interval '2 days' WHERE organization_id=$1 AND id=$2",
-        env.org, booking,
-    )
-    await _approve_retention(env.pool, env.org)
+async def _purged_stay(pg_pool):
+    env, _, booking = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, booking)
     await _purge_retention(env.pool, env.org, booking)
     fence = await env.pool.fetchrow(
         """SELECT original_subject_id,purpose,operation_id,policy_version
@@ -87,7 +64,7 @@ async def _purged_stay(env):
         "policy_version": fence["policy_version"],
         "request_ids": [str(row["request_id"]) for row in request_ids],
     }
-    return booking, journal_item
+    return env, booking, journal_item
 
 
 async def _verify(env, checkpoint):
@@ -103,8 +80,7 @@ async def _verify(env, checkpoint):
 
 
 async def test_signed_v2_restore_journal_matches_actual_stay_fences_and_tombstones(pg_pool):
-    env, _ = await hotel_setup(pg_pool)
-    _, purge = await _purged_stay(env)
+    env, _, purge = await _purged_stay(pg_pool)
 
     proof = await _verify(env, _signed_checkpoint(env.org, [purge]))
 
@@ -114,8 +90,7 @@ async def test_signed_v2_restore_journal_matches_actual_stay_fences_and_tombston
 
 
 async def test_signed_v2_restore_rejects_missing_fence_or_tombstone(pg_pool):
-    env, _ = await hotel_setup(pg_pool)
-    booking, purge = await _purged_stay(env)
+    env, booking, purge = await _purged_stay(pg_pool)
     checkpoint = _signed_checkpoint(env.org, [purge])
 
     await env.pool.execute(
@@ -128,8 +103,7 @@ async def test_signed_v2_restore_rejects_missing_fence_or_tombstone(pg_pool):
 
 
 async def test_signed_v2_restore_rejects_missing_or_wrong_tombstone_and_tampering(pg_pool):
-    env, _ = await hotel_setup(pg_pool)
-    booking, purge = await _purged_stay(env)
+    env, booking, purge = await _purged_stay(pg_pool)
 
     # Even a freshly signed journal cannot name a different request receipt.
     wrong = dict(purge)
@@ -156,8 +130,7 @@ async def test_signed_v2_restore_rejects_missing_or_wrong_tombstone_and_tamperin
 
 
 async def test_signed_v1_checkpoint_always_quarantines_stay_purges(pg_pool):
-    env, _ = await hotel_setup(pg_pool)
-    _, purge = await _purged_stay(env)
+    env, _, purge = await _purged_stay(pg_pool)
 
     with pytest.raises(RestoreBlocked, match="Authenticated stay purge journal required"):
         await _verify(env, _signed_checkpoint(env.org, [purge], version="c24-restore-v1"))
@@ -295,8 +268,7 @@ async def test_hotel_last_room_race_commits_one_source_proven_stay_only(pg_pool)
 
 @pytest.mark.parametrize('target', ['receipt', 'stay'])
 async def test_backend_sql_cannot_recreate_a_purged_booking(pg_pool, target):
-    env, _ = await hotel_setup(pg_pool)
-    booking, item = await _purged_stay(env)
+    env, booking, item = await _purged_stay(pg_pool)
     row = await pg_pool.fetchrow('SELECT contact_id,id_conversazione FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
     source = await pg_pool.fetchval('SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2', env.org, __import__('uuid').UUID(row['id_conversazione']))
     async with pg_pool.acquire() as conn, conn.transaction():
