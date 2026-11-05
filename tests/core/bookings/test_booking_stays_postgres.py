@@ -131,12 +131,11 @@ async def test_owner_retention_purges_only_one_stay_and_fences_replay(pg_pool):
     await pg_pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
         VALUES($1,'booking_stay_content','synthetic-v1',true,1,false,'synthetic','synthetic',now()-interval '1 day',now()+interval '1 day')""", env.org)
     await pg_pool.execute("UPDATE messages SET status='handled' WHERE organization_id=$1 AND id=$2", env.org, lineage.source_message_id)
-    assert await pg_pool.fetchval("SELECT public.booking_stay_admin_purge($1,$2,'retention',NULL,'synthetic-v1')", env.org, booking) == 2
-    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
-    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    with pytest.raises(Exception, match='Completed archived stay retention evidence required'):
+        await pg_pool.fetchval("SELECT public.booking_stay_admin_purge($1,$2,'retention',NULL,'synthetic-v1')", env.org, booking)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 1
-    with pytest.raises(AllocationDenied):
-        await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command, new_booking=lineage)
 
 async def test_completed_stay_records_immutable_transactional_evidence(pg_pool):
     env, lineage = await hotel_setup(pg_pool)

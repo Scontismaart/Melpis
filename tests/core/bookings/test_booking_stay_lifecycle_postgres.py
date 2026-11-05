@@ -75,9 +75,31 @@ async def _purge_retention(pool, org, booking, version='synthetic-stay-v1'):
     )
 
 
+@pytest.mark.parametrize('scope', ['organization', 'subject', 'conversation', 'record'])
+async def test_retention_respects_active_scoped_holds(pg_pool, scope):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, booking)
+    scope_id = {'organization': None, 'subject': lineage.contact_id,
+                'conversation': lineage.conversation_id, 'record': booking}[scope]
+    hold = uuid4()
+    await pg_pool.execute('''INSERT INTO gdpr_retention_holds
+        (organization_id,hold_id,category,scope,scope_id,reason_code,authority_reference,approved_by,approved_at,review_by)
+        VALUES($1,$2,'booking_stay_content',$3,$4,'test','test:hold','qa',now(),now()+interval '1 month')''',
+        env.org, hold, scope, scope_id)
+    with pytest.raises(Exception, match='Completed archived stay retention evidence required'):
+        await _purge_retention(pg_pool, env.org, booking)
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+    await pg_pool.execute('''INSERT INTO gdpr_retention_hold_events
+        (organization_id,hold_id,event_id,kind,authority_reference,approved_by,occurred_at)
+        VALUES($1,$2,$3,'released','test:release','qa',now())''', env.org, hold, uuid4())
+    assert await _purge_retention(pg_pool, env.org, booking) == 2
+
+
 async def test_owner_purge_is_scoped_and_preserves_booking_and_source_records(pg_pool):
-    env, target_lineage = await hotel_setup(pg_pool)
-    target = await _create_stay(env, target_lineage, terminal=True)
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
+    env, target_lineage, target = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, target)
     same_org_lineage = await _new_lineage(env)
     same_org_other = await _create_stay(
         env, same_org_lineage, arrival='2026-10-29', departure='2026-10-30',
@@ -90,7 +112,6 @@ async def test_owner_purge_is_scoped_and_preserves_booking_and_source_records(pg
         "UPDATE bookings SET updated_at=now()-interval '2 days' WHERE organization_id=$1 AND id=$2",
         env.org, target,
     )
-    await _approve_retention(pg_pool, env.org)
 
     source_before = await pg_pool.fetchrow(
         'SELECT organization_id,contact_id,id_conversazione,data,ora,coperti,stato FROM bookings WHERE organization_id=$1 AND id=$2',
@@ -204,13 +225,13 @@ async def test_owner_erasure_purge_requires_barrier_matching_operation_scope_and
 
 
 async def test_purge_rolls_back_receipts_stay_and_tombstones_after_late_failure(pg_pool):
-    env, lineage = await hotel_setup(pg_pool)
-    booking = await _create_stay(env, lineage, terminal=True)
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, booking)
     await pg_pool.execute(
         "UPDATE bookings SET updated_at=now()-interval '2 days' WHERE organization_id=$1 AND id=$2",
         env.org, booking,
     )
-    await _approve_retention(pg_pool, env.org)
     suffix = uuid4().hex
     function_name = f'test_stay_purge_fault_{suffix}'
     trigger_name = f'test_stay_purge_fault_{suffix}'
