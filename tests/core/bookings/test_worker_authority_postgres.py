@@ -45,3 +45,52 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         retry = await authority.claim(conn, org, message)
         assert retry.claim_id != first.claim_id
         assert retry.generation == first.generation + 1
+
+@pytest.mark.asyncio
+async def test_private_worker_validates_confirmed_a04_proposal(state_env):
+    from src.core.bookings.conversation_state import render_confirmation_prompt
+    from tests.core.bookings.test_a05_auto_booking import _policy
+
+    env = state_env
+    org, message, pool, conversation = env["org"], env["message"], env["pool"], env["conv"]
+    proposal = await commit_source(env, message, "2026-11-12 10:00", {
+        "service_id": "standard", "customer_name": True, "appointment_date": "2026-11-12",
+        "appointment_time": "10:00", "party_size": 2,
+    }, 1700000000)
+    state = (await apply(env, message))["state"]
+    prompt, reply = uuid4(), uuid4()
+    reply_wam = "synthetic-confirmation-" + uuid4().hex
+    await pool.execute("""INSERT INTO messages
+        (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id,sent_at)
+        VALUES($1,$2,$3,'outbound','text','{}','sent',$4,$5,clock_timestamp()-interval '2 minutes')""",
+        prompt, org, conversation, render_confirmation_prompt(state, prompt), "synthetic-prompt-" + uuid4().hex)
+    stamp = await pool.fetchval("SELECT floor(extract(epoch from clock_timestamp()-interval '1 minute'))::bigint")
+    text = f"CONFIRM {prompt}"
+    reply_body = {"id": reply_wam, "type": "text", "timestamp": str(stamp), "text": {"body": text}}
+    await pool.execute("""INSERT INTO messages
+        (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id)
+        VALUES($1,$2,$3,'inbound','text',$4::jsonb,'processing',$5,$6)""",
+        reply, org, conversation, json.dumps(reply_body), text, reply_wam)
+    await env["repo"].confirm(org, env["auth"], conversation, reply, prompt, request_id=uuid4(),
+                              expected_revision=1, expected_catalog_revision=2)
+    await pool.execute("""UPDATE booking_settings SET config=config || $2::jsonb,capienze_orarie=$3::jsonb
+        WHERE organization_id=$1""", org, json.dumps(_policy("internal")), json.dumps({"10:00": 10}))
+    proposal_wam = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, message)
+    async with pool.acquire() as conn, conn.transaction():
+        for provider_id in (proposal_wam, reply_wam):
+            inbox, lease = uuid4(), uuid4()
+            payload = {"entry": [{"changes": [{"value": {"messages": [{"id": provider_id}]}}]}]}
+            await conn.execute("""INSERT INTO meta_webhook_inbox
+                (id,organization_id,channel,event_key,payload,trace_id,status,lease_token,lease_until)
+                VALUES($1,$2,'whatsapp',$3,$4::jsonb,'synthetic','processing',$5,now()+interval '1 minute')""",
+                inbox, org, provider_id, json.dumps(payload), lease)
+            await record_receipt(conn, {"id": inbox, "organization_id": org, "lease_token": lease}, provider_id)
+            await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)
+        await record_committed_operation(conn, proposal)
+        authority = WorkerBookingAuthority()
+        claim = await authority.claim(conn, org, message)
+        capability = await authority.mint(conn, claim, conversation,
+                                          expected_state_revision=2, expected_catalog_revision=2)
+        proof = await authority.revalidate(conn, capability)
+        assert proof["request_id"] and proof["booking_id"]
+        assert not proof["runtime_enabled"]
