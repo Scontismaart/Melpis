@@ -89,3 +89,30 @@ async def test_controller_rejects_broad_credentials(monkeypatch):
     with pytest.raises(PermissionError, match="operator_required"):
         await run_c24_retention_targets(pool, message_targets=[(uuid4(), uuid4())])
     assert conn.fetchval.await_count == 1
+
+@pytest.mark.asyncio
+async def test_retention_operator_database_role_and_dispatch(pg_pool, sample_org, other_org):
+    """Exercise real grants, role checks and tenant-bound no-op dispatch."""
+    import asyncpg
+
+    async with pg_pool.acquire() as conn:
+        async with conn.transaction():
+            assert not await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+            await conn.execute("GRANT melpis_c24_retention TO CURRENT_USER")
+            await conn.execute("SET LOCAL ROLE melpis_c24_retention")
+            assert await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+            assert not await conn.fetchval(
+                "SELECT has_table_privilege(current_user, 'public.messages', 'SELECT')")
+            for kind in ("message", "conversation", "receipt"):
+                assert not await conn.fetchval(
+                    "SELECT public.c24_run_retention_target($1,$2,$3)",
+                    kind, other_org["id"], uuid4())
+            # An identifier from a different organization must never be found.
+            assert not await conn.fetchval(
+                "SELECT public.c24_run_retention_target('message',$1,$2)",
+                other_org["id"], sample_org["id"])
+            await conn.execute("RESET ROLE")
+            await conn.execute("SET LOCAL ROLE service_role")
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                async with conn.transaction():
+                    await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
