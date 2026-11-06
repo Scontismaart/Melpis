@@ -74,6 +74,7 @@ class Deletion:
                     blockers.append('administrative_stay_purge_required')
             if op['scope'] == 'organization':
                 required |= {'knowledge_content', 'organization_profile'}
+            conversation_counts = {'states': 0, 'receipts': 0}
             if schema == 'ready':
                 if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
                     SELECT 1 FROM simulation_requests WHERE organization_id=$1
