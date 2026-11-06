@@ -110,7 +110,7 @@ jobs:
             PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f "$f"
           done
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
