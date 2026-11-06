@@ -127,6 +127,7 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
     )
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_service = AsyncMock()
     mock_channel = AsyncMock()
 

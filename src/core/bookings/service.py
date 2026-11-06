@@ -272,7 +272,7 @@ class BookingService:
                     data=d_val,
                     ora_inizio=t_val,
                     coperti=coperti,
-                    note=note,
+                    note=booking.get("note", ""),
                     origine=origine,
                     source_message_id=source_message_id,
                     internal_booking_id=booking.get("id"),
