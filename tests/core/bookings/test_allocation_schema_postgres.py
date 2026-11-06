@@ -1,5 +1,6 @@
 """Local PostgreSQL structural checks for the dark schema; no production writes."""
 import pytest
+import re
 
 pytestmark = pytest.mark.asyncio
 
@@ -154,10 +155,13 @@ async def test_no_operational_runtime_import():
         if path.relative_to(root).as_posix() in {
             'core/bookings/allocation_contracts.py',
             'core/db/repositories/booking_allocation_repo.py',
+            'core/bookings/conversation_state.py',
+            'core/db/repositories/booking_conversation_repo.py',
         }: continue
         text = path.read_text(encoding='utf-8')
-        if any(name in text for name in ('allocation_contracts', 'booking_allocation_repo',
-                                         'BookingAllocationRepository')):
+        if any(re.search(r"" + re.escape(name) + r"", text) for name in ('allocation_contracts', 'booking_allocation_repo',
+                                         'BookingAllocationRepository', 'conversation_state',
+                                         'booking_conversation_repo', 'BookingConversationRepository')):
             matches.append(path)
     assert not matches
 

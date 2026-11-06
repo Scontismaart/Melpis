@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 import pytest_asyncio
+import asyncpg
 
 
 @pytest_asyncio.fixture
@@ -72,13 +73,17 @@ async def test_soft_delete_message_excluded(repo, org_id, msg_id):
 async def test_soft_deleted_messages_not_claimed(repo, org_id, msg_id, conv_id):
     cvid = await conv_id()
     mid = await msg_id(cvid)
-    await _soft_delete_message(repo, mid)
     async with repo.pool.acquire() as conn:
         await conn.execute(
-            "UPDATE messages SET direction = 'inbound', status = 'received_pending_ai', deleted_at = NULL WHERE id = $1",
+            "UPDATE messages SET direction = 'inbound', status = 'received_pending_ai' WHERE id = $1 AND organization_id=$2",
             mid,
+            org_id,
         )
-        await conn.execute("UPDATE messages SET deleted_at = NOW() WHERE id = $1", mid)
+    await _soft_delete_message(repo, mid)
+    async with repo.pool.acquire() as conn:
+        with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match='resurrection'):
+            await conn.execute('UPDATE messages SET deleted_at=NULL WHERE id=$1 AND organization_id=$2', mid, org_id)
+        assert await conn.fetchval('SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1 AND organization_id=$2', mid, org_id)
     claimed = await repo.claim_inbound_messages(limit=10)
     assert mid not in [c["id"] for c in claimed]
 

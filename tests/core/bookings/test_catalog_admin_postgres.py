@@ -199,7 +199,7 @@ async def test_service_role_forced_truncate_cannot_erase_evidence(catalog_env):
                 await conn.execute(f'GRANT TRUNCATE ON {table} TO service_role')
                 # Force access to FK dependants too, so trigger protection is
                 # tested rather than an unrelated missing table privilege.
-                children = 'booking_allocation_sets,booking_resource_allocations,booking_allocation_requests'
+                children = 'booking_allocation_sets,booking_resource_allocations,booking_allocation_requests,booking_conversation_states,booking_conversation_requests'
                 await conn.execute(f'GRANT TRUNCATE ON {children} TO service_role')
                 await conn.execute('SET LOCAL ROLE service_role')
                 with pytest.raises(asyncpg.InsufficientPrivilegeError, match='evidence cannot be truncated'):

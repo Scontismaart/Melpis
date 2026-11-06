@@ -6,6 +6,7 @@ import pytest
 
 from src.core.retention_job import run_retention
 from src.core import retention_job
+from tests.core.gdpr.test_c24_schema_compatibility import legacy_pool as pg_pool
 
 
 async def approve_message_retention(pool, org, *, days=1):
@@ -113,6 +114,20 @@ async def test_approved_retention_is_tenant_scoped_bounded_and_preserves_protect
         assert await conn.fetchval("SELECT count(*) FROM usage_events WHERE organization_id=$1", org) == 1
         assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE organization_id=$1", org) == 1
         assert await conn.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org) == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_runner_stops_on_partial_c24_schema(pg_pool, sample_org, monkeypatch):
+    org = sample_org["id"]
+    await approve_message_retention(pg_pool, org)
+    message = (await seed_messages(pg_pool, org))[0]
+    async with pg_pool.acquire() as conn:
+        await conn.execute('ALTER TABLE messages ADD COLUMN c24_original_subject_id uuid')
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
+
+    assert (await run_retention(pg_pool))["messages_redacted"] == 0
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval("SELECT content_text FROM messages WHERE id=$1", message)
 
 
 @pytest.mark.asyncio

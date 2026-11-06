@@ -341,6 +341,21 @@ class BookingAllocationRepository:
             await conn.fetchval("SELECT pg_advisory_xact_lock(hashtextextended($1,725))",
                                 f"allocation-resource|{org}|{resource_id}")
 
+    async def _observe_candidate_locked(self, conn, org, catalog, candidate):
+        """Read diagnostic capacity inside the caller's authenticated transaction.
+
+        No booking ID, receipt, writer hook or independent commit is created.
+        Resource locks use the same namespace/order as allocation writers.
+        """
+        from src.core.bookings.allocation_contracts import derive_candidate
+        if not conn.is_in_transaction():
+            raise AllocationUnavailable("Scoped observation transaction required")
+        start, end, claims = derive_candidate(candidate, catalog)
+        for resource_id in sorted({claim[0] for claim in claims}):
+            await conn.fetchval("SELECT pg_advisory_xact_lock(hashtextextended($1,725))",
+                                f"allocation-resource|{org}|{resource_id}")
+        return await self._availability(conn, org, catalog, (start,end,None), claims, None, (), None, None)
+
     async def _availability(self, conn, org, catalog, bounds, claims, booking_id, old_claims, old, fingerprint):
         start, end, _ = bounds
         fits = self._weekly_fits(catalog.availability, start, end, catalog.timezone)
@@ -365,7 +380,7 @@ class BookingAllocationRepository:
                 JOIN bookings b ON b.organization_id=a.organization_id AND b.id=a.booking_id
                 WHERE a.organization_id=$1 AND s.organization_id=$1 AND b.organization_id=$1
                   AND a.resource_id=$2 AND a.starts_at<$4 AND a.ends_at>$3
-                  AND a.booking_id<>$5 ORDER BY a.starts_at,a.ends_at""", org, rid, start, end, booking_id)
+                  AND ($5::uuid IS NULL OR a.booking_id<>$5) ORDER BY a.starts_at,a.ends_at""", org, rid, start, end, booking_id)
             if any(row["booking_fingerprint"] != _booking_fingerprint(row) for row in rows):
                 return "unknown"
             if exclusive and rows:

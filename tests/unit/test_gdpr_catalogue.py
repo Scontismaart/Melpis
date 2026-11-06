@@ -19,8 +19,35 @@ def test_every_nonempty_frozen_projection_passes_runtime_validator():
             if query:
                 assert exporter.catalogue_query(category, scope) == query
                 count += 1
-    assert count == 70
-    assert len({category.name for category in catalog.CATEGORIES}) == 51
+    # Three C24 categories each add organization/contact projections; the
+    # durable canonical-response lineage also adds one contact projection.
+    assert count == 77
+    assert len({category.name for category in catalog.CATEGORIES}) == 54
+
+
+@pytest.mark.parametrize('name', [
+    'booking_conversation_states', 'booking_conversation_requests',
+    'booking_conversation_revocations',
+])
+def test_conversation_categories_have_verified_subject_scope_without_account_content(name):
+    category = next(item for item in catalog.CATEGORIES if item.name == name)
+    assert exporter.catalogue_query(category, 'organization')
+    assert exporter.catalogue_query(category, 'contact')
+    if name == 'booking_conversation_requests':
+        assert "COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid" in category.contact_query
+    else:
+        assert 'subject_id = $2::uuid' in category.contact_query
+    assert exporter.catalogue_query(category, 'account') is None
+    assert category.exclusion_reason
+
+
+def test_canonical_response_contact_projection_survives_source_deletion():
+    category = next(item for item in catalog.CATEGORIES if item.name == 'simulation_requests')
+    query = exporter.catalogue_query(category, 'contact')
+    assert 'c24_subject_id = $2::uuid' in query
+    assert 'JOIN' not in query
+    assert 'c24_conversation_id' in query and 'c24_source_message_id' in query
+    assert 'response,' not in query and 'payload_hash' not in query
 
 
 def test_empty_scope_is_not_executable():

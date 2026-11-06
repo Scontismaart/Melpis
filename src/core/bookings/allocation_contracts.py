@@ -65,6 +65,10 @@ def derive_allocation(request: AllocationRequest, catalog: CatalogDraft):
     """Derive bounds and resource quantities only; never asserts availability."""
     if request.action == 'cancel':
         raise ValueError('Cancellation has no new allocation')
+    return _derive_resource_bounds(request, catalog)
+
+
+def _derive_resource_bounds(request, catalog):
     if request.expected_catalog_revision != catalog.revision:
         raise ValueError('Catalog revision mismatch')
     service = next((s for s in catalog.services if s.service_id == request.service_id), None)
@@ -100,3 +104,33 @@ def derive_allocation(request: AllocationRequest, catalog: CatalogDraft):
             raise ValueError('Exclusive resource quantity must be one')
         claims.append((resource.resource_id, resource.kind, resource.exclusive, quantity))
     return start, end, tuple(sorted(claims))
+
+class AllocationCandidate(Contract):
+    """Read-only proposal; no booking identity, operation or authorization."""
+    expected_catalog_revision: Positive
+    service_id: Identifier
+    appointment_date: date | None = None
+    appointment_time: time | None = None
+    arrival_date: date | None = None
+    departure_date: date | None = None
+    party_size: Positive | None = None
+    room_count: Positive | None = None
+
+    @model_validator(mode='after')
+    def candidate_shape(self):
+        appointment = self.appointment_date is not None and self.appointment_time is not None
+        stay = self.arrival_date is not None and self.departure_date is not None
+        supplied = (self.appointment_date, self.appointment_time, self.arrival_date, self.departure_date)
+        if appointment == stay or sum(x is not None for x in supplied) != 2:
+            raise ValueError('Exactly one complete temporal form is required')
+        if stay and self.departure_date <= self.arrival_date:
+            raise ValueError('Invalid civil stay')
+        if self.appointment_time is not None:
+            AllocationRequest.local_minute(self.appointment_time)
+        return self
+
+
+def derive_candidate(candidate: AllocationCandidate, catalog: CatalogDraft):
+    if type(candidate) is not AllocationCandidate:
+        raise ValueError('Typed allocation candidate required')
+    return _derive_resource_bounds(candidate, catalog)
