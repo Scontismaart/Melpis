@@ -58,6 +58,7 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
         await conn.fetchval('SELECT archive_completed_hotel_allocation($1,$2)', env.org, booking)
         await conn.execute('CREATE TEMP TABLE restored_archived_sets AS SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
         await conn.fetchval("SELECT booking_stay_admin_purge($1,$2,'retention',NULL,'synthetic-stay-v1')", env.org, booking)
+        await conn.execute('SET CONSTRAINTS ALL IMMEDIATE')
         request_ids = await conn.fetch('SELECT request_id FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
         payload = {'version': 'c24-restore-v2', 'organization_id': str(env.org), 'backup_id': 'backup',
                    'sequence': 3, 'complete': True, 'erasures': [], 'stay_purges': [{
@@ -80,11 +81,9 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
             else:
                 await conn.execute('ALTER TABLE booking_allocation_sets DISABLE TRIGGER allocation_guard')
                 await conn.execute(f'INSERT INTO booking_allocation_sets SELECT * FROM {source}')
-                await conn.execute('ALTER TABLE booking_allocation_sets ENABLE TRIGGER allocation_guard')
                 if source == 'restored_sets':
                     await conn.execute('ALTER TABLE booking_resource_allocations DISABLE TRIGGER allocation_guard')
                     await conn.execute('INSERT INTO booking_resource_allocations SELECT * FROM restored_claims')
-                    await conn.execute('ALTER TABLE booking_resource_allocations ENABLE TRIGGER allocation_guard')
             with pytest.raises(RestoreBlocked, match='Stay purge copies'):
                 await verify()
             await savepoint.rollback()
