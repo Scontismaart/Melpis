@@ -1,6 +1,6 @@
 """Explicitly targeted SQL074 lifecycle continuation, disabled by default.
 
-The caller supplies reviewed tenant/record pairs and an owner-capable pool. This
+The caller supplies reviewed tenant/record pairs and a dedicated retention-operator pool. This
 module neither discovers targets nor grants lifecycle privileges to a worker.
 SQL074 remains the authority for policy, hold, lineage and concurrency checks.
 """
@@ -27,9 +27,9 @@ async def run_c24_retention_targets(pool, *, message_targets=(), conversation_ta
         return counts
     # Bound iteration as well as database work, including generator inputs.
     groups = (
-        (message_targets, "c24_purge_source", "messages_purged"),
-        (conversation_targets, "c24_expire_idle", "conversations_expired"),
-        (receipt_targets, "c24_cleanup_receipt", "receipts_cleaned"),
+        (message_targets, "message", "messages_purged"),
+        (conversation_targets, "conversation", "conversations_expired"),
+        (receipt_targets, "receipt", "receipts_cleaned"),
     )
     remaining = 500
     batches = []
@@ -43,9 +43,11 @@ async def run_c24_retention_targets(pool, *, message_targets=(), conversation_ta
         for organization_id, record_id in targets:
             async with pool.acquire() as conn:
                 async with conn.transaction(isolation="read_committed"):
+                    if not await conn.fetchval("SELECT public.c24_retention_operator_allowed()"):
+                        raise PermissionError("c24_retention_operator_required")
                     applied = await conn.fetchval(
-                        f"SELECT public.{function}($1::uuid,$2::uuid)",
-                        organization_id, record_id,
+                        "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+                        function, organization_id, record_id,
                     )
             counts[counter] += int(applied is True)
     return counts

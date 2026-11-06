@@ -31,19 +31,18 @@ async def test_controller_is_disabled_without_explicit_owner_cutover(monkeypatch
 @pytest.mark.asyncio
 async def test_controller_delegates_targeted_mutations_to_owner_functions(monkeypatch):
     monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
-    pool, conn = pool_with_results([True, False, True])
+    pool, conn = pool_with_results([True, True, True, False, True, True])
     org, message, conversation, receipt = (uuid4() for _ in range(4))
     assert await run_c24_retention_targets(pool, message_targets=[(org, message)],
                                            conversation_targets=[(org, conversation)],
                                            receipt_targets=[(org, receipt)]) == {
         "messages_purged": 1, "conversations_expired": 0, "receipts_cleaned": 1,
     }
-    assert conn.fetchval.await_args_list[0].args == (
-        "SELECT public.c24_purge_source($1::uuid,$2::uuid)", org, message)
-    assert conn.fetchval.await_args_list[1].args == (
-        "SELECT public.c24_expire_idle($1::uuid,$2::uuid)", org, conversation)
-    assert conn.fetchval.await_args_list[2].args == (
-        "SELECT public.c24_cleanup_receipt($1::uuid,$2::uuid)", org, receipt)
+    for index, kind, record in [(1, "message", message), (3, "conversation", conversation), (5, "receipt", receipt)]:
+        assert conn.fetchval.await_args_list[index].args == (
+            "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)", kind, org, record)
+    assert all(conn.fetchval.await_args_list[index].args == ("SELECT public.c24_retention_operator_allowed()",)
+               for index in (0, 2, 4))
     assert conn.transaction.call_count == 3
     conn.transaction.assert_called_with(isolation="read_committed")
 
@@ -81,3 +80,12 @@ async def test_manifest_runner_disabled_before_opening_file_or_connecting(monkey
     monkeypatch.delenv("GDPR_C24_OWNER_RETENTION_ENABLED", raising=False)
     with pytest.raises(SystemExit, match="disabled"):
         await _run_manifest(tmp_path / "missing.json")
+
+
+@pytest.mark.asyncio
+async def test_controller_rejects_broad_credentials(monkeypatch):
+    monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
+    pool, conn = pool_with_results([False])
+    with pytest.raises(PermissionError, match="operator_required"):
+        await run_c24_retention_targets(pool, message_targets=[(uuid4(), uuid4())])
+    assert conn.fetchval.await_count == 1
