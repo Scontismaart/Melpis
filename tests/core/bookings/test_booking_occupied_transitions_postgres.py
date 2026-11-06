@@ -2,9 +2,11 @@
 import asyncio
 from datetime import date, time
 
+import asyncpg
 import pytest
 from uuid import uuid4
 from src.core.bookings.booking_mutation_contract import BookingMutation, BookingMutationRejected, apply_booking_mutation
+from src.core.bookings.scheduled_booking_review import run_scheduled_booking_reviews
 from src.core.db.repositories.booking_allocation_repo import AllocationConflict, AllocationDenied, AllocationUnavailable, _booking_fingerprint
 from src.core.db.repositories.booking_repo import BookingRepository
 from tests.core.bookings.test_allocation_engine_postgres import create_environment, wait_blocked
@@ -127,6 +129,53 @@ async def test_scheduled_review_observes_concurrently_committed_allocation(pg_po
         results = await asyncio.gather(admission, *([review] if review else []), return_exceptions=True)
     assert results[0]['outcome'] == 'allocated' and results[1] is None
     assert await pg_pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'confermata'
+
+
+async def test_scheduled_worker_atomically_reviews_elapsed_booking_with_private_receipt(pg_pool):
+    env = await create_environment(pg_pool)
+    await pg_pool.execute("UPDATE organizations SET subscription_status='active' WHERE id=$1", env.org)
+    booking = await env.booking()
+    await env.apply(env.request(booking))
+    await apply_booking_mutation(
+        pg_pool, env.org, env.auth, env.request(booking, action='replace', allocation_revision=1),
+        mutation=BookingMutation('confirm', '', '', ''),
+    )
+    original_claims = await pg_pool.fetch(
+        'SELECT resource_id,quantity,starts_at,ends_at FROM booking_resource_allocations '
+        'WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id', env.org, booking,
+    )
+    assert original_claims
+    async with pg_pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute('SET LOCAL ROLE service_role')
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                async with conn.transaction():
+                    await conn.fetchval('SELECT public.apply_scheduled_booking_review($1,$2)', env.org, booking)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        await conn.execute('SET LOCAL ROLE melpis_booking_scheduler')
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            async with conn.transaction():
+                await conn.fetchval('SELECT nome_cliente FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
+        assert await conn.fetchval('SELECT public.apply_scheduled_booking_review($1,$2)', uuid4(), booking) is False
+        assert await run_scheduled_booking_reviews(conn) >= 1
+        assert await conn.fetchval('SELECT public.apply_scheduled_booking_review($1,$2)', env.org, booking) is False
+    row = await BookingRepository(pg_pool).get_booking(env.org, booking)
+    allocation = await pg_pool.fetchrow(
+        'SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking,
+    )
+    assert row['stato'] == 'da_verificare' and row['no_show_at'] is None
+    assert allocation['state'] == 'active' and allocation['allocation_revision'] == 3
+    assert allocation['booking_fingerprint'] == _booking_fingerprint(row)
+    assert allocation['booking_calendar_revision'] == row['calendar_revision']
+    assert await pg_pool.fetch(
+        'SELECT resource_id,quantity,starts_at,ends_at FROM booking_resource_allocations '
+        'WHERE organization_id=$1 AND booking_id=$2 AND allocation_revision=3 ORDER BY resource_id', env.org, booking,
+    ) == original_claims
+    receipts = await pg_pool.fetch(
+        "SELECT actor_user_id,action,outcome,applied_allocation_revision FROM booking_allocation_requests "
+        "WHERE organization_id=$1 AND booking_id=$2 AND actor_kind='scheduled_review'", env.org, booking,
+    )
+    assert len(receipts) == 1 and tuple(receipts[0]) == (None, 'replace', 'replaced', 3)
 
 @pytest.mark.parametrize('authority,allowed', [('internal_calendar_sync', True),('google_authoritative', False),('external_authoritative', False)])
 async def test_calendar_authority_is_local_or_fail_closed(pg_pool, authority, allowed):
