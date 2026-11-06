@@ -3,6 +3,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+import asyncpg
 
 from src.core.db.repositories.booking_repo import BookingRepository, ManagedBookingMutationRequired
 from tests.core.bookings.test_allocation_engine_postgres import create_environment, wait_blocked
@@ -82,3 +83,49 @@ async def test_legacy_writers_observe_concurrent_allocation(pg_pool, monkeypatch
     after = await repo.get_booking(env.org, booking)
     assert (after['stato'], after['data'], after['ora'], after['coperti']) == (
         before['stato'], before['data'], before['ora'], before['coperti'])
+
+
+@pytest.mark.parametrize('operation', ['cancel', 'no_show', 'reject', 'confirm', 'complete', 'update', 'google_confirm'])
+async def test_repeatable_read_stale_snapshot_fails_closed(pg_pool, operation):
+    """A caller's old snapshot must not hide an allocation committed later."""
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    repo = BookingRepository(pg_pool)
+    async with pg_pool.acquire() as conn, conn.transaction(isolation='repeatable_read'):
+        before = dict(await conn.fetchrow(
+            'SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking))
+        assert not await conn.fetchval(
+            'SELECT EXISTS(SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2)',
+            env.org, booking)
+        # This commits on a separate connection after the old snapshot is fixed.
+        assert (await env.apply(env.request(booking)))['outcome'] == 'allocated'
+        token = repo._locked_connection.set((asyncio.current_task(), conn))
+        try:
+            with pytest.raises(asyncpg.InterfaceError, match='different isolation level'):
+                if operation == 'cancel':
+                    await repo.cancel_legacy_booking(env.org, booking)
+                elif operation == 'no_show':
+                    await repo.mark_legacy_booking_no_show(env.org, booking)
+                elif operation in ('reject', 'confirm'):
+                    await repo.update_booking_status(env.org, booking,
+                        'rifiutata' if operation == 'reject' else 'confermata', expected=before)
+                elif operation == 'complete':
+                    await repo.mark_booking_completed(env.org, booking, before)
+                elif operation == 'google_confirm':
+                    await repo.request_google_confirmation(env.org, booking)
+                else:
+                    await repo.update_booking_details(env.org, booking, nome_cliente=before['nome_cliente'],
+                        telefono=before['telefono'], data=before['data'], ora=before['ora'], coperti=2,
+                        note=before['note'], stato=before['stato'], expected=before)
+        finally:
+            repo._locked_connection.reset(token)
+    after = await repo.get_booking(env.org, booking)
+    assert (after['stato'], after['data'], after['ora'], after['coperti'], after['updated_at']) == (
+        before['stato'], before['data'], before['ora'], before['coperti'], before['updated_at'])
+    allocation = await pg_pool.fetchrow(
+        'SELECT state,allocation_revision FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2',
+        env.org, booking)
+    assert allocation['state'] == 'active' and allocation['allocation_revision'] == 1
+    assert await pg_pool.fetchval(
+        'SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2',
+        env.org, booking) > 0
