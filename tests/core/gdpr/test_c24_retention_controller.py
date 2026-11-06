@@ -55,3 +55,29 @@ async def test_controller_bounds_targets_before_any_mutation(monkeypatch):
     with pytest.raises(ValueError, match="target_limit"):
         await run_c24_retention_targets(pool, message_targets=[(uuid4(), uuid4())] * 500, receipt_targets=[(uuid4(), uuid4())])
     pool.acquire.assert_not_called()
+
+
+def test_manifest_validates_complete_batch_before_execution(tmp_path):
+    import json
+
+    from src.core.gdpr.c24_retention_controller import read_target_manifest
+
+    path = tmp_path / "targets.json"
+    org, receipt = uuid4(), uuid4()
+    path.write_text(json.dumps({"receipt_targets": [[str(org), str(receipt)]]}))
+    assert read_target_manifest(path) == {
+        "message_targets": [], "conversation_targets": [], "receipt_targets": [(org, receipt)],
+    }
+    path.write_text(json.dumps({"message_targets": [[str(org), str(receipt)]],
+                                "receipt_targets": [[str(org), "invalid"]]}))
+    with pytest.raises(ValueError):
+        read_target_manifest(path)
+
+
+@pytest.mark.asyncio
+async def test_manifest_runner_disabled_before_opening_file_or_connecting(monkeypatch, tmp_path):
+    from src.core.gdpr.c24_retention_controller import _run_manifest
+
+    monkeypatch.delenv("GDPR_C24_OWNER_RETENTION_ENABLED", raising=False)
+    with pytest.raises(SystemExit, match="disabled"):
+        await _run_manifest(tmp_path / "missing.json")
