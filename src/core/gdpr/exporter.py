@@ -1,6 +1,5 @@
 """Bounded snapshot export: PostgreSQL ciphertext, small one-time Redis ticket."""
 import hashlib
-import json
 import asyncio
 import re
 from contextlib import asynccontextmanager
@@ -20,6 +19,7 @@ _C24_ONLY = {
     'booking_conversation_states', 'booking_conversation_requests',
     'booking_conversation_revocations',
 }
+_STAY_ONLY = {'booking_stays', 'booking_stay_purge_fences', 'booking_stay_tombstones'}
 _LEGACY_SIMULATION_QUERY = """
     SELECT request_id, status, created_at, reserved_at, completed_at
     FROM simulation_requests WHERE organization_id = $1::uuid
@@ -136,10 +136,14 @@ class Exporter:
                 await append(('{"organization_id":' + encode(str(org)) + ',"exported_at":' +
                               encode(datetime.now(timezone.utc).isoformat())).encode())
                 for category in CATEGORIES:
-                    query = catalogue_query(category, scope, schema=schema)
+                    stay_missing = category.name in _STAY_ONLY and not await conn.fetchval(
+                        'SELECT to_regclass($1) IS NOT NULL', 'public.' + category.name,
+                    )
+                    query = None if stay_missing else catalogue_query(category, scope, schema=schema)
                     item = {'category': category.name, 'count': 0}
                     if not query:
                         reason = (
+                            'stay_schema_relation_absent' if stay_missing else
                             'conversation_schema_' + schema
                             if category.name in _C24_ONLY and schema != 'ready'
                             else category.exclusion_reason or 'no_verified_subject_relation'

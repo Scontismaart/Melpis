@@ -10,6 +10,10 @@ CREATE_TABLE_RE = re.compile(
     r"\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_$.]*)",
     re.IGNORECASE,
 )
+CREATE_VIEW_RE = re.compile(
+    r"^\s*create\s+(?:or\s+replace\s+)?view\s+([a-z_][a-z0-9_$.]*)",
+    re.IGNORECASE | re.MULTILINE,
+)
 VALID_CLASSES = {"direct", "parent-derived", "system/root", "platform/infra"}
 
 
@@ -21,7 +25,8 @@ def _created_tables() -> set[str]:
     return {
         table.split(".")[-1].lower()
         for path in sources
-        for table in CREATE_TABLE_RE.findall(path.read_text(encoding="utf-8"))
+        for pattern in (CREATE_TABLE_RE, CREATE_VIEW_RE)
+        for table in pattern.findall(path.read_text(encoding="utf-8"))
     }
 
 

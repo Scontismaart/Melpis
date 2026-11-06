@@ -25,6 +25,14 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
     No journal, wrong signature, missing tombstone, or restored content fails
     closed. A successful result is evidence for C2.4 only, never a global GO.
     """
+    org, entries, sequence, purges = _authenticate_checkpoint(
+        organization_id, checkpoint, verification_key=verification_key,
+        backup_id=backup_id, minimum_sequence=minimum_sequence,
+    )
+    return await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges)
+
+
+def _authenticate_checkpoint(organization_id, checkpoint, *, verification_key, backup_id, minimum_sequence):
     try:
         org = UUID(str(organization_id))
         if (not isinstance(verification_key, bytes) or len(verification_key) < 32
@@ -33,9 +41,13 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
                 or not isinstance(checkpoint, dict) or set(checkpoint) != {'payload', 'signature'}):
             raise ValueError
         payload, signature = checkpoint['payload'], checkpoint['signature']
-        if (not isinstance(payload, dict) or set(payload) != {
-                'version', 'organization_id', 'backup_id', 'sequence', 'complete', 'erasures'}
-                or payload['version'] != 'c24-restore-v1' or payload['complete'] is not True
+        if not isinstance(payload, dict):
+            raise ValueError
+        expected = {'version', 'organization_id', 'backup_id', 'sequence', 'complete', 'erasures'}
+        if payload.get('version') == 'c24-restore-v2':
+            expected.add('stay_purges')
+        if (set(payload) != expected or payload.get('version') not in {'c24-restore-v1', 'c24-restore-v2'}
+                or payload['complete'] is not True
                 or payload['organization_id'] != str(org) or payload['backup_id'] != backup_id
                 or type(payload['sequence']) is not int or payload['sequence'] < minimum_sequence
                 or not isinstance(payload['erasures'], list) or len(payload['erasures']) > 10000
@@ -58,31 +70,92 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
                 raise ValueError
             seen.add(operation)
             entries.append((operation, scope, subject))
+        purges = []
+        if payload['version'] == 'c24-restore-v2':
+            if not isinstance(payload['stay_purges'], list) or len(payload['stay_purges']) > 10000:
+                raise ValueError
+            seen_bookings = set()
+            for item in payload['stay_purges']:
+                if not isinstance(item, dict) or set(item) != {'booking_id','subject_id','purpose','operation_id','policy_version','request_ids'}:
+                    raise ValueError
+                booking, subject = UUID(item['booking_id']), UUID(item['subject_id'])
+                operation = UUID(item['operation_id']) if item['operation_id'] is not None else None
+                purpose, version, ids = item['purpose'], item['policy_version'], item['request_ids']
+                if (booking in seen_bookings or purpose not in {'erasure','retention'}
+                    or (purpose == 'erasure') != (operation is not None)
+                    or not isinstance(version, str) or not 1 <= len(version) <= 80
+                    or not isinstance(ids, list) or len(ids) > 10000):
+                    raise ValueError
+                requests = {UUID(value) for value in ids}
+                if len(requests) != len(ids):
+                    raise ValueError
+                seen_bookings.add(booking)
+                purges.append((booking,subject,purpose,operation,version,requests))
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
         raise RestoreBlocked('Authenticated external restore checkpoint required') from None
 
-    return await _verify_replayed_erasures(conn, org, entries, payload['sequence'])
+    return org, entries, payload['sequence'], purges if payload['version']=='c24-restore-v2' else None
 
 
-async def verify_restore_journal_replay(conn, organization_id, payload, signature, **trust):
+async def verify_restore_journal_replay(conn, organization_id, payload, signature, *,
+                                        stay_checkpoint=None, checkpoint_verification_key=None,
+                                        backup_id=None, minimum_sequence=None, **trust):
     """Check scoped replay against signed evidence and an independently pinned tip."""
     org = UUID(str(organization_id))
     try:
         verified = verify_erasure_segment(payload, signature, **trust)
     except RestoreJournalInvalid:
         raise RestoreBlocked('Authenticated external restore journal required') from None
+    purges = None
+    if stay_checkpoint is not None:
+        _, checkpoint_entries, checkpoint_sequence, purges = _authenticate_checkpoint(
+            org, stay_checkpoint, verification_key=checkpoint_verification_key,
+            backup_id=backup_id, minimum_sequence=minimum_sequence,
+        )
+        if purges is None:
+            raise RestoreBlocked('Authenticated stay purge journal required')
+        await _verify_replayed_erasures(conn, org, checkpoint_entries, checkpoint_sequence, purges=purges)
     scoped = tuple(entry for entry in verified if entry.organization_id == org)
     return await _verify_replayed_erasures(
         conn, org, [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped],
         trust['independent_tip'].sequence,
         fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped},
+        purges=purges,
     )
 
 
-async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None):
+async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None, purges=None):
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
+    if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
+        raise RestoreBlocked('Restore verification requires read committed isolation')
+    if not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM organizations WHERE id=$1)', org):
+        raise RestoreBlocked('Restored organization is unavailable')
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))', str(org))
+    stay_schema = await conn.fetchval("SELECT to_regclass('public.booking_stays') IS NOT NULL")
+    if stay_schema:
+        if purges is None:
+            raise RestoreBlocked('Authenticated stay purge journal required')
+        actual = await conn.fetch('''SELECT booking_id,original_subject_id,purpose,operation_id,policy_version
+            FROM booking_stay_purge_fences WHERE organization_id=$1''', org)
+        expected_fences = {(b,s,p,o,v) for b,s,p,o,v,_ in purges}
+        if {(r['booking_id'],r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) for r in actual} != expected_fences:
+            raise RestoreBlocked('Stay purge fences do not match authenticated journal')
+        if await conn.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1', org) != sum(len(p[5]) for p in purges):
+            raise RestoreBlocked('Stay purge tombstones do not match authenticated journal')
+        for booking, subject, purpose, operation, version, requests in purges:
+            rows = await conn.fetch('''SELECT request_id,original_subject_id,purpose,operation_id,policy_version
+                FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2''', org, booking)
+            if ({r['request_id'] for r in rows} != requests
+                or any((r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) != (subject,purpose,operation,version) for r in rows)
+                or await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2)''', org, booking)):
+                raise RestoreBlocked('Stay purge copies do not match authenticated journal')
+    elif purges:
+        raise RestoreBlocked('Stay purge schema required by authenticated journal')
     for operation, scope, subject in entries:
         present = await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM gdpr_erasure_barriers
             WHERE organization_id=$1 AND operation_id=$2 AND scope=$3
@@ -101,7 +174,15 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
                   AND s.name='local' AND s.status='confirmed')''', org, operation, scope, subject, digest, key_id)
             if not reconciled:
                 raise RestoreBlocked('Replayed erasure evidence does not match the journal')
-        remaining = await conn.fetchval('''SELECT
+        remaining = False
+        if stay_schema:
+            remaining = await conn.fetchval('''SELECT
+            EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1
+                   AND ($2::uuid IS NULL OR original_subject_id=$2))
+            OR EXISTS(SELECT 1 FROM booking_allocation_requests r
+                LEFT JOIN booking_stays s ON s.organization_id=r.organization_id AND s.organization_id=$1 AND s.booking_id=r.booking_id
+                WHERE r.organization_id=$1 AND ($2::uuid IS NULL OR s.original_subject_id IS NULL OR s.original_subject_id=$2))''', org, subject)
+        remaining = remaining or await conn.fetchval('''SELECT
             EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1
                    AND ($2::uuid IS NULL OR subject_id=$2))
             OR EXISTS(SELECT 1 FROM booking_conversation_requests r
