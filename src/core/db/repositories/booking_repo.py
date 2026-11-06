@@ -12,6 +12,11 @@ from src.core.db.scoping import TenantScopedRepository
 
 logger = logging.getLogger(__name__)
 
+
+class ManagedBookingMutationRequired(RuntimeError):
+    """An allocation-backed booking needs an explicitly revisioned mutation."""
+
+
 class BookingRepository(TenantScopedRepository):
     """Repository specializzato per Prenotazioni, Lock di Slot (P0) e Capienze."""
 
@@ -577,6 +582,30 @@ class BookingRepository(TenantScopedRepository):
             """, organization_id, target_date)
             return [dict(r) for r in rows]
 
+    @staticmethod
+    async def _has_managed_allocation(conn, organization_id, booking_id):
+        if not await conn.fetchval("SELECT to_regclass('public.booking_allocation_sets') IS NOT NULL"):
+            return False
+        return await conn.fetchval("""
+            SELECT EXISTS (SELECT 1 FROM public.booking_allocation_sets
+                WHERE organization_id = $1 AND booking_id = $2)
+        """, organization_id, booking_id)
+
+    async def mark_legacy_booking_no_show(self, organization_id, booking_id):
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow("""
+                SELECT id FROM bookings WHERE organization_id = $1 AND id = $2 FOR UPDATE
+            """, organization_id, booking_id)
+            if row is None:
+                return None
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            updated = await conn.fetchrow("""
+                UPDATE bookings SET stato = 'no_show', no_show_at = NOW(), updated_at = NOW()
+                WHERE organization_id = $1 AND id = $2 RETURNING *
+            """, organization_id, booking_id)
+            return dict(updated)
+
     async def mark_legacy_booking_for_review(self, organization_id, booking_id, target_date):
         """Apply the scheduler transition only when no typed allocation owns the row."""
         async with self._connection() as conn, conn.transaction(isolation="read_committed"):
@@ -590,11 +619,7 @@ class BookingRepository(TenantScopedRepository):
                 return None
             # The allocator locks the same booking before inserting or replacing
             # a set. Read after acquiring that lock, using a fresh snapshot.
-            has_allocations = await conn.fetchval("SELECT to_regclass('public.booking_allocation_sets') IS NOT NULL")
-            if has_allocations and await conn.fetchval("""
-                SELECT EXISTS (SELECT 1 FROM public.booking_allocation_sets
-                    WHERE organization_id = $1 AND booking_id = $2)
-            """, organization_id, booking_id):
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
                 logger.warning("Scheduled review requires typed transition org=%s booking=%s",
                                organization_id, booking_id)
                 return None

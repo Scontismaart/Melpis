@@ -18,6 +18,9 @@ from src.core.db.repositories.booking_repo import BookingRepository
 
 router = APIRouter(tags=["bookings"])
 
+def owner_mutations_enabled() -> bool:
+    return os.getenv('BOOKING_TYPED_OWNER_MUTATIONS_ENABLED', '').strip().lower() == 'true'
+
 
 class MutationBody(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", hide_input_in_errors=True)
@@ -52,7 +55,7 @@ class OwnerMutationBody(BaseModel):
 @router.post('/typed-mutations')
 async def owner_mutation(request: Request, user: dict = Depends(require_ruolo('owner')),
                          mfa: dict = Depends(require_mfa())):
-    if os.getenv('BOOKING_TYPED_OWNER_MUTATIONS_ENABLED', '').strip().lower() != 'true':
+    if not owner_mutations_enabled():
         raise HTTPException(404, 'Not found')
     body = await parse_body(request, OwnerMutationBody)
     service = getattr(request.app.state, 'booking_service', None)

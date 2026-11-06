@@ -596,13 +596,7 @@ class BookingService:
         return booking
 
     async def mark_no_show(self, org_id, booking_id):
-        async with self.repo.pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                UPDATE bookings SET stato = 'no_show', no_show_at = NOW(), updated_at = NOW()
-                WHERE organization_id = $1 AND id = $2
-                RETURNING *
-            """, org_id, booking_id)
-            booking = dict(row) if row else None
+        booking = await self.repo.mark_legacy_booking_no_show(org_id, booking_id)
         if booking and self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(booking, org_id)
