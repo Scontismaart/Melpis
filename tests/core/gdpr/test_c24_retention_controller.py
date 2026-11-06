@@ -91,7 +91,7 @@ async def test_controller_rejects_broad_credentials(monkeypatch):
     assert conn.fetchval.await_count == 1
 
 @pytest.mark.asyncio
-async def test_retention_operator_database_role_and_dispatch(pg_pool, sample_org, other_org):
+async def test_retention_operator_database_role_and_dispatch(pg_pool, other_org):
     """Exercise real grants, role checks and tenant-bound no-op dispatch."""
     import asyncpg
 
@@ -107,10 +107,6 @@ async def test_retention_operator_database_role_and_dispatch(pg_pool, sample_org
                 assert not await conn.fetchval(
                     "SELECT public.c24_run_retention_target($1,$2,$3)",
                     kind, other_org["id"], uuid4())
-            # An identifier from a different organization must never be found.
-            assert not await conn.fetchval(
-                "SELECT public.c24_run_retention_target('message',$1,$2)",
-                other_org["id"], sample_org["id"])
             await conn.execute("RESET ROLE")
             await conn.execute("SET LOCAL ROLE service_role")
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
@@ -123,7 +119,7 @@ from tests.core.gdpr.test_c24_idle_expiry import age_state
 
 
 @pytest.mark.asyncio
-async def test_operator_dispatches_eligible_expiry_and_receipt(state_env):
+async def test_operator_dispatches_eligible_targets(state_env, other_org):
     env = state_env
     pool = env['pool']
     request = uuid4()
@@ -139,10 +135,23 @@ async def test_operator_dispatches_eligible_expiry_and_receipt(state_env):
         retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
         VALUES($1,'technical_receipts','test',true,90,false,'test:receipt','qa',
         clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""", env['org'])
+    await pool.execute("""UPDATE messages SET status='handled',handling_type='ai',
+        created_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND id=$2""",
+        env['org'], env['message'])
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'messages_content','test',true,90,false,'test:source','qa',
+        clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""", env['org'])
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute('GRANT melpis_c24_retention TO CURRENT_USER')
         await conn.execute('SET LOCAL ROLE melpis_c24_retention')
-        for kind, target in [('conversation', env['conv']), ('receipt', request)]:
-            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, uuid4(), target)
+        targets = [('conversation', env['conv']), ('receipt', request), ('message', env['message'])]
+        for kind, target in targets:
+            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, other_org['id'], target)
             assert await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
             assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
+    message = await pool.fetchrow(
+        "SELECT content_purged_at,content_text,ai_reply_cache,billed_at FROM messages WHERE organization_id=$1 AND id=$2",
+        env['org'], env['message'])
+    assert message['content_purged_at'] and message['billed_at']
+    assert message['content_text'] is None and message['ai_reply_cache'] is None
