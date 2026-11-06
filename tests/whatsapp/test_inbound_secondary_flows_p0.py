@@ -124,6 +124,7 @@ async def test_fast_reply_meta_failure_does_not_mark_replied(base_app_config, fa
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
@@ -160,6 +161,7 @@ async def test_all_successful_flows_finalize_properly(base_app_config, fake_tena
     }
 
     mock_repo = AsyncMock()
+    mock_repo.pool = None
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
