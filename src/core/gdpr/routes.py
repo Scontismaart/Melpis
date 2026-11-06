@@ -19,7 +19,7 @@ from src.core.auth.dependencies import (
 from src.core.db.repository import CoreRepository
 from src.core.gdpr import token_store
 from src.core.gdpr.exporter import Exporter
-from src.core.gdpr.operations import Operations, OperationUnavailable, RequestConflict
+from src.core.gdpr.operations import Operations, RequestConflict
 from src.core.gdpr.deletion import Deletion
 from src.core.gdpr.product_policy import product_policy_payload
 
