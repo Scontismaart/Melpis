@@ -23,7 +23,8 @@ async def env(monkeypatch):
     app.include_router(routes.router)
     repo = BookingRepository(object())
     repo.get_booking = AsyncMock(return_value={'id': str(uuid4()), 'stato': 'no_show'})
-    service = SimpleNamespace(repo=repo, mark_no_show=AsyncMock(), cancel=AsyncMock())
+    service = SimpleNamespace(repo=repo, mark_no_show=AsyncMock(), cancel=AsyncMock(), reject=AsyncMock(),
+                              confirm=AsyncMock(), mark_completed=AsyncMock(), update_booking=AsyncMock())
     app.state.booking_service = service
     app.dependency_overrides[get_current_user] = verified
     app.dependency_overrides[get_organization_context] = verified
@@ -110,3 +111,29 @@ async def test_cancel_legacy_managed_booking_fails_closed(env):
     assert (await client.post(f'/api/bookings/{uuid4()}/cancel')).status_code == 409
     apply.assert_not_awaited()
     audit.assert_not_awaited()
+
+
+@pytest.mark.parametrize('operation', ['reject', 'confirm', 'mark-completed', 'update'])
+async def test_remaining_legacy_routes_reject_managed_booking(env, operation):
+    client, _, service, apply, audit = env
+    method = {'reject': 'reject', 'confirm': 'confirm', 'mark-completed': 'mark_completed',
+              'update': 'update_booking'}[operation]
+    getattr(service, method).side_effect = ManagedBookingMutationRequired()
+    path = f'/api/bookings/{uuid4()}'
+    response = await (client.put(path, json={}) if operation == 'update'
+                      else client.post(f'{path}/{operation}'))
+    assert response.status_code == 409
+    apply.assert_not_awaited()
+    audit.assert_not_awaited()
+
+
+async def test_managed_reject_uses_typed_contract(env):
+    client, identity, service, apply, audit = env
+    key, booking = uuid4(), uuid4()
+    headers = {'Idempotency-Key': str(key), 'X-Booking-Allocation-Revision': '1',
+               'X-Booking-Catalog-Revision': '2'}
+    assert (await client.post(f'/api/bookings/{booking}/reject', headers=headers)).status_code == 200
+    assert apply.await_args.kwargs['mutation'].operation == 'reject'
+    assert apply.await_args.args[1:3] == (identity['organization_id'], identity['auth_user_id'])
+    service.reject.assert_not_awaited()
+    audit.assert_awaited_once()

@@ -313,7 +313,7 @@ class BookingRepository(TenantScopedRepository):
         return booking
 
     async def request_google_confirmation(self, organization_id, booking_id):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             from src.core.gdpr.guard import check_contact_intake
             phone = await conn.fetchval("SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2",
                                        uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)))
@@ -393,8 +393,20 @@ class BookingRepository(TenantScopedRepository):
                 )
             return [dict(r) for r in rows]
 
+    @asynccontextmanager
+    async def _legacy_mutation_connection(self, organization_id, booking_id):
+        # Serialize the managed-set check with allocator admission on the same row.
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow(
+                "SELECT id FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+                organization_id, booking_id,
+            )
+            if row and await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            yield conn
+
     async def update_booking_status(self, organization_id, booking_id, stato, expected_status=None, expected=None):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET stato = $3, updated_at = NOW()
                 WHERE organization_id = $1 AND id = $2
@@ -412,7 +424,7 @@ class BookingRepository(TenantScopedRepository):
             return dict(row) if row else None
 
     async def mark_booking_completed(self, organization_id, booking_id, expected):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET stato = 'completata', completata_at = NOW(), updated_at = NOW()
                 WHERE organization_id = $1 AND id = $2
@@ -431,7 +443,7 @@ class BookingRepository(TenantScopedRepository):
         if isinstance(ora, str):
             ore, minuti = ora.split(":")
             ora = time(int(ore), int(minuti))
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET nome_cliente = $3, telefono = $4,
                     data = $5, ora = $6, coperti = $7, note = $8,

@@ -151,6 +151,8 @@ async def update_booking(booking_id: str, body: PrenotazioneModificaInput,
             user["organization_id"], booking_id,
             **body.model_dump(exclude_unset=True),
         )
+    except ManagedBookingMutationRequired:
+        raise HTTPException(409, "Managed booking requires a typed mutation") from None
     except SlotPienoError as e:
         raise HTTPException(status_code=409, detail={
             "messaggio": str(e),
@@ -170,6 +172,8 @@ async def confirm_booking(booking_id: str, request: Request,
     service = _get_booking_service(request)
     try:
         b = await service.confirm(user["organization_id"], booking_id)
+    except ManagedBookingMutationRequired:
+        raise HTTPException(409, "Managed booking requires a typed mutation") from None
     except SlotPienoError as e:
         raise HTTPException(status_code=409, detail={"messaggio": str(e), "alternative": e.alternative})
     except BookingNotFoundError as e:
@@ -181,15 +185,33 @@ async def confirm_booking(booking_id: str, request: Request,
 
 
 @router.post("/{booking_id}/reject")
-async def reject_booking(booking_id: str, body: dict | None = None, request: Request = None,
-                         user: dict = Depends(require_ruolo("owner", "manager"))):
+async def reject_booking(
+    booking_id: str, body: dict | None = None, request: Request = None,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+    idempotency_key: str | None = Header(default=None),
+    x_booking_allocation_revision: str | None = Header(default=None),
+    x_booking_catalog_revision: str | None = Header(default=None),
+):
     service = _get_booking_service(request)
-    body = body or {}
-    try:
-        b = await service.reject(user["organization_id"], booking_id, body.get("motivo", ""))
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    await _audit_booking(request, user, "prenotazione.rifiutata", b)
+    if any(value is not None for value in (idempotency_key, x_booking_allocation_revision, x_booking_catalog_revision)):
+        if body:
+            raise HTTPException(422, "Managed rejection does not support a reason")
+        b, replayed = await _mark_managed_booking(
+            service, user, booking_id, idempotency_key,
+            x_booking_allocation_revision, x_booking_catalog_revision, "reject",
+        )
+    else:
+        replayed = False
+        try:
+            b = await service.reject(user["organization_id"], booking_id, (body or {}).get("motivo", ""))
+        except ManagedBookingMutationRequired:
+            raise HTTPException(409, "Managed booking requires a typed mutation") from None
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if not replayed:
+        await _audit_booking(request, user, "prenotazione.rifiutata", b)
     return b
 
 
@@ -295,6 +317,8 @@ async def mark_completed(booking_id: str, request: Request,
     service = _get_booking_service(request)
     try:
         b = await service.mark_completed(user["organization_id"], booking_id)
+    except ManagedBookingMutationRequired:
+        raise HTTPException(409, "Managed booking requires a typed mutation") from None
     except SlotPienoError as e:
         raise HTTPException(status_code=409, detail={"messaggio": str(e), "alternative": e.alternative})
     except BookingNotFoundError as e:
