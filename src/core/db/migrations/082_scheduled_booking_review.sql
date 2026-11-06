@@ -1,5 +1,7 @@
 -- The scheduler can mark an elapsed booking for human review. It cannot
 -- choose a status, change capacity, read customer data, or send a message.
+DO $scheduled_booking_review$
+BEGIN
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'melpis_booking_scheduler') THEN
@@ -25,6 +27,9 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
         WHERE rolname = COALESCE(NULLIF(current_setting('role'), 'none'), session_user)
           AND NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
           AND pg_has_role(oid, 'melpis_booking_scheduler', 'USAGE')
+          AND NOT has_any_column_privilege(oid, 'public.bookings', 'SELECT,UPDATE,INSERT,REFERENCES')
+          AND NOT has_any_column_privilege(oid, 'public.contacts', 'SELECT,UPDATE,INSERT,REFERENCES')
+          AND NOT has_table_privilege(oid, 'public.booking_allocation_requests', 'INSERT')
     )
 $$;
 REVOKE ALL ON FUNCTION public.booking_scheduled_review_role() FROM PUBLIC;
@@ -197,3 +202,5 @@ REVOKE ALL ON FUNCTION public.list_scheduled_booking_reviews(uuid, uuid),
 GRANT USAGE ON SCHEMA public TO melpis_booking_scheduler;
 GRANT EXECUTE ON FUNCTION public.list_scheduled_booking_reviews(uuid, uuid),
     public.apply_scheduled_booking_review(uuid, uuid) TO melpis_booking_scheduler;
+END;
+$scheduled_booking_review$;
