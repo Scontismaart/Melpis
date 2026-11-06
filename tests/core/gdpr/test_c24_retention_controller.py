@@ -116,3 +116,33 @@ async def test_retention_operator_database_role_and_dispatch(pg_pool, sample_org
             with pytest.raises(asyncpg.InsufficientPrivilegeError):
                 async with conn.transaction():
                     await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+
+from tests.core.bookings.test_conversation_state_postgres import state_env, commit_source, apply
+from tests.core.gdpr.test_conversation_lifecycle_c24 import approve_conversation
+from tests.core.gdpr.test_c24_idle_expiry import age_state
+
+
+@pytest.mark.asyncio
+async def test_operator_dispatches_eligible_expiry_and_receipt(state_env):
+    env = state_env
+    pool = env['pool']
+    request = uuid4()
+    await commit_source(env, env['message'], '2026-11-12', {'service_id': 'standard'}, 1700000000)
+    await apply(env, env['message'], request=request)
+    await approve_conversation(pool, env['org'])
+    await age_state(env, 31)
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute('ALTER TABLE booking_conversation_requests DISABLE TRIGGER conversation_immutable')
+        await conn.execute("UPDATE booking_conversation_requests SET c24_concluded_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND request_id=$2", env['org'], request)
+        await conn.execute('ALTER TABLE booking_conversation_requests ENABLE TRIGGER conversation_immutable')
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'technical_receipts','test',true,90,false,'test:receipt','qa',
+        clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""", env['org'])
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute('GRANT melpis_c24_retention TO CURRENT_USER')
+        await conn.execute('SET LOCAL ROLE melpis_c24_retention')
+        for kind, target in [('conversation', env['conv']), ('receipt', request)]:
+            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, uuid4(), target)
+            assert await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
+            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
