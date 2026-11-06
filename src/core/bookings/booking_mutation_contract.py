@@ -316,7 +316,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 or allocation['booking_calendar_revision'] != locked['calendar_revision']
                 or allocation['timezone'] != catalog.timezone
                 or (allocation['temporal_kind'] != 'minutes' and (is_reschedule or allocation['temporal_kind'] != 'civil_nights'))
-                or locked['stato'] not in {'in_attesa', 'confermata'}
+                or (locked['stato'] not in {'in_attesa', 'confermata'}
+                    and (mutation.operation, locked['stato']) != ('no_show', 'da_verificare'))
                 or locked['completata_at'] is not None or locked['no_show_at'] is not None):
                 raise AllocationConflict('Active allocation preimage changed')
             if is_reschedule and (request.service_id != allocation['service_id'] or request.room_count is not None):

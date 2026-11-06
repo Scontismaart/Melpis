@@ -89,7 +89,9 @@ class BookingAllocationRepository:
             if mutation.operation == 'reactivate' and (booking['stato'] not in {'cancellata','cancellato','rifiutata'}
                 or booking['completata_at'] is not None or booking['no_show_at'] is not None):
                 raise AllocationConflict('Reactivation preimage changed')
-            if mutation.operation in {'cancel','reject','no_show'} and (booking['stato'] not in {'in_attesa','confermata'}
+            if mutation.operation in {'cancel','reject','no_show'} and (
+                (booking['stato'] not in {'in_attesa','confermata'}
+                 and (mutation.operation, booking['stato']) != ('no_show', 'da_verificare'))
                 or booking['completata_at'] is not None or booking['no_show_at'] is not None):
                 raise AllocationConflict('Release preimage changed')
         stay = None

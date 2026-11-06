@@ -176,6 +176,27 @@ async def test_scheduled_worker_atomically_reviews_elapsed_booking_with_private_
         "WHERE organization_id=$1 AND booking_id=$2 AND actor_kind='scheduled_review'", env.org, booking,
     )
     assert len(receipts) == 1 and tuple(receipts[0]) == (None, 'replace', 'replaced', 3)
+    for operation in ('cancel', 'reject'):
+        with pytest.raises(AllocationConflict):
+            await apply_booking_mutation(
+                pg_pool, env.org, env.auth, env.request(booking, action='cancel', allocation_revision=3),
+                mutation=BookingMutation(operation, '', '', ''),
+            )
+    release = env.request(booking, action='cancel', allocation_revision=3)
+    no_show = BookingMutation('no_show', '', '', '')
+    result = await apply_booking_mutation(pg_pool, env.org, env.auth, release, mutation=no_show)
+    assert result['outcome'] == 'cancelled' and result['applied_allocation_revision'] == 4
+    assert (await apply_booking_mutation(pg_pool, env.org, env.auth, release, mutation=no_show))['replayed']
+    row = await BookingRepository(pg_pool).get_booking(env.org, booking)
+    assert row['stato'] == 'no_show' and row['no_show_at'] is not None
+    assert await pg_pool.fetchval(
+        'SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2',
+        env.org, booking,
+    ) == 0
+    assert await pg_pool.fetchval(
+        'SELECT booking_fingerprint FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2',
+        env.org, booking,
+    ) == _booking_fingerprint(row)
 
 @pytest.mark.parametrize('authority,allowed', [('internal_calendar_sync', True),('google_authoritative', False),('external_authoritative', False)])
 async def test_calendar_authority_is_local_or_fail_closed(pg_pool, authority, allowed):
