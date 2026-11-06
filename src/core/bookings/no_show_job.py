@@ -12,10 +12,9 @@ async def mark_da_verificare_for_org(service, org_id, org_timezone: str = "Europ
     marked = []
     for b in bookings:
         try:
-            updated = await service.repo.update_booking_status(
-                org_id, b["id"], "da_verificare", expected_status="confermata")
+            updated = await service.repo.mark_legacy_booking_for_review(org_id, b["id"], today)
             if updated:
                 marked.append(updated)
-        except Exception as e:
-            logger.error("No-show check failed for booking %s: %s", b["id"], e)
+        except Exception:
+            logger.error("Scheduled review failed org=%s booking=%s", org_id, b["id"])
     return marked

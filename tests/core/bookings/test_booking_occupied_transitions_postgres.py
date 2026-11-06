@@ -1,10 +1,13 @@
 """Dark owner transitions preserve occupied claims; no operational wiring."""
+import asyncio
+from datetime import date, time
+
 import pytest
 from uuid import uuid4
 from src.core.bookings.booking_mutation_contract import BookingMutation, BookingMutationRejected, apply_booking_mutation
 from src.core.db.repositories.booking_allocation_repo import AllocationConflict, AllocationDenied, AllocationUnavailable, _booking_fingerprint
 from src.core.db.repositories.booking_repo import BookingRepository
-from tests.core.bookings.test_allocation_engine_postgres import create_environment
+from tests.core.bookings.test_allocation_engine_postgres import create_environment, wait_blocked
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,6 +67,66 @@ async def test_review_status_transition_rebinds_valid_preimage(pg_pool):
     result = await apply_booking_mutation(pg_pool, env.org, env.auth, env.request(booking, action='replace', allocation_revision=1), mutation=BookingMutation('complete', '', '', ''))
     assert result['outcome'] == 'replaced'
     assert await pg_pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'completata'
+
+
+async def test_legacy_scheduled_review_preserves_managed_allocation(pg_pool, caplog):
+    env = await create_environment(pg_pool)
+    managed = await env.booking()
+    await env.apply(env.request(managed))
+    await apply_booking_mutation(
+        pg_pool, env.org, env.auth, env.request(managed, action='replace', allocation_revision=1),
+        mutation=BookingMutation('confirm', '', '', ''),
+    )
+    target_date = date(2026, 10, 28)
+    repo = BookingRepository(pg_pool)
+    legacy = await repo.create_booking(
+        organization_id=env.org, nome_cliente='Synthetic', data=target_date,
+        ora=time(10), coperti=1, stato='confermata',
+    )
+    assert await repo.mark_legacy_booking_for_review(env.org, managed, target_date) is None
+    assert 'Scheduled review requires typed transition' in caplog.text
+    assert await repo.mark_legacy_booking_for_review(uuid4(), legacy['id'], target_date) is None
+    result = await repo.mark_legacy_booking_for_review(env.org, legacy['id'], target_date)
+    assert result['stato'] == 'da_verificare'
+    assert await repo.mark_legacy_booking_for_review(env.org, legacy['id'], target_date) is None
+    row = await repo.get_booking(env.org, managed)
+    fingerprint = await pg_pool.fetchval(
+        'SELECT booking_fingerprint FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2',
+        env.org, managed,
+    )
+    assert row['stato'] == 'confermata' and fingerprint == _booking_fingerprint(row)
+
+
+async def test_scheduled_review_observes_concurrently_committed_allocation(pg_pool, monkeypatch):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    await pg_pool.execute("UPDATE bookings SET stato='confermata' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    allocated = asyncio.Event()
+    release = asyncio.Event()
+    original = env.engine._receipt
+    allocator_pid = None
+
+    async def pause_after_receipt(conn, *args):
+        nonlocal allocator_pid
+        await original(conn, *args)
+        allocator_pid = conn.get_server_pid()
+        allocated.set()
+        await release.wait()
+
+    monkeypatch.setattr(env.engine, '_receipt', pause_after_receipt)
+    admission = asyncio.create_task(env.apply(env.request(booking)))
+    review = None
+    try:
+        await asyncio.wait_for(allocated.wait(), 5)
+        review = asyncio.create_task(BookingRepository(pg_pool).mark_legacy_booking_for_review(
+            env.org, booking, date(2026, 10, 28),
+        ))
+        await wait_blocked(pg_pool, allocator_pid)
+    finally:
+        release.set()
+        results = await asyncio.gather(admission, *([review] if review else []), return_exceptions=True)
+    assert results[0]['outcome'] == 'allocated' and results[1] is None
+    assert await pg_pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'confermata'
 
 @pytest.mark.parametrize('authority,allowed', [('internal_calendar_sync', True),('google_authoritative', False),('external_authoritative', False)])
 async def test_calendar_authority_is_local_or_fail_closed(pg_pool, authority, allowed):
