@@ -577,7 +577,11 @@ class BookingService:
         return updated
 
     async def cancel(self, org_id, booking_id):
-        booking = await self.repo.update_booking_status(org_id, booking_id, "cancellata")
+        from src.core.bookings.memory_repo import InMemoryBookingRepo
+        if isinstance(self.repo, InMemoryBookingRepo):
+            booking = await self.repo.update_booking_status(org_id, booking_id, "cancellata")
+        else:
+            booking = await self.repo.cancel_legacy_booking(org_id, booking_id)
         if self.booking_router and org_id and booking and booking.get("external_booking_id"):
             try:
                 from src.core.bookings.ports.base import CancelBookingRequest

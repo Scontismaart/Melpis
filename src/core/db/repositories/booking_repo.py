@@ -591,6 +591,21 @@ class BookingRepository(TenantScopedRepository):
                 WHERE organization_id = $1 AND booking_id = $2)
         """, organization_id, booking_id)
 
+    async def cancel_legacy_booking(self, organization_id, booking_id):
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow("""
+                SELECT id FROM bookings WHERE organization_id = $1 AND id = $2 FOR UPDATE
+            """, organization_id, booking_id)
+            if row is None:
+                return None
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            updated = await conn.fetchrow("""
+                UPDATE bookings SET stato = 'cancellata', updated_at = NOW()
+                WHERE organization_id = $1 AND id = $2 RETURNING *
+            """, organization_id, booking_id)
+            return dict(updated)
+
     async def mark_legacy_booking_no_show(self, organization_id, booking_id):
         async with self._connection() as conn, conn.transaction(isolation="read_committed"):
             row = await conn.fetchrow("""

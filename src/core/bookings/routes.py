@@ -194,17 +194,35 @@ async def reject_booking(booking_id: str, body: dict | None = None, request: Req
 
 
 @router.post("/{booking_id}/cancel")
-async def cancel_booking(booking_id: str, request: Request,
-                         user: dict = Depends(require_ruolo("owner", "manager"))):
+async def cancel_booking(
+    booking_id: str, request: Request,
+    user: dict = Depends(require_ruolo("owner", "manager")),
+    idempotency_key: str | None = Header(default=None),
+    x_booking_allocation_revision: str | None = Header(default=None),
+    x_booking_catalog_revision: str | None = Header(default=None),
+):
     service = _get_booking_service(request)
-    b = await service.cancel(user["organization_id"], booking_id)
+    if any(value is not None for value in (
+        idempotency_key, x_booking_allocation_revision, x_booking_catalog_revision,
+    )):
+        b, replayed = await _mark_managed_booking(
+            service, user, booking_id, idempotency_key,
+            x_booking_allocation_revision, x_booking_catalog_revision, "cancel",
+        )
+    else:
+        replayed = False
+        try:
+            b = await service.cancel(user["organization_id"], booking_id)
+        except ManagedBookingMutationRequired:
+            raise HTTPException(409, "Managed booking requires an idempotency key and both allocation revisions") from None
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
-    await _audit_booking(request, user, "prenotazione.annullata", b)
+    if not replayed:
+        await _audit_booking(request, user, "prenotazione.annullata", b)
     return b
 
 
-async def _mark_managed_no_show(service, user, booking_id, key, allocation_revision, catalog_revision):
+async def _mark_managed_booking(service, user, booking_id, key, allocation_revision, catalog_revision, operation):
     if not owner_mutations_enabled():
         raise HTTPException(409, "Managed booking mutations are unavailable")
     if user.get("ruolo") != "owner":
@@ -229,7 +247,7 @@ async def _mark_managed_no_show(service, user, booking_id, key, allocation_revis
         )
         result = await apply_booking_mutation(
             repo.pool, user["organization_id"], user["auth_user_id"], command,
-            mutation=BookingMutation("no_show", "", "", ""),
+            mutation=BookingMutation(operation, "", "", ""),
         )
         return await repo.get_booking(user["organization_id"], command.booking_id), result["replayed"]
     except AllocationConflict:
@@ -254,9 +272,9 @@ async def mark_no_show(
     if any(value is not None for value in (
         idempotency_key, x_booking_allocation_revision, x_booking_catalog_revision,
     )):
-        booking, replayed = await _mark_managed_no_show(
+        booking, replayed = await _mark_managed_booking(
             service, user, booking_id, idempotency_key,
-            x_booking_allocation_revision, x_booking_catalog_revision,
+            x_booking_allocation_revision, x_booking_catalog_revision, "no_show",
         )
     else:
         replayed = False

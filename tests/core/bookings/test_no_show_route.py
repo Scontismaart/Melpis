@@ -23,7 +23,7 @@ async def env(monkeypatch):
     app.include_router(routes.router)
     repo = BookingRepository(object())
     repo.get_booking = AsyncMock(return_value={'id': str(uuid4()), 'stato': 'no_show'})
-    service = SimpleNamespace(repo=repo, mark_no_show=AsyncMock())
+    service = SimpleNamespace(repo=repo, mark_no_show=AsyncMock(), cancel=AsyncMock())
     app.state.booking_service = service
     app.dependency_overrides[get_current_user] = verified
     app.dependency_overrides[get_organization_context] = verified
@@ -77,5 +77,36 @@ async def test_legacy_managed_booking_fails_closed(env):
     client, _, service, apply, audit = env
     service.mark_no_show.side_effect = ManagedBookingMutationRequired()
     assert (await client.post(f'/api/bookings/{uuid4()}/mark-no-show')).status_code == 409
+    apply.assert_not_awaited()
+    audit.assert_not_awaited()
+
+
+async def test_cancel_typed_gate_dispatch_and_replay(env):
+    client, identity, service, apply, audit = env
+    booking_id, key = uuid4(), uuid4()
+    path = f'/api/bookings/{booking_id}/cancel'
+    headers = {'Idempotency-Key': str(key), 'X-Booking-Allocation-Revision': '1',
+               'X-Booking-Catalog-Revision': '2'}
+    identity['ruolo'] = 'manager'
+    assert (await client.post(path, headers=headers)).status_code == 403
+    identity['ruolo'] = 'owner'
+    identity['aal'] = 'aal1'
+    assert (await client.post(path, headers=headers)).status_code == 403
+    identity['aal'] = 'aal2'
+    assert (await client.post(path, headers=headers)).status_code == 200
+    args, kwargs = apply.await_args
+    assert args[1:3] == (identity['organization_id'], identity['auth_user_id'])
+    assert args[3].booking_id == booking_id and args[3].request_id == key
+    assert kwargs['mutation'].operation == 'cancel'
+    apply.return_value = {'replayed': True}
+    assert (await client.post(path, headers=headers)).status_code == 200
+    assert audit.await_count == 1
+    service.cancel.assert_not_awaited()
+
+
+async def test_cancel_legacy_managed_booking_fails_closed(env):
+    client, _, service, apply, audit = env
+    service.cancel.side_effect = ManagedBookingMutationRequired()
+    assert (await client.post(f'/api/bookings/{uuid4()}/cancel')).status_code == 409
     apply.assert_not_awaited()
     audit.assert_not_awaited()
