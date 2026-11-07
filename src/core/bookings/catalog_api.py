@@ -108,3 +108,7 @@ async def publish_catalog(request: Request, user: dict = Depends(require_ruolo("
         expected_revision=body.expected_revision, request_id=body.request_id,
     ))
     return capabilities(state, user)
+
+
+from src.core.bookings.sector_admission_api import router as sector_admission_router
+router.include_router(sector_admission_router)

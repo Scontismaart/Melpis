@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from src.core.db.repositories.webhook_inbox_repo import WebhookInboxRepository
+from src.core.db.inbound_worker_provenance import private_booking_worker_enabled, record_receipt
 
 logger = logging.getLogger(__name__)
 
@@ -98,3 +99,5 @@ class WebhookInboxWorker:
                         await _handle_status_update(repo, org_id, status)
                     for msg in value.messages or []:
                         await _handle_inbound_message(repo, org_id, msg, value.contacts, trace_id=row["trace_id"])
+                        if private_booking_worker_enabled():
+                            await record_receipt(repo.pool.connection, row, msg.id)

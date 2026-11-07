@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -8,6 +9,13 @@ import asyncio
 import asyncpg
 
 from src.core.db.scoping import TenantScopedRepository
+
+logger = logging.getLogger(__name__)
+
+
+class ManagedBookingMutationRequired(RuntimeError):
+    """An allocation-backed booking needs an explicitly revisioned mutation."""
+
 
 class BookingRepository(TenantScopedRepository):
     """Repository specializzato per Prenotazioni, Lock di Slot (P0) e Capienze."""
@@ -305,7 +313,7 @@ class BookingRepository(TenantScopedRepository):
         return booking
 
     async def request_google_confirmation(self, organization_id, booking_id):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             from src.core.gdpr.guard import check_contact_intake
             phone = await conn.fetchval("SELECT telefono FROM bookings WHERE organization_id=$1 AND id=$2",
                                        uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)))
@@ -385,8 +393,20 @@ class BookingRepository(TenantScopedRepository):
                 )
             return [dict(r) for r in rows]
 
+    @asynccontextmanager
+    async def _legacy_mutation_connection(self, organization_id, booking_id):
+        # Serialize the managed-set check with allocator admission on the same row.
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow(
+                "SELECT id FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+                organization_id, booking_id,
+            )
+            if row and await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            yield conn
+
     async def update_booking_status(self, organization_id, booking_id, stato, expected_status=None, expected=None):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET stato = $3, updated_at = NOW()
                 WHERE organization_id = $1 AND id = $2
@@ -404,7 +424,7 @@ class BookingRepository(TenantScopedRepository):
             return dict(row) if row else None
 
     async def mark_booking_completed(self, organization_id, booking_id, expected):
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET stato = 'completata', completata_at = NOW(), updated_at = NOW()
                 WHERE organization_id = $1 AND id = $2
@@ -423,7 +443,7 @@ class BookingRepository(TenantScopedRepository):
         if isinstance(ora, str):
             ore, minuti = ora.split(":")
             ora = time(int(ore), int(minuti))
-        async with self._connection() as conn:
+        async with self._legacy_mutation_connection(organization_id, booking_id) as conn:
             row = await conn.fetchrow("""
                 UPDATE bookings SET nome_cliente = $3, telefono = $4,
                     data = $5, ora = $6, coperti = $7, note = $8,
@@ -573,6 +593,68 @@ class BookingRepository(TenantScopedRepository):
                 ORDER BY ora
             """, organization_id, target_date)
             return [dict(r) for r in rows]
+
+    @staticmethod
+    async def _has_managed_allocation(conn, organization_id, booking_id):
+        if not await conn.fetchval("SELECT to_regclass('public.booking_allocation_sets') IS NOT NULL"):
+            return False
+        return await conn.fetchval("""
+            SELECT EXISTS (SELECT 1 FROM public.booking_allocation_sets
+                WHERE organization_id = $1 AND booking_id = $2)
+        """, organization_id, booking_id)
+
+    async def cancel_legacy_booking(self, organization_id, booking_id):
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow("""
+                SELECT id FROM bookings WHERE organization_id = $1 AND id = $2 FOR UPDATE
+            """, organization_id, booking_id)
+            if row is None:
+                return None
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            updated = await conn.fetchrow("""
+                UPDATE bookings SET stato = 'cancellata', updated_at = NOW()
+                WHERE organization_id = $1 AND id = $2 RETURNING *
+            """, organization_id, booking_id)
+            return dict(updated)
+
+    async def mark_legacy_booking_no_show(self, organization_id, booking_id):
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow("""
+                SELECT id FROM bookings WHERE organization_id = $1 AND id = $2 FOR UPDATE
+            """, organization_id, booking_id)
+            if row is None:
+                return None
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
+                raise ManagedBookingMutationRequired()
+            updated = await conn.fetchrow("""
+                UPDATE bookings SET stato = 'no_show', no_show_at = NOW(), updated_at = NOW()
+                WHERE organization_id = $1 AND id = $2 RETURNING *
+            """, organization_id, booking_id)
+            return dict(updated)
+
+    async def mark_legacy_booking_for_review(self, organization_id, booking_id, target_date):
+        """Apply the scheduler transition only when no typed allocation owns the row."""
+        async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            row = await conn.fetchrow("""
+                SELECT id FROM bookings
+                WHERE organization_id = $1 AND id = $2 AND data = $3
+                  AND stato = 'confermata' AND completata_at IS NULL AND no_show_at IS NULL
+                FOR UPDATE
+            """, organization_id, booking_id, target_date)
+            if row is None:
+                return None
+            # The allocator locks the same booking before inserting or replacing
+            # a set. Read after acquiring that lock, using a fresh snapshot.
+            if await self._has_managed_allocation(conn, organization_id, booking_id):
+                logger.warning("Scheduled review requires typed transition org=%s booking=%s",
+                               organization_id, booking_id)
+                return None
+            updated = await conn.fetchrow("""
+                UPDATE bookings SET stato = 'da_verificare', updated_at = NOW()
+                WHERE organization_id = $1 AND id = $2 RETURNING *
+            """, organization_id, booking_id)
+            return dict(updated)
 
     async def upsert_booking_settings_config(self, organization_id, config):
         if not isinstance(config, dict) or "catalog_v2" in config:

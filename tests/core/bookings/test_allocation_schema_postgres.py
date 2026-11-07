@@ -361,3 +361,55 @@ async def test_admin_membership_regrant_path_cannot_hide_privileges(allocation_d
             with pytest.raises(asyncpg.PostgresError,match='privilege requires review'):
                 async with c.transaction(): await c.execute(MIGRATION)
         finally: await tx.rollback()
+
+async def test_service_receipt_shape_provenance_and_acl(allocation_data):
+    from tests.core.test_quota_reservation_lifecycle import _inbound_message
+
+    pool, org, other, _, _, booking, _ = allocation_data
+    message = await _inbound_message(pool, org)
+    inbox, operation, actor, other_booking = uuid4(), uuid4(), uuid4(), uuid4()
+    async with pool.acquire() as c:
+        await c.execute("""INSERT INTO meta_webhook_inbox
+            (id,organization_id,channel,event_key,payload,trace_id)
+            VALUES($1,$2,'whatsapp',$3,'{}','synthetic')""", inbox, org, str(inbox))
+        await c.execute("INSERT INTO usage_events(id,organization_id,event_type) VALUES($1,$2,'synthetic')", operation, org)
+        await c.execute('INSERT INTO inbound_worker_receipts VALUES($1,$2,$3)', org, inbox, message)
+        await c.execute('INSERT INTO inbound_worker_operations VALUES($1,$2,$3,$4)', org, inbox, message, operation)
+        sql = """INSERT INTO booking_allocation_requests
+            (organization_id,request_id,booking_id,actor_user_id,actor_kind,service_inbox_id,service_message_id,service_operation_id,action,payload_hash,outcome,catalog_revision)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,'allocate',$9,'unknown',1)"""
+        await c.execute(sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64)
+        await put_receipt(c, org, booking)
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            async with c.transaction():
+                await c.execute('SET LOCAL ROLE service_role')
+                await c.execute(sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64)
+        assert await c.fetchval("SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND actor_kind='human' AND actor_user_id IS NOT NULL AND service_inbox_id IS NULL", org) == 1
+        for kind, human, i, m, o in [
+            ('human', None, None, None, None),
+            ('human', actor, inbox, message, operation),
+            ('inbound_worker', actor, inbox, message, operation),
+            ('inbound_worker', None, inbox, message, None),
+            ('inbound_worker', None, inbox, message, uuid4()),
+            ('unknown', None, inbox, message, operation),
+        ]:
+            with pytest.raises(asyncpg.PostgresError):
+                async with c.transaction():
+                    await c.execute(sql, org, uuid4(), booking, human, kind, i, m, o, 'a'*64)
+        await c.execute("INSERT INTO bookings(id,organization_id,nome_cliente,telefono,data,ora,coperti,stato) VALUES($1,$2,'Synthetic','','2026-10-28','10:00',1,'in_attesa')", other_booking, other)
+        # Exact source tuple and tenant must match, even if each UUID exists elsewhere.
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            async with c.transaction():
+                await c.execute(sql, other, uuid4(), other_booking, None, 'inbound_worker', inbox, message, operation, 'a'*64)
+        await c.execute('DELETE FROM inbound_worker_operations WHERE organization_id=$1 AND operation_id=$2', org, operation)
+        assert await c.fetchval("SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND service_operation_id=$2", org, operation) == 1
+        for role in ('anon', 'authenticated', 'service_role'):
+            for table in ('inbound_worker_receipts', 'inbound_worker_operations'):
+                for privilege in ('SELECT', 'INSERT', 'UPDATE', 'DELETE'):
+                    assert not await c.fetchval('SELECT has_table_privilege($1,$2,$3)', role, table, privilege)
+        for role in ('anon', 'authenticated'):
+            assert not await c.fetchval("SELECT has_table_privilege($1,'booking_allocation_requests','INSERT')", role)
+        for privilege in ('UPDATE', 'DELETE', 'TRUNCATE'):
+            assert not await c.fetchval("SELECT has_table_privilege('service_role','booking_allocation_requests',$1)", privilege)
+        migration = (Path(__file__).parents[3] / 'src/core/db/migrations/079_booking_service_receipts.sql').read_text(encoding='utf-8-sig')
+        await c.execute(migration)

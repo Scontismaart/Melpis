@@ -51,7 +51,7 @@ class MultiChannelRetryWorker:
             except Exception as e:
                 logger.error("Error processing delivery attempt %s: %s", attempt["id"], e)
 
-    async def _process_one(self, attempt: dict, *, confirmation_guarded=False):
+    async def _process_one(self, attempt: dict, *, confirmation_guarded=False, prompt_guarded=False):
         message_id = attempt["message_id"]
         payload = await self.repo.reconstruct_payload_for_retry(message_id)
         if not payload:
@@ -90,6 +90,27 @@ class MultiChannelRetryWorker:
                 attempt["id"], message_id,
             )
             return
+        if payload.get("handling_type") == "c24_confirmation_prompt" and not prompt_guarded:
+            from src.core.db.repositories.booking_allocation_repo import AllocationDenied, AllocationUnavailable
+            from src.core.db.repositories.booking_conversation_repo import (
+                BookingConversationRepository, ConversationStateDenied, ConversationStateUnavailable,
+            )
+            try:
+                repository = BookingConversationRepository(self.repo.pool)
+                async with repository.confirmation_prompt_delivery_guard(
+                    org_id, payload.get("conversation_id"), message_id,
+                ) as eligible:
+                    if eligible:
+                        return await self._process_one(attempt, prompt_guarded=True)
+            except (ConversationStateDenied, ConversationStateUnavailable, AllocationDenied, AllocationUnavailable):
+                pass
+            await self.repo.update_delivery_attempt(
+                attempt["id"], "failed", {"error": "booking_prompt_no_longer_current"},
+            )
+            await self.repo.update_message_status(
+                message_id, "failed", error_code="booking_prompt_no_longer_current", organization_id=org_id,
+            )
+            return
         channel = (payload.get("channel") or payload.get("canale") or "whatsapp").lower()
         attempt_num = attempt["attempt_number"]
 
@@ -116,13 +137,24 @@ class MultiChannelRetryWorker:
                     raise RuntimeError(result.error or "Instagram delivery failed")
             else:
                 # Default channel: WhatsApp
-                if self.service and hasattr(self.service, "attempt_delivery"):
+                delivery_service = self.service
+                if payload.get("handling_type") == "c24_confirmation_prompt" and not callable(
+                    getattr(delivery_service, "attempt_delivery", None)
+                ):
+                    from src.core.channels.whatsapp_adapter import WhatsAppOutboundAdapter
+                    adapter = self.channel_router.get_adapter("whatsapp") if self.channel_router else None
+                    if not isinstance(adapter, WhatsAppOutboundAdapter):
+                        raise RuntimeError("Confirmation prompt requires original-payload delivery")
+                    delivery_service = adapter.service
+                    if not callable(getattr(delivery_service, "attempt_delivery", None)):
+                        raise RuntimeError("Confirmation prompt requires original-payload delivery")
+                if delivery_service and hasattr(delivery_service, "attempt_delivery"):
                     import src.whatsapp.config as wa_config
                     tenant = await wa_config.load_tenant_config(org_id, self.app_config, self.repo)
                     from src.whatsapp.client import MetaClient
                     client = MetaClient(tenant)
                     try:
-                        result = await self.service.attempt_delivery(
+                        result = await delivery_service.attempt_delivery(
                             message_id=message_id,
                             phone_number_id=tenant.phone_number_id,
                             access_token=tenant.access_token,

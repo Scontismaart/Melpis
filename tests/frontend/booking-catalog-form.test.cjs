@@ -145,3 +145,21 @@ test("weekly hours use time inputs and round-trip civil-day boundaries", () => {
   assert.deepEqual(plain(h.form.read(2).availability.days[0].windows[0]), { start_minute: null, end_minute: null });
   h.dom.window.close();
 });
+
+test("hotel room occupancy limit is optional, editable and strictly positive", () => {
+  const { container, form, dom } = setup();
+  form.load(fixtures.hotel_bnb);
+  const input = field(container, "Ospiti massimi per camera (facoltativo)");
+  assert.ok(input);
+  assert.equal(input.min, "1");
+  assert.match(container.textContent, /Senza un limite positivo/);
+  change(dom, input, "3");
+  assert.equal(form.read(3).resources[0].max_occupants, 3);
+  change(dom, input, "0");
+  assert.throws(() => form.read(3), /numero intero positivo/);
+  change(dom, input, "");
+  assert.equal(Object.hasOwn(form.read(3).resources[0], "max_occupants"), false);
+  change(dom, field(container, "Tipo"), "operator");
+  assert.equal(field(container, "Ospiti massimi per camera (facoltativo)"), undefined);
+  dom.window.close();
+});

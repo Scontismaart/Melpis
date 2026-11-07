@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from src.core.billing.quota_reservations import QuotaOperation, _decode, _hash
 from src.core.bookings.catalog_contracts import ScopedCatalog
@@ -19,6 +19,7 @@ from src.core.bookings.conversation_state import (
     validate_proposal_catalog,
 )
 from src.core.db.quota_provenance import require_quota_trust_epoch
+from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
 from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
 from src.core.db.repositories.booking_catalog_repo import decode
 
@@ -46,17 +47,62 @@ class BookingConversationRepository:
         self._allocation = BookingAllocationRepository(pool)
 
     @asynccontextmanager
-    async def _scope(self, organization_id, auth_user_id, conversation_id):
-        org, auth, conversation = map(_uuid, (organization_id, auth_user_id, conversation_id))
+    async def confirmation_prompt_delivery_guard(self, organization_id, conversation_id, prompt_id):
+        """Hold the authoritative conversation and consent through delivery."""
+        prompt_id = _uuid(prompt_id)
+        async with self._scope(organization_id, None, conversation_id, worker=True) as context:
+            conn, org, conversation, _, scoped, _ = context
+            state, row = await self._load(conn, org, conversation)
+            if (not state or state.intent != 'booking' or state.confirmation
+                    or state.missing_fields or state.ambiguous_fields or state.handoff_reason
+                    or state.catalog_revision != scoped.catalog.revision):
+                yield False
+                return
+            prompt = await conn.fetchrow("""SELECT content,content_text FROM messages
+                WHERE organization_id=$1 AND conversation_id=$2 AND id=$3 AND direction='outbound'
+                  AND handling_type='c24_confirmation_prompt' AND deleted_at IS NULL""",
+                org, conversation, prompt_id,
+            )
+            payload = decode(prompt['content']) if prompt else {}
+            phone = await conn.fetchval('SELECT phone_number FROM contacts WHERE organization_id=$1 AND id=$2',
+                                        org, row['subject_id'])
+            eligible = (isinstance(payload, dict) and bool(phone) and payload.get('to') == phone
+                        and payload.get('_c24_subject_id') == str(row['subject_id'])
+                        and payload.get('_c24_state_digest') == state_digest(state)
+                        and payload.get('_c24_source_id') == str(state.last_source_message_id)
+                        and prompt['content_text'] == render_confirmation_prompt(state, prompt_id))
+            if eligible:
+                eligible = not await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM messages m
+                    JOIN messages origin ON origin.organization_id=m.organization_id
+                     AND origin.conversation_id=m.conversation_id AND origin.id=$3
+                    WHERE m.organization_id=$1 AND origin.organization_id=$1 AND m.conversation_id=$2
+                      AND m.direction='inbound' AND m.id<>origin.id AND m.created_at>=origin.created_at)""",
+                    org, conversation, state.last_source_message_id,
+                )
+            yield eligible
+
+    @asynccontextmanager
+    async def _scope(self, organization_id, auth_user_id, conversation_id, *, worker=False):
+        org, conversation = map(_uuid, (organization_id, conversation_id))
+        auth = None if worker else _uuid(auth_user_id)
         async with self.pool.acquire() as conn, conn.transaction(isolation='read_committed'):
             organization = await conn.fetchrow('SELECT * FROM organizations WHERE id=$1 FOR SHARE', org)
             if not organization:
                 raise ConversationStateDenied('Organization unavailable')
             await conn.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(org))
-            actor = await self._allocation._actor(conn, org, auth)
+            if worker:
+                if not private_booking_worker_enabled() or not await conn.fetchval("""SELECT
+                    current_user=pg_get_userbyid(relowner) FROM pg_class
+                    WHERE oid='public.inbound_worker_operations'::regclass"""):
+                    raise ConversationStateDenied('Private conversation worker unavailable')
+                actor = None
+            else:
+                actor = await self._allocation._actor(conn, org, auth)
             conv = await conn.fetchrow('SELECT * FROM conversations WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, conversation)
             if not conv or conv['deleted_at'] is not None or conv['status'] != 'active' or conv['canale'] != 'whatsapp':
                 raise ConversationStateDenied('Live WhatsApp conversation required')
+            if worker and conv['ticket_status'] != 'AI_ACTIVE':
+                raise ConversationStateDenied('Conversation is with staff')
             contact = await conn.fetchrow('SELECT id,deleted_at,consent_status FROM contacts WHERE organization_id=$1 AND id=$2 FOR SHARE', org, conv['contact_id'])
             if not contact or contact['deleted_at'] is not None or contact['consent_status'] == 'withdrawn':
                 raise ConversationStateDenied('Contact access unavailable')
@@ -293,19 +339,51 @@ class BookingConversationRepository:
             request_id=request_id, expected_revision=expected_revision,
             expected_catalog_revision=expected_catalog_revision, prompt_message_id=_uuid(prompt_message_id))
 
+    async def apply_worker_source(self, organization_id, conversation_id, source_message_id):
+        """Use only persisted inbound evidence and current server revisions."""
+        org, conversation, source = map(_uuid, (organization_id, conversation_id, source_message_id))
+        request = uuid5(NAMESPACE_URL, f'melpis:c24:conversation:{org}:{conversation}:{source}')
+        return await self._apply(org, None, conversation, source, request_id=request,
+                                 expected_revision=None, expected_catalog_revision=None,
+                                 prompt_message_id=None, worker=True)
+
     async def _apply(self, organization_id, auth_user_id, conversation_id, source_message_id,
-                     *, request_id, expected_revision, expected_catalog_revision, prompt_message_id):
+                     *, request_id, expected_revision, expected_catalog_revision, prompt_message_id, worker=False):
         source_id, request = map(_uuid, (source_message_id, request_id))
-        if type(expected_revision) is not int or expected_revision < 0 or type(expected_catalog_revision) is not int:
+        if not worker and (type(expected_revision) is not int or expected_revision < 0
+                           or type(expected_catalog_revision) is not int):
             raise ValueError('Strict expected revisions required')
-        async with self._scope(organization_id, auth_user_id, conversation_id) as context:
-            conn, org, conversation, actor, scoped, _authority = context
+        async with self._scope(organization_id, auth_user_id, conversation_id, worker=worker) as context:
+            conn, org, conversation, actor, scoped, authority = context
             catalog = scoped.catalog
             if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_conversation_revocations WHERE organization_id=$1 AND conversation_id=$2)
                 OR EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND deleted_at IS NOT NULL)''', org, conversation):
                 raise ConversationStateDenied('Conversation metadata was revoked')
             source, provider_time, source_hash = await self._source(conn, org, conversation, source_id)
+            if worker:
+                prior = await conn.fetchrow('''SELECT applied_revision FROM booking_conversation_requests
+                    WHERE organization_id=$1 AND conversation_id=$2 AND request_id=$3''', org, conversation, request)
+                expected_revision = (prior['applied_revision'] - 1 if prior else await conn.fetchval(
+                    'SELECT revision FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2',
+                    org, conversation,
+                ) or 0)
+                expected_catalog_revision = catalog.revision
+                match = re.fullmatch(r'CONFIRM ([0-9a-f-]{36})', source['content_text'])
+                if match:
+                    prompt_message_id = _uuid(match[1])
             action = 'proposal' if prompt_message_id is None else 'confirmation'
+            if worker:
+                provenance = await conn.fetch('''SELECT r.inbox_id,o.operation_id FROM inbound_worker_receipts r
+                    JOIN meta_webhook_inbox i ON i.organization_id=r.organization_id AND i.id=r.inbox_id
+                    LEFT JOIN inbound_worker_operations o ON o.organization_id=$1
+                      AND o.inbox_id=r.inbox_id AND o.message_id=r.message_id AND $3='proposal'
+                    WHERE r.organization_id=$1 AND i.organization_id=$1 AND r.message_id=$2
+                      AND i.channel='whatsapp' AND i.status='completed'
+                      AND ($3='confirmation' OR o.operation_id IS NOT NULL)
+                    LIMIT 2 FOR SHARE OF r,i''', org, source_id, action)
+                if len(provenance) != 1:
+                    raise ConversationStateDenied('Unambiguous worker source unavailable')
+                evidence = provenance[0]
             canonical_hash, proposal, prompt_hash = None, None, None
             prompt = None
             if action == 'proposal':
@@ -359,7 +437,8 @@ class BookingConversationRepository:
                 if cached.get('richiede_umano') is not False:
                     updated = updated.model_copy(update={'handoff_reason':updated.handoff_reason or 'outside_scope'})
             else:
-                if prompt['content_text'] != render_confirmation_prompt(state, prompt_message_id):
+                if prompt['content_text'] not in (render_confirmation_prompt(state, prompt_message_id),
+                        render_confirmation_prompt(state, prompt_message_id, legacy=True)):
                     raise StateConflict('Prompt does not match current state snapshot')
                 updated = confirm_details(state, source_message_id=source_id, prompt_message_id=prompt_message_id,
                     prompt_body_hash=prompt_hash, expected_revision=expected_revision)
@@ -376,11 +455,91 @@ class BookingConversationRepository:
                 canonical(updated.model_dump(mode='json')), state_digest(updated), expected_revision)
             if stored_revision != updated.revision:
                 raise StateConflict('State compare-and-swap failed')
-            await conn.execute('''INSERT INTO booking_conversation_requests
+            if worker:
+                await conn.execute('''INSERT INTO booking_conversation_requests
+                    (organization_id,request_id,conversation_id,source_message_id,actor_user_id,actor_kind,
+                     service_inbox_id,service_operation_id,action,
+                     payload_hash,applied_revision,canonical_response_hash,prompt_message_id,prompt_body_hash)
+                    VALUES($1,$2,$3,$4,NULL,'inbound_worker',$5,$6,$7,$8,$9,$10,$11,$12)''',
+                    org, request, conversation, source_id, evidence['inbox_id'], evidence['operation_id'],
+                    action, operation_hash, updated.revision,
+                    canonical_hash, prompt_message_id, prompt_hash)
+            else:
+                await conn.execute('''INSERT INTO booking_conversation_requests
                 (organization_id,request_id,conversation_id,source_message_id,actor_user_id,action,
                  payload_hash,applied_revision,canonical_response_hash,prompt_message_id,prompt_body_hash)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)''', org, request, conversation, source_id,
-                actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
+                    actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
+            if (worker and action == 'proposal' and authority == 'internal'
+                    and catalog.sector in {'ristorante', 'parrucchiere', 'centro_estetico', 'hotel_bnb'} and updated.intent == 'booking'
+                    and not updated.handoff_reason and not updated.missing_fields
+                    and not updated.ambiguous_fields and not updated.details_confirmed):
+                from src.core.bookings.auto_policy import parse_and_validate_auto_booking
+                settings = await conn.fetchrow('''SELECT config,capienze_orarie FROM booking_settings
+                    WHERE organization_id=$1''', org)
+                slots = {slot.field:slot.value for slot in updated.slots}
+                if catalog.sector == 'ristorante':
+                    decision = parse_and_validate_auto_booking(
+                        {'config':decode(settings['config']), 'capienze_orarie':decode(settings['capienze_orarie'])}
+                        if settings else {}, catalog.timezone,
+                        {'service':'ristorante/tavolo', 'date':slots.get('appointment_date'),
+                         'time':slots.get('appointment_time'), 'party_size':slots.get('party_size'),
+                         'duration_minutes':updated.derived.duration_minutes},
+                        now=await conn.fetchval('SELECT clock_timestamp()'),
+                    )
+                    eligible = decision.accepted
+                else:
+                    from datetime import date, time
+                    from src.core.bookings.allocation_contracts import AllocationRequest
+                    from src.core.bookings.sector_admission_policy import SectorAdmissionDenied, validate_sector_admission
+                    eligible = False
+                    try:
+                        if settings and await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences
+                            WHERE organization_id=$1 AND sector=$2)''', org, catalog.sector):
+                            if catalog.sector == 'hotel_bnb':
+                                from src.core.bookings.hotel_admission_policy import validate_hotel_admission
+                                candidate = AllocationRequest(request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                                    service_id=slots.get('service_id'), arrival_date=date.fromisoformat(slots['arrival_date']),
+                                    departure_date=date.fromisoformat(slots['departure_date']), room_count=slots.get('room_count'))
+                                validate_hotel_admission(decode(settings['config']), catalog, candidate, guest_count=slots['guest_count'],
+                                                         now=await conn.fetchval('SELECT clock_timestamp()'))
+                            else:
+                                candidate = AllocationRequest(request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                                    service_id=slots.get('service_id'),
+                                    appointment_date=date.fromisoformat(slots['appointment_date']),
+                                    appointment_time=time.fromisoformat(slots['appointment_time']))
+                                validate_sector_admission(decode(settings['config']), catalog, candidate,
+                                                          now=await conn.fetchval('SELECT clock_timestamp()'))
+                            eligible = True
+                    except (KeyError, ValueError, TypeError, SectorAdmissionDenied):
+                        pass
+                if not eligible:
+                    return self._result(updated, updated.revision, False, catalog.revision)
+                # The state, worker receipt and outbound attempt commit together.
+                # The retry worker must hold the C2.4 delivery guard through send.
+                destination = await conn.fetchval('''SELECT c.phone_number FROM contacts c
+                    JOIN conversations v ON v.organization_id=c.organization_id AND v.contact_id=c.id
+                    WHERE v.organization_id=$1 AND c.organization_id=$1 AND v.id=$2
+                      AND c.deleted_at IS NULL''', org, conversation)
+                if not destination:
+                    raise ConversationStateUnavailable('Current destination unavailable')
+                prompt_id = uuid4()
+                body = render_confirmation_prompt(updated, prompt_id)
+                key = f'c24-prompt:{org}:{conversation}:{source_id}'
+                payload = {'to':destination, 'type':'text', 'text':{'body':body},
+                    '_delivery_category':'service', '_c24_state_digest':state_digest(updated),
+                    '_c24_source_id':str(source_id), '_c24_subject_id':str(await conn.fetchval(
+                        'SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2', org, conversation))}
+                await conn.execute('''INSERT INTO messages
+                    (id,organization_id,conversation_id,direction,message_type,content,content_text,
+                     status,handling_type,idempotency_key)
+                    VALUES($1,$2,$3,'outbound','text',$4::jsonb,$5,'queued','c24_confirmation_prompt',$6)''',
+                    prompt_id, org, conversation, canonical(payload), body, key)
+                await conn.execute('''INSERT INTO message_delivery_attempts (id,message_id,next_retry_at)
+                    SELECT $2,m.id,clock_timestamp() FROM messages m
+                    WHERE m.organization_id=$1 AND m.id=$3''', org, uuid4(), prompt_id)
             return self._result(updated, updated.revision, False, catalog.revision)
 
     @staticmethod

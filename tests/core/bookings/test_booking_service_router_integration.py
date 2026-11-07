@@ -44,7 +44,7 @@ def mock_booking_repo():
             "richiede_intervento": kwargs["richiede_intervento"],
         }
     )
-    repo.update_booking_status = AsyncMock(
+    repo.cancel_legacy_booking = AsyncMock(
         return_value={
             "id": uuid.uuid4(),
             "organization_id": ORG_ID,
@@ -169,4 +169,16 @@ async def test_cancel_booking_dispatches_to_router(mock_booking_repo, mock_route
     b_id = uuid.uuid4()
     await service.cancel(ORG_ID, b_id)
 
+    mock_booking_repo.cancel_legacy_booking.assert_awaited_once_with(ORG_ID, b_id)
     mock_router.dispatch_cancel_booking.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_guard_failure_does_not_dispatch(mock_booking_repo, mock_router):
+    from src.core.db.repositories.booking_repo import ManagedBookingMutationRequired
+
+    mock_booking_repo.cancel_legacy_booking.side_effect = ManagedBookingMutationRequired()
+    service = BookingService(repo=mock_booking_repo, booking_router=mock_router)
+    with pytest.raises(ManagedBookingMutationRequired):
+        await service.cancel(ORG_ID, uuid.uuid4())
+    mock_router.dispatch_cancel_booking.assert_not_awaited()

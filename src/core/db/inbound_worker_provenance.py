@@ -2,6 +2,11 @@
 
 This records provenance only; it grants no booking or worker authority.
 """
+import os
+
+
+def private_booking_worker_enabled():
+    return os.getenv('C24_PRIVATE_BOOKING_WORKER_ENABLED') == 'true'
 
 
 async def record_receipt(conn, row, provider_message_id):

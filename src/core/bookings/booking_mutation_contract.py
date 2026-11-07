@@ -154,6 +154,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         catalog, sector, authority = await engine._catalog(conn, org, orgrow, settings)
         if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority not in {'internal', 'internal_calendar_sync'}:
             raise AllocationUnavailable('Catalog authority unavailable')
+        if sector == 'studio_medico_dentista' and mutation.note:
+            raise BookingMutationRejected('Medical booking notes are not accepted')
         if mutation.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import time
             from src.core.bookings.catalog_contracts import CivilNightDuration
@@ -184,6 +186,12 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                                   previous['catalog_revision'], catalog.revision, True)
         if before is not None and new_booking is not None:
             raise AllocationConflict('Booking already exists')
+        # Opted-in sector rows can only change capacity through this typed
+        # transaction. The marker is consumed by the booking trigger.
+        sector_fenced = (await conn.fetchval("SELECT to_regclass('public.booking_sector_admission_fences') IS NOT NULL")
+            and await conn.fetchval('SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences WHERE organization_id=$1)', org))
+        if sector_fenced:
+            await conn.execute('SELECT public.booking_sector_mark_worker_insert($1,$2)', org, request.booking_id)
         contact_preimage = None
         if mutation.operation in {'create', 'create_stay'}:
             from datetime import date, time
@@ -314,7 +322,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 or allocation['booking_calendar_revision'] != locked['calendar_revision']
                 or allocation['timezone'] != catalog.timezone
                 or (allocation['temporal_kind'] != 'minutes' and (is_reschedule or allocation['temporal_kind'] != 'civil_nights'))
-                or locked['stato'] not in {'in_attesa', 'confermata'}
+                or (locked['stato'] not in {'in_attesa', 'confermata'}
+                    and (mutation.operation, locked['stato']) != ('no_show', 'da_verificare'))
                 or locked['completata_at'] is not None or locked['no_show_at'] is not None):
                 raise AllocationConflict('Active allocation preimage changed')
             if is_reschedule and (request.service_id != allocation['service_id'] or request.room_count is not None):
@@ -399,6 +408,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                                                    contact_preimage=contact_preimage)
         if result['replayed'] or result['outcome'] != expected[request.action]:
             raise BookingMutationRejected('Allocation was not applied')
+        if sector_fenced:
+            await conn.execute('DELETE FROM booking_sector_admission_markers WHERE transaction_id=txid_current() AND organization_id=$1 AND booking_id=$2', org, request.booking_id)
         if mutation.notice:
             booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
             if booking['stato'] != 'confermata':

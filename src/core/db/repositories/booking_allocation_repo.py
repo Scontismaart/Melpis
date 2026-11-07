@@ -89,7 +89,9 @@ class BookingAllocationRepository:
             if mutation.operation == 'reactivate' and (booking['stato'] not in {'cancellata','cancellato','rifiutata'}
                 or booking['completata_at'] is not None or booking['no_show_at'] is not None):
                 raise AllocationConflict('Reactivation preimage changed')
-            if mutation.operation in {'cancel','reject','no_show'} and (booking['stato'] not in {'in_attesa','confermata'}
+            if mutation.operation in {'cancel','reject','no_show'} and (
+                (booking['stato'] not in {'in_attesa','confermata'}
+                 and (mutation.operation, booking['stato']) != ('no_show', 'da_verificare'))
                 or booking['completata_at'] is not None or booking['no_show_at'] is not None):
                 raise AllocationConflict('Release preimage changed')
         stay = None
@@ -124,7 +126,29 @@ class BookingAllocationRepository:
             raise ValueError("AllocationRequest required")
         return await self._run_on_connection(conn, _uuid(organization_id), _uuid(auth_user_id), request, observe=False, mutation_hash=mutation_hash, contact_preimage=contact_preimage)
 
-    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None, contact_preimage=None):
+    async def _apply_worker_on_connection(self, conn, organization_id, message_id, inbox_id, operation_id, service_digest, request):
+        """Apply a verified create inside the lifecycle owner's transaction."""
+        if not conn.is_in_transaction():
+            raise RuntimeError("Allocation requires an active transaction")
+        org, message, inbox, operation = map(_uuid, (organization_id, message_id, inbox_id, operation_id))
+        if (type(request) is not AllocationRequest or request.action != 'allocate'
+                or request.expected_allocation_revision != 0
+                or type(service_digest) is not str or len(service_digest) != 64
+                or any(c not in '0123456789abcdef' for c in service_digest)):
+            raise AllocationDenied('Invalid worker allocation scope')
+        # Match SQL079's actual caller check even for replay, where no insert
+        # trigger fires. Lock the evidence until this transaction ends.
+        source = await conn.fetchrow("""SELECT o.message_id FROM inbound_worker_operations o
+            WHERE o.organization_id=$1 AND o.message_id=$2 AND o.inbox_id=$3 AND o.operation_id=$4
+              AND COALESCE(NULLIF(current_setting('role'), 'none'), session_user) =
+                  pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='public.inbound_worker_operations'::regclass))
+            FOR KEY SHARE""", org, message, inbox, operation)
+        if not source:
+            raise AllocationDenied('Worker provenance unavailable')
+        worker = (message, inbox, operation, service_digest)
+        return await self._run_on_connection(conn, org, None, request, observe=False, worker=worker)
+
+    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None, contact_preimage=None, worker=None):
         orgrow = await conn.fetchrow(
             "SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE", org)
         if not orgrow:
@@ -134,12 +158,19 @@ class BookingAllocationRepository:
         if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2)
             OR EXISTS(SELECT 1 FROM booking_stay_tombstones WHERE organization_id=$1 AND request_id=$3)''', org, request.booking_id, request.request_id):
             raise AllocationDenied('Purged booking or request cannot be replayed')
-        actor = await self._actor(conn, org, auth)
+        actor = await self._actor(conn, org, auth) if worker is None else None
         booking = await conn.fetchrow(
             "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2", org, request.booking_id)
         if not booking:
             raise AllocationDenied("Booking is outside the organization")
         conversation_id, subject = await self._lineage(conn, org, booking)
+        if worker is not None:
+            source = await conn.fetchrow("""SELECT conversation_id,c24_original_subject_id FROM messages
+                WHERE organization_id=$1 AND id=$2 AND direction='inbound' AND deleted_at IS NULL FOR SHARE""", org, worker[0])
+            if (not source or not conversation_id or subject is None
+                    or source['conversation_id'] != conversation_id or source['c24_original_subject_id'] != subject
+                    or booking.get('source_message_id') != str(worker[0])):
+                raise AllocationDenied('Worker booking lineage unavailable')
         if conversation_id:
             conv = await conn.fetchrow(
                 "SELECT id,contact_id,deleted_at FROM conversations WHERE organization_id=$1 AND id=$2 FOR UPDATE",
@@ -162,6 +193,9 @@ class BookingAllocationRepository:
         if not booking:
             raise AllocationDenied("Booking is unavailable")
         conversation_id, subject = await self._lineage(conn, org, booking)
+        if worker is not None and (booking.get('source_message_id') != str(worker[0])
+                or conversation_id != source['conversation_id'] or subject != source['c24_original_subject_id']):
+            raise AllocationDenied('Worker booking lineage changed')
         if conversation_id:
             conv = await conn.fetchrow(
                 "SELECT id,contact_id,deleted_at FROM conversations WHERE organization_id=$1 AND id=$2",
@@ -172,21 +206,29 @@ class BookingAllocationRepository:
         fingerprint = _booking_fingerprint(booking)
 
         if not observe:
-            digest = semantic_request_hash(request, organization_id=org, actor_user_id=actor)
+            digest = (semantic_request_hash(request, organization_id=org, actor_user_id=actor) if worker is None else
+                      _digest({'version': 2, 'organization_id': str(org), 'service_digest': worker[3],
+                               'request': request.model_dump(mode='json')}))
             # Serialize one request UUID across booking IDs before receipt lookup.
             await conn.fetchval("SELECT pg_advisory_xact_lock(hashtextextended($1,723))",
                                 f"allocation-request|{org}|{request.request_id}")
             previous = await conn.fetchrow(
-                """SELECT booking_id,actor_user_id,action,payload_hash,outcome,
+                """SELECT booking_id,actor_user_id,COALESCE(to_jsonb(r)->>'actor_kind','human') AS actor_kind,
+                          (to_jsonb(r)->>'service_message_id')::uuid AS service_message_id,
+                          (to_jsonb(r)->>'service_inbox_id')::uuid AS service_inbox_id,
+                          (to_jsonb(r)->>'service_operation_id')::uuid AS service_operation_id,action,payload_hash,outcome,
                           applied_allocation_revision,catalog_revision,mutation_hash
-                     FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2""",
+                     FROM booking_allocation_requests r WHERE organization_id=$1 AND request_id=$2""",
                 org, request.request_id)
             if previous:
                 if authority not in {"internal", "internal_calendar_sync"}:
                     raise AllocationUnavailable("Current authority is not supported")
                 if (previous["booking_id"] != request.booking_id or previous["actor_user_id"] != actor
                         or previous["action"] != request.action or previous["payload_hash"] != digest
-                        or previous["mutation_hash"] != mutation_hash):
+                        or previous["mutation_hash"] != mutation_hash
+                        or previous['actor_kind'] != ('human' if worker is None else 'inbound_worker')
+                        or (previous['service_message_id'], previous['service_inbox_id'], previous['service_operation_id'])
+                           != ((None, None, None) if worker is None else worker[:3])):
                     raise AllocationConflict("Request identifier was used for a different operation")
                 current_set = await conn.fetchrow(
                     "SELECT allocation_revision,state FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2",
@@ -262,7 +304,7 @@ class BookingAllocationRepository:
         # is implemented by this disconnected repository.
         if authority not in {"internal", "internal_calendar_sync"} or current.sector not in {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"}:
             if not observe:
-                await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash)
+                await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash, worker)
             return self._result("unknown", None, old, current.revision, current.revision, False)
         if request.action != "cancel":
             if current is None or current.sector != sector or current.timezone != orgrow["timezone"]:
@@ -279,7 +321,7 @@ class BookingAllocationRepository:
         if (stale or ineligible) and request.action != "cancel":
             if not observe:
                 await self._take_locks(conn, org, request, old_claims, new_claims)
-                await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash)
+                await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash, worker)
             return self._result("unknown" if observe else "unknown", None, old,
                                 current.revision, current.revision, False)
 
@@ -372,7 +414,7 @@ class BookingAllocationRepository:
                             org, request.booking_id, applied, current.revision, rid, kind, exclusive,
                             quantity, start, end)
         if not observe:
-            await self._receipt(conn, org, request, actor, digest, outcome, applied, current.revision, mutation_hash)
+            await self._receipt(conn, org, request, actor, digest, outcome, applied, current.revision, mutation_hash, worker)
         current_set = old
         if not observe and applied is not None:
             current_set = {"allocation_revision": applied, "state": "cancelled" if outcome == "cancelled" else "active"}
@@ -575,11 +617,18 @@ class BookingAllocationRepository:
         return True
 
     @staticmethod
-    async def _receipt(conn, org, request, actor, digest, outcome, applied, catalog_revision, mutation_hash=None):
-        await conn.execute("""INSERT INTO booking_allocation_requests
-            (organization_id,request_id,booking_id,actor_user_id,action,payload_hash,outcome,applied_allocation_revision,catalog_revision,mutation_hash)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""", org, request.request_id, request.booking_id,
-            actor, request.action, digest, outcome, applied, catalog_revision, mutation_hash)
+    async def _receipt(conn, org, request, actor, digest, outcome, applied, catalog_revision, mutation_hash=None, worker=None):
+        if worker is None:
+            await conn.execute("""INSERT INTO booking_allocation_requests
+                (organization_id,request_id,booking_id,actor_user_id,action,payload_hash,outcome,applied_allocation_revision,catalog_revision,mutation_hash)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""", org, request.request_id, request.booking_id,
+                actor, request.action, digest, outcome, applied, catalog_revision, mutation_hash)
+        else:
+            await conn.execute("""INSERT INTO booking_allocation_requests
+                (organization_id,request_id,booking_id,actor_user_id,actor_kind,service_message_id,service_inbox_id,service_operation_id,action,payload_hash,outcome,applied_allocation_revision,catalog_revision,mutation_hash)
+                VALUES($1,$2,$3,NULL,'inbound_worker',$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
+                org, request.request_id, request.booking_id, *worker[:3], request.action, digest,
+                outcome, applied, catalog_revision, mutation_hash)
 
     @staticmethod
     def _result(outcome, applied, current, original_catalog_revision, current_catalog_revision, replayed):
