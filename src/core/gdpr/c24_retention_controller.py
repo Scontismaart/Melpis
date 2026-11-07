@@ -43,6 +43,34 @@ async def run_c24_retention_targets(pool, *, message_targets=(), conversation_ta
         for organization_id, record_id in targets:
             async with pool.acquire() as conn:
                 async with conn.transaction(isolation="read_committed"):
+                    # SET ROLE alone would let a privileged login impersonate the
+                    # narrow operator. Validate the original session first.
+                    allowed_login = await conn.fetchval("""SELECT EXISTS (
+                        SELECT 1 FROM pg_roles r WHERE r.rolname=session_user
+                          AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
+                          AND pg_has_role(r.oid, 'melpis_c24_retention', 'MEMBER')
+                          AND NOT EXISTS (SELECT 1 FROM pg_namespace n
+                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+                              AND has_schema_privilege(r.oid,n.oid,'CREATE'))
+                          AND NOT EXISTS (SELECT 1 FROM pg_roles granted
+                            WHERE granted.oid <> r.oid AND granted.oid <> 'melpis_c24_retention'::regrole
+                              AND pg_has_role(r.oid, granted.oid, 'MEMBER'))
+                          AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+                              AND c.relkind IN ('r','p','v','m','f')
+                              AND (has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                                OR has_any_column_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))
+                          AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' AND p.prosecdef
+                              AND NOT ((p.proname='c24_retention_operator_allowed'
+                                        AND pg_get_function_identity_arguments(p.oid)='')
+                                       OR (p.proname='c24_run_retention_target'
+                                        AND pg_get_function_identity_arguments(p.oid)='p_kind text, p_org uuid, p_id uuid'))
+                              AND has_function_privilege(r.oid,p.oid,'EXECUTE'))
+                    )""")
+                    if not allowed_login:
+                        raise PermissionError("c24_retention_operator_required")
+                    await conn.execute("SET LOCAL ROLE melpis_c24_retention")
                     if not await conn.fetchval("SELECT public.c24_retention_operator_allowed()"):
                         raise PermissionError("c24_retention_operator_required")
                     applied = await conn.fetchval(
@@ -93,9 +121,10 @@ async def _run_manifest(path: Path):
     try:
         async with asyncpg.create_pool(dsn=dsn, min_size=1, max_size=1) as pool:
             return await run_c24_retention_targets(pool, **targets)
-    except Exception:
+    except Exception as exc:
         # Driver errors can contain connection or row details.
-        raise SystemExit("C2.4 retention stopped after a database error.") from None
+        raise SystemExit("C2.4 retention stopped after a database error; error type: "
+                         + type(exc).__name__) from None
 
 
 def main():

@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+import asyncpg
 
 from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
 
@@ -10,6 +11,7 @@ from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
 def pool_with_results(results):
     conn = MagicMock()
     conn.fetchval = AsyncMock(side_effect=results)
+    conn.execute = AsyncMock()
     conn.transaction.return_value.__aenter__ = AsyncMock()
     conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool = MagicMock()
@@ -31,18 +33,20 @@ async def test_controller_is_disabled_without_explicit_owner_cutover(monkeypatch
 @pytest.mark.asyncio
 async def test_controller_delegates_targeted_mutations_to_owner_functions(monkeypatch):
     monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
-    pool, conn = pool_with_results([True, True, True, False, True, True])
+    pool, conn = pool_with_results([True, True, True, True, True, False, True, True, True])
     org, message, conversation, receipt = (uuid4() for _ in range(4))
     assert await run_c24_retention_targets(pool, message_targets=[(org, message)],
                                            conversation_targets=[(org, conversation)],
                                            receipt_targets=[(org, receipt)]) == {
         "messages_purged": 1, "conversations_expired": 0, "receipts_cleaned": 1,
     }
-    for index, kind, record in [(1, "message", message), (3, "conversation", conversation), (5, "receipt", receipt)]:
+    for index, kind, record in [(2, "message", message), (5, "conversation", conversation), (8, "receipt", receipt)]:
         assert conn.fetchval.await_args_list[index].args == (
             "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)", kind, org, record)
     assert all(conn.fetchval.await_args_list[index].args == ("SELECT public.c24_retention_operator_allowed()",)
-               for index in (0, 2, 4))
+               for index in (1, 4, 7))
+    assert conn.execute.await_count == 3
+    assert all(call.args == ("SET LOCAL ROLE melpis_c24_retention",) for call in conn.execute.await_args_list)
     assert conn.transaction.call_count == 3
     conn.transaction.assert_called_with(isolation="read_committed")
 
@@ -91,27 +95,35 @@ async def test_controller_rejects_broad_credentials(monkeypatch):
     assert conn.fetchval.await_count == 1
 
 @pytest.mark.asyncio
-async def test_retention_operator_database_role_and_dispatch(pg_pool, other_org):
+async def test_retention_operator_database_role_and_dispatch(pg_pool, postgres_container, other_org):
     """Exercise real grants, role checks and tenant-bound no-op dispatch."""
     import asyncpg
 
-    async with pg_pool.acquire() as conn:
-        async with conn.transaction():
-            assert not await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
-            await conn.execute("GRANT melpis_c24_retention TO CURRENT_USER")
-            await conn.execute("SET LOCAL ROLE melpis_c24_retention")
-            assert await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
-            assert not await conn.fetchval(
-                "SELECT has_table_privilege(current_user, 'public.messages', 'SELECT')")
-            for kind in ("message", "conversation", "receipt"):
-                assert not await conn.fetchval(
-                    "SELECT public.c24_run_retention_target($1,$2,$3)",
-                    kind, other_org["id"], uuid4())
-            await conn.execute("RESET ROLE")
-            await conn.execute("SET LOCAL ROLE service_role")
-            with pytest.raises(asyncpg.InsufficientPrivilegeError):
-                async with conn.transaction():
+    role, password = 'retention_test_' + uuid4().hex, uuid4().hex
+    async with pg_pool.acquire() as admin:
+        await admin.execute(f"CREATE ROLE {role} LOGIN NOINHERIT PASSWORD '{password}'")
+        try:
+            await admin.execute(f'GRANT melpis_c24_retention TO {role}')
+            conn = await asyncpg.connect(dsn=postgres_container.get_connection_url().replace('+psycopg2', ''),
+                                         user=role, password=password)
+            try:
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
                     await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+                await conn.execute("SET ROLE melpis_c24_retention")
+                assert await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+                assert not await conn.fetchval(
+                    "SELECT has_table_privilege(current_user, 'public.messages', 'SELECT')")
+                for kind in ("message", "conversation", "receipt"):
+                    assert not await conn.fetchval(
+                        "SELECT public.c24_run_retention_target($1,$2,$3)",
+                        kind, other_org["id"], uuid4())
+                await conn.execute("RESET ROLE")
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.fetchval("SELECT public.c24_retention_operator_allowed()")
+            finally:
+                await conn.close()
+        finally:
+            await admin.execute(f'DROP ROLE {role}')
 
 from tests.core.bookings.test_conversation_state_postgres import state_env, commit_source, apply
 from tests.core.gdpr.test_conversation_lifecycle_c24 import approve_conversation
@@ -119,7 +131,7 @@ from tests.core.gdpr.test_c24_idle_expiry import age_state
 
 
 @pytest.mark.asyncio
-async def test_operator_dispatches_eligible_targets(state_env, other_org):
+async def test_operator_dispatches_eligible_targets(state_env, other_org, postgres_container):
     env = state_env
     pool = env['pool']
     request = uuid4()
@@ -142,14 +154,24 @@ async def test_operator_dispatches_eligible_targets(state_env, other_org):
         retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
         VALUES($1,'messages_content','test',true,90,false,'test:source','qa',
         clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""", env['org'])
-    async with pool.acquire() as conn, conn.transaction():
-        await conn.execute('GRANT melpis_c24_retention TO CURRENT_USER')
-        await conn.execute('SET LOCAL ROLE melpis_c24_retention')
-        targets = [('conversation', env['conv']), ('receipt', request), ('message', env['message'])]
-        for kind, target in targets:
-            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, other_org['id'], target)
-            assert await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
-            assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
+    role, password = 'retention_test_' + uuid4().hex, uuid4().hex
+    async with pool.acquire() as admin:
+        await admin.execute(f"CREATE ROLE {role} LOGIN NOINHERIT PASSWORD '{password}'")
+        try:
+            await admin.execute(f'GRANT melpis_c24_retention TO {role}')
+            conn = await asyncpg.connect(dsn=postgres_container.get_connection_url().replace('+psycopg2', ''),
+                                         user=role, password=password)
+            try:
+                await conn.execute('SET ROLE melpis_c24_retention')
+                targets = [('conversation', env['conv']), ('receipt', request), ('message', env['message'])]
+                for kind, target in targets:
+                    assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, other_org['id'], target)
+                    assert await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
+                    assert not await conn.fetchval('SELECT public.c24_run_retention_target($1,$2,$3)', kind, env['org'], target)
+            finally:
+                await conn.close()
+        finally:
+            await admin.execute(f'DROP ROLE {role}')
     message = await pool.fetchrow(
         "SELECT content_purged_at,content_text,ai_reply_cache,billed_at FROM messages WHERE organization_id=$1 AND id=$2",
         env['org'], env['message'])
