@@ -17,7 +17,14 @@ function setup(fetch, config = {}) {
   dom.window.MelpisBookingCatalogForm = { create(container, opts) { formOptions = opts; return { load(c) { model = c && copy(c); container.textContent = model ? model.services[0].name : "empty"; }, read(revision) { if (!model) throw Error("empty"); return { ...copy(model), revision }; }, clear() { model = null; container.replaceChildren(); }, setEditable(v) { container.dataset.editable = String(v); }, opts }; } };
   dom.window.eval(source);
   const container = dom.window.document.querySelector("main");
-  const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: (url, options) => { calls.push({ url, options }); return fetch(url, options, calls.length); }, getContext: () => context, getSession: () => session, translate: config.translate, confirm: config.confirm || (async () => true), onOpenSecurity: config.onOpenSecurity || (() => {}) });
+  const controller = dom.window.MelpisBookingCatalog.create({ container, API_BASE: "", apiFetch: (url, options) => {
+    // Admission status has its own focused dashboard-host contract tests.
+    // Keep this controller suite scoped to catalog reads and writes.
+    if (url.endsWith("/sector-admission") && String(options?.method || "GET").toUpperCase() === "GET") {
+      return Promise.resolve(response({ enabled: false, eligible: true, published_revision: 1 }));
+    }
+    calls.push({ url, options }); return fetch(url, options, calls.length);
+  }, getContext: () => context, getSession: () => session, translate: config.translate, confirm: config.confirm || (async () => true), onOpenSecurity: config.onOpenSecurity || (() => {}) });
   return { dom, container, controller, calls, setContext: (value) => { context = { ...context, ...value }; }, setSession: (value) => { session = { ...session, ...value }; }, changeModel: (name) => { model.services[0].name = name; formOptions.onChange(); } };
 }
 function button(h, text) { return [...h.container.querySelectorAll("button")].find((n) => n.textContent === text); }
