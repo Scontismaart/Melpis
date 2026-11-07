@@ -186,6 +186,12 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                                   previous['catalog_revision'], catalog.revision, True)
         if before is not None and new_booking is not None:
             raise AllocationConflict('Booking already exists')
+        # Opted-in sector rows can only change capacity through this typed
+        # transaction. The marker is consumed by the booking trigger.
+        sector_fenced = (await conn.fetchval("SELECT to_regclass('public.booking_sector_admission_fences') IS NOT NULL")
+            and await conn.fetchval('SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences WHERE organization_id=$1)', org))
+        if sector_fenced:
+            await conn.execute('SELECT public.booking_sector_mark_worker_insert($1,$2)', org, request.booking_id)
         contact_preimage = None
         if mutation.operation in {'create', 'create_stay'}:
             from datetime import date, time
@@ -402,6 +408,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                                                    contact_preimage=contact_preimage)
         if result['replayed'] or result['outcome'] != expected[request.action]:
             raise BookingMutationRejected('Allocation was not applied')
+        if sector_fenced:
+            await conn.execute('DELETE FROM booking_sector_admission_markers WHERE transaction_id=txid_current() AND organization_id=$1 AND booking_id=$2', org, request.booking_id)
         if mutation.notice:
             booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
             if booking['stato'] != 'confermata':

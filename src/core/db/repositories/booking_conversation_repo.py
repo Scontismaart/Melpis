@@ -471,22 +471,51 @@ class BookingConversationRepository:
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)''', org, request, conversation, source_id,
                     actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
             if (worker and action == 'proposal' and authority == 'internal'
-                    and catalog.sector == 'ristorante' and updated.intent == 'booking'
+                    and catalog.sector in {'ristorante', 'parrucchiere', 'centro_estetico', 'hotel_bnb'} and updated.intent == 'booking'
                     and not updated.handoff_reason and not updated.missing_fields
                     and not updated.ambiguous_fields and not updated.details_confirmed):
                 from src.core.bookings.auto_policy import parse_and_validate_auto_booking
                 settings = await conn.fetchrow('''SELECT config,capienze_orarie FROM booking_settings
                     WHERE organization_id=$1''', org)
                 slots = {slot.field:slot.value for slot in updated.slots}
-                decision = parse_and_validate_auto_booking(
-                    {'config':decode(settings['config']), 'capienze_orarie':decode(settings['capienze_orarie'])}
-                    if settings else {}, catalog.timezone,
-                    {'service':'ristorante/tavolo', 'date':slots.get('appointment_date'),
-                     'time':slots.get('appointment_time'), 'party_size':slots.get('party_size'),
-                     'duration_minutes':updated.derived.duration_minutes},
-                    now=await conn.fetchval('SELECT clock_timestamp()'),
-                )
-                if not decision.accepted:
+                if catalog.sector == 'ristorante':
+                    decision = parse_and_validate_auto_booking(
+                        {'config':decode(settings['config']), 'capienze_orarie':decode(settings['capienze_orarie'])}
+                        if settings else {}, catalog.timezone,
+                        {'service':'ristorante/tavolo', 'date':slots.get('appointment_date'),
+                         'time':slots.get('appointment_time'), 'party_size':slots.get('party_size'),
+                         'duration_minutes':updated.derived.duration_minutes},
+                        now=await conn.fetchval('SELECT clock_timestamp()'),
+                    )
+                    eligible = decision.accepted
+                else:
+                    from datetime import date, time
+                    from src.core.bookings.allocation_contracts import AllocationRequest
+                    from src.core.bookings.sector_admission_policy import SectorAdmissionDenied, validate_sector_admission
+                    eligible = False
+                    try:
+                        if settings and await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences
+                            WHERE organization_id=$1 AND sector=$2)''', org, catalog.sector):
+                            if catalog.sector == 'hotel_bnb':
+                                from src.core.bookings.hotel_admission_policy import validate_hotel_admission
+                                candidate = AllocationRequest(request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                                    service_id=slots.get('service_id'), arrival_date=date.fromisoformat(slots['arrival_date']),
+                                    departure_date=date.fromisoformat(slots['departure_date']), room_count=slots.get('room_count'))
+                                validate_hotel_admission(decode(settings['config']), catalog, candidate, guest_count=slots['guest_count'],
+                                                         now=await conn.fetchval('SELECT clock_timestamp()'))
+                            else:
+                                candidate = AllocationRequest(request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                                    service_id=slots.get('service_id'),
+                                    appointment_date=date.fromisoformat(slots['appointment_date']),
+                                    appointment_time=time.fromisoformat(slots['appointment_time']))
+                                validate_sector_admission(decode(settings['config']), catalog, candidate,
+                                                          now=await conn.fetchval('SELECT clock_timestamp()'))
+                            eligible = True
+                    except (KeyError, ValueError, TypeError, SectorAdmissionDenied):
+                        pass
+                if not eligible:
                     return self._result(updated, updated.revision, False, catalog.revision)
                 # The state, worker receipt and outbound attempt commit together.
                 # The retry worker must hold the C2.4 delivery guard through send.

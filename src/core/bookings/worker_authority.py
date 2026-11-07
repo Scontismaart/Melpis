@@ -6,6 +6,7 @@ Claim expiry never grants an AI call, quota renewal, or refund.
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import date, time
 from hashlib import sha256
 from uuid import UUID, uuid4, uuid5
 from weakref import WeakSet
@@ -22,6 +23,24 @@ from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
 from src.core.bookings.allocation_contracts import AllocationRequest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _SectorSlot:
+    date: date
+    time: time
+    party_size: int = 1
+    capacity: int | None = None
+
+
+@dataclass(frozen=True)
+class _HotelSlot:
+    date: date
+    time: time
+    departure: date
+    room_count: int | None
+    party_size: int
+    capacity: None = None
 
 
 class WorkerProofDenied(PermissionError):
@@ -308,13 +327,21 @@ class WorkerBookingAuthority:
         settings = await conn.fetchrow('SELECT * FROM booking_settings WHERE organization_id=$1 FOR SHARE', org)
         catalog, sector, authority = await self._allocation._catalog(conn, org, organization, settings)
         config = decode(settings['config']) if settings else None
-        if (not isinstance(config, dict) or not isinstance(config.get('a05'), dict)
-            or config['a05'].get('enabled') is not True or authority != 'internal'
+        if (not isinstance(config, dict) or authority != 'internal'
             or catalog.sector != sector or catalog.timezone != organization['timezone']
             or catalog.revision != expected_catalog
-            or not validate_auto_booking_configuration({**dict(settings), 'config': config,
-                'capienze_orarie': decode(settings['capienze_orarie'])}, organization['timezone'], sector).valid
             or cached.get('booking_catalog_revision') != catalog.revision or cached.get('richiede_umano') is not False):
+            raise WorkerProofDenied('Current policy or catalog unavailable')
+        if sector == 'ristorante':
+            if (not isinstance(config.get('a05'), dict) or config['a05'].get('enabled') is not True
+                or not validate_auto_booking_configuration({**dict(settings), 'config': config,
+                    'capienze_orarie': decode(settings['capienze_orarie'])}, organization['timezone'], sector).valid):
+                raise WorkerProofDenied('Current policy or catalog unavailable')
+        elif sector in {'parrucchiere', 'centro_estetico', 'hotel_bnb'}:
+            if not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences
+                    WHERE organization_id=$1 AND sector=$2)''', org, sector):
+                raise WorkerProofDenied('Sector admission fence unavailable')
+        else:
             raise WorkerProofDenied('Current policy or catalog unavailable')
         post = await conn.fetchrow('''SELECT snapshot_hash,revision,catalog_revision FROM booking_conversation_states
             WHERE organization_id=$1 AND conversation_id=$2 FOR UPDATE''', org, conversation)
@@ -325,16 +352,57 @@ class WorkerBookingAuthority:
                 or state.last_source_message_id != confirmation.source_message_id or not state.details_confirmed):
             raise WorkerProofDenied('Conversation state changed')
         slots = {slot.field: slot.value for slot in state.slots}
-        slot_policy = parse_and_validate_auto_booking(
-            {'config': config, 'capienze_orarie': decode(settings['capienze_orarie'])},
-            organization['timezone'],
-            {'service': 'ristorante/tavolo', 'date': slots.get('appointment_date'),
-             'time': slots.get('appointment_time'), 'party_size': slots.get('party_size'),
-             'duration_minutes': state.derived.duration_minutes},
-            now=await conn.fetchval('SELECT clock_timestamp()'),
-        )
-        if not slot_policy.accepted:
-            raise WorkerProofDenied('Current slot policy denied')
+        if sector == 'ristorante':
+            slot_policy = parse_and_validate_auto_booking(
+                {'config': config, 'capienze_orarie': decode(settings['capienze_orarie'])},
+                organization['timezone'],
+                {'service': 'ristorante/tavolo', 'date': slots.get('appointment_date'),
+                 'time': slots.get('appointment_time'), 'party_size': slots.get('party_size'),
+                 'duration_minutes': state.derived.duration_minutes},
+                now=await conn.fetchval('SELECT clock_timestamp()'),
+            )
+            if not slot_policy.accepted:
+                raise WorkerProofDenied('Current slot policy denied')
+            slot = slot_policy.booking
+        elif sector == 'hotel_bnb':
+            from src.core.bookings.catalog_contracts import CivilNightDuration
+            from src.core.bookings.hotel_admission_policy import validate_hotel_admission
+            try:
+                arrival = date.fromisoformat(slots['arrival_date'])
+                departure = date.fromisoformat(slots['departure_date'])
+                room_count = slots.get('room_count')
+                guests = slots['guest_count']
+                if type(guests) is not int or guests < 1:
+                    raise ValueError('Invalid guest count')
+                service = next(item for item in catalog.services if item.service_id == slots.get('service_id'))
+                if not isinstance(service.duration, CivilNightDuration):
+                    raise ValueError('Invalid stay service')
+                candidate_request = AllocationRequest(
+                    request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                    service_id=service.service_id, arrival_date=arrival, departure_date=departure,
+                    room_count=room_count,
+                )
+                validate_hotel_admission(config, catalog, candidate_request, guest_count=guests,
+                                         now=await conn.fetchval('SELECT clock_timestamp()'))
+                slot = _HotelSlot(arrival, service.duration.check_in, departure, room_count, guests)
+            except (KeyError, ValueError, TypeError, StopIteration):
+                raise WorkerProofDenied('Current stay policy denied') from None
+        else:
+            from src.core.bookings.sector_admission_policy import SectorAdmissionDenied, validate_sector_admission
+            try:
+                day = date.fromisoformat(slots['appointment_date'])
+                clock = time.fromisoformat(slots['appointment_time'])
+                candidate_request = AllocationRequest(
+                    request_id=uuid4(), booking_id=uuid4(), action='allocate',
+                    expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+                    service_id=slots.get('service_id'), appointment_date=day, appointment_time=clock,
+                )
+                validate_sector_admission(config, catalog, candidate_request,
+                                          now=await conn.fetchval('SELECT clock_timestamp()'))
+            except (KeyError, ValueError, TypeError, SectorAdmissionDenied):
+                raise WorkerProofDenied('Current slot policy denied') from None
+            slot = _SectorSlot(day, clock)
         if not await conn.fetchrow('''SELECT request_id FROM booking_conversation_requests
             WHERE organization_id=$1 AND conversation_id=$2 AND source_message_id=$3
               AND action='proposal' AND applied_revision=$4 AND canonical_response_hash=$5
@@ -347,7 +415,7 @@ class WorkerBookingAuthority:
             raise WorkerProofDenied('Booking claim expired')
         return (org, conversation, message, conv['contact_id'], stamp, source_hash, response_hash,
                 state.revision, state_digest(state), catalog.revision, provenance['inbox_id'],
-                operation.id, slot_policy.booking, slots.get('service_id'))
+                operation.id, slot, slots.get('service_id'))
 
     async def mint(self, conn, claim, conversation, *, expected_state_revision, expected_catalog_revision):
         if type(expected_state_revision) is not int or expected_state_revision < 1 or type(expected_catalog_revision) is not int or expected_catalog_revision < 1:
@@ -375,6 +443,9 @@ class WorkerBookingAuthority:
         return {'request_id': request, 'booking_id': booking, 'semantic_hash': digest,
                 'runtime_enabled': False, 'confirmation_authorized': False}
 
+    async def _mark_sector_admission(self, conn, org, booking):
+        await conn.execute('SELECT public.booking_sector_mark_worker_insert($1,$2)', org, booking)
+
     async def create_booking(self, conn, capability):
         """Create a confirmed internal A05 booking from a single-use capability."""
         if not private_booking_worker_enabled():
@@ -383,16 +454,23 @@ class WorkerBookingAuthority:
         org, conversation, message, subject = prior[:4]
         inbox, operation, slot, service_id = prior[10:]
         request_id, booking_id, semantic_hash = service_receipt_v2(org, message, 'create', prior[6])
+        temporal = ({'arrival_date': slot.date, 'departure_date': slot.departure, 'room_count': slot.room_count}
+                    if isinstance(slot, _HotelSlot) else
+                    {'appointment_date': slot.date, 'appointment_time': slot.time,
+                     'party_size': slot.party_size if slot.capacity is not None else None})
         request = AllocationRequest(
             request_id=request_id, booking_id=booking_id, action='allocate',
             expected_allocation_revision=0, expected_catalog_revision=prior[9],
-            service_id=service_id, appointment_date=slot.date, appointment_time=slot.time,
-            party_size=slot.party_size,
+            service_id=service_id, **temporal,
         )
         async with conn.transaction():
-            # Serialize against both the older hourly writer and the typed allocator.
-            await conn.fetchval('SELECT pg_advisory_xact_lock(hashtext($1))',
-                                f'{org}|{slot.date.isoformat()}|{slot.time.hour}')
+            # Restaurant admission still shares the legacy hourly capacity lock.
+            # Fenced sectors already hold the tenant admission lock and use
+            # resource locks; taking an hour lock after that fence would invert
+            # the legacy writer's hour-then-fence order.
+            if slot.capacity is not None:
+                await conn.fetchval('SELECT pg_advisory_xact_lock(hashtext($1))',
+                                    f'{org}|{slot.date.isoformat()}|{slot.time.hour}')
             existing = await conn.fetchval(
                 'SELECT id FROM bookings WHERE organization_id=$1 AND source_message_id=$2',
                 org, str(message),
@@ -406,13 +484,16 @@ class WorkerBookingAuthority:
                 if not result['replayed'] or result['outcome'] != 'allocated':
                     raise WorkerProofDenied('Existing booking receipt unavailable')
                 return booking_id
-            used = await conn.fetchval("""SELECT COALESCE(SUM(coperti),0) FROM bookings
-                WHERE organization_id=$1 AND data=$2 AND EXTRACT(HOUR FROM ora)=$3
-                  AND stato IN ('in_attesa','confermata','da_verificare','completata')""",
-                org, slot.date, slot.time.hour,
-            )
-            if used + slot.party_size > slot.capacity:
-                raise WorkerProofDenied('Slot capacity unavailable')
+            if slot.capacity is not None:
+                used = await conn.fetchval("""SELECT COALESCE(SUM(coperti),0) FROM bookings
+                    WHERE organization_id=$1 AND data=$2 AND EXTRACT(HOUR FROM ora)=$3
+                      AND stato IN ('in_attesa','confermata','da_verificare','completata')""",
+                    org, slot.date, slot.time.hour,
+                )
+                if used + slot.party_size > slot.capacity:
+                    raise WorkerProofDenied('Slot capacity unavailable')
+            else:
+                await self._mark_sector_admission(conn, org, booking_id)
             # Only a customer-authored self-identification supplies the booking name.
             from src.core.inbound.service import _customer_name_from_messages
             source = await conn.fetchrow('''SELECT content_text FROM messages WHERE organization_id=$1
@@ -432,12 +513,21 @@ class WorkerBookingAuthority:
                 booking_id, org, subject, str(conversation), name, phone, slot.date, slot.time,
                 slot.party_size, str(message),
             )
+            if isinstance(slot, _HotelSlot):
+                await conn.execute('''INSERT INTO booking_stays(organization_id,booking_id,original_subject_id,
+                    original_conversation_id,source_message_id,arrival_date,departure_date,revision)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,1)''',
+                    org, booking_id, subject, conversation, message, slot.date, slot.departure)
             result = await self._allocation._apply_worker_on_connection(
                 conn, org, message, inbox, operation, semantic_hash, request,
             )
             if result['replayed'] or result['outcome'] != 'allocated':
                 raise WorkerProofDenied('Slot allocation unavailable')
-            await BookingRepository(None).enqueue_calendar_confirmation(conn, dict(booking), message, 'whatsapp')
+            if isinstance(slot, _HotelSlot):
+                from src.core.bookings.hotel_confirmation import enqueue_hotel_confirmation
+                await enqueue_hotel_confirmation(conn, dict(booking), message, slot.date, slot.departure)
+            else:
+                await BookingRepository(None).enqueue_calendar_confirmation(conn, dict(booking), message, 'whatsapp')
             claim = capability._claim
             if not await conn.fetchval('''SELECT lease_until>clock_timestamp() FROM booking_worker_claims
                 WHERE organization_id=$1 AND message_id=$2 AND claim_id=$3 AND generation=$4''',
