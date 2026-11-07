@@ -2,9 +2,12 @@
 import asyncio
 import logging
 
+from src.core.db.scoping import system_scope
+
 logger = logging.getLogger(__name__)
 
 
+@system_scope('read-only verification of database-owned worker schema metadata; no tenant records')
 async def assert_private_booking_ready(pool):
     """Require the private lifecycle owner and the worker's database objects."""
     if pool is None:
