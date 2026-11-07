@@ -102,7 +102,7 @@ class TestConversationMessages:
         org, profile, conv = await self._create_org_with_conv(pg_pool)
 
         from datetime import datetime, timezone, timedelta
-        base = datetime(2026, 8, 16, 10, 0, 0, tzinfo=timezone.utc)
+        base = datetime.now(timezone.utc) - timedelta(days=1)
         await self._insert_message(pg_pool, org, conv, direction="outbound",
                                    text="Buongiorno! Come possiamo aiutarti?",
                                    status="sent", created_at=base)
