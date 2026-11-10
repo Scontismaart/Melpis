@@ -26,6 +26,7 @@ async def test_controller_is_disabled_without_explicit_owner_cutover(monkeypatch
     pool, _ = pool_with_results([])
     assert await run_c24_retention_targets(pool, message_targets=[(uuid4(), uuid4())]) == {
         "messages_purged": 0, "conversations_expired": 0, "receipts_cleaned": 0,
+        "suppressions_cleaned": 0, "suppression_audit_rows_expired": 0,
     }
     pool.acquire.assert_not_called()
 
@@ -33,21 +34,24 @@ async def test_controller_is_disabled_without_explicit_owner_cutover(monkeypatch
 @pytest.mark.asyncio
 async def test_controller_delegates_targeted_mutations_to_owner_functions(monkeypatch):
     monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
-    pool, conn = pool_with_results([True, True, True, True, True, False, True, True, True])
-    org, message, conversation, receipt = (uuid4() for _ in range(4))
+    pool, conn = pool_with_results([True, True, True, True, True, False, True, True, True, True, True, True])
+    org, message, conversation, receipt, audit = (uuid4() for _ in range(5))
     assert await run_c24_retention_targets(pool, message_targets=[(org, message)],
                                            conversation_targets=[(org, conversation)],
-                                           receipt_targets=[(org, receipt)]) == {
+                                           receipt_targets=[(org, receipt)],
+                                           suppression_audit_targets=[(org, audit)]) == {
         "messages_purged": 1, "conversations_expired": 0, "receipts_cleaned": 1,
+        "suppressions_cleaned": 0, "suppression_audit_rows_expired": 1,
     }
-    for index, kind, record in [(2, "message", message), (5, "conversation", conversation), (8, "receipt", receipt)]:
+    for index, kind, record in [(2, "message", message), (5, "conversation", conversation),
+                                (8, "receipt", receipt), (11, "suppression_audit", audit)]:
         assert conn.fetchval.await_args_list[index].args == (
             "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)", kind, org, record)
     assert all(conn.fetchval.await_args_list[index].args == ("SELECT public.c24_retention_operator_allowed()",)
-               for index in (1, 4, 7))
-    assert conn.execute.await_count == 3
+               for index in (1, 4, 7, 10))
+    assert conn.execute.await_count == 4
     assert all(call.args == ("SET LOCAL ROLE melpis_c24_retention",) for call in conn.execute.await_args_list)
-    assert conn.transaction.call_count == 3
+    assert conn.transaction.call_count == 4
     conn.transaction.assert_called_with(isolation="read_committed")
 
 
@@ -70,6 +74,7 @@ def test_manifest_validates_complete_batch_before_execution(tmp_path):
     path.write_text(json.dumps({"receipt_targets": [[str(org), str(receipt)]]}))
     assert read_target_manifest(path) == {
         "message_targets": [], "conversation_targets": [], "receipt_targets": [(org, receipt)],
+        "suppression_targets": [], "suppression_audit_targets": [],
     }
     path.write_text(json.dumps({"message_targets": [[str(org), str(receipt)]],
                                 "receipt_targets": [[str(org), "invalid"]]}))

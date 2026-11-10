@@ -15,14 +15,23 @@ from uuid import UUID
 import asyncpg
 
 
-async def run_c24_retention_targets(pool, *, message_targets=(), conversation_targets=(), receipt_targets=()):
+async def run_c24_retention_targets(
+    pool, *, message_targets=(), conversation_targets=(), receipt_targets=(),
+    suppression_targets=(), suppression_audit_targets=(),
+):
     """Attempt at most 500 explicitly supplied targets, each in its own transaction.
 
     A target is ``(organization_id, record_id)``. False results are ineligible,
     not failures; database errors propagate so callers cannot mistake a partial
     run for a completed one. SQL074 functions are idempotent on retry.
     """
-    counts = {"messages_purged": 0, "conversations_expired": 0, "receipts_cleaned": 0}
+    counts = {
+        "messages_purged": 0,
+        "conversations_expired": 0,
+        "receipts_cleaned": 0,
+        "suppressions_cleaned": 0,
+        "suppression_audit_rows_expired": 0,
+    }
     if os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") != "true":
         return counts
     # Bound iteration as well as database work, including generator inputs.
@@ -30,6 +39,8 @@ async def run_c24_retention_targets(pool, *, message_targets=(), conversation_ta
         (message_targets, "message", "messages_purged"),
         (conversation_targets, "conversation", "conversations_expired"),
         (receipt_targets, "receipt", "receipts_cleaned"),
+        (suppression_targets, "suppression", "suppressions_cleaned"),
+        (suppression_audit_targets, "suppression_audit", "suppression_audit_rows_expired"),
     )
     remaining = 500
     batches = []
@@ -81,7 +92,10 @@ async def run_c24_retention_targets(pool, *, message_targets=(), conversation_ta
     return counts
 
 
-_TARGET_KEYS = ("message_targets", "conversation_targets", "receipt_targets")
+_TARGET_KEYS = (
+    "message_targets", "conversation_targets", "receipt_targets",
+    "suppression_targets", "suppression_audit_targets",
+)
 
 
 def read_target_manifest(path: Path):

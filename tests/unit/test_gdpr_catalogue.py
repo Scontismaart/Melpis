@@ -1,5 +1,6 @@
 """Static validation tests for the frozen GDPR export SQL catalogue."""
 from dataclasses import replace
+import re
 import pytest
 
 from src.core.gdpr import catalog, exporter
@@ -19,15 +20,16 @@ def test_every_nonempty_frozen_projection_passes_runtime_validator():
             if query:
                 assert exporter.catalogue_query(category, scope) == query
                 count += 1
-    # Three C24 categories each add organization/contact projections; the
-    # durable canonical-response lineage also adds one contact projection.
-    assert count == 83
-    assert len({category.name for category in catalog.CATEGORIES}) == 57
+    # C24 suppression metadata adds organization/contact projections, while
+    # the lifecycle audit exposes only bounded tenant/contact projections.
+    assert count == 89
+    assert len({category.name for category in catalog.CATEGORIES}) == 60
 
 
 @pytest.mark.parametrize('name', [
     'booking_conversation_states', 'booking_conversation_requests',
     'booking_conversation_revocations',
+    'c24_idle_watermarks', 'c24_source_fences', 'c24_suppression_lifecycle_audit',
 ])
 def test_conversation_categories_have_verified_subject_scope_without_account_content(name):
     category = next(item for item in catalog.CATEGORIES if item.name == name)
@@ -36,7 +38,7 @@ def test_conversation_categories_have_verified_subject_scope_without_account_con
     if name == 'booking_conversation_requests':
         assert "COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid" in category.contact_query
     else:
-        assert 'subject_id = $2::uuid' in category.contact_query
+        assert re.search(r'subject_id\s*=\s*\$2::uuid', category.contact_query)
     assert exporter.catalogue_query(category, 'account') is None
     assert category.exclusion_reason
 
