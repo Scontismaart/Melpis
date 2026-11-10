@@ -51,6 +51,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                    AND out_m.organization_id = $1
                    AND out_m.conversation_id = (e.dettagli->>'conversation_id')::uuid 
                    AND out_m.direction = 'outbound' 
+                   AND out_m.deleted_at IS NULL
+                   AND out_m.created_at > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= e.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 ''
@@ -61,6 +63,14 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
         WHERE e.organization_id = $1
           AND e.created_at >= NOW() - make_interval(days => $2)
           AND e.tipo_evento IN ('messaggio', 'recensione')
+          AND (e.tipo_evento <> 'messaggio' OR (
+              e.created_at > NOW() - INTERVAL '60 days'
+              AND EXISTS (SELECT 1 FROM messages source_m
+                          WHERE source_m.organization_id = e.organization_id
+                            AND source_m.id = e.source_id
+                            AND source_m.deleted_at IS NULL
+                            AND source_m.created_at > NOW() - INTERVAL '60 days')
+          ))
         
         UNION ALL
         
@@ -80,6 +90,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                  WHERE out_m.conversation_id = m.conversation_id 
                    AND out_m.organization_id = $1
                    AND out_m.direction = 'outbound' 
+                   AND out_m.deleted_at IS NULL
+                   AND out_m.created_at > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= m.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 (m.ai_reply_cache->>'text'),
@@ -94,6 +106,7 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
         WHERE m.organization_id = $1
           AND m.direction = 'inbound'
           AND m.deleted_at IS NULL
+          AND m.created_at > NOW() - INTERVAL '60 days'
           AND m.created_at >= NOW() - make_interval(days => $2)
           AND NOT EXISTS (
               SELECT 1 FROM event_log e 
