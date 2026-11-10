@@ -6,8 +6,10 @@ The private confirmation worker is disabled unless
 `DATABASE_URL` and is exactly `melpis_c24_booking_worker`. The API startup
 validates the identity, the required schema, the bounded table grants, the
 absence of extra role memberships, and the separation from the application
-login before it starts the worker pool. A missing or unsuitable identity fails
-closed.
+login before it starts the worker pool. Both connections must also report the
+same immutable per-database identity marker and PostgreSQL database OID. A
+worker DSN pointed at another database fails closed even when it uses the
+expected login. A missing or unsuitable identity fails closed.
 
 Migration `086_private_booking_worker_role.sql` provisions the dedicated login
 without a password and grants access only to the booking evidence, policy,
@@ -16,6 +18,11 @@ does not grant access to catalogs, billing, membership, credentials, or other
 product domains. `BYPASSRLS` is confined to this non-inheriting backend login;
 the worker's tenant-scoped queries and authorization checks remain mandatory
 and the readiness check rejects other table or security-definer privileges.
+PostgreSQL row-lock privileges are granted only at column scope for protected
+parent/evidence tables, and an enabled trigger rejects all worker `UPDATE`s on
+those tables. Tests verify row locks still work and primary-key mutation is
+denied. The immutable database identity marker is readable by the worker but
+cannot be updated or deleted.
 The capability function that permits fenced sector admission is the only
 security-definer function allowed to this identity.
 

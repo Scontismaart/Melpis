@@ -20,6 +20,29 @@ END $$;
 
 GRANT USAGE ON SCHEMA public TO melpis_c24_booking_worker;
 
+-- Bind the worker connection to this logical database as well as to its login.
+-- The random marker is provisioned per database and cannot be changed later;
+-- the database OID is checked with it to reject same-cluster clones.
+CREATE TABLE IF NOT EXISTS public.c24_database_instance_identity (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    identity_id uuid NOT NULL DEFAULT gen_random_uuid()
+);
+INSERT INTO public.c24_database_instance_identity(singleton)
+VALUES (true) ON CONFLICT (singleton) DO NOTHING;
+CREATE OR REPLACE FUNCTION public.c24_database_instance_identity_immutable()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+BEGIN
+ RAISE EXCEPTION 'database instance identity is immutable' USING ERRCODE='42501';
+END $$;
+DROP TRIGGER IF EXISTS c24_database_instance_identity_immutable
+ ON public.c24_database_instance_identity;
+CREATE TRIGGER c24_database_instance_identity_immutable
+ BEFORE UPDATE OR DELETE ON public.c24_database_instance_identity
+ FOR EACH ROW EXECUTE FUNCTION public.c24_database_instance_identity_immutable();
+REVOKE ALL ON public.c24_database_instance_identity FROM PUBLIC,anon,authenticated,service_role;
+GRANT SELECT ON public.c24_database_instance_identity TO melpis_c24_booking_worker;
+REVOKE ALL ON FUNCTION public.c24_database_instance_identity_immutable() FROM PUBLIC;
+
 -- Narrow data access for confirmed private booking work. Tenant conditions
 -- remain mandatory in application SQL; the role cannot read unrelated product
 -- domains, modify catalogs, or manage accounts, billing, consent, or policy.
@@ -51,6 +74,33 @@ GRANT UPDATE (request_id) ON public.simulation_requests TO melpis_c24_booking_wo
 GRANT UPDATE (organization_id, conversation_id) ON public.booking_conversation_states,
     public.booking_conversation_requests TO melpis_c24_booking_worker;
 GRANT UPDATE (revision) ON public.booking_stays TO melpis_c24_booking_worker;
+
+-- PostgreSQL requires UPDATE privilege for SELECT ... FOR UPDATE/SHARE. The
+-- worker receives only column-level lock privileges; a trigger rejects every
+-- attempted data UPDATE on these read-only evidence/parent tables. This keeps
+-- row-lock semantics without granting a usable mutation capability.
+CREATE OR REPLACE FUNCTION public.c24_private_worker_reject_update()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF session_user='melpis_c24_booking_worker' THEN
+  RAISE EXCEPTION 'private booking worker cannot update protected rows' USING ERRCODE='42501';
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.c24_private_worker_reject_update() FROM PUBLIC;
+DO $$
+DECLARE rel text;
+BEGIN
+ FOREACH rel IN ARRAY ARRAY[
+  'organizations','messages','conversations','contacts','bookings','booking_settings',
+  'inbound_worker_receipts','inbound_worker_operations','meta_webhook_inbox','usage_events',
+  'simulation_requests','booking_conversation_states','booking_conversation_requests','booking_stays'
+ ] LOOP
+  EXECUTE format('DROP TRIGGER IF EXISTS c24_private_worker_readonly_update ON public.%I',rel);
+  EXECUTE format('CREATE TRIGGER c24_private_worker_readonly_update BEFORE UPDATE ON public.%I '
+    'FOR EACH ROW EXECUTE FUNCTION public.c24_private_worker_reject_update()',rel);
+ END LOOP;
+END $$;
 
 GRANT INSERT, UPDATE ON public.booking_worker_claims TO melpis_c24_booking_worker;
 GRANT INSERT ON public.bookings, public.booking_stays, public.booking_allocation_sets,

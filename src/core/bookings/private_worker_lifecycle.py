@@ -56,7 +56,7 @@ async def assert_private_booking_ready(pool, *, application_pool=None):
                     'booking_sector_admission_fences','booking_allocation_sets','booking_resource_allocations',
                     'booking_allocation_requests','booking_confirmation_outbox','booking_stay_purge_fences',
                     'booking_stay_tombstones','gdpr_erasure_barriers','usage_events','simulation_requests',
-                    'message_delivery_attempts'))""")
+                    'message_delivery_attempts','c24_database_instance_identity'))""")
             functions_ok = await conn.fetchval("""SELECT NOT EXISTS (
                 SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
                 WHERE n.nspname='public' AND p.prosecdef
@@ -73,12 +73,15 @@ async def assert_private_booking_ready(pool, *, application_pool=None):
                 AND to_regclass('public.inbound_worker_receipts') IS NOT NULL
                 AND to_regclass('public.booking_conversation_states') IS NOT NULL
                 AND to_regclass('public.booking_conversation_requests') IS NOT NULL
+                AND (SELECT count(*)=1 FROM public.c24_database_instance_identity)
                 AND to_regclass('public.booking_allocation_requests') IS NOT NULL
                 AND to_regclass('public.booking_confirmation_outbox') IS NOT NULL
                 AND to_regclass('public.booking_stays') IS NOT NULL
                 AND to_regclass('public.booking_sector_admission_epochs') IS NOT NULL
                 AND to_regclass('public.booking_sector_admission_markers') IS NOT NULL
                 AND to_regprocedure('public.booking_sector_mark_worker_insert(uuid,uuid)') IS NOT NULL
+                AND to_regclass('public.c24_database_instance_identity') IS NOT NULL
+                AND to_regprocedure('public.c24_private_worker_reject_update()') IS NOT NULL
                 AND EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid=c.oid
                     AND attname='generation' AND NOT attisdropped)
                 AND EXISTS (SELECT 1 FROM pg_attribute
@@ -91,7 +94,16 @@ async def assert_private_booking_ready(pool, *, application_pool=None):
                 JOIN pg_class c ON c.oid=to_regclass('public.booking_worker_claims')
                 JOIN pg_class f ON f.oid=to_regclass('public.booking_sector_admission_fences')
                 WHERE o.oid=to_regclass('public.inbound_worker_operations')""")
-            ready = identity_ok is True and tables_ok is True and functions_ok is True and schema_ok is True
+            protected_updates_ok = await conn.fetchval("""WITH protected(rel) AS (SELECT unnest(ARRAY[
+                'organizations','messages','conversations','contacts','bookings','booking_settings',
+                'inbound_worker_receipts','inbound_worker_operations','meta_webhook_inbox','usage_events',
+                'simulation_requests','booking_conversation_states','booking_conversation_requests','booking_stays'
+            ])) SELECT count(*)=14 AND bool_and(t.tgenabled='O' AND p.proname='c24_private_worker_reject_update')
+              FROM protected x JOIN pg_class c ON c.oid=to_regclass('public.'||x.rel)
+              JOIN pg_trigger t ON t.tgrelid=c.oid AND t.tgname='c24_private_worker_readonly_update'
+              JOIN pg_proc p ON p.oid=t.tgfoid WHERE NOT t.tgisinternal""")
+            ready = (identity_ok is True and tables_ok is True and functions_ok is True
+                     and schema_ok is True and protected_updates_ok is True)
     except Exception:
         raise RuntimeError('Private booking worker database readiness failed') from None
     if ready is not True:
@@ -101,9 +113,18 @@ async def assert_private_booking_ready(pool, *, application_pool=None):
             async with pool.acquire() as worker_conn, application_pool.acquire() as app_conn:
                 worker_login = await worker_conn.fetchval('SELECT session_user')
                 application_login = await app_conn.fetchval('SELECT session_user')
+                worker_identity = await worker_conn.fetchrow('''SELECT i.identity_id::text AS identity_id,
+                    d.oid::text AS database_oid FROM public.c24_database_instance_identity i
+                    JOIN pg_database d ON d.datname=current_database() WHERE i.singleton=true''')
+                application_identity = await app_conn.fetchrow('''SELECT i.identity_id::text AS identity_id,
+                    d.oid::text AS database_oid FROM public.c24_database_instance_identity i
+                    JOIN pg_database d ON d.datname=current_database() WHERE i.singleton=true''')
         except Exception:
             raise RuntimeError('Private booking worker database readiness failed') from None
-        if not worker_login or worker_login == application_login:
+        if (not worker_login or worker_login == application_login or not worker_identity
+                or not application_identity
+                or worker_identity['identity_id'] != application_identity['identity_id']
+                or worker_identity['database_oid'] != application_identity['database_oid']):
             raise RuntimeError('Private booking worker database readiness failed')
 
 

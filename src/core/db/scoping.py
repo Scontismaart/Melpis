@@ -42,6 +42,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "gdpr_policies": ("direct", "Versioned controller approvals are bound to one tenant."),
     "gdpr_erasure_barriers": ("direct", "Erasure tombstones fence data production within a tenant."),
     "organizations": ("system/root", "Tenant root rows; selected by organization primary key."),
+    "c24_database_instance_identity": ("system/root", "Immutable database identity marker used to bind private service connections."),
     "user_profiles": ("system/root", "User principal profile keyed by auth user, may belong to multiple organizations."),
     "auth_access_lifecycle": ("system/root", "Server-only durable principal access and provisioning history keyed by immutable auth identity."),
     "organization_memberships": ("direct", "Membership is owned by exactly one organization."),
