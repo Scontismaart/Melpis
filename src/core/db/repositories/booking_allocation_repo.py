@@ -140,8 +140,9 @@ class BookingAllocationRepository:
         # trigger fires. Lock the evidence until this transaction ends.
         source = await conn.fetchrow("""SELECT o.message_id FROM inbound_worker_operations o
             WHERE o.organization_id=$1 AND o.message_id=$2 AND o.inbox_id=$3 AND o.operation_id=$4
-              AND COALESCE(NULLIF(current_setting('role'), 'none'), session_user) =
+              AND (COALESCE(NULLIF(current_setting('role'), 'none'), session_user) =
                   pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='public.inbound_worker_operations'::regclass))
+                  OR COALESCE(NULLIF(current_setting('role'), 'none'), session_user)='melpis_c24_booking_worker')
             FOR KEY SHARE""", org, message, inbox, operation)
         if not source:
             raise AllocationDenied('Worker provenance unavailable')

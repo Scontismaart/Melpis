@@ -1,0 +1,27 @@
+# C2.4 private booking worker identity
+
+The private confirmation worker is disabled unless
+`C24_PRIVATE_BOOKING_WORKER_ENABLED=true`. Enabling it requires
+`C24_PRIVATE_BOOKING_DATABASE_URL` and a database login that is distinct from
+`DATABASE_URL` and is exactly `melpis_c24_booking_worker`. The API startup
+validates the identity, the required schema, the bounded table grants, the
+absence of extra role memberships, and the separation from the application
+login before it starts the worker pool. A missing or unsuitable identity fails
+closed.
+
+Migration `086_private_booking_worker_role.sql` provisions the dedicated login
+without a password and grants access only to the booking evidence, policy,
+allocation, confirmation, and message-delivery tables used by this worker. It
+does not grant access to catalogs, billing, membership, credentials, or other
+product domains. `BYPASSRLS` is confined to this non-inheriting backend login;
+the worker's tenant-scoped queries and authorization checks remain mandatory
+and the readiness check rejects other table or security-definer privileges.
+The capability function that permits fenced sector admission is the only
+security-definer function allowed to this identity.
+
+The database credential must be provisioned in a protected secret store after
+the migration has been reviewed and applied in an authorized environment. No
+credential is stored in the repository. The worker remains off in all
+operational environments until that provisioning, the migration, and the
+separate C2.4 activation approval are complete. This repository change does
+not apply a remote migration or enable the worker.

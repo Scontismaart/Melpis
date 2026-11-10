@@ -28,6 +28,7 @@ class Pool:
 def app_setup(monkeypatch):
     monkeypatch.setenv('APP_ENV', 'development')
     monkeypatch.setenv('DATABASE_URL', 'postgresql://test:test@localhost/test')
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_DATABASE_URL', 'postgresql://worker:worker@localhost/test')
     monkeypatch.delenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', raising=False)
     monkeypatch.delenv('META_APP_SECRET', raising=False)
     monkeypatch.delenv('META_VERIFY_TOKEN', raising=False)
@@ -51,7 +52,11 @@ def app_setup(monkeypatch):
     monkeypatch.setattr('src.whatsapp.inbound_processor.InboundProcessor', Mock(return_value=SimpleNamespace(process_next_batch=AsyncMock())))
     monkeypatch.setattr('src.whatsapp.retry_worker.RetryWorker', Mock(return_value=SimpleNamespace(process_next_batch=AsyncMock())))
     pool = Pool(True)
+    worker_pool = Pool(True)
     monkeypatch.setattr('asyncpg.create_pool', AsyncMock(return_value=pool))
+    monkeypatch.setattr('src.core.bookings.private_worker_lifecycle.create_private_booking_pool', AsyncMock(return_value=worker_pool))
+    monkeypatch.setattr('src.core.bookings.private_worker_lifecycle.assert_private_booking_ready', AsyncMock())
+    pool.worker_pool = worker_pool
     return pool
 
 
@@ -69,7 +74,7 @@ async def test_enabled_starts_one_task_and_shutdown_cancels(app_setup, monkeypat
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
     started, stopped = asyncio.Event(), asyncio.Event()
     async def loop(pool):
-        assert pool is app_setup
+        assert pool is app_setup.worker_pool
         started.set()
         try:
             await asyncio.Event().wait()
@@ -81,22 +86,35 @@ async def test_enabled_starts_one_task_and_shutdown_cancels(app_setup, monkeypat
     async with main.lifespan(app):
         await asyncio.wait_for(started.wait(), 1)
         assert app.state.private_booking_task is not None
-        runner.assert_called_once_with(app_setup)
-        app_setup.conn.fetchval.assert_awaited_once()
+        runner.assert_called_once_with(app_setup.worker_pool)
     assert stopped.is_set()
     assert app.state.private_booking_task.cancelled()
     app_setup.close.assert_awaited_once()
+    app_setup.worker_pool.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_enabled_wrong_identity_fails_closed_and_closes_pool(app_setup, monkeypatch):
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
-    app_setup.conn.fetchval.return_value = False
+    from src.core.bookings import private_worker_lifecycle
+    private_worker_lifecycle.assert_private_booking_ready.side_effect = RuntimeError('readiness failed')
     with pytest.raises(RuntimeError, match='readiness failed'):
         async with main.lifespan(FastAPI()):
             pytest.fail('startup must fail')
     app_setup.close.assert_awaited_once()
+    app_setup.worker_pool.close.assert_awaited_once()
     main.stop_email_worker.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_enabled_without_dedicated_dsn_fails_closed(app_setup, monkeypatch):
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+    monkeypatch.delenv('C24_PRIVATE_BOOKING_DATABASE_URL')
+    with pytest.raises(RuntimeError, match='readiness failed'):
+        async with main.lifespan(FastAPI()):
+            pytest.fail('worker must not reuse the API database identity')
+    app_setup.close.assert_awaited_once()
+    app_setup.worker_pool.close.assert_not_awaited()
 
 
 @pytest.mark.asyncio

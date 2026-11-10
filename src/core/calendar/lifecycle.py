@@ -68,9 +68,10 @@ class CalendarLifecycle:
             await self.queue.fail(claim, "context_changed", uncertain=claim["recovery"], blocked=not claim["recovery"])
             return
         async with s.repo.pool.acquire() as conn:
-            booking = await conn.fetchrow("""SELECT b.*, EXISTS(
-                SELECT 1 FROM booking_sector_admission_fences f WHERE f.organization_id=b.organization_id
-            ) AS c24_sector_fenced FROM bookings b WHERE b.organization_id=$1 AND b.id=$2""",
+            booking = await conn.fetchrow("""SELECT b.*, f.organization_id IS NOT NULL AS c24_sector_fenced
+                FROM bookings b LEFT JOIN booking_sector_admission_fences f
+                  ON f.organization_id=$1 AND f.organization_id=b.organization_id
+                WHERE b.organization_id=$1 AND b.id=$2""",
                 claim["organization_id"], claim["internal_booking_id"])
         if booking and booking.get("c24_sector_fenced") and (
             booking.get("calendar_confirm_pending") or claim["calendar_claimed_action"] == "authoritative"

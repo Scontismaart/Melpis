@@ -92,7 +92,7 @@ class BookingConversationRepository:
             await conn.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(org))
             if worker:
                 if not private_booking_worker_enabled() or not await conn.fetchval("""SELECT
-                    current_user=pg_get_userbyid(relowner) FROM pg_class
+                    current_user='melpis_c24_booking_worker' OR current_user=pg_get_userbyid(relowner) FROM pg_class
                     WHERE oid='public.inbound_worker_operations'::regclass"""):
                     raise ConversationStateDenied('Private conversation worker unavailable')
                 actor = None

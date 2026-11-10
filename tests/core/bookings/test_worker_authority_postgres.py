@@ -52,7 +52,7 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
     ('AI_ACTIVE', False, False), ('PENDING_STAFF', False, False),
     ('CLAIMED', False, False), ('AI_ACTIVE', True, False), ('AI_ACTIVE', False, True),
 ])
-async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket_status, closed_date, entrypoint, monkeypatch):
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, private_worker_pool, ticket_status, closed_date, entrypoint, monkeypatch):
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
@@ -120,10 +120,10 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, ticket
 
         authority = WorkerBookingAuthority()
         with pytest.raises(WorkerProofDenied, match='Confirmed proposal unavailable'):
-            await authority.process_confirmation(pool, uuid4(), conversation, reply)
+            await authority.process_confirmation(private_worker_pool, uuid4(), conversation, reply)
         repo = SimpleNamespace(pool=pool, reap_stale_claims=AsyncMock(),
                                claim_inbound_messages=AsyncMock(return_value=[]))
-        worker = InboundWorker(repo, None)
+        worker = InboundWorker(repo, None, private_booking_pool=private_worker_pool)
         await worker.process_next_batch()
         await worker.process_next_batch()
         booking = await pool.fetchval('SELECT id FROM bookings WHERE organization_id=$1 AND source_message_id=$2',

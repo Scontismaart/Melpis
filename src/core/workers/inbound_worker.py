@@ -19,11 +19,13 @@ class InboundWorker:
         repo: Any,
         inbound_service: InboundProcessingService,
         batch_size: int = 10,
+        private_booking_pool: Any = None,
     ):
         self.repo = repo
         self.inbound_service = inbound_service
         self.batch_size = batch_size
         self._booking_worker = None
+        self.private_booking_pool = private_booking_pool
 
     async def process_next_batch(self):
         """Esegue il reaper dei claim pendenti/scaduti e preleva il prossimo batch atomico."""
@@ -35,11 +37,11 @@ class InboundWorker:
             except Exception as e:
                 logger.error("Error processing message %s: %s", msg.get("id"), e)
         from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
-        if private_booking_worker_enabled():
+        if private_booking_worker_enabled() and self.private_booking_pool is not None:
             if self._booking_worker is None:
                 from src.core.bookings.worker_authority import WorkerBookingAuthority
                 self._booking_worker = WorkerBookingAuthority()
             try:
-                await self._booking_worker.process_next_batch(self.repo.pool)
+                await self._booking_worker.process_next_batch(self.private_booking_pool)
             except Exception as exc:
                 logger.error("Private booking worker batch failed: %s", type(exc).__name__)

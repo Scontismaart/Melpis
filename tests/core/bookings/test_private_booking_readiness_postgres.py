@@ -7,8 +7,22 @@ from src.core.bookings.private_worker_lifecycle import assert_private_booking_re
 
 
 @pytest.mark.asyncio
-async def test_worker_readiness_accepts_owner_identity_and_rejects_other_login(pg_pool, postgres_container):
-    await assert_private_booking_ready(pg_pool)
+async def test_worker_readiness_requires_dedicated_identity(private_worker_pool, pg_pool, postgres_container):
+    await assert_private_booking_ready(private_worker_pool, application_pool=pg_pool)
+    with pytest.raises(RuntimeError, match='readiness failed'):
+        await assert_private_booking_ready(private_worker_pool, application_pool=private_worker_pool)
+    assert await private_worker_pool.fetchval("SELECT has_table_privilege(current_user,'public.messages','INSERT')")
+    assert not await private_worker_pool.fetchval("SELECT has_table_privilege(current_user,'public.organization_memberships','SELECT')")
+    assert not await private_worker_pool.fetchval("SELECT has_column_privilege(current_user,'public.messages','content_text','UPDATE')")
+    with pytest.raises(RuntimeError, match='readiness failed'):
+        await assert_private_booking_ready(pg_pool)
+    async with pg_pool.acquire() as admin:
+        await admin.execute('GRANT SELECT ON public.whatsapp_accounts TO melpis_c24_booking_worker')
+    with pytest.raises(RuntimeError, match='readiness failed'):
+        await assert_private_booking_ready(private_worker_pool)
+    async with pg_pool.acquire() as admin:
+        await admin.execute('REVOKE SELECT ON public.whatsapp_accounts FROM melpis_c24_booking_worker')
+    await assert_private_booking_ready(private_worker_pool)
     role, password = 'c24_wrong_owner_' + uuid4().hex, uuid4().hex
     async with pg_pool.acquire() as admin:
         await admin.execute(f'CREATE ROLE {role} LOGIN NOINHERIT PASSWORD \'{password}\'')

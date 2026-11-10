@@ -20,7 +20,7 @@ from tests.core.test_quota_reservation_lifecycle import _auth_member, _inbound_m
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico'])
-async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool, monkeypatch, sector):
+async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool, private_worker_pool, monkeypatch, sector):
     pool = pg_pool
     org = (await _organization(pool))['id']
     await pool.execute("UPDATE organizations SET timezone='Europe/Rome',business_profile=$2::jsonb WHERE id=$1",
@@ -83,7 +83,7 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
         async with legacy.slot_lock(org, appointment, '10:00'):
             return await legacy.create_booking(org, 'Synthetic legacy', appointment, '10:00', 1)
 
-    worker = asyncio.create_task(WorkerBookingAuthority().process_next_batch(pool))
+    worker = asyncio.create_task(WorkerBookingAuthority().process_next_batch(private_worker_pool))
     competing = None
     try:
         await asyncio.wait_for(entered.wait(), 5)
@@ -96,7 +96,7 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     assert isinstance(legacy_result, Exception) and 'guarded admission' in str(legacy_result)
     booking = await pool.fetchval('SELECT id FROM bookings WHERE organization_id=$1', org)
     assert booking is not None
-    assert await authority.process_next_batch(pool) == 0
+    assert await authority.process_next_batch(private_worker_pool) == 0
     assert await pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', org, booking) == 'confermata'
     assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', org, booking) == 1
     assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', org, booking) == 1

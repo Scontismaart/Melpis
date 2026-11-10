@@ -99,7 +99,8 @@ class WorkerBookingAuthority:
 
     async def _confirmed_jobs(self, pool, limit):
         async with pool.acquire() as conn:
-            if not await conn.fetchval("""SELECT current_user = pg_get_userbyid(relowner)
+            if not await conn.fetchval("""SELECT current_user='melpis_c24_booking_worker'
+                OR current_user = pg_get_userbyid(relowner)
                 FROM pg_class WHERE oid='public.inbound_worker_operations'::regclass"""):
                 raise WorkerProofDenied('Private booking worker identity unavailable')
             prior_org, prior_conversation = self._cursor or (None, None)
