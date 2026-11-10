@@ -354,8 +354,11 @@ class ConversationOrchestrator:
 
         # 11. Vertical Strategy & Booking Creation / Validation
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id) if org_id else None)
-        risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, req.text)
+        if risposta.prenotazione is not None:
+            risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, req.text)
         pren = risposta.prenotazione
+        from src.core.bookings.conversation_state import StructuredConversationResponse
+        structured_booking = isinstance(risposta, StructuredConversationResponse)
 
         booking_created = None
         disponibilita_slot = None
@@ -389,6 +392,7 @@ class ConversationOrchestrator:
             and intent_result.intent == "faq"
             and guardrail_action != "block"
             and not risposta.richiede_umano
+            and not structured_booking
             and not (pren and pren.data and pren.ora and pren.coperti)
         ):
             try:
@@ -429,8 +433,9 @@ class ConversationOrchestrator:
                 req.quota_operation, req.quota_ticket, risposta,
                 context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
             )
-            if not req.is_simulation and pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
-                risposta.risposta = BOOKING_RECEIVED_REPLY
+            if (not req.is_simulation and not risposta.richiede_umano
+                    and (structured_booking or (pren and pren.data and pren.ora and pren.coperti))):
+                risposta = risposta.model_copy(update={"risposta": BOOKING_RECEIVED_REPLY})
                 output.response_text = risposta.risposta
                 output._quota_final = validate_final_response(
                     req.quota_operation, req.quota_ticket, risposta,

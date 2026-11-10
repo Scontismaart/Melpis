@@ -66,8 +66,15 @@
       model.resources.forEach((r, index) => {
         const box = group(resources, `${translate("Risorsa")} ${index + 1}`);
         control(box, "Identificativo", r.resource_id, "text", (v) => { r.resource_id = v; });
-        control(box, "Tipo", r.kind, "text", (v) => { r.kind = v; }, kinds.map((k) => [k, kindNames[k]]));
+        control(box, "Tipo", r.kind, "text", (v) => { r.kind = v; if (v !== "room") delete r.max_occupants; render(); }, kinds.map((k) => [k, kindNames[k]]));
         control(box, "Capacità", r.capacity, "number", (v) => { r.capacity = v; });
+        if (model.sector === "hotel_bnb" && r.kind === "room") {
+          const occupancy = control(box, "Ospiti massimi per camera (facoltativo)", r.max_occupants, "number", (v) => {
+            if (v == null) delete r.max_occupants; else r.max_occupants = v;
+          });
+          occupancy.min = "1";
+          el("p", "Senza un limite positivo, la conferma automatica del soggiorno non è disponibile.", box);
+        }
         control(box, "Esclusiva (capacità 1)", r.exclusive, "checkbox", (v) => { r.exclusive = v; });
         button(box, "Rimuovi risorsa", () => { model.resources.splice(index, 1); });
       });
@@ -143,7 +150,13 @@
       button(closures, "Aggiungi data", () => { model.availability.closed_dates.push(""); });
     }
     function load(catalog) { model = catalog == null ? null : clone(catalog); render(); }
-    function read(revision) { if (!model) throw new Error("Seleziona o carica un catalogo"); const result = clone(model); result.revision = revision; return result; }
+    function read(revision) {
+      if (!model) throw new Error("Seleziona o carica un catalogo");
+      if (model.resources.some((r) => r.max_occupants != null && (r.kind !== "room" || !Number.isInteger(r.max_occupants) || r.max_occupants < 1))) {
+        throw new Error(translate("Il limite ospiti per camera deve essere un numero intero positivo."));
+      }
+      const result = clone(model); result.revision = revision; return result;
+    }
     function clear() { model = null; container.replaceChildren(); }
     function setEditable(value) { editable = Boolean(value); render(); }
     render();

@@ -19,6 +19,7 @@ _C24_ONLY = {
     'booking_conversation_states', 'booking_conversation_requests',
     'booking_conversation_revocations',
 }
+_C24_RETENTION_ONLY = {'c24_idle_watermarks', 'c24_source_fences', 'c24_suppression_lifecycle_audit'}
 _STAY_ONLY = {'booking_stays', 'booking_stay_purge_fences', 'booking_stay_tombstones'}
 _LEGACY_SIMULATION_QUERY = """
     SELECT request_id, status, created_at, reserved_at, completed_at
@@ -31,7 +32,7 @@ def catalogue_query(category, scope, *, schema='ready'):
         raise ValueError('Only the frozen GDPR catalogue is executable')
     query = category.query if scope == 'organization' else getattr(category, scope + '_query')
     if schema != 'ready':
-        if category.name in _C24_ONLY:
+        if category.name in (_C24_ONLY | _C24_RETENTION_ONLY):
             return None
         if category.name == 'simulation_requests':
             query = _LEGACY_SIMULATION_QUERY if scope == 'organization' else category.account_query if scope == 'account' else None
@@ -136,16 +137,21 @@ class Exporter:
                 await append(('{"organization_id":' + encode(str(org)) + ',"exported_at":' +
                               encode(datetime.now(timezone.utc).isoformat())).encode())
                 for category in CATEGORIES:
-                    stay_missing = category.name in _STAY_ONLY and not await conn.fetchval(
-                        'SELECT to_regclass($1) IS NOT NULL', 'public.' + category.name,
+                    relation_missing = (
+                        category.name in (_STAY_ONLY | _C24_RETENTION_ONLY)
+                        and not await conn.fetchval(
+                            'SELECT to_regclass($1) IS NOT NULL',
+                            'public.' + category.name,
+                        )
                     )
-                    query = None if stay_missing else catalogue_query(category, scope, schema=schema)
+                    query = None if relation_missing else catalogue_query(category, scope, schema=schema)
                     item = {'category': category.name, 'count': 0}
                     if not query:
                         reason = (
-                            'stay_schema_relation_absent' if stay_missing else
+                            'stay_schema_relation_absent' if category.name in _STAY_ONLY and relation_missing else
+                            'c24_retention_schema_relation_absent' if category.name in _C24_RETENTION_ONLY and relation_missing else
                             'conversation_schema_' + schema
-                            if category.name in _C24_ONLY and schema != 'ready'
+                            if category.name in (_C24_ONLY | _C24_RETENTION_ONLY) and schema != 'ready'
                             else category.exclusion_reason or 'no_verified_subject_relation'
                         )
                         item.update(status='excluded', reason=reason)
