@@ -313,7 +313,7 @@ async def test_receipt_erasure_policy_hold_and_release(state_env, monkeypatch):
     from src.core.gdpr.deletion import Deletion
     from tests.core.gdpr.test_conversation_lifecycle_c24 import populated, subject, approve_conversation
     from tests.core.gdpr.test_deletion_a06 import approve_policies
-    monkeypatch.setenv('ENCRYPTION_KEY','MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=')
+    monkeypatch.setenv("ENCRYPTION_KEY", __import__("base64").urlsafe_b64encode(bytes(range(32))).decode("ascii"))
     env=state_env; pool=env['pool']; org=env['org']; request=await populated(env)
     contact=await subject(env)
     await pool.execute("""INSERT INTO c24_idle_watermarks
