@@ -130,6 +130,7 @@ async def test_manifest_controller_uses_dedicated_login_per_transaction(
                 await login.close()
             assert await _run_manifest(path) == {
                 'messages_purged': 0, 'conversations_expired': 1, 'receipts_cleaned': 0,
+                'suppressions_cleaned': 0, 'suppression_audit_rows_expired': 0,
             }
             assert not await admin.fetchval(
                 'SELECT EXISTS(SELECT 1 FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2)',
