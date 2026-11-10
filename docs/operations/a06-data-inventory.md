@@ -1,7 +1,7 @@
 # A06 data inventory and export projection
 
 This inventory is a static review of `src/whatsapp/schema.sql`,
-`src/core/db/schema.sql`, and data tables introduced through migrations 002–063. It describes SQL declarations
+`src/core/db/schema.sql`, and data tables introduced through migrations 002–087. It describes SQL declarations
 and checked-in code; it is not confirmation of the deployed database or of
 external provider configuration. The export query allowlist is
 [`src/core/gdpr/catalog.py`](../../src/core/gdpr/catalog.py). It contains one
@@ -9,8 +9,8 @@ frozen category per table, explicit selected columns, and no `SELECT *`.
 
 ## Scope and identity keys
 
-**A06 status: technical partial.** The catalog contains 51 unique categories
-and 70 executable projections, including narrow subject views. This is not a
+**A06 status: technical partial.** The reviewed catalog contains 60 unique categories
+and 89 executable projections, including narrow subject views. This is not a
 legal sign-off or issue closure. The five Privacy V1.0 product decisions are founder-approved; effective
 tenant records, contractual/provider verification and C01 operational cutover remain pending, as do shared authentication-account disposition,
 subject-level review of unstructured content, verified external-provider
@@ -46,6 +46,9 @@ verified.
 | `contacts` | Tenant + customer `id` / phone | Phone, effective consent and disclosure timestamps | Tenant and exact-contact projection | Migration 014 contact delete; consent state is separate from historical log |
 | `conversations` | Tenant; `contact_id` | Channel, status, staff assignment and timestamps | Tenant and contact join | Contact FK cascades; soft-delete propagation in migration 014 |
 | `booking_conversation_revocations` | Tenant + conversation + original contact | Immutable revocation fence, subject identifiers, reason and timestamp | No contact/account content projection; lifecycle metadata requires review | Prevents old A04 evidence from recreating revoked state. Retention, legal basis, subject export and eventual disposition remain open controller decisions. |
+| `c24_idle_watermarks` | Tenant + conversation + original contact | Expired conversation generation, cutoff and provider timestamp | Tenant and exact-contact projection; no account projection | Migration 087 permits removal only after approved technical-receipt retention (maximum 90 days), no active state/receipt/unpurged source, and no applicable hold; message tombstones still reject replay. |
+| `c24_source_fences` | Tenant + conversation + original contact | Request/source identifiers and fence time | Tenant and exact-contact projection; no account projection | Migration 087 removes only after request receipt is gone and source remains as content-purged tombstone; erasure additionally requires validated A06 barrier and redacted subject. |
+| `c24_suppression_lifecycle_audit` | Tenant + original contact/conversation | Cleanup kind/action, opaque digest, operation correlation and timestamp | Tenant and exact-contact projection; raw source/operation identifiers excluded | Migration 087 appends audit atomically; policy-gated cleanup respects organization, subject, conversation and record holds and expires it under approved technical-receipt retention (maximum 90 days). |
 | `messages` | Tenant; conversation → contact | Message text, delivery status and timestamps; JSON payload may contain more | Tenant projection includes `content_text`; subject projection returns structure and timestamps only | Conversation FK cascades; retention worker handles messages |
 | `message_delivery_attempts` | Message → conversation → contact | Retry state and error JSON | Safe retry fields; error JSON excluded | FK to message; no separate retention policy found |
 | `contact_consent_log` | Contact; optional triggering message | Opt-in/out event, method and matched text | Event fields; matched free text excluded | Contact delete cascades; preserve event semantics in lifecycle service |
@@ -94,11 +97,10 @@ verified.
 | `gdpr_erasure_barriers` | Tenant; explicitly scoped contact subject | Scope, subject ID, operation and creation time; digest/key ID | Tenant projection; contact projection requires contact scope and exact subject ID | Migration 063; digest and key ID excluded; no account projection |
 | `gdpr_export_chunks` | Tenant; operation | Encrypted serialized export chunks and digests | Excluded; recursive export artifact | Migration 063; never included in an export |
 
-The 51-table inventory above covers application data through migration 062
-and the six lifecycle tables added by migration 063. The catalog contains 70
-executable organization/contact/account projections across its 51 categories,
-including safe
-projections for five lifecycle tables; `gdpr_export_chunks` remains excluded
+The inventory rows above cover the listed application data and C2.4 lifecycle
+metadata added by migrations 074/087. The frozen catalog contains 89
+executable organization/contact/account projections across 60 categories,
+including narrow C2.4 projections; `gdpr_export_chunks` remains excluded
 because it stores encrypted recursive export artifacts. Lifecycle event and
 step evidence JSON, operation manifests, request hashes, session data, and
 erasure barrier digests are excluded. These lifecycle records remain governed

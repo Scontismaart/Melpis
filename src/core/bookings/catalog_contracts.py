@@ -14,7 +14,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, model_serializer
 
 from src.core.calendar.availability import CalendarAvailability, local_instant
 
@@ -132,12 +132,22 @@ class Resource(Contract):
     kind: Literal["operator", "space", "table", "seat_pool", "room", "equipment"]
     capacity: Positive
     exclusive: bool
+    max_occupants: Positive | None = None
 
     @model_validator(mode="after")
     def exclusive_capacity(self):
         if self.exclusive and self.capacity != 1:
             raise ValueError("An exclusive resource has capacity one")
+        if self.kind != 'room' and self.max_occupants is not None:
+            raise ValueError("Occupancy limit applies only to room resources")
         return self
+
+    @model_serializer(mode='wrap')
+    def preserve_legacy_shape(self, handler):
+        value = handler(self)
+        if self.max_occupants is None:
+            value.pop('max_occupants', None)
+        return value
 
 
 class ResourceRequirement(Contract):

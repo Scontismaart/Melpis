@@ -40,7 +40,8 @@ def _dsn() -> str:
     return dsn
 
 
-async def _con_pool_esimero(job_coro, lock_name: str | None = None, *, pool_max_size: int = _JOB_POOL_MAX):
+async def _con_pool_esimero(job_coro, lock_name: str | None = None, *, pool_max_size: int = _JOB_POOL_MAX,
+                          database_url: str | None = None):
     """Esegue la coroutine del job su un pool creato DENTRO il suo event
     loop e lo chiude sempre. Log di durata per diagnostiche post-incidente.
     Protegge l'esecuzione distribuita multi-istanza con PostgreSQL advisory lock."""
@@ -48,7 +49,7 @@ async def _con_pool_esimero(job_coro, lock_name: str | None = None, *, pool_max_
     nome = getattr(job_coro, "__name__", "job")
     effective_lock_name = lock_name or f"scheduler_{nome}"
     pool = await asyncpg.create_pool(
-        dsn=_dsn(),
+        dsn=_dsn() if database_url is None else database_url,
         min_size=_JOB_POOL_MIN,
         max_size=pool_max_size,
         command_timeout=_JOB_COMMAND_TIMEOUT,
@@ -177,6 +178,20 @@ async def _reminder_timeout_job(pool):
 
 def _run_no_show_check():
     asyncio.run(_con_pool_esimero(_no_show_check_job))
+
+
+def _run_scheduled_booking_review():
+    if os.getenv("C24_SCHEDULED_BOOKING_REVIEW_ENABLED") != "true":
+        return
+    database_url = os.getenv("C24_SCHEDULED_BOOKING_REVIEW_DSN")
+    if not database_url:
+        logger.error("Scheduled booking review requires its isolated database connection")
+        return
+    from src.core.bookings.scheduled_booking_review import run_scheduled_booking_reviews
+    try:
+        asyncio.run(_con_pool_esimero(run_scheduled_booking_reviews, database_url=database_url))
+    except (asyncpg.PostgresError, ValueError, OSError, TimeoutError):
+        logger.error("Scheduled booking review could not start")
 
 
 async def _no_show_check_job(pool):
@@ -352,6 +367,14 @@ def avvia_scheduler():
         name="Marca da_verificare prenotazioni non completate",
         replace_existing=True,
     )
+    if os.getenv("C24_SCHEDULED_BOOKING_REVIEW_ENABLED") == "true":
+        _scheduler.add_job(
+            _run_scheduled_booking_review,
+            CronTrigger(hour=23, minute=35),
+            id="scheduled_booking_review",
+            name="Marca da_verificare le prenotazioni gestite scadute",
+            replace_existing=True,
+        )
     _scheduler.add_job(
         _run_calendar_sync,
         CronTrigger(minute=0),

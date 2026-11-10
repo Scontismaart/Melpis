@@ -141,7 +141,14 @@ async def lifespan(app: FastAPI):
     app.state.inbound_task = None
     app.state.retry_task = None
     app.state.governance_task = None
+    app.state.private_booking_task = None
+    app.state.private_booking_pool = None
+    from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+    private_booking_enabled = background_jobs_enabled and private_booking_worker_enabled()
     dsn = os.getenv("DATABASE_URL")
+    if private_booking_enabled and not dsn:
+        stop_email_worker()
+        raise RuntimeError("Private booking worker requires its database")
     if dsn:
         import asyncpg
         try:
@@ -156,6 +163,16 @@ async def lifespan(app: FastAPI):
                 dsn=dsn, min_size=1, max_size=db_pool_max, command_timeout=30,
                 server_settings={"search_path": "public, extensions"},
             )
+            if private_booking_enabled:
+                worker_dsn = os.getenv("C24_PRIVATE_BOOKING_DATABASE_URL", "").strip()
+                if not worker_dsn:
+                    raise RuntimeError("Private booking worker requires its dedicated database identity")
+                from src.core.bookings.private_worker_lifecycle import (
+                    assert_private_booking_ready, create_private_booking_pool,
+                )
+                worker_pool = await create_private_booking_pool(worker_dsn)
+                app.state.private_booking_pool = worker_pool
+                await assert_private_booking_ready(worker_pool, application_pool=pool)
             app.state.repo = CoreRepository(pool=pool)
             app.state.pool = pool
             logger.info("[startup] Database pool created successfully.")
@@ -282,7 +299,20 @@ async def lifespan(app: FastAPI):
                 app.state.inbound_task = asyncio.create_task(_inbound_loop())
                 app.state.retry_task = asyncio.create_task(_retry_loop())
                 app.state.governance_task = asyncio.create_task(_governance_loop())
+                if private_booking_enabled:
+                    from src.core.bookings.private_worker_lifecycle import run_private_booking_worker
+                    app.state.private_booking_task = asyncio.create_task(
+                        run_private_booking_worker(app.state.private_booking_pool)
+                    )
         except Exception as e:
+            if private_booking_enabled:
+                if app.state.private_booking_pool is not None:
+                    await app.state.private_booking_pool.close()
+                    app.state.private_booking_pool = None
+                if "pool" in locals():
+                    await pool.close()
+                stop_email_worker()
+                raise RuntimeError("Private booking worker database readiness failed") from None
             if google_calendar_enabled():
                 raise RuntimeError("Calendar enabled requires verified database and worker readiness") from None
             logger.warning("[startup] Database connection failed: %s. Running without pool.", e)
@@ -328,6 +358,7 @@ async def lifespan(app: FastAPI):
             getattr(app.state, "inbound_task", None),
             getattr(app.state, "retry_task", None),
             getattr(app.state, "governance_task", None),
+            getattr(app.state, "private_booking_task", None),
         ) if task is not None
     ]
     for task in background_tasks:
@@ -336,6 +367,9 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*background_tasks, return_exceptions=True)
     if app.state.pool:
         await app.state.pool.close()
+    if app.state.private_booking_pool:
+        await app.state.private_booking_pool.close()
+        app.state.private_booking_pool = None
     from src.core.documenti.isolated import shutdown_local_workers
     await shutdown_local_workers()
     await close_http_client()

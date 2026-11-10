@@ -117,6 +117,48 @@ async def test_booking_confirmation_checks_current_state_before_delivery(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_router_prompt_retry_uses_original_row(app_config, mock_repo, mock_tenant, monkeypatch, eligible):
+    from src.core.channels.whatsapp_adapter import WhatsAppOutboundAdapter
+    from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
+
+    message_id, attempt_id, conversation = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    org = mock_tenant.organization_id
+    content = {"to": "39123456789", "type": "text", "text": {"body": "Verifica i dati"},
+               "_c24_state_digest": "synthetic", "_c24_source_id": str(uuid.uuid4()),
+               "_c24_subject_id": str(uuid.uuid4())}
+    mock_repo.reconstruct_payload_for_retry.return_value = {
+        "id": message_id, "organization_id": org, "conversation_id": conversation,
+        "handling_type": "c24_confirmation_prompt", "status": "queued",
+        "channel": "whatsapp", "content": content,
+    }
+
+    @asynccontextmanager
+    async def guard(_self, org_id, conversation_id, prompt_id):
+        assert (org_id, conversation_id, prompt_id) == (org, conversation, message_id)
+        yield eligible
+
+    monkeypatch.setattr(BookingConversationRepository, "confirmation_prompt_delivery_guard", guard)
+    service = AsyncMock()
+    service.attempt_delivery.return_value = {"wam_id": "synthetic-wam"}
+    router = MagicMock()
+    router.get_adapter.return_value = WhatsAppOutboundAdapter(service)
+    worker = MultiChannelRetryWorker(app_config, mock_repo, channel_router=router)
+    with patch("src.whatsapp.config.load_tenant_config", AsyncMock(return_value=mock_tenant)):
+        await worker._process_one({"id": attempt_id, "message_id": message_id, "attempt_number": 1})
+    service.send_whatsapp_message.assert_not_awaited()
+    if eligible:
+        assert service.attempt_delivery.await_args.kwargs["payload"] == content
+        assert service.attempt_delivery.await_args.kwargs["message_id"] == message_id
+        mock_repo.update_delivery_attempt.assert_awaited_once_with(attempt_id, "succeeded")
+    else:
+        service.attempt_delivery.assert_not_awaited()
+        mock_repo.update_message_status.assert_awaited_once_with(
+            message_id, "failed", error_code="booking_prompt_no_longer_current", organization_id=org,
+        )
+
+
+@pytest.mark.asyncio
 async def test_instagram_retry_success_via_router(app_config, mock_repo):
     msg_id = uuid.uuid4()
     org_id = uuid.uuid4()

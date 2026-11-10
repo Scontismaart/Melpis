@@ -55,6 +55,8 @@ ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
 # reviewed worker/tenant-resolution functions may omit a tenant bind filter.
 # A new decorator use remains visible to the checker unless explicitly added.
 SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
+    "src/core/bookings/private_worker_lifecycle.py::assert_private_booking_ready":
+        "read-only PostgreSQL catalog readiness check for the dedicated private worker principal; no tenant records are read",
     "src/core/retention_job.py::_expired_exports":
         "enumerates expired snapshot IDs with SKIP LOCKED LIMIT 100; each mutation binds its stored tenant",
     "src/core/retention_job.py::_retention_policies":
@@ -116,6 +118,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/bookings/private_worker_lifecycle.py::assert_private_booking_ready", "8c0fb690e1bc6108c73e7b401eedd14b509df0387cbf2ed71b40779c49a40e4a"):
+        "exact read-only pg_class/pg_attribute readiness query; verifies table ownership and required schema only",
     ("src/core/retention_job.py::_expired_exports", "78b2481fd729638ce87ca4abc5bc58025e7c1d7c3597c276cf1979cbd9a8d8cb"):
         "bounded expiration of derived encrypted export artifacts, not source data",
     ("src/core/retention_job.py::_retention_policies", "672e839eec8bb38ab3c9c981b8e7aff866b18b10f656c5140476015fd979ed86"):

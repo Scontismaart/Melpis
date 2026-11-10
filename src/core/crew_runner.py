@@ -17,7 +17,7 @@ from src.core.llm_config import (
     budget_ratio_from_billing,
     route_llm,
 )
-from src.models.schemas import MessaggioInput, ProfiloAttivita, RispostaOutput
+from src.models.schemas import CanaleMessaggio, MessaggioInput, ProfiloAttivita, RispostaOutput
 from src.core.ai_safety import AI_INPUT_MAX_CHARS
 from src.core.llm_config import LLM_TIMEOUT_SECONDS
 from src.core.billing.suspension import assert_ai_generation_allowed
@@ -59,6 +59,38 @@ def _validate_output(risultato) -> RispostaOutput:
             "sia ancora disponibile sul provider LLM configurato."
         )
     return output
+
+
+async def _published_booking_catalog(messaggio, profilo, provider_context):
+    from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+    if (not private_booking_worker_enabled() or messaggio.canale != CanaleMessaggio.WHATSAPP
+            or provider_context.task_type != 'customer_message'
+            or provider_context.worker_message_id is None):
+        return None
+    from src.core.bookings.catalog_contracts import validate_catalog_json
+    from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository, canonical
+    from src.core.db.repositories.booking_repo import BookingRepository
+
+    org = provider_context.organization_id
+    state = await BookingCatalogRepository(BookingRepository(provider_context.pool)).read(org)
+    if state['published'] is None:
+        return None
+    catalog = validate_catalog_json(canonical(state['published']), organization_id=org)
+    if catalog.catalog.sector != state['organization_sector'] or catalog.catalog.sector != profilo.verticale:
+        raise ProviderAccountingError('Published booking catalog does not match current organization sector')
+    return catalog
+
+
+def _validate_structured_output(result, catalog, organization_id):
+    from src.core.bookings.conversation_state import _bounded_json, parse_structured_response_json
+
+    raw = _bounded_json(result.raw)
+    if (not isinstance(raw, dict) or 'prenotazione' in raw
+            or set(raw) - (set(RispostaOutput.model_fields) | {'booking_state_proposal'})):
+        raise ValueError('Invalid structured booking response')
+    if 'booking_state_proposal' not in raw:
+        return RispostaOutput.model_validate(raw)
+    return parse_structured_response_json(result.raw, catalog=catalog, organization_id=organization_id)
 
 
 def genera_risposta(
@@ -121,6 +153,7 @@ async def genera_risposta_async(
     saturare il rate-limit/budget condiviso del provider LLM quando piu'
     tenant generano risposte in parallelo."""
     _execution_gate(messaggio, provider_context)
+    booking_catalog = await _published_booking_catalog(messaggio, profilo, provider_context)
     billing = provider_context.billing_snapshot
     route_request = _route_request_for_message(messaggio, billing, intent)
     route = route_llm(route_request)
@@ -135,12 +168,15 @@ async def genera_risposta_async(
                                  contesto_documenti=contesto_documenti[:12000], variante=variante,
                                  contesto_disponibilita=contesto_disponibilita,
                                  tentativi_falliti=tentativi_falliti, tools=None,
-                                 provider_context=provider_context, reason=attempt_reason)
+                                 provider_context=provider_context, reason=attempt_reason,
+                                 **({'booking_catalog': booking_catalog} if booking_catalog is not None else {}))
                 remaining = LLM_TIMEOUT_SECONDS - (time.monotonic() - inizio)
                 if remaining <= 0:
                     break
-                out = _validate_output(await asyncio.wait_for(crew.kickoff_async(), timeout=remaining))
-                return out
+                result = await asyncio.wait_for(crew.kickoff_async(), timeout=remaining)
+                if booking_catalog is not None:
+                    return _validate_structured_output(result, booking_catalog, provider_context.organization_id)
+                return _validate_output(result)
             except Exception as exc:
                 errors.append(type(exc).__name__)
     raise RuntimeError("Tutti i modelli configurati hanno fallito. " + " | ".join(errors)) from None

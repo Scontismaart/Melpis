@@ -344,9 +344,12 @@ class LegacyInboundPipeline:
                     logger.warning("Guardrail usage logging failed for org %s msg %s: %s", org_id, msg["id"],type(e).__name__)
 
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id))
-        risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, text)
+        if risposta.prenotazione is not None:
+            risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, text)
         pren = risposta.prenotazione
         result.pren = pren
+        from src.core.bookings.conversation_state import StructuredConversationResponse
+        structured_booking = isinstance(risposta, StructuredConversationResponse)
 
         if (quota_operation is None and pren and pren.data and pren.ora
                 and pren.coperti and not risposta.richiede_umano):
@@ -367,8 +370,9 @@ class LegacyInboundPipeline:
                 quota_operation, quota_ticket, risposta,
                 context_chunks=contesto.chunks, profile=profilo, knowledge_epoch=contesto.knowledge_epoch if contesto.chunks else None,
             )
-            if pren and pren.data and pren.ora and pren.coperti and not risposta.richiede_umano:
-                risposta.risposta = BOOKING_RECEIVED_REPLY
+            if (not risposta.richiede_umano
+                    and (structured_booking or (pren and pren.data and pren.ora and pren.coperti))):
+                risposta = risposta.model_copy(update={"risposta": BOOKING_RECEIVED_REPLY})
                 result.response_text = risposta.risposta
                 result.quota_final = validate_final_response(
                     quota_operation, quota_ticket, risposta,

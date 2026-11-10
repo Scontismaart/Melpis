@@ -3,10 +3,7 @@
   "product_approval": "founder_approved_final",
   "registered_on": "2026-11-03",
   "source_sha256": "10fae00fec96e050bb36cfc0cec37863668574ce1d2487162a5c9f7acf20377d",
-  "source_artifact": "founder attachment 26eac263-666c-47bb-b8ff-117acf67efe4, original bytes",
   "canonical_document": "privacy-data-governance-v1.0.md",
-  "canonical_document_sha256": "5634f1de70e889e3fc3f7924f230f4ef3a37da00f4f36519199e7ddb079d457b",
-  "canonical_document_hash_format": "UTF-8 Git blob with LF line endings",
   "operational_execution_authorized": false,
   "provider_agreements_verified": false,
   "health_sector_activation_authorized": false

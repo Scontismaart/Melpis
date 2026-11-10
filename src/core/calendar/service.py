@@ -55,7 +55,7 @@ class GoogleCalendarService:
                 AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
                     AND table_name='google_calendar_credentials' AND column_name='connection_epoch')
                 AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
-                    AND table_name='google_calendar_credentials' AND column_name='credential_version')
+                    AND table_name='google_calendar_credentials' AND column_name='refresh_dispatch_id')
                 AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.bookings'::regclass
                     AND tgname='calendar_queue_booking' AND tgenabled='O')
                 AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.bookings'::regclass

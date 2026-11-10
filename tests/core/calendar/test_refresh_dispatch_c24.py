@@ -16,10 +16,6 @@ pytestmark = pytest.mark.asyncio
 
 
 async def prepare(pool, org, monkeypatch):
-    assert not await pool.fetchval("""SELECT EXISTS(
-        SELECT 1 FROM pg_attribute
-        WHERE attrelid='public.google_calendar_credentials'::regclass
-        AND attname='refresh_dispatch_id' AND NOT attisdropped)""")
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "synthetic-client")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "synthetic-secret")
     fernet = Fernet(Fernet.generate_key())
@@ -44,8 +40,8 @@ async def test_cancelled_thread_cannot_retry_or_restore_disconnected_credentials
     task=asyncio.create_task(connection.credentials(org))
     try:
         assert await asyncio.to_thread(entered.wait,5)
-        marker=await pg_pool.fetchrow('SELECT connection_status,last_error_code,credential_version FROM google_calendar_credentials WHERE organization_id=$1',org)
-        assert marker['connection_status']=='reconnect_required' and marker['last_error_code'] == 'refresh_outcome_unknown' and marker['credential_version'] > 0
+        marker=await pg_pool.fetchrow('SELECT connection_status,refresh_dispatch_id FROM google_calendar_credentials WHERE organization_id=$1',org)
+        assert marker['connection_status']=='reconnect_required' and marker['refresh_dispatch_id']
         task.cancel()
         with pytest.raises(asyncio.CancelledError): await task
         with pytest.raises(CalendarUnavailable,match='reconnect_required'): await connection.credentials(org)
@@ -66,22 +62,10 @@ async def test_successful_refresh_is_once_and_commits_rotated_credentials(pg_poo
         creds._refresh_token='rotated-refresh'
         creds.expiry=datetime.now(timezone.utc).replace(tzinfo=None)+timedelta(hours=1)
     monkeypatch.setattr(Credentials,'refresh',refresh)
-    results = await asyncio.gather(connection.credentials(org), connection.credentials(org))
+    await asyncio.gather(connection.credentials(org), connection.credentials(org))
     row=await connection.row(org)
-    assert calls==['refresh'] and row['last_error_code'] is None and row['connection_status']=='connected'
+    assert calls==['refresh'] and row['refresh_dispatch_id'] is None and row['connection_status']=='connected'
     assert connection.fernet.decrypt(row['refresh_token'].encode())==b'rotated-refresh'
-    # Google auth's before_request can refresh an expired token even with
-    # AuthorizedHttp.max_refresh_attempts=0. The resource client has no
-    # refresh secret and cannot bypass the durable coordinator.
-    from google.auth.exceptions import RefreshError
-    access = results[0][0]
-    assert access.refresh_token is None and access.client_secret is None
-    access.expiry = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1)
-    def forbidden_request(*_args, **_kwargs):
-        pytest.fail("resource request attempted a token exchange")
-    with pytest.raises(RefreshError, match='calendar_refresh_requires_coordinator'):
-        access.before_request(forbidden_request, 'GET', 'https://example.test/calendar', {})
-    assert calls == ['refresh']
 
 
 async def test_timeout_is_unknown_and_never_retried(pg_pool,sample_org,monkeypatch):
@@ -92,7 +76,7 @@ async def test_timeout_is_unknown_and_never_retried(pg_pool,sample_org,monkeypat
     with pytest.raises(CalendarUnavailable,match='refresh_unavailable'): await connection.credentials(org)
     with pytest.raises(CalendarUnavailable,match='reconnect_required'): await connection.credentials(org)
     row=await connection.row(org)
-    assert row['last_error_code']=='refresh_outcome_unknown' and row['connection_status']=='reconnect_required' and calls==['refresh']
+    assert row['refresh_dispatch_id'] and row['connection_status']=='reconnect_required' and calls==['refresh']
 
 
 async def test_actual_google_sdk_cannot_retry_uncertain_token_post(pg_pool, sample_org, monkeypatch):
@@ -111,7 +95,7 @@ async def test_actual_google_sdk_cannot_retry_uncertain_token_post(pg_pool, samp
         await connection.credentials(org)
     assert calls == [('POST', 10)]
     row = await connection.row(org)
-    assert row['connection_status'] == 'reconnect_required' and row['last_error_code'] == 'refresh_outcome_unknown'
+    assert row['connection_status'] == 'reconnect_required' and row['refresh_dispatch_id']
     assert connection.fernet.decrypt(row['refresh_token'].encode()) == b'old-refresh'
     with pytest.raises(CalendarUnavailable, match='reconnect_required'):
         await connection.credentials(org)
@@ -137,7 +121,7 @@ async def test_reauthorization_fences_old_thread_and_consumes_generation(pg_pool
         release.set(); assert await asyncio.to_thread(finished.wait,5)
         row=await connection.row(org)
         assert connection.fernet.decrypt(row['access_token'].encode())==b'new-token'
-        assert row['connection_status']=='connected' and row['last_error_code'] is None
+        assert row['connection_status']=='connected' and row['refresh_dispatch_id'] is None
     finally:
         release.set()
         if not task.done(): task.cancel()
@@ -155,7 +139,7 @@ async def test_late_refresh_cannot_overwrite_new_epoch_even_if_lock_is_lost(pg_p
         assert await asyncio.to_thread(entered.wait,5)
         replacement=connection.fernet.encrypt(b'replaced-token').decode()
         await pg_pool.execute("""UPDATE google_calendar_credentials SET connection_epoch=$2,
-            credential_version=credential_version+1,connection_status='connected',last_error_code=NULL,
+            credential_version=credential_version+1,connection_status='connected',refresh_dispatch_id=NULL,
             access_token=$3 WHERE organization_id=$1""",org,uuid4(),replacement)
         release.set()
         with pytest.raises(CalendarUnavailable,match='connection_changed'): await task
@@ -191,12 +175,12 @@ async def test_refresh_errors_keep_durable_marker_and_never_retry(
         await connection.credentials(org)
     row = await connection.row(org)
     assert row['connection_status'] == expected_status
-    assert row['credential_version'] > 0
+    assert row['refresh_dispatch_id'] is not None
     with pytest.raises(CalendarUnavailable):
         await connection.credentials(org)
     assert calls == ['refresh']
     unchanged = await connection.row(org)
-    assert unchanged['credential_version'] == row['credential_version'] and unchanged['last_error_code'] == row['last_error_code']
+    assert unchanged['refresh_dispatch_id'] == row['refresh_dispatch_id']
     assert unchanged['access_token'] == row['access_token']
     assert unchanged['refresh_token'] == row['refresh_token']
 
@@ -221,7 +205,7 @@ async def test_malformed_refresh_result_fails_closed_without_retry(
         await connection.credentials(org)
     row = await connection.row(org)
     assert row['connection_status'] == 'reconnect_required'
-    assert row['credential_version'] > 0
+    assert row['refresh_dispatch_id'] is not None
     assert connection.fernet.decrypt(row['access_token'].encode()) == b'old-access'
     assert connection.fernet.decrypt(row['refresh_token'].encode()) == b'old-refresh'
     with pytest.raises(CalendarUnavailable):
@@ -249,15 +233,16 @@ async def test_refresh_success_cas_rejects_changed_version_and_dispatch_marker(
     try:
         assert await asyncio.to_thread(entered.wait, 5)
         before = await connection.row(org)
+        replacement_marker = uuid4()
         await pg_pool.execute("""UPDATE google_calendar_credentials
-            SET credential_version=credential_version+1,last_error_code='synthetic_replacement'
-            WHERE organization_id=$1""", org)
+            SET credential_version=credential_version+1,refresh_dispatch_id=$2
+            WHERE organization_id=$1""", org, replacement_marker)
         release.set()
         with pytest.raises(CalendarUnavailable, match='connection_changed'):
             await task
         after = await connection.row(org)
         assert after['credential_version'] == before['credential_version'] + 1
-        assert after['last_error_code'] == 'synthetic_replacement'
+        assert after['refresh_dispatch_id'] == replacement_marker
         assert after['access_token'] == before['access_token']
         assert after['connection_status'] == 'reconnect_required'
         assert calls == ['refresh']

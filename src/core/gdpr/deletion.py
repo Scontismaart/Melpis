@@ -307,7 +307,9 @@ class Deletion:
             manifest = {'version': 'a06-v1', 'local_erasure': 'approved_relational_data_erased',
                         'external_copies': 'pending_verified_receipts',
                         'retained': ['billing', 'audit', 'provider_accounting', 'shared_auth_accounts', 'backups',
-                                     'conversation_revocation_fences_pending_policy', 'booking_stay_replay_fences_pending_policy'],
+                                     'gdpr_erasure_barriers', 'booking_conversation_revocations_pending_lifecycle',
+                                     'conversation_suppression_lifecycle_audit_pending_expiry',
+                                     'booking_stay_replay_fences_pending_policy'],
                         'subject_unstructured_data': 'controller_review_required' if subject else 'tenant_scoped',
                         'policies': {k: {'version': p['version'], 'reference': p['approval_reference']} for k,p in policies.items()}}
             await conn.execute(
