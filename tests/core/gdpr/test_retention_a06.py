@@ -65,7 +65,7 @@ async def test_primary_data_retention_is_disabled_without_explicit_cutover(
 
 
 @pytest.mark.asyncio
-async def test_approved_retention_is_tenant_scoped_bounded_and_preserves_protected_records(
+async def test_approved_legacy_retention_fails_closed_with_c24_schema(
     pg_pool, sample_org, other_org, monkeypatch,
 ):
     org = sample_org["id"]
@@ -102,12 +102,12 @@ async def test_approved_retention_is_tenant_scoped_bounded_and_preserves_protect
 
     monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
     first = await run_retention(pg_pool)
-    assert first["messages_redacted"] == 500
+    assert first["messages_redacted"] == 0
     second = await run_retention(pg_pool)
-    assert second["messages_redacted"] == 2
+    assert second["messages_redacted"] == 0
 
     async with pg_pool.acquire() as conn:
-        assert await conn.fetchval("SELECT count(*) FROM messages WHERE id=ANY($1::uuid[]) AND content_text IS NULL", eligible) == 502
+        assert await conn.fetchval("SELECT count(*) FROM messages WHERE id=ANY($1::uuid[]) AND content_text IS NOT NULL", eligible) == 502
         for message_id in (billed_id, processing_id, pending_id, other_id):
             assert await conn.fetchval("SELECT content_text FROM messages WHERE id=$1", message_id) is not None
         assert await conn.fetchval("SELECT content_text FROM messages WHERE id=$1", other_id) == "synthetic other tenant content"
@@ -207,7 +207,7 @@ async def test_expired_newer_policy_does_not_fall_back_to_older_approval(
 
 
 @pytest.mark.asyncio
-async def test_product_cap_allows_90_days_rejects_91_and_remains_tenant_scoped(
+async def test_product_cap_and_c24_schema_block_legacy_cleanup(
     pg_pool, sample_org, other_org, monkeypatch,
 ):
     org_a = sample_org["id"]
@@ -224,7 +224,11 @@ async def test_product_cap_allows_90_days_rejects_91_and_remains_tenant_scoped(
 
     counts = await run_retention(pg_pool)
 
-    assert counts["messages_redacted"] == 1
+    from src.core.gdpr.product_policy import retention_days_allowed
+
+    assert retention_days_allowed("messages_content", 90)
+    assert not retention_days_allowed("messages_content", 91)
+    assert counts["messages_redacted"] == 0
     async with pg_pool.acquire() as conn:
         row_a = await conn.fetchrow(
             "SELECT content_text,deleted_at FROM messages WHERE id=$1", message_a,
@@ -232,8 +236,8 @@ async def test_product_cap_allows_90_days_rejects_91_and_remains_tenant_scoped(
         row_b = await conn.fetchrow(
             "SELECT content_text,deleted_at FROM messages WHERE id=$1", message_b,
         )
-    assert row_a["content_text"] is None
-    assert row_a["deleted_at"] is not None
+    assert row_a["content_text"] == "synthetic tenant A old message"
+    assert row_a["deleted_at"] is None
     assert row_b["content_text"] == "synthetic tenant B old message"
     assert row_b["deleted_at"] is None
 
