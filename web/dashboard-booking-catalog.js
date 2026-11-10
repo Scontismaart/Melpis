@@ -8,6 +8,7 @@
     let epoch = 0, identity = null, active = false, controller = null, form = null;
     let state = null, pending = null, conflictCopy = null, receipt = null, busy = false, languagePending = false, dirty = false, statusKey = "";
     let status, editor, save, publish, reload, restore, revision, security, audit;
+    let admissionPanel, admissionStatus, admissionToggle, admissionState, pendingAdmission = null;
     function signature() {
       const context = getContext(), session = getSession();
       if (!context || context.view !== "prenotazioni" || !context.userId || !context.sessionOrganizationId || !session || !["owner", "manager", "staff"].includes(session.ruolo)) return null;
@@ -32,11 +33,13 @@
       save.hidden = !p.save; publish.hidden = !p.publish;
       save.disabled = busy || !p.save; publish.disabled = busy || dirty || !p.publish || !state?.draft;
       if (form) form.setEditable(!busy && p.save);
+      if (admissionState) renderAdmission(admissionState);
     }
     function clear() {
       controller?.abort(); controller = null;
       form?.clear(); form = null; state = null; pending = null; conflictCopy = null; receipt = null; busy = false; languagePending = false; dirty = false; statusKey = "";
       container.replaceChildren(); status = editor = save = publish = reload = restore = revision = security = audit = null;
+      admissionPanel = admissionStatus = admissionToggle = admissionState = pendingAdmission = null;
     }
     function invalidate() { active = false; identity = null; epoch += 1; clear(); }
     function leave() { invalidate(); }
@@ -46,6 +49,10 @@
       revision = node("p", "", container);
       status = node("p", "", container); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       security = addButton("Apri impostazioni di sicurezza", () => { if (valid(epoch) && typeof deps.onOpenSecurity === "function") deps.onOpenSecurity(); }); security.hidden = true;
+      admissionPanel = node("fieldset", null, container); admissionPanel.hidden = true;
+      node("legend", "Prenotazioni automatiche", admissionPanel);
+      admissionStatus = node("p", "Stato prenotazioni automatiche non disponibile.", admissionPanel);
+      admissionToggle = doc.createElement("button"); admissionToggle.type = "button"; admissionToggle.addEventListener("click", toggleAdmission); admissionPanel.appendChild(admissionToggle);
       editor = node("div", null, container);
       save = addButton("Salva bozza", saveDraft);
       publish = addButton("Pubblica", publishDraft);
@@ -65,6 +72,51 @@
       form = root.MelpisBookingCatalogForm.create(editor, { sector: data.organization_sector, canEdit: permissions().save, translate: tr, onChange: () => { dirty = true; controls(); setMessage("Salva bozza"); } });
       form.load(data.draft || data.published || null);
       controls();
+    }
+    function renderAdmission(data) {
+      admissionState = data;
+      const owner = getSession()?.ruolo === "owner";
+      const eligible = data && data.eligible === true && Number.isSafeInteger(data.published_revision) && data.published_revision > 0;
+      admissionPanel.hidden = !owner || !data?.eligible;
+      if (admissionPanel.hidden) return;
+      admissionStatus.textContent = tr(data.enabled ? "Conferma automatica attiva per questo settore." : eligible ? "Disattivata. Nessuna prenotazione viene confermata automaticamente." : "Pubblica un catalogo prima di attivare le conferme automatiche.");
+      admissionToggle.textContent = tr(data.enabled ? "Disattiva conferma automatica" : "Attiva conferma automatica");
+      admissionToggle.disabled = busy || !eligible;
+    }
+    async function loadAdmission(token) {
+      try {
+        const response = await apiFetch(`${API_BASE}/api/bookings/catalog/sector-admission`, { signal: controller?.signal });
+        if (!valid(token)) return;
+        if (!response.ok) { admissionStatus.textContent = tr("Stato prenotazioni automatiche non disponibile."); admissionToggle.disabled = true; return; }
+        const data = await response.json();
+        if (!valid(token)) return;
+        if (typeof data.enabled !== "boolean" || typeof data.eligible !== "boolean" || !(data.published_revision === null || Number.isSafeInteger(data.published_revision))) {
+          admissionStatus.textContent = tr("Stato prenotazioni automatiche non disponibile."); admissionToggle.disabled = true; return;
+        }
+        renderAdmission(data);
+      } catch (_) { if (valid(token)) { admissionStatus.textContent = tr("Stato prenotazioni automatiche non disponibile."); admissionToggle.disabled = true; } }
+    }
+    async function toggleAdmission() {
+      const token = epoch; const current = admissionState;
+      if (!valid(token) || busy || getSession()?.ruolo !== "owner" || !current?.eligible || !Number.isSafeInteger(current.published_revision)) return;
+      const enabled = !current.enabled;
+      if (enabled) {
+        if (typeof deps.confirm !== "function") { setMessage("Conferma non disponibile."); return; }
+        let confirmed = false;
+        try { confirmed = await deps.confirm({ title: tr("Attivare le prenotazioni automatiche?"), description: tr("La modifica richiede il ruolo proprietario e la verifica a due fattori. Le prenotazioni storiche non saranno attivate."), label: tr("Attiva") }); } catch (_) { confirmed = false; }
+        if (!valid(token) || !confirmed || state?.published_revision !== current.published_revision) return;
+      }
+      const key = JSON.stringify([enabled, current.published_revision]);
+      if (!pendingAdmission || pendingAdmission.key !== key) pendingAdmission = { key, requestId: root.crypto.randomUUID() };
+      busy = true; controls(); renderAdmission(current);
+      try {
+        const response = await apiFetch(`${API_BASE}/api/bookings/catalog/sector-admission`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: pendingAdmission.requestId, expected_published_revision: current.published_revision, enabled }), signal: controller?.signal });
+        if (!valid(token)) return;
+        if (response.ok) { pendingAdmission = null; await loadAdmission(token); }
+        else if (response.status === 409) { pendingAdmission = null; admissionStatus.textContent = tr("Il catalogo è cambiato. Ricarica e verifica prima di modificare l'attivazione."); await load(true); }
+        else { admissionStatus.textContent = tr(response.status === 403 ? "Permesso mancante o verifica a due fattori necessaria." : "Impostazione non salvata. Riprova senza modificare la richiesta."); }
+      } catch (_) { if (valid(token)) admissionStatus.textContent = tr("Esito incerto. Riprova senza modificare la richiesta."); }
+      finally { if (valid(token)) { busy = false; controls(); renderAdmission(admissionState); } }
     }
     function fail(response) {
       if (response.status === 409) {
@@ -90,6 +142,7 @@
         if (!validState(data)) { state = null; controls(); setMessage("Risposta del catalogo non valida."); reload.hidden = false; return; }
         if (!preserveConflict) conflictCopy = null;
         apply(data); pending = null; receipt = null; reload.hidden = true; security.hidden = !(getSession()?.ruolo === "owner" && !data.capabilities.can_publish && typeof deps.onOpenSecurity === "function");
+        await loadAdmission(token);
         restore.hidden = !(preserveConflict && conflictCopy && permissions().save);
         setMessage(!data.organization_sector ? "Settore non disponibile: aggiorna il profilo prima di modificare il catalogo." : !restore.hidden ? "Catalogo aggiornato. Puoi ripristinare le tue modifiche e verificarle." : getSession()?.ruolo === "owner" && !data.capabilities.can_publish ? "Per pubblicare verifica i permessi e la verifica a due fattori nelle impostazioni di sicurezza." : "Catalogo caricato.");
       } catch (_) { if (valid(token)) { setMessage(receipt ? "Scrittura riuscita, ma il catalogo aggiornato non è disponibile. Ricarica prima di continuare." : "Connessione non disponibile. Riprova."); reload.hidden = false; } }
@@ -162,6 +215,7 @@
       container.querySelectorAll("[data-catalog-text]").forEach((element) => { element.textContent = tr(element.dataset.catalogText); });
       if (state && revision) revision.textContent = `${tr("Revisione corrente")}: ${state.revision} · ${tr("Pubblicata")}: ${state.published_revision == null ? tr("nessuna") : state.published_revision}`;
       setMessage(statusKey);
+      if (admissionState) renderAdmission(admissionState);
       if (form) form.setEditable(permissions().save);
     }
     function enter() {

@@ -1,10 +1,5 @@
 # Privacy & Data Governance V1.0 — implementation matrix
 
-**Independent foundation on main through migration069.** SQL070-072, C2.4 state,
-stays and their purge evidence described below are proposed in the separate
-#153/#156/#157 chain; they are not installed or implemented by this foundation.
-The product standards apply as requirements, not a claim of deployed controls.
-
 The founder approved the V1.0 product standards. They do not establish effective
 per-tenant database policies, authorize destructive execution, prove deployment,
 or establish provider agreements. Controller instructions must be compatible with
@@ -16,15 +11,16 @@ requirements. Periods below are maximums, subject to earlier removal when requir
 and to applicable documented obligations; external copies must not be represented
 as already deleted.
 
-Stores named below include proposed C2.4 tables, explicitly absent from this
-foundation. They are a lifecycle inventory, not a verified production inventory. Access means the intended authorized path, not proof of a
+The stores named below reflect the checked-in inventory and code, not a verified
+production inventory. Access means the intended authorized path, not proof of a
 live permission audit. Export projections are curated and may be partial; excluded
 free text and unverified subject relationships require review. See the [A06
-inventory](../operations/a06-data-inventory.md) and [C2.4 privacy contract proposal](https://github.com/Scontismaart/Melpis/pull/153).
+inventory](../operations/a06-data-inventory.md) and [C2.4 privacy
+contract](../operations/conversation-privacy-c24.md).
 
 The code-owned `src/core/gdpr/product_policy.py` registry now publishes the approved
-version and limits. Its foundation worker guard rejects over-cap message schedules at enumeration
-and latest-row recheck. C2.4 guards require the separate SQL070-dependent work. It never clamps
+version and limits. Its worker guard rejects over-cap messages/C2.4 schedules at
+enumeration, latest-row recheck and the C2.4 cross-category gate. It never clamps
 or inserts tenant policy rows. Unknown simulator schedules are not automatically
 executed. The public endpoint distinguishes product maxima from uncertified
 effective tenant schedules; an environment flag alone is not operational GO.

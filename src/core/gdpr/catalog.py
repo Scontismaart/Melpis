@@ -48,6 +48,27 @@ CATEGORIES: tuple[Category, ...] = (
         FROM booking_conversation_revocations
         WHERE organization_id = $1::uuid AND subject_id = $2::uuid
     """, exclusion_reason="Pseudonymous suppression evidence remains policy-gated; no verified account content relation."),
+    Category("c24_idle_watermarks", """
+        SELECT organization_id,conversation_id,subject_id,generation,cutoff,provider_timestamp,expired_at
+        FROM c24_idle_watermarks WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT organization_id,conversation_id,generation,cutoff,expired_at
+        FROM c24_idle_watermarks WHERE organization_id=$1::uuid AND subject_id=$2::uuid
+    """, exclusion_reason="Account-level suppression metadata has no verified subject relation."),
+    Category("c24_source_fences", """
+        SELECT organization_id,conversation_id,subject_id,request_id,source_message_id,fenced_at
+        FROM c24_source_fences WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT organization_id,conversation_id,fenced_at
+        FROM c24_source_fences WHERE organization_id=$1::uuid AND subject_id=$2::uuid
+    """, exclusion_reason="Source and request identifiers are omitted from individual exports; no account relation."),
+    Category("c24_suppression_lifecycle_audit", """
+        SELECT organization_id,record_kind,record_digest,action,occurred_at
+        FROM c24_suppression_lifecycle_audit WHERE organization_id=$1::uuid
+    """, contact_query="""
+        SELECT organization_id,record_kind,record_digest,action,occurred_at
+        FROM c24_suppression_lifecycle_audit WHERE organization_id=$1::uuid AND subject_id=$2::uuid
+    """, exclusion_reason="Minimal audit projection; source and operation IDs are excluded."),
     Category("booking_conversation_states", """
         SELECT organization_id, conversation_id, subject_id, revision,
                catalog_revision, source_message_id, provider_timestamp, snapshot,

@@ -1,12 +1,12 @@
 """PostgreSQL integration tests for GDPR-gated retention behavior."""
 import hashlib
+import json
 import uuid
 
 import pytest
 
 from src.core.retention_job import run_retention
 from src.core import retention_job
-from tests.core.gdpr.test_c24_schema_compatibility import legacy_pool as pg_pool
 
 
 async def approve_message_retention(pool, org, *, days=1):
@@ -114,20 +114,6 @@ async def test_approved_retention_is_tenant_scoped_bounded_and_preserves_protect
         assert await conn.fetchval("SELECT count(*) FROM usage_events WHERE organization_id=$1", org) == 1
         assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE organization_id=$1", org) == 1
         assert await conn.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org) == 1
-
-
-@pytest.mark.asyncio
-async def test_legacy_runner_stops_on_partial_c24_schema(pg_pool, sample_org, monkeypatch):
-    org = sample_org["id"]
-    await approve_message_retention(pg_pool, org)
-    message = (await seed_messages(pg_pool, org))[0]
-    async with pg_pool.acquire() as conn:
-        await conn.execute('ALTER TABLE messages ADD COLUMN c24_original_subject_id uuid')
-    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
-
-    assert (await run_retention(pg_pool))["messages_redacted"] == 0
-    async with pg_pool.acquire() as conn:
-        assert await conn.fetchval("SELECT content_text FROM messages WHERE id=$1", message)
 
 
 @pytest.mark.asyncio
@@ -285,23 +271,37 @@ async def test_latest_over_cap_policy_inserted_after_enumeration_prevents_redact
 
 
 @pytest.mark.asyncio
-async def test_unmapped_simulator_schedule_does_not_delete_completed_response(
+async def test_invalid_c24_cap_blocks_message_redaction_with_live_proposal(
     pg_pool, sample_org, monkeypatch,
 ):
-    org, user, request = sample_org["id"], uuid.uuid4(), uuid.uuid4()
-    await pg_pool.execute("""INSERT INTO simulation_requests(
-        organization_id,auth_user_id,request_id,payload_hash,status,response,completed_at,created_at)
-        VALUES($1,$2,$3,$4,'completed','{"synthetic":"retained"}',
-               NOW()-INTERVAL '120 days',NOW()-INTERVAL '120 days')""",
-        org, user, request, hashlib.sha256(b"synthetic-response").hexdigest())
-    await pg_pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,
-        erasure_allowed,retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
-        VALUES($1,'simulator_responses','synthetic-unmapped',TRUE,1,FALSE,
-               'test:synthetic','qa',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
+    org = sample_org["id"]
+    await approve_message_retention(pg_pool, org, days=1)
+    message_id = (await seed_messages(
+        pg_pool, org, age_days=120,
+    ))[0]
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE messages SET ai_reply_cache=$2::jsonb WHERE organization_id=$1 AND id=$3",
+            org, '{"booking_state_proposal":{"intent":"booking"}}', message_id,
+        )
+        await conn.execute(
+            """INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+                   retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+               VALUES($1,'booking_conversation_content','synthetic-c24-over-cap',TRUE,31,FALSE,
+                      'test:synthetic-retention','qa-a06',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""",
+            org,
+        )
     monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
 
     counts = await run_retention(pg_pool)
 
-    assert counts["simulator_purged"] == 0
-    assert await pg_pool.fetchval("""SELECT response->>'synthetic' FROM simulation_requests
-        WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3""", org, user, request) == "retained"
+    assert counts["messages_redacted"] == 0
+    async with pg_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT content_text,deleted_at,ai_reply_cache FROM messages WHERE id=$1", message_id,
+        )
+    assert row["content_text"] == "synthetic retained message"
+    assert row["deleted_at"] is None
+    assert json.loads(row["ai_reply_cache"]) == {
+        "booking_state_proposal": {"intent": "booking"},
+    }

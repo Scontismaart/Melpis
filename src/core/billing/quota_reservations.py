@@ -214,6 +214,9 @@ def validate_final_response(
         _deny()
     if response._guardrail_blocked:
         raise AIGenerationBlocked("Final AI response did not pass guardrails")
+    from src.core.bookings.conversation_state import StructuredConversationResponse
+    if isinstance(response, StructuredConversationResponse):
+        response.assert_catalog_organization(operation.organization_id)
     verdict = valida_risposta(response, context_chunks, profile)
     if verdict.azione == "block":
         raise AIGenerationBlocked("Final AI response did not pass guardrails")
@@ -640,6 +643,12 @@ class QuotaReservations:
             if final.knowledge_epoch is not None:
                 metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
+            if operation.channel == "inbound" and "booking_state_proposal" in payload:
+                from src.core.db.inbound_worker_provenance import (
+                    private_booking_worker_enabled, record_committed_operation,
+                )
+                if private_booking_worker_enabled():
+                    await record_committed_operation(conn, operation)
             return payload
 
     async def renew(self, operation: QuotaOperation, ticket: QuotaTicket):

@@ -177,17 +177,26 @@ class StructuredConversationResponse(RispostaOutput):
     booking_state_proposal: ConversationProposal
     booking_catalog_revision: Positive
     _catalog_seal: str | None = PrivateAttr(default=None)
+    _catalog_organization_id: UUID | None = PrivateAttr(default=None)
 
     def _protected_digest(self):
-        if type(self.booking_state_proposal) is not ConversationProposal or type(self.booking_catalog_revision) is not int:
+        if (type(self.booking_state_proposal) is not ConversationProposal
+                or type(self.booking_catalog_revision) is not int
+                or type(self._catalog_organization_id) is not UUID):
             raise ValueError('Unsealed structured response')
-        body = canonical({'catalog':self.booking_catalog_revision,
+        body = canonical({'organization_id':str(self._catalog_organization_id),
+                          'catalog':self.booking_catalog_revision,
                           'proposal':self.booking_state_proposal.model_dump(mode='json')})
         return hmac.new(_RESPONSE_SEAL_KEY, body.encode(), hashlib.sha256).hexdigest()
 
     def _assert_sealed(self):
         if type(self._catalog_seal) is not str or not hmac.compare_digest(self._catalog_seal, self._protected_digest()):
             raise ValueError('Structured response changed after catalog validation')
+
+    def assert_catalog_organization(self, organization_id: UUID):
+        self._assert_sealed()
+        if self._catalog_organization_id != organization_id:
+            raise ValueError('Structured response belongs to a different organization')
 
     def model_copy(self, *, update=None, deep=False):
         self._assert_sealed()
@@ -216,6 +225,7 @@ class StructuredConversationResponse(RispostaOutput):
         normalized = parse_proposal_json(canonical(self.booking_state_proposal.model_dump(mode='json')))
         validate_proposal_catalog(normalized, current)
         object.__setattr__(self, 'booking_state_proposal', normalized)
+        self.__pydantic_private__['_catalog_organization_id'] = context['organization_id']
         self.__pydantic_private__['_catalog_seal'] = self._protected_digest()
         return self
 
@@ -460,7 +470,7 @@ def medical_source_requires_handoff(text, catalog):
     return False
 
 
-def render_confirmation_prompt(state, prompt_message_id):
+def render_confirmation_prompt(state, prompt_message_id, *, legacy=False):
     if type(prompt_message_id) is not UUID or prompt_message_id.version != 4:
         raise ValueError('Random version4 prompt UUID required')
     labels = {'service_id':'Servizio', 'resource_id':'Risorsa richiesta',
@@ -470,9 +480,13 @@ def render_confirmation_prompt(state, prompt_message_id):
         'contact_phone':'Telefono fornito', 'contact_email':'Email fornita'}
     lines = ['Verifica i dati: nessuna prenotazione e ancora confermata.']
     for slot in state.slots:
+        if not legacy and slot.field in {'customer_name', 'contact_phone', 'contact_email'}:
+            continue
         value = ('presente' if slot.value else 'non presente') if type(slot.value) is bool else str(slot.value)
         lines.append(f'{labels[slot.field]}: {value}')
     lines.append(f'MELPIS-CONFIRM-v1 {state_digest(state)} {prompt_message_id}')
+    if not legacy:
+        lines.append(f'Per confermare questi dati, rispondi CONFIRM {prompt_message_id}')
     return '\n'.join(lines)
 
 

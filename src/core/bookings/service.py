@@ -577,7 +577,11 @@ class BookingService:
         return updated
 
     async def cancel(self, org_id, booking_id):
-        booking = await self.repo.update_booking_status(org_id, booking_id, "cancellata")
+        from src.core.bookings.memory_repo import InMemoryBookingRepo
+        if isinstance(self.repo, InMemoryBookingRepo):
+            booking = await self.repo.update_booking_status(org_id, booking_id, "cancellata")
+        else:
+            booking = await self.repo.cancel_legacy_booking(org_id, booking_id)
         if self.booking_router and org_id and booking and booking.get("external_booking_id"):
             try:
                 from src.core.bookings.ports.base import CancelBookingRequest
@@ -596,13 +600,7 @@ class BookingService:
         return booking
 
     async def mark_no_show(self, org_id, booking_id):
-        async with self.repo.pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                UPDATE bookings SET stato = 'no_show', no_show_at = NOW(), updated_at = NOW()
-                WHERE organization_id = $1 AND id = $2
-                RETURNING *
-            """, org_id, booking_id)
-            booking = dict(row) if row else None
+        booking = await self.repo.mark_legacy_booking_no_show(org_id, booking_id)
         if booking and self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(booking, org_id)

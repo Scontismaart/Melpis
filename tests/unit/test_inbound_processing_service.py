@@ -195,6 +195,29 @@ async def test_step7_ticket_claimed_by_operator_skips_ai(base_config, mock_deps)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("verified", [False, True])
+async def test_booking_confirmation_does_not_enter_ai_pipeline(base_config, mock_deps, monkeypatch, verified):
+    from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
+
+    monkeypatch.setenv("C24_PRIVATE_BOOKING_WORKER_ENABLED", "true")
+    apply = AsyncMock(return_value={"details_confirmed_current": verified})
+    monkeypatch.setattr(BookingConversationRepository, "apply_worker_source", apply)
+    orchestrator = AsyncMock()
+    service = InboundProcessingService(base_config, mock_deps["repo"], mock_deps["service"],
+                                       mock_deps["booking_service"], orchestrator=orchestrator)
+    msg = {"id": uuid.uuid4(), "organization_id": uuid.uuid4(), "conversation_id": uuid.uuid4(),
+           "content_text": f"CONFIRM {uuid.uuid4()}", "content": {"from": "+390000000000"},
+           "canale": "whatsapp"}
+    with patch("src.core.inbound.service.load_tenant_config", new=AsyncMock(return_value=None)):
+        result = await service.process_message(msg)
+    expected = "booking_details_confirmed" if verified else "booking_confirmation_rejected"
+    assert result.handling_type == expected
+    apply.assert_awaited_once_with(msg["organization_id"], msg["conversation_id"], msg["id"])
+    mock_deps["quota"].reserve.assert_not_awaited()
+    orchestrator.orchestrate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("canale", ["whatsapp", "instagram"])
 async def test_step11_12_orchestration_and_send(base_config, mock_deps, canale):
     mock_orchestrator = AsyncMock()
