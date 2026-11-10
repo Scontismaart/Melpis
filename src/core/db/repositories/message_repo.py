@@ -538,7 +538,7 @@ class MessageRepository(TenantScopedRepository):
             organization_id = uuid.UUID(organization_id)
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC",
+                "SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL AND created_at > NOW() - INTERVAL '60 days' ORDER BY created_at DESC",
                 organization_id,
             )
             return [dict(r) for r in rows]
