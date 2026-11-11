@@ -6,8 +6,8 @@ are replaced, so request parsing, signature validation, authorization, and DB
 state transitions remain real.
 """
 
-import glob
 import asyncio
+import os
 import time
 import uuid
 
@@ -439,13 +439,10 @@ async def test_lifecycle_migration_replay_preserves_never_provisioned_and_disabl
         str(never_id): await lifecycle_row(pg_pool, never_id),
         str(disabled_id): await lifecycle_row(pg_pool, disabled_id),
     }
-    migrations = []
-    for path in sorted(glob.glob("src/core/db/migrations/[0-9][0-9][0-9]_*.sql")):
-        with open(path, encoding="utf-8") as migration_file:
-            if "auth_access_lifecycle" in migration_file.read():
-                migrations.append(path)
-    assert len(migrations) == 1
-    migration_path = migrations[0]
+    # Replay the migration that creates the lifecycle, not every later
+    # migration that happens to reference its table or policies.
+    migration_path = "src/core/db/migrations/059_auth_access_lifecycle.sql"
+    assert os.path.isfile(migration_path)
     async with pg_pool.acquire() as conn:
         with open(migration_path, encoding="utf-8") as migration_file:
             migration = migration_file.read()
