@@ -67,7 +67,10 @@ class Deletion:
             )
             policies = {p['category']: dict(p) for p in policies}
             required = {'contact_content', 'transient_content', 'cutover'}
-            if await conn.fetchval("SELECT to_regclass('public.booking_stays') IS NOT NULL"):
+            booking_stays_available = bool(await conn.fetchval(
+                "SELECT to_regclass('public.booking_stays') IS NOT NULL",
+            ))
+            if booking_stays_available:
                 if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays
                     WHERE organization_id=$1 AND ($2::uuid IS NULL OR original_subject_id=$2))''', org, op['subject_id']):
                     required.add('booking_stay_content')
@@ -141,19 +144,14 @@ class Deletion:
                    AND ($2::uuid IS NULL OR contact_id=$2) AND stato IN ('in_attesa','confermata'))''', org, op['subject_id'],
             ):
                 blockers.append('active_booking_requires_controller_action')
-            if blockers == ['administrative_stay_purge_required']:
-                # Fence retries before the owner-only scoped purge. All other
-                # policy, active-booking and cutover checks have passed.
-                pending_subject = op['subject_id']
-                if pending_subject:
-                    pending_phone = await conn.fetchval('SELECT phone_number FROM contacts WHERE organization_id=$1 AND id=$2', org, pending_subject)
-                    pending_digest, pending_key = identifier_fingerprint(org, pending_phone)
-                else:
-                    pending_digest, pending_key = None, None
-                await conn.execute('''INSERT INTO gdpr_erasure_barriers
-                    (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
-                    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,operation_id) DO NOTHING''',
-                    org, oid, op['scope'], pending_subject, pending_digest, pending_key)
+            hotel_purge_required = blockers == ['administrative_stay_purge_required']
+            if hotel_purge_required:
+                # The organization advisory lock fences every conforming
+                # writer while local GDPR redactions run. The durable barrier
+                # is inserted below, immediately before the hotel capability
+                # purge, because the ordinary redaction triggers reject writes
+                # after that barrier exists.
+                blockers.remove('administrative_stay_purge_required')
             if blockers:
                 await conn.execute(
                     '''UPDATE gdpr_operations SET status='blocked',manifest=$3::jsonb,updated_at=NOW()
@@ -257,10 +255,22 @@ class Deletion:
                     await conn.execute(
                         'DELETE FROM simulation_requests WHERE organization_id=$1 AND request_id=$2', org, operation.id,
                     )
-            await conn.execute(
-                '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
-                   WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)''', org, subject,
-            )
+            if booking_stays_available:
+                # Keep hotel booking content until its scoped, policy-checked
+                # purge capability runs below. On older schemas the relation
+                # does not exist, so retain the legacy relational erasure path.
+                await conn.execute(
+                    '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
+                       WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)
+                         AND NOT EXISTS(SELECT 1 FROM booking_stays s
+                           WHERE s.organization_id=$1 AND s.organization_id=bookings.organization_id
+                             AND s.booking_id=bookings.id)''', org, subject,
+                )
+            else:
+                await conn.execute(
+                    '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
+                       WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)''', org, subject,
+                )
             await conn.execute(
                 '''UPDATE reviews SET autore='REDACTED',testo='',bozza_risposta='',is_anonymized=TRUE
                    WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)''', org, subject,
@@ -299,6 +309,25 @@ class Deletion:
                 '''INSERT INTO gdpr_erasure_barriers(organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
                    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(organization_id,operation_id) DO NOTHING''', org, oid, op['scope'], subject, digest, key_id,
             )
+            if hotel_purge_required:
+                hotel_policy = policies['booking_stay_content']
+                stays = await conn.fetch(
+                    '''SELECT booking_id FROM booking_stays
+                       WHERE organization_id=$1
+                         AND ($2::uuid IS NULL OR original_subject_id=$2)
+                       ORDER BY booking_id''', org, subject,
+                )
+                for stay in stays:
+                    # The role switch is limited to this one capability call.
+                    # On error the enclosing transaction rolls back both
+                    # redactions, barrier, and any earlier hotel purges.
+                    await conn.execute('SET LOCAL ROLE service_role')
+                    await conn.fetchval(
+                        '''SELECT public.c24_purge_hotel_for_erasure(
+                             $1::uuid,$2::uuid,$3::uuid,$4::text)''',
+                        org, stay['booking_id'], oid, str(hotel_policy['version']),
+                    )
+                    await conn.execute('RESET ROLE')
             await conn.execute(
                 '''INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status,attempts)
                    VALUES($1,$2,'local','confirmed',1) ON CONFLICT(organization_id,operation_id,name)
@@ -329,9 +358,10 @@ class Deletion:
             await event(conn, org, oid, 'erase.local_committed', count=contacts_count,
                         conversation_states=conversation_counts['states'],
                         conversation_receipts=conversation_counts['receipts'])
-        # Process-local simulator data has no direct contact provenance. For an
-        # organization erasure clear this process immediately; other worker
-        # copies remain an explicit independently verified stage.
-        if subject is None:
-            from src.core.conversation_store import store
-            store.erase_organization(str(org))
+        # Process-local simulator histories are keyed by staff/session, not a
+        # verified data-subject ID. Clear this tenant's entire ephemeral cache
+        # after any committed erasure rather than guessing which session may
+        # contain the subject. Other process/worker copies remain a separately
+        # evidenced lifecycle stage.
+        from src.core.conversation_store import store
+        store.erase_organization(str(org))

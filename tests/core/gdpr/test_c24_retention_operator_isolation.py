@@ -67,6 +67,7 @@ async def test_controller_rejects_custom_schema_create_or_public_security_define
     from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
 
     monkeypatch.setenv('GDPR_C24_OWNER_RETENTION_ENABLED', 'true')
+    monkeypatch.setenv('GDPR_RETENTION_EXECUTION_ENABLED', 'true')
     role, password = 'c24_test_' + uuid4().hex, uuid4().hex
     async with pg_pool.acquire() as admin:
         await admin.execute(f'CREATE ROLE {role} LOGIN NOINHERIT PASSWORD \'{password}\'')
@@ -117,6 +118,7 @@ async def test_manifest_controller_uses_dedicated_login_per_transaction(
     target = [str(env['org']), str(env['conv'])]
     path.write_text(json.dumps({'conversation_targets': [target, target]}))
     monkeypatch.setenv('GDPR_C24_OWNER_RETENTION_ENABLED', 'true')
+    monkeypatch.setenv('GDPR_RETENTION_EXECUTION_ENABLED', 'true')
     monkeypatch.setenv('GDPR_C24_OWNER_RETENTION_DSN', dsn)
     async with env['pool'].acquire() as admin:
         await admin.execute(f"CREATE ROLE {role} LOGIN NOINHERIT PASSWORD '{password}'")
@@ -129,7 +131,7 @@ async def test_manifest_controller_uses_dedicated_login_per_transaction(
             finally:
                 await login.close()
             assert await _run_manifest(path) == {
-                'messages_purged': 0, 'conversations_expired': 1, 'receipts_cleaned': 0,
+                'inboxes_purged': 0, 'messages_purged': 0, 'conversations_expired': 1, 'receipts_cleaned': 0,
                 'suppressions_cleaned': 0, 'suppression_audit_rows_expired': 0,
             }
             assert not await admin.fetchval(

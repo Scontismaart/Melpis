@@ -38,9 +38,6 @@ class ClaimFakeRepo:
                        "sync_status": "pending", "external_booking_id": None}
                 self._rows[key] = row
                 return dict(row), True
-            if existing.get("sync_status") == "failed":
-                existing["sync_status"] = "pending"
-                return dict(existing), True
             return dict(existing), False
 
     async def record_sync_success(self, organization_id, idempotency_key, external_booking_id):
@@ -110,17 +107,18 @@ class TestCancelIdempotency:
         assert all(r.success for r in results)
 
     @pytest.mark.asyncio
-    async def test_failed_cancel_marks_failed_and_retries(self):
+    async def test_unverified_cancel_is_uncertain_and_never_retried(self):
         repo = ClaimFakeRepo()
         router = BookingAdapterRouter(repo=repo)
         bad = _cancel_adapter(ok=False)
         res = await router.dispatch_cancel_booking(ORG, _cancel_req(), adapter=bad, mode=BookingMode.AUTHORITATIVE)
         assert res.success is False
-        assert repo.row(ORG, "ext-cancel:org:b1")["sync_status"] == "failed"
+        assert repo.row(ORG, "ext-cancel:org:b1")["sync_status"] == "uncertain"
         good = _cancel_adapter(ok=True)
         res2 = await router.dispatch_cancel_booking(ORG, _cancel_req(), adapter=good, mode=BookingMode.AUTHORITATIVE)
-        assert res2.success is True
-        assert repo.row(ORG, "ext-cancel:org:b1")["sync_status"] == "synced"
+        assert res2.success is False and res2.sync_status == "uncertain"
+        good.cancel_booking.assert_not_awaited()
+        assert repo.row(ORG, "ext-cancel:org:b1")["sync_status"] == "uncertain"
 
 
 def _create_adapter(provider="zak", ok=True) -> MagicMock:
@@ -154,7 +152,7 @@ class TestShadowTerminalState:
         assert repo.row(ORG, "ext-book:shadow-1")["sync_status"] == "synced"
 
     @pytest.mark.asyncio
-    async def test_shadow_failure_marks_failed_not_pending(self):
+    async def test_shadow_failure_marks_uncertain_not_pending(self):
         repo = ClaimFakeRepo()
         router = BookingAdapterRouter(repo=repo)
         adapter, req = _create_adapter(ok=False)
@@ -162,7 +160,10 @@ class TestShadowTerminalState:
         res = await router.dispatch_create_booking(
             ORG, req, adapter=adapter, mode=BookingMode.SHADOW, verticale="x")
         assert res.success is True  # non-blocking invariato
-        assert repo.row(ORG, "ext-book:shadow-1")["sync_status"] == "failed"
+        assert res.sync_status == "uncertain"
+        assert repo.row(ORG, "ext-book:shadow-1")["sync_status"] == "uncertain"
+        await router.dispatch_create_booking(ORG, req, adapter=adapter, mode=BookingMode.SHADOW, verticale="x")
+        adapter.create_booking.assert_awaited_once()
 
 
 class TestDeterministicKey:
@@ -207,7 +208,7 @@ class TestDeterministicKey:
 
 class TestSweepJob:
     @pytest.mark.asyncio
-    async def test_sweep_marks_stale_failed_and_counts(self):
+    async def test_sweep_marks_stale_uncertain_and_counts(self):
         from src.core.bookings.sync_sweep_job import sweep_stale_syncs
         from src.core.db.repositories.external_booking_repo import (
             ExternalBookingRepository,
@@ -226,7 +227,8 @@ class TestSweepJob:
         async def _fail(org, key, msg, sync_status="failed"):
             if key == "k-fresh":
                 raise RuntimeError("db down")
-            marked.append((org, key, msg))
+            marked.append((org, key, msg, sync_status))
+            return {"sync_status": sync_status}
 
         with patch.object(ExternalBookingRepository, "get_pending_syncs",
                           new=AsyncMock(side_effect=_get_pending)), \
@@ -234,9 +236,10 @@ class TestSweepJob:
                           new=AsyncMock(side_effect=_fail)):
             out = await sweep_stale_syncs(MagicMock())
 
-        assert out == {"examined": 2, "swept_to_failed": 1}
+        assert out == {"examined": 2, "swept_to_uncertain": 1}
         assert marked[0][0] == ORG and marked[0][1] == "k-stale"
         assert "gestionale" in marked[0][2]
+        assert marked[0][3] == "uncertain"
 
     @pytest.mark.asyncio
     async def test_sweep_empty_noop(self):
@@ -248,4 +251,4 @@ class TestSweepJob:
         with patch.object(ExternalBookingRepository, "get_pending_syncs",
                           new=AsyncMock(return_value=[])):
             assert await sweep_stale_syncs(MagicMock()) == {
-                "examined": 0, "swept_to_failed": 0}
+                "examined": 0, "swept_to_uncertain": 0}

@@ -124,7 +124,10 @@ async def test_create_booking_escalates_to_human_on_external_failure(
 @pytest.mark.asyncio
 async def test_create_booking_data_minimization_integration(mock_booking_repo):
     """Verifica che il router applicato dal service minimizzi le note sanitarie a monte."""
-    real_router = BookingAdapterRouter(repo=None)
+    external_repo = MagicMock()
+    external_repo.claim_sync_slot = AsyncMock(return_value=({'sync_status': 'pending'}, True))
+    external_repo.record_sync_success = AsyncMock(return_value={'sync_status': 'synced'})
+    real_router = BookingAdapterRouter(repo=external_repo)
     mock_adapter = MagicMock()
     mock_adapter.create_booking = AsyncMock(
         return_value=BookingResult(

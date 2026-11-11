@@ -283,12 +283,12 @@ class BookingService:
                     req=req,
                     verticale=resolved_verticale,
                 )
-                if not ext_res.success and ext_res.sync_status == "failed":
+                if not ext_res.success or ext_res.sync_status == "uncertain":
                     logger.warning(
                         "External booking sync failed for booking %s",
                         booking.get("id")
                     )
-                    booking["external_sync_status"] = "failed"
+                    booking["external_sync_status"] = ext_res.sync_status
                     booking["richiede_intervento"] = True
                 else:
                     if booking.get("external_sync_status") != "failed":
@@ -390,29 +390,14 @@ class BookingService:
                 sent = await self.send_booking_reconfirmation(org_id, updated)
                 if not sent:
                     raise RuntimeError("notifica WhatsApp di riconferma non inviata")
-            except Exception:
-                logger.exception("booking=reconfirmation_failed id=%s", booking_id)
-                old_day = self._format_date(current.get("data"))
-                old_hour = self._format_time(current.get("ora"))
-                async with self._slot_lock(org_id, old_day, old_hour):
-                    still_current = await self.repo.get_booking(org_id, booking_id)
-                    if still_current and all(still_current.get(key) == updated.get(key) for key in ("stato", "data", "ora", "coperti", "updated_at")):
-                        available = True
-                        if current["stato"] not in STATI_LIBERI:
-                            disp = await self.verifica_disponibilita(
-                                org_id, old_day, old_hour, current["coperti"], exclude_booking_id=booking_id)
-                            available = current["coperti"] <= disp.coperti_liberi
-                        if available:
-                            await self.repo.update_booking_details(
-                                org_id, booking_id, stato=current["stato"],
-                                nome_cliente=current.get("nome_cliente", ""),
-                                telefono=current.get("telefono", ""),
-                                data=old_day, ora=old_hour,
-                                coperti=current.get("coperti"), note=current.get("note", ""),
-                                expected=still_current,
-                            )
-                        else:
-                            await self.repo.mark_booking_requires_intervention(org_id, booking_id, expected=still_current)
+            except Exception as exc:
+                # A transport or persistence failure can happen after Meta
+                # accepted the notice. Rolling back the schedule would make
+                # a potentially delivered message describe the wrong booking.
+                logger.error("booking=reconfirmation_unverified id=%s error_type=%s", booking_id, type(exc).__name__)
+                # A concurrent edit does not remove the ambiguity; staff must
+                # still reconcile the latest booking against the notice.
+                await self.repo.mark_booking_requires_intervention(org_id, booking_id)
                 raise
         if self.calendar_service:
             try:
@@ -459,12 +444,14 @@ class BookingService:
         if not tenant:
             return False
         try:
-            await self.whatsapp.send_whatsapp_message(
+            result = await self.whatsapp.send_whatsapp_message(
                 org_id=org_id, to_number=to_number,
                 payload={"to": to_number, "type": "text", "text": {"body": text}},
                 category=category, meta_client=None, tenant_config=tenant,
                 idempotency_key=idempotency_key,
             )
+            from src.core.channels.delivery import provider_message_id
+            provider_message_id(result)
             return True
         except Exception as e:
             logger.error("WhatsApp send failed for org %s: %s", org_id, type(e).__name__)
@@ -589,9 +576,16 @@ class BookingService:
                     idempotency_key=f"ext-cancel:{org_id}:{booking_id}",
                     external_booking_id=str(booking["external_booking_id"]),
                 )
-                await self.booking_router.dispatch_cancel_booking(org_id, cancel_req)
+                result = await self.booking_router.dispatch_cancel_booking(org_id, cancel_req)
+                if not result.success or result.sync_status == "uncertain":
+                    await self.repo.mark_booking_requires_intervention(org_id, booking_id)
+                    booking["richiede_intervento"] = True
+                    booking["external_sync_status"] = result.sync_status
             except Exception as e:
-                logger.error("External cancel failed for booking %s: %s", booking_id, e)
+                logger.error("External cancel outcome unavailable booking=%s error_type=%s", booking_id, type(e).__name__)
+                await self.repo.mark_booking_requires_intervention(org_id, booking_id)
+                booking["richiede_intervento"] = True
+                booking["external_sync_status"] = "uncertain"
         if self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(booking, org_id)

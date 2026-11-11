@@ -20,6 +20,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+function flushMicrotasks() { return new Promise((resolve) => setImmediate(resolve)); }
 function response(data) { return { ok: true, json: () => Promise.resolve(data) }; }
 function harness(view) {
   const dom = new JSDOM(fs.readFileSync(path.join(root, "web/index.html"), "utf8"), {
@@ -47,7 +48,7 @@ function harness(view) {
     API_BASE: "", bookingCalendar, Date, Map, Set,
     _toDateKey: dom.window.MelpisDashboardShared.toDateKey,
     crypto: { randomUUID: () => "test-idempotency-key" },
-    apiFetch(url, options = {}) { const pending = deferred(); requests.push({ url, options, ...pending }); return pending.promise; },
+    apiFetch(url, options = {}) { if (url.endsWith("/api/bookings/c24-status")) return Promise.resolve(response({ fenced: false, enabled: false })); const pending = deferred(); requests.push({ url, options, ...pending }); return pending.promise; },
     _skeletonList: () => "<div class='skeleton'>loading</div>",
     _sanitize: (value) => String(value), _tDash: (_key, fallback, vars = {}) => fallback.replace(/{{(\w+)}}/g, (_, key) => vars[key]),
     t: (key) => key, localeCorrente: () => "it-IT",
@@ -266,6 +267,7 @@ for (const scenario of ["date B", "leave and return", "new form", "stale error"]
     const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
     h.context.apriFormPrenotazione({ id: "A", data: "2026-10-02", nome_cliente: "Customer A", coperti: 2 });
     const saving = h.submitBooking();
+    await flushMicrotasks();
     if (scenario === "date B") h.setDate("2026-10-03");
     else if (scenario === "leave and return") { h.context.navigate("inbox"); h.context.navigate("prenotazioni"); h.context.apriFormPrenotazione({ id: "A", data: "2026-10-02", nome_cliente: "Customer A", coperti: 2 }); }
     else h.context.apriFormPrenotazione({ id: "B", data: "2026-10-03", nome_cliente: "Customer B", coperti: 3 });
@@ -291,10 +293,11 @@ test("Booking save cannot render date A after selected date changes during refre
   h.context.apriFormPrenotazione({ data: "2026-10-02", nome_cliente: "Customer A", coperti: 2 });
   const refreshing = deferred(), refreshStarted = deferred();
   h.context.apiFetch = (url, options = {}) => {
+    if (url === "/api/bookings/c24-status") return Promise.resolve(response({ fenced: false, enabled: false }));
     if (url === "/api/bookings" && !options.method) { refreshStarted.resolve(); return refreshing.promise; }
     const request = deferred(); h.requests.push({ url, ...request }); return request.promise;
   };
-  const saving = h.submitBooking(); h.requests[0].resolve(response({})); await refreshStarted.promise;
+  const saving = h.submitBooking(); await flushMicrotasks(); h.requests[0].resolve(response({})); await refreshStarted.promise;
   h.setDate("2026-10-03");
   h.document.getElementById("booking-table-day-title").textContent = "2026-10-03";
   refreshing.resolve(response([])); await saving;
@@ -306,6 +309,7 @@ test("Booking save in unchanged context closes its own form and refreshes the sa
   const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
   h.context.apriFormPrenotazione({ id: "A", data: "2026-10-03", nome_cliente: "Customer A", coperti: 2 });
   const saving = h.submitBooking();
+  await flushMicrotasks();
   assert.equal(h.requests[0].url, "/api/bookings/A");
   assert.equal(h.requests[0].options.method, "PUT");
   assert.equal(JSON.parse(h.requests[0].options.body).data, "2026-10-03");
@@ -342,6 +346,7 @@ for (const scenario of ["new detail", "leave and return", "stale error", "delaye
     const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
     h.context.apriDettaglioPrenotazione({ id: "A", data: "2026-10-02", nome_cliente: "Customer A", stato: "in_attesa" });
     const pending = h.context.eseguiAzionePrenotazione("confirm");
+    await flushMicrotasks();
     const oldJson = deferred(), jsonStarted = deferred();
     if (scenario === "delayed JSON") {
       h.requests[0].resolve({ ok: true, json: () => { jsonStarted.resolve(); return oldJson.promise; } });
@@ -371,6 +376,7 @@ test("New booking detail opens with its own enabled actions while older action i
   const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
   h.context.apriDettaglioPrenotazione({ id: "A", data: "2026-10-02", stato: "in_attesa" });
   const pending = h.context.eseguiAzionePrenotazione("confirm");
+  await flushMicrotasks();
   h.context.apriDettaglioPrenotazione({ id: "B", data: "2026-10-03", stato: "in_attesa" });
   assert.equal(h.document.getElementById("booking-confirm-btn").disabled, false);
   h.requests[0].resolve(response({ id: "A", stato: "confermata" })); await pending;
@@ -380,6 +386,7 @@ test("Booking action in current context closes its own detail and refreshes book
   const h = harness("prenotazioni"); t.after(() => h.dom.window.close());
   h.context.apriDettaglioPrenotazione({ id: "A", data: "2026-10-02", stato: "in_attesa" });
   const pending = h.context.eseguiAzionePrenotazione("confirm");
+  await flushMicrotasks();
   assert.equal(h.requests[0].url, "/api/bookings/A/confirm"); assert.equal(h.requests[0].options.method, "POST");
   const refreshes = [];
   h.context.apiFetch = async url => { refreshes.push(url); return response([]); };

@@ -463,12 +463,12 @@ class InboundProcessingService:
             return await read_context(acquired)
 
     async def _apply_committed_booking(self, org_id, msg, content, canonical) -> BookingApplicationResult:
-        """Resume a booking only from the durable final, never a model grant.
+        """Apply an A04-committed A05 proposal only through the private worker.
 
-        Customer intent is independently proved from tenant-scoped inbound
-        messages. Availability, validation, source dedup and external dispatch
-        continue through BookingService. Failures request staff intervention;
-        they never change/refund the commercial response or rerun the provider.
+        No BookingService/legacy writer fallback is allowed here: the worker
+        rechecks A04, tenant ingress, customer intent, the fixed restaurant
+        policy and allocation catalog, then commits booking/receipt/outbox in
+        one private transaction. A failure never refunds the response quota.
         """
         from src.models.schemas import RispostaOutput
 
@@ -478,152 +478,21 @@ class InboundProcessingService:
             return BookingApplicationResult(False)
         if not (pren.data and pren.ora and pren.coperti):
             return BookingApplicationResult(True)
-        if self.booking_service is None:
+        from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+        private_pool = getattr(self, "private_booking_pool", None)
+        if not private_booking_worker_enabled() or private_pool is None:
             return BookingApplicationResult(True)
         try:
-            source = await self._booking_context(org_id, msg, pren)
-            if source is None:
-                return BookingApplicationResult(True)
-            booking_repo = getattr(self.booking_service, "repo", None)
-            settings = await booking_repo.get_booking_settings(org_id) if booking_repo else None
-            config = (settings or {}).get("config") or {}
-            if isinstance(config, str):
-                config = json.loads(config)
-            a05 = config.get("a05") if isinstance(config, dict) else None
-            if isinstance(a05, dict) and a05.get("enabled") is True:
-                from src.core.bookings.auto_policy import parse_and_validate_auto_booking
-                if not hasattr(booking_repo, "auto_booking_lock"):
-                    return BookingApplicationResult(True)
-                async with booking_repo.auto_booking_lock(
-                    org_id, source["conversation_id"], pren.data, pren.ora,
-                ) as conn:
-                    # Recheck intent after serializing all inbound inserts. A
-                    # cancellation that won the conversation lock prevents the
-                    # booking; a later cancellation is a separate event.
-                    source = await self._booking_context(
-                        org_id, msg, pren, conn=conn, require_latest=True,
-                        require_explicit_party=True,
-                    )
-                    if source is None or not _booking_action_is_fresh(source, pren):
-                        return BookingApplicationResult(True)
-                    existing = await conn.fetchrow(
-                        "SELECT * FROM bookings WHERE organization_id=$1 AND source_message_id=$2",
-                        uuid.UUID(str(org_id)), source["booking_source_message_id"],
-                    )
-                    if existing is not None:
-                        return _booking_application_result(dict(existing))
-                    profile = source.get("business_profile") or {}
-                    if isinstance(profile, str):
-                        profile = json.loads(profile)
-                    if profile.get("verticale") != "ristorante":
-                        return BookingApplicationResult(True)
-                    # The settings writer takes an exclusive capacity lock;
-                    # this transaction holds its shared form until commit.
-                    settings = await booking_repo.get_booking_settings(org_id)
-                    request = {
-                        "service": "ristorante/tavolo", "date": pren.data,
-                        "time": pren.ora, "party_size": pren.coperti,
-                        "duration_minutes": 60,
-                    }
-                    decision = parse_and_validate_auto_booking(
-                        settings or {}, source.get("timezone"), request,
-                        now=source["verified_now"],
-                    )
-                    if not decision.accepted or pren.note:
-                        return BookingApplicationResult(True)
-                    if decision.booking.authority == "external_authoritative":
-                        # Current adapters cannot prove a confirmed, atomic
-                        # external hold. Never fall back to local authority.
-                        return BookingApplicationResult(True)
-                    customer_name = source.get("customer_name")
-                    if not customer_name or (pren.nome_cliente and
-                                             pren.nome_cliente.casefold() != customer_name.casefold()):
-                        return BookingApplicationResult(True)
-                    source_content = source["content"]
-                    if isinstance(source_content, str):
-                        source_content = json.loads(source_content)
-                    phone = _extract_from(source_content)
-                    if not phone:
-                        return BookingApplicationResult(True)
-                    channel = source["canale"] or "whatsapp"
-                    used = await conn.fetchval(
-                        """SELECT COALESCE(SUM(coperti),0) FROM bookings
-                           WHERE organization_id=$1 AND data=$2
-                             AND EXTRACT(HOUR FROM ora)=$3
-                             AND stato IN ('in_attesa','confermata','da_verificare','completata')""",
-                        uuid.UUID(str(org_id)), decision.booking.date,
-                        decision.booking.time.hour,
-                    )
-                    if int(used or 0) + pren.coperti > decision.booking.capacity:
-                        return BookingApplicationResult(True)
-                    if decision.booking.authority == "google_authoritative":
-                        await booking_repo.insert_google_pending(
-                            org_id, source["conversation_id"], msg["id"], source["booking_source_message_id"],
-                            nome_cliente=customer_name, telefono=phone, data=decision.booking.date,
-                            ora=decision.booking.time, coperti=pren.coperti, channel=channel,
-                        )
-                        return BookingApplicationResult(True)
-                    created = await booking_repo.insert_auto_confirmed(
-                        org_id, source["conversation_id"], msg["id"],
-                        source["booking_source_message_id"],
-                        nome_cliente=customer_name, telefono=phone,
-                        data=decision.booking.date, ora=decision.booking.time,
-                        coperti=pren.coperti, channel=channel,
-                        authority=decision.booking.authority,
-                    )
-                    return _booking_application_result(created)
-            if not hasattr(booking_repo, "auto_booking_lock"):
-                return BookingApplicationResult(True)
-            # Historical tenants retain the pending, staff-reviewed path. It
-            # uses the same conversation/slot transaction so a delayed worker
-            # cannot create a pending booking after a newer cancellation.
-            async with booking_repo.auto_booking_lock(
-                org_id, source["conversation_id"], pren.data, pren.ora,
-            ) as conn:
-                source = await self._booking_context(
-                    org_id, msg, pren, conn=conn, require_latest=True,
-                )
-                if source is None or not _booking_action_is_fresh(source, pren):
-                    return BookingApplicationResult(True)
-                existing = await conn.fetchrow(
-                    "SELECT * FROM bookings WHERE organization_id=$1 AND source_message_id=$2",
-                    uuid.UUID(str(org_id)), source["booking_source_message_id"],
-                )
-                if existing is not None:
-                    return _booking_application_result(dict(existing))
-                source_content = source["content"]
-                if isinstance(source_content, str):
-                    source_content = json.loads(source_content)
-                channel = source["canale"] or "whatsapp"
-                used = await conn.fetchval(
-                    """SELECT COALESCE(SUM(coperti),0) FROM bookings
-                       WHERE organization_id=$1 AND data=$2
-                         AND EXTRACT(HOUR FROM ora)=$3
-                         AND stato IN ('in_attesa','confermata','da_verificare','completata')""",
-                    uuid.UUID(str(org_id)), date.fromisoformat(pren.data), int(pren.ora[:2]),
-                )
-                current_settings = await booking_repo.get_booking_settings(org_id) or {}
-                capacities = current_settings.get("capienze_orarie") or {}
-                if isinstance(capacities, str):
-                    capacities = json.loads(capacities)
-                capacity = capacities.get(f"{int(pren.ora[:2]):02d}:00", 40)
-                if type(capacity) is not int or pren.coperti + int(used or 0) > capacity:
-                    return BookingApplicationResult(True)
-                created = await booking_repo.create_booking(
-                    uuid.UUID(str(org_id)), source.get("customer_name") or "Cliente da verificare",
-                    pren.data, pren.ora, pren.coperti,
-                    telefono=_extract_from(source_content), note="",
-                    stato="in_attesa", origine="Instagram" if channel == "instagram" else "WhatsApp",
-                    richiede_intervento=True,
-                    id_conversazione=str(source["conversation_id"]),
-                    source_message_id=source["booking_source_message_id"],
-                )
-                return _booking_application_result(created)
-        except Exception as exc:
-            logger.warning(
-                "inbound=postcommit_booking_requires_staff organization_id=%s message_id=%s error_type=%s",
-                org_id, msg.get("id"), type(exc).__name__,
+            from src.core.bookings.worker_authority import WorkerBookingAuthority
+            booking_id = await WorkerBookingAuthority().process_a05_booking(
+                private_pool, org_id, msg["id"], canonical,
             )
+            if not booking_id:
+                return BookingApplicationResult(True)
+            return BookingApplicationResult(False)
+        except Exception as exc:
+            logger.warning("inbound=postcommit_booking_requires_staff organization_id=%s message_id=%s error_type=%s",
+                           org_id, msg.get("id"), type(exc).__name__)
             return BookingApplicationResult(True)
 
     async def _process_message(self, msg: dict, lease: QuotaLease) -> ProcessingOutcome:
@@ -807,12 +676,15 @@ class InboundProcessingService:
         # Privacy gates AI and replay. Deterministic operator requests,
         # reminders and feedback retain their established handling.
         from src.core.bookings.privacy_boundary import medical_restricted_for_inbound
-        if await medical_restricted_for_inbound(self.repo, org_id, business_profile_raw):
+        from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+        if await medical_restricted_for_inbound(
+            self.repo, org_id, business_profile_raw, text=text,
+            allow_administrative=private_booking_worker_enabled() and canale == "whatsapp",
+        ):
             return await self._escalate(
                 org_id, msg, content, tenant_config, HUMAN_WAIT_REPLY, "medical_handoff",
             )
 
-        from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
         if (private_booking_worker_enabled() and canale == "whatsapp"
                 and re.fullmatch(r"CONFIRM [0-9a-f-]{36}", text)):
             from src.core.bookings.conversation_state import StateConflict
@@ -1029,12 +901,23 @@ class InboundProcessingService:
                     await release_quota_if_safe()
                     return
                 raise RuntimeError("A04 final response proof missing")
-            # A model-proposed booking without customer authorization is only
-            # a deterministic staff handoff, not a commercial AI final.
+            # A pure escalation is not a customer-facing commercial final.
+            # A guardrail-approved substantive answer remains billable even
+            # when it also asks staff to follow up.
             from src.core.ai_safety import BOOKING_FAILURE_REPLY
+            from src.core.guardrails.validator import FALLBACK_STAFF_TEXT
             from src.models.schemas import RispostaOutput
             payload = json.loads(final_response.serialized)
             candidate = RispostaOutput.model_validate(payload)
+            handoff_only = (
+                candidate.categoria.strip().casefold() == "escalation"
+                or candidate.risposta.strip() in {FALLBACK_STAFF_TEXT, BOOKING_FAILURE_REPLY}
+            )
+            if candidate.richiede_umano and handoff_only:
+                await release_quota_if_safe()
+                risposta_text = candidate.risposta
+                richiede_umano = True
+                return
             proposal = candidate.prenotazione
             if (proposal and proposal.data and proposal.ora and proposal.coperti
                     and not candidate.richiede_umano):

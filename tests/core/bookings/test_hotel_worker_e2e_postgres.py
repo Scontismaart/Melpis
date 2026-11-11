@@ -156,12 +156,12 @@ async def test_hotel_worker_rejects_new_cancellation_or_withdrawn_consent(pg_poo
 
 
 @pytest.mark.asyncio
-async def test_hotel_expired_worker_claim_cannot_mint(pg_pool, monkeypatch):
+async def test_hotel_expired_worker_claim_cannot_mint(pg_pool, private_worker_pool, monkeypatch):
     env = await setup_hotel(pg_pool, monkeypatch)
     arrival, departure = next_autumn_dst()
     source, conversation, reply = await confirmed_request(env, arrival, departure)
     authority = WorkerBookingAuthority()
-    async with pg_pool.acquire() as conn, conn.transaction():
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         claim = await authority.claim(conn, env['org'], source)
         await conn.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
             WHERE organization_id=$1 AND message_id=$2""", env['org'], source)

@@ -395,8 +395,16 @@ class BookingRepository(TenantScopedRepository):
 
     @asynccontextmanager
     async def _legacy_mutation_connection(self, organization_id, booking_id):
-        # Serialize the managed-set check with allocator admission on the same row.
+        # Serialize with sector activation before checking the fence, including
+        # edits that do not change capacity and therefore bypass SQL084's trigger.
         async with self._connection() as conn, conn.transaction(isolation="read_committed"):
+            org = uuid.UUID(str(organization_id))
+            if await conn.fetchval("SELECT to_regclass('public.booking_sector_admission_fences') IS NOT NULL"):
+                await conn.execute("SELECT public.booking_sector_lock_epoch($1)", org)
+                await conn.fetchval("SELECT pg_advisory_xact_lock(hashtextextended($1::text,884))", str(org))
+                if await conn.fetchval("SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences WHERE organization_id=$1)", org):
+                    raise ManagedBookingMutationRequired()
+            # Serialize the managed-set check with allocator admission on the same row.
             row = await conn.fetchrow(
                 "SELECT id FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE",
                 organization_id, booking_id,

@@ -1,4 +1,4 @@
-"""Private, dormant typed booking transaction; no route or worker access."""
+"""Tenant-scoped atomic booking mutations shared by fenced owner and worker paths."""
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -53,7 +53,7 @@ class BookingMutation:
             parsed = time.fromisoformat(self.ora)
             if parsed.tzinfo or parsed.second or parsed.microsecond:
                 raise ValueError("Invalid booking time")
-            if self.operation == 'reschedule' and (self.notice or any((self.nome_cliente, self.telefono, self.note))):
+            if self.operation == 'reschedule' and any((self.nome_cliente, self.telefono, self.note)):
                 raise ValueError('Reschedule cannot change contact or send notice')
         elif self.data is not None or self.ora is not None or self.coperti is not None:
             raise ValueError("Contact edit cannot change scheduling")
@@ -65,7 +65,7 @@ class BookingMutation:
             from datetime import date
             if (type(self.arrival_date) is not str or type(self.departure_date) is not str
                 or date.fromisoformat(self.arrival_date) >= date.fromisoformat(self.departure_date)
-                or self.data != self.arrival_date or self.notice
+                or self.data != self.arrival_date or (self.operation == 'create_stay' and self.notice)
                 or (self.operation == 'create_stay' and self.expected_stay_revision is not None)
                 or (self.operation == 'reschedule_stay' and (type(self.expected_stay_revision) is not int or self.expected_stay_revision < 1
                     or any((self.nome_cliente, self.telefono, self.note))))):
@@ -116,24 +116,67 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
             raise AllocationDenied('Purged booking or request cannot be replayed')
         actor = await engine._actor(conn, org, auth)
         before = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
+        owner_stay_create = (mutation.operation == 'create_stay' and new_booking is not None
+                             and new_booking.contact_id is None and new_booking.conversation_id is None
+                             and new_booking.source_message_id is None)
+        if owner_stay_create:
+            if not mutation.telefono.strip():
+                raise BookingMutationRejected('Manual stay requires a phone number')
+            if not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM organization_memberships
+                WHERE organization_id=$1 AND user_id=$2 AND ruolo='owner' AND joined_at IS NOT NULL)''', org, actor):
+                raise AllocationDenied('Owner required for manual stay')
         if before is None:
             if new_booking is None or request.action != 'allocate':
                 raise AllocationDenied('Booking unavailable')
-            lineage_row = {'contact_id': new_booking.contact_id, 'id_conversazione': new_booking.conversation_id}
+            if owner_stay_create:
+                import re
+                from uuid import uuid4
+                from src.core.gdpr.guard import check_contact_intake
+                phone = re.sub(r'[^0-9]', '', mutation.telefono)
+                if not phone or len(phone) > 32:
+                    raise BookingMutationRejected('Invalid phone number')
+                # The suppression check precedes all identity reads. Serialize
+                # normalized variants so concurrent requests cannot fork a subject.
+                await check_contact_intake(conn, org, phone)
+                await conn.fetchval('SELECT pg_advisory_xact_lock(hashtextextended($1,727))',
+                                    f'manual-stay-contact|{org}|{phone}')
+                contacts = await conn.fetch('''SELECT id,deleted_at FROM contacts WHERE organization_id=$1
+                    AND regexp_replace(phone_number,'[^0-9]','','g')=$2 LIMIT 2 FOR UPDATE''', org, phone)
+                if len(contacts) > 1 or (contacts and contacts[0]['deleted_at'] is not None):
+                    raise AllocationDenied('Contact requires reconciliation')
+                contact_id = contacts[0]['id'] if contacts else uuid4()
+                if not contacts:
+                    await conn.execute('INSERT INTO contacts(id,organization_id,phone_number) VALUES($1,$2,$3)',
+                                       contact_id, org, phone)
+                lineage_row = {'contact_id': contact_id, 'id_conversazione': None}
+            else:
+                lineage_row = {'contact_id': new_booking.contact_id, 'id_conversazione': new_booking.conversation_id}
         else:
             lineage_row = before
         conversation, subject = await engine._lineage(conn, org, lineage_row)
         stay_transition = mutation.operation in {'confirm', 'complete', 'reactivate'} and await conn.fetchval(
             'SELECT EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)', org, request.booking_id)
         if mutation.operation in {'create_stay', 'reschedule_stay'} or stay_transition:
-            source = new_booking.source_message_id if new_booking else await conn.fetchval(
-                'SELECT source_message_id FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', org, request.booking_id)
-            proof = await conn.fetchrow('''SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3
-                AND direction='inbound' AND deleted_at IS NULL AND c24_original_subject_id=$4 FOR SHARE''',
-                org, conversation, source, subject)
-            if not proof:
-                raise AllocationDenied('Verified stay source required')
-        if before is not None and new_booking is not None:
+            stay_lineage = await conn.fetchrow('''SELECT source_kind,source_message_id,original_subject_id,
+                original_conversation_id FROM booking_stays WHERE organization_id=$1 AND booking_id=$2''',
+                org, request.booking_id) if before is not None else None
+            manual_stay = owner_stay_create if before is None else bool(stay_lineage and stay_lineage['source_kind'] == 'owner')
+            if manual_stay:
+                if (conversation is not None or subject is None or (stay_lineage and
+                    (stay_lineage['original_subject_id'] != subject or stay_lineage['original_conversation_id'] is not None
+                     or stay_lineage['source_message_id'] is not None))):
+                    raise AllocationDenied('Manual stay lineage unavailable')
+                if not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM organization_memberships
+                    WHERE organization_id=$1 AND user_id=$2 AND ruolo='owner' AND joined_at IS NOT NULL)''', org, actor):
+                    raise AllocationDenied('Owner required for manual stay')
+            else:
+                source = new_booking.source_message_id if new_booking else (stay_lineage['source_message_id'] if stay_lineage else None)
+                proof = await conn.fetchrow('''SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3
+                    AND direction='inbound' AND deleted_at IS NULL AND c24_original_subject_id=$4 FOR SHARE''',
+                    org, conversation, source, subject)
+                if not proof:
+                    raise AllocationDenied('Verified stay source required')
+        if before is not None and new_booking is not None and not owner_stay_create:
             supplied = await engine._lineage(conn, org, {'contact_id': new_booking.contact_id, 'id_conversazione': new_booking.conversation_id})
             if supplied != (conversation, subject):
                 raise AllocationDenied('Booking lineage differs')
@@ -203,7 +246,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                     or request.appointment_time != time.fromisoformat(mutation.ora)))
                     or (request.party_size is not None and request.party_size != mutation.coperti)):
                 raise BookingMutationRejected('Allocation and booking differ')
-            if is_stay and (not new_booking.contact_id or not new_booking.conversation_id or not new_booking.source_message_id
+            if is_stay and not owner_stay_create and (not new_booking.contact_id or not new_booking.conversation_id or not new_booking.source_message_id
                 or not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM messages WHERE organization_id=$1
                   AND conversation_id=$2 AND id=$3 AND direction='inbound' AND deleted_at IS NULL
                   AND c24_original_subject_id=$4)''', org, new_booking.conversation_id,
@@ -212,15 +255,18 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
             await conn.execute("""INSERT INTO bookings
                 (id,organization_id,contact_id,id_conversazione,nome_cliente,telefono,data,ora,coperti,note,stato)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'in_attesa')""", request.booking_id, org,
-                new_booking.contact_id, str(new_booking.conversation_id) if new_booking.conversation_id else None,
+                subject, str(conversation) if conversation else None,
                 mutation.nome_cliente, mutation.telefono, date.fromisoformat(mutation.data),
                 time.fromisoformat(mutation.ora), mutation.coperti, mutation.note)
             if is_stay:
+                await conn.execute('SELECT public.mark_booking_stay_owner_source($1,$2,$3,$4,$5)',
+                                   org, request.booking_id, subject, request.request_id, actor)
                 await conn.execute('''INSERT INTO booking_stays(organization_id,booking_id,original_subject_id,
-                    original_conversation_id,source_message_id,arrival_date,departure_date,revision)
-                    VALUES($1,$2,$3,$4,$5,$6,$7,1)''', org, request.booking_id, new_booking.contact_id,
-                    new_booking.conversation_id, new_booking.source_message_id,
-                    date.fromisoformat(mutation.arrival_date), date.fromisoformat(mutation.departure_date))
+                    original_conversation_id,source_message_id,arrival_date,departure_date,revision,source_kind)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,1,$8)''', org, request.booking_id, subject,
+                    conversation, new_booking.source_message_id,
+                    date.fromisoformat(mutation.arrival_date), date.fromisoformat(mutation.departure_date),
+                    'owner' if owner_stay_create else 'inbound')
         elif mutation.operation in {'confirm', 'complete', 'reactivate'}:
             reactivating = mutation.operation == 'reactivate'
             if request.action != ('allocate' if reactivating else 'replace'):
@@ -300,6 +346,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 raise AllocationConflict('Stay claims changed')
             await engine._take_locks(conn, org, request, claims, new_claims)
             contact_preimage = await engine._seal_contact_preimage(conn, org, request, mutation=mutation)
+            await conn.execute('SELECT public.mark_booking_stay_owner_source($1,$2,$3,$4,$5)',
+                               org, request.booking_id, subject, request.request_id, actor)
             await conn.execute('''UPDATE bookings SET data=$3,ora=$4,coperti=$5,stato='in_attesa',updated_at=NOW()
                 WHERE organization_id=$1 AND id=$2''', org, request.booking_id, date.fromisoformat(mutation.data), time.fromisoformat(mutation.ora), mutation.coperti)
             await conn.execute('''UPDATE booking_stays SET arrival_date=$3,departure_date=$4,revision=revision+1
@@ -410,9 +458,135 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
             raise BookingMutationRejected('Allocation was not applied')
         if sector_fenced:
             await conn.execute('DELETE FROM booking_sector_admission_markers WHERE transaction_id=txid_current() AND organization_id=$1 AND booking_id=$2', org, request.booking_id)
-        if mutation.notice:
+        if mutation.notice and mutation.operation in {'reschedule', 'reschedule_stay'}:
+            booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
+            if booking['stato'] != 'in_attesa':
+                raise BookingMutationRejected('Reconfirmation requires a pending booking')
+            await _enqueue_reschedule_notice(conn, dict(booking), request, mutation)
+        elif mutation.notice:
             booking = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
             if booking['stato'] != 'confermata':
                 raise BookingMutationRejected('Confirmation notice requires a confirmed booking')
-            await BookingRepository(pool).enqueue_calendar_confirmation(conn, dict(booking), None, 'whatsapp')
+            stay = await conn.fetchrow('''SELECT arrival_date,departure_date,source_kind FROM booking_stays
+                WHERE organization_id=$1 AND booking_id=$2 FOR SHARE''', org, request.booking_id)
+            # A confirmation for this booking revision may already exist (for
+            # example a worker confirmation). Never insert an orphan second
+            # message when the outbox's revision key has already been used.
+            existing = await conn.fetchrow('''SELECT m.content FROM booking_confirmation_outbox o
+                JOIN messages m ON m.organization_id=o.organization_id AND m.id=o.outbound_message_id
+                WHERE o.organization_id=$1 AND m.organization_id=$1
+                  AND o.booking_id=$2 AND o.booking_revision=$3
+                FOR UPDATE OF o''', org, request.booking_id, booking['calendar_revision'])
+            if stay:
+                from src.core.bookings.hotel_confirmation import enqueue_hotel_confirmation
+                text = (f"Soggiorno confermato in Melpis: arrivo {stay['arrival_date'].isoformat()}, "
+                        f"partenza {stay['departure_date'].isoformat()}.")
+            else:
+                text = (f"Prenotazione confermata in Melpis per il {booking['data'].isoformat()} "
+                        f"alle {booking['ora'].strftime('%H:%M')}, {booking['coperti']} persone.")
+            expected_payload = {'to': booking['telefono'], 'type': 'text', 'text': {'body': text},
+                                '_delivery_category': 'service'}
+            if existing:
+                from src.core.db.repositories.booking_catalog_repo import decode
+                if decode(existing['content']) != expected_payload:
+                    raise BookingMutationRejected('Existing confirmation differs')
+            elif stay:
+                manual_booking = dict(booking)
+                manual_booking['source_message_id'] = f"manual:{booking['id']}:{booking['calendar_revision']}"
+                if stay['source_kind'] == 'owner':
+                    import re
+                    from uuid import uuid4
+                    from src.core.gdpr.guard import check_contact_intake
+                    phone = re.sub(r'[^0-9]', '', booking['telefono'] or '')
+                    if not phone:
+                        raise BookingMutationRejected('Confirmation destination unavailable')
+                    await check_contact_intake(conn, org, phone)
+                    contact = await conn.fetchrow('''SELECT id,phone_number,deleted_at,consent_status FROM contacts
+                        WHERE organization_id=$1 AND id=$2 FOR SHARE''', org, booking['contact_id'])
+                    if (not contact or contact['deleted_at'] is not None or contact['consent_status'] == 'withdrawn'
+                            or re.sub(r'[^0-9]', '', contact['phone_number']) != phone):
+                        raise AllocationDenied('Confirmation subject unavailable')
+                    await conn.execute('''INSERT INTO conversations(id,organization_id,contact_id)
+                        VALUES($1,$2,$3) ON CONFLICT(organization_id,contact_id) DO NOTHING''', uuid4(), org, contact['id'])
+                    conv = await conn.fetchval('''SELECT id FROM conversations WHERE organization_id=$1
+                        AND contact_id=$2 AND deleted_at IS NULL''', org, contact['id'])
+                    if not conv:
+                        raise AllocationDenied('Confirmation conversation unavailable')
+                    manual_booking['id_conversazione'] = str(conv)
+                await enqueue_hotel_confirmation(conn, manual_booking, None, stay['arrival_date'], stay['departure_date'])
+            else:
+                await BookingRepository(pool).enqueue_calendar_confirmation(conn, dict(booking), None, 'whatsapp')
+            if not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_confirmation_outbox
+                WHERE organization_id=$1 AND booking_id=$2 AND booking_revision=$3)''',
+                org, request.booking_id, booking['calendar_revision']):
+                raise BookingMutationRejected('Confirmation destination unavailable')
         return result
+
+
+async def _enqueue_reschedule_notice(conn, booking, request, mutation):
+    """Atomically persist a pending-review notice, never a provider delivery."""
+    import json
+    import re
+    from uuid import uuid4
+    from src.core.gdpr.guard import check_contact_intake
+
+    org, phone = booking['organization_id'], booking['telefono'] or ''
+    normalized = re.sub(r'[^0-9]', '', phone)
+    if not normalized:
+        raise BookingMutationRejected('Reconfirmation destination unavailable')
+    await check_contact_intake(conn, org, normalized)
+    conversation = booking['id_conversazione']
+    if conversation:
+        row = await conn.fetchrow('''SELECT c.id,s.phone_number,s.deleted_at,s.consent_status FROM conversations c
+            JOIN contacts s ON s.organization_id=c.organization_id AND s.organization_id=$1 AND s.id=c.contact_id
+            WHERE c.organization_id=$1 AND s.organization_id=$1 AND c.id=$2 AND c.deleted_at IS NULL FOR SHARE OF c,s''', org, UUID(str(conversation)))
+        if (not row or row['deleted_at'] is not None or row['consent_status'] == 'withdrawn'
+                or re.sub(r'[^0-9]', '', row['phone_number']) != normalized):
+            raise AllocationDenied('Reconfirmation subject unavailable')
+        conversation = row['id']
+    else:
+        await conn.fetchval('SELECT pg_advisory_xact_lock(hashtextextended($1,727))', f'manual-stay-contact|{org}|{normalized}')
+        rows = await conn.fetch('''SELECT id,deleted_at,consent_status FROM contacts WHERE organization_id=$1
+            AND regexp_replace(phone_number,'[^0-9]','','g')=$2 LIMIT 2 FOR UPDATE''', org, normalized)
+        if len(rows) > 1 or (rows and (rows[0]['deleted_at'] is not None or rows[0]['consent_status'] == 'withdrawn')):
+            raise AllocationDenied('Reconfirmation subject unavailable')
+        contact = rows[0]['id'] if rows else uuid4()
+        if booking['contact_id'] and booking['contact_id'] != contact:
+            raise AllocationDenied('Reconfirmation subject changed')
+        if not rows:
+            await conn.execute('INSERT INTO contacts(id,organization_id,phone_number) VALUES($1,$2,$3)', contact, org, normalized)
+        await conn.execute('''INSERT INTO conversations(id,organization_id,contact_id) VALUES($1,$2,$3)
+            ON CONFLICT(organization_id,contact_id) DO NOTHING''', uuid4(), org, contact)
+        conversation = await conn.fetchval('''SELECT id FROM conversations WHERE organization_id=$1
+            AND contact_id=$2 AND deleted_at IS NULL''', org, contact)
+        if not conversation:
+            raise AllocationDenied('Reconfirmation conversation unavailable')
+    if mutation.operation == 'reschedule_stay':
+        body = (f"Richiesta di modifica del soggiorno: arrivo {request.arrival_date.isoformat()}, "
+                f"partenza {request.departure_date.isoformat()}. Contatta l'attività per confermare.")
+    else:
+        body = (f"Richiesta di modifica della prenotazione: {booking['data'].isoformat()} "
+                f"alle {booking['ora'].strftime('%H:%M')}, {booking['coperti']} persone. "
+                "Contatta l'attività per confermare.")
+    payload = {'to': phone, 'type': 'text', 'text': {'body': body}, '_delivery_category': 'service'}
+    key = f"booking-reconfirmation:{org}:{booking['id']}:{booking['calendar_revision']}"
+    existing = await conn.fetchrow('''SELECT m.content,m.handling_type FROM booking_confirmation_outbox o
+        JOIN messages m ON m.organization_id=o.organization_id AND m.id=o.outbound_message_id
+        WHERE o.organization_id=$1 AND m.organization_id=$1
+          AND o.booking_id=$2 AND o.booking_revision=$3 FOR UPDATE OF o''',
+        org, booking['id'], booking['calendar_revision'])
+    if existing:
+        from src.core.db.repositories.booking_catalog_repo import decode
+        if existing['handling_type'] != 'booking_reconfirmation' or decode(existing['content']) != payload:
+            raise BookingMutationRejected('Existing reconfirmation differs')
+        return
+    message = await conn.fetchrow('''INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
+        content,content_text,status,handling_type,idempotency_key)
+        VALUES($1,$2,$3,'outbound','text',$4::jsonb,$5,'queued','booking_reconfirmation',$6)
+        ON CONFLICT(organization_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING id,content''',
+        uuid4(), org, conversation, json.dumps(payload), body, key)
+    if not message:
+        raise BookingMutationRejected('Reconfirmation identifier already used')
+    await conn.execute('''INSERT INTO booking_confirmation_outbox
+        (organization_id,booking_id,inbound_message_id,outbound_message_id,booking_revision)
+        VALUES($1,$2,NULL,$3,$4)''', org, booking['id'], message['id'], booking['calendar_revision'])

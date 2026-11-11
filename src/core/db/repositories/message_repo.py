@@ -464,6 +464,8 @@ class MessageRepository(TenantScopedRepository):
                   AND direction = 'outbound'
                   AND handling_type = 'ai_handled'
                   AND deleted_at IS NULL
+                  AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
+                       ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                 ORDER BY created_at DESC
                 LIMIT 1
             """, organization_id, conversation_id)
@@ -475,6 +477,8 @@ class MessageRepository(TenantScopedRepository):
                 SELECT * FROM messages
                 WHERE id = $2::uuid AND organization_id = $1::uuid
                   AND deleted_at IS NULL
+                  AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
+                       ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
             """, organization_id, message_id)
             return dict(row) if row else None
 
@@ -538,7 +542,10 @@ class MessageRepository(TenantScopedRepository):
             organization_id = uuid.UUID(organization_id)
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL AND created_at > NOW() - INTERVAL '60 days' ORDER BY created_at DESC",
+                """SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL
+                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
+                        ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                   ORDER BY created_at DESC""",
                 organization_id,
             )
             return [dict(r) for r in rows]

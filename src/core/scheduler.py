@@ -126,6 +126,49 @@ async def _retention_job(pool):
     await run_retention(pool)
 
 
+def _run_c24_retention_sweep():
+    """Run C2.4 retention only with its isolated, explicitly enabled identity."""
+    if (os.getenv("GDPR_RETENTION_EXECUTION_ENABLED") != "true"
+            or os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") != "true"
+            or os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") != "true"):
+        return
+    dsn = os.getenv("GDPR_C24_OWNER_RETENTION_DSN")
+    if not dsn:
+        # Enabled without the least-privilege connection is a configuration
+        # error. Never fall back to the application/service-role DSN.
+        raise RuntimeError("C2.4 retention requires its dedicated connection")
+    try:
+        asyncio.run(_run_c24_retention_sweep_async(dsn))
+    except Exception as exc:
+        # Driver exceptions can include connection details. Log only the class,
+        # never exception text, and avoid chaining it into the scheduler log.
+        logger.error("scheduler=c24_retention_sweep_failed error_type=%s", type(exc).__name__)
+        raise RuntimeError("C2.4 retention sweep failed") from None
+
+
+async def _run_c24_retention_sweep_async(dsn):
+    pool = None
+    try:
+        pool = await asyncpg.create_pool(
+            dsn=dsn, min_size=1, max_size=1, command_timeout=_JOB_COMMAND_TIMEOUT,
+        )
+        from src.core.jobs.base import execute_with_advisory_lock
+
+        if not await execute_with_advisory_lock(pool, "c24_retention_sweep", _c24_retention_job):
+            logger.info("scheduler=job_skipped job=c24_retention_sweep (advisory_lock_held)")
+    finally:
+        if pool is not None:
+            await pool.close()
+
+
+async def _c24_retention_job(pool):
+    from src.core.gdpr.c24_retention_controller import run_c24_retention_sweep
+
+    result = await run_c24_retention_sweep(pool)
+    logger.info("scheduler=c24_retention_sweep enabled=%s batch_clear=%s",
+                result.get("enabled"), result.get("batch_clear"))
+
+
 def _run_reminder_check():
     asyncio.run(_con_pool_esimero(_reminder_check_job))
 
@@ -253,14 +296,14 @@ def _run_booking_sync_sweep():
 
 
 async def _booking_sync_sweep_job(pool):
-    """Riconcilia i sync esterni orfani (pending oltre soglia -> failed + log
+    """Segnala i sync esterni orfani (pending oltre soglia -> uncertain + log
     escalation). Idempotente: righe gia' terminali non vengono toccate."""
     from src.core.bookings.sync_sweep_job import sweep_stale_syncs
 
     outcome = await sweep_stale_syncs(pool)
     logger = __import__("logging").getLogger(__name__)
     logger.info("booking_sync_sweep=completato examined=%d swept=%d",
-                outcome["examined"], outcome["swept_to_failed"])
+                outcome["examined"], outcome["swept_to_uncertain"])
 
 
 def _run_airtable_webhook_reap():
@@ -324,6 +367,22 @@ def avvia_scheduler():
     if _scheduler is not None:
         return
 
+    c24_retention_enabled = (
+        os.getenv("GDPR_RETENTION_EXECUTION_ENABLED") == "true"
+        and os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") == "true"
+        and os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") == "true"
+    )
+    c24_retention_interval = None
+    if c24_retention_enabled:
+        if not os.getenv("GDPR_C24_OWNER_RETENTION_DSN"):
+            raise RuntimeError("C2.4 retention requires its dedicated connection")
+        try:
+            c24_retention_interval = int(os.getenv("GDPR_C24_RETENTION_INTERVAL_SECONDS", "3600"))
+        except ValueError:
+            raise RuntimeError("C2.4 retention interval is invalid") from None
+        if not 60 <= c24_retention_interval <= 86400:
+            raise RuntimeError("C2.4 retention interval is invalid")
+
     _scheduler = BackgroundScheduler()
     _scheduler.add_job(
         genera_e_caching,
@@ -339,6 +398,15 @@ def avvia_scheduler():
         name="Data retention — soft-delete e purge",
         replace_existing=True,
     )
+    if c24_retention_enabled:
+        # Never fall back to the application's database identity.
+        _scheduler.add_job(
+            _run_c24_retention_sweep,
+            IntervalTrigger(seconds=c24_retention_interval),
+            id="c24_retention_sweep",
+            name="C2.4 tenant-scoped retention and hotel lifecycle",
+            replace_existing=True,
+        )
     _scheduler.add_job(
         _purge_local_simulator_history,
         IntervalTrigger(minutes=15),

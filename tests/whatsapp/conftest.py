@@ -78,7 +78,7 @@ async def pg_pool(postgres_container):
             await conn.execute(f.read())
         # Keep the WhatsApp tests on the same complete schema/migration chain
         # as core tests, including migration 063's durable erasure barrier.
-        for sql_path in sorted(glob.glob("src/core/db/migrations/0*.sql")):
+        for sql_path in sorted(glob.glob("src/core/db/migrations/[0-9][0-9][0-9]_*.sql")):
             with open(sql_path, encoding="utf-8") as f:
                 sql = f.read()
             try:

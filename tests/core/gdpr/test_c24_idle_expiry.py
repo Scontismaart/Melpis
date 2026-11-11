@@ -17,6 +17,21 @@ async def age_state(env, days):
         await conn.execute('ALTER TABLE booking_conversation_states DISABLE TRIGGER c24_state_activity')
         await conn.execute("UPDATE booking_conversation_states SET updated_at=clock_timestamp()-make_interval(days=>$3) WHERE organization_id=$1 AND conversation_id=$2", env['org'], env['conv'], days)
         await conn.execute('ALTER TABLE booking_conversation_states ENABLE TRIGGER c24_state_activity')
+        # Model an old server receipt, not merely an old processing timestamp.
+        await conn.execute('ALTER TABLE messages DISABLE TRIGGER c24_source_received')
+        await conn.execute("""UPDATE messages SET c24_received_at=clock_timestamp()-make_interval(days=>$3)
+            WHERE organization_id=$1 AND conversation_id=$2 AND id=(SELECT source_message_id
+              FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2)""",
+            env['org'], env['conv'], days)
+        await conn.execute('ALTER TABLE messages ENABLE TRIGGER c24_source_received')
+
+
+async def age_message(pool, org, message, days):
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute('ALTER TABLE messages DISABLE TRIGGER c24_source_received')
+        await conn.execute('''UPDATE messages SET c24_received_at=clock_timestamp()-make_interval(days=>$3)
+            WHERE organization_id=$1 AND id=$2''', org, message, days)
+        await conn.execute('ALTER TABLE messages ENABLE TRIGGER c24_source_received')
 
 
 async def test_idle_expiry_fences_old_source_and_allows_fresh_source(state_env):
@@ -53,6 +68,39 @@ async def test_idle_expiry_fences_old_source_and_allows_fresh_source(state_env):
     await pool.execute("UPDATE contacts SET consent_status='granted' WHERE organization_id=$1 AND id=$2",env['org'],subject)
     with pytest.raises(PermissionError):
         await apply(env, fresh)
+
+
+async def test_idle_expiry_scrubs_a04_proposals_but_preserves_receipt_and_usage(state_env, other_org):
+    env=state_env; pool=env['pool']; request=uuid4()
+    operation=await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
+    await apply(env,env['message'],request=request)
+    await approve_conversation(pool,env['org'])
+    await age_state(env,31)
+    used=await _used(pool,env['org'])
+    assert not await pool.fetchval('SELECT c24_expire_idle($1,$2)',other_org['id'],env['conv'])
+    assert await pool.fetchval('SELECT c24_expire_idle($1,$2)',env['org'],env['conv'])
+    assert not await pool.fetchval("SELECT COALESCE(ai_reply_cache ? 'booking_state_proposal',false) FROM messages WHERE organization_id=$1 AND id=$2",env['org'],env['message'])
+    assert not await pool.fetchval("SELECT COALESCE(response ? 'booking_state_proposal',false) FROM simulation_requests WHERE organization_id=$1 AND request_id=$2",env['org'],operation.id)
+    assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM booking_conversation_requests WHERE organization_id=$1 AND request_id=$2)',env['org'],request)
+    assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM booking_conversation_revocations WHERE organization_id=$1 AND conversation_id=$2)',env['org'],env['conv'])
+    assert await _used(pool,env['org']) == used
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError,match='Expired proposal'):
+        await pool.execute("UPDATE messages SET ai_reply_cache=ai_reply_cache || '{\"booking_state_proposal\":{}}'::jsonb WHERE organization_id=$1 AND id=$2",env['org'],env['message'])
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError,match='Expired proposal'):
+        await pool.execute("UPDATE simulation_requests SET response=response || '{\"booking_state_proposal\":{}}'::jsonb WHERE organization_id=$1 AND request_id=$2",env['org'],operation.id)
+
+
+async def test_state_expiry_uses_server_receipt_not_late_processing_time(state_env):
+    env=state_env; pool=env['pool']
+    await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
+    await apply(env,env['message'])
+    await approve_conversation(pool,env['org'])
+    # Processing was just committed; only the immutable source receipt is old.
+    await age_message(pool,env['org'],env['message'],31)
+    assert await pool.fetchval("SELECT updated_at>clock_timestamp()-interval '1 minute' FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2",env['org'],env['conv'])
+    with pytest.raises(ConversationStateUnavailable):
+        await env['repo'].read(env['org'],env['auth'],env['conv'])
+    assert await pool.fetchval('SELECT c24_expire_idle($1,$2)',env['org'],env['conv'])
 
 
 async def test_hold_and_service_role_block_idle_cleanup(state_env):
@@ -247,6 +295,7 @@ async def test_owner_source_cleanup_holds_fences_and_billing(state_env):
     state=(await apply(env,fresh,revision=1))['state']; usage=await _used(pool,org)
     await pool.execute("UPDATE messages SET status='handled',handling_type='ai' WHERE organization_id=$1 AND id=$2",org,fresh)
     await pool.execute("UPDATE messages SET status='handled',handling_type='ai',created_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND id=$2",org,source)
+    await age_message(pool,org,source,91)
     await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
       VALUES($1,'messages_content','qa-90',TRUE,90,FALSE,'test:qa','qa',clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day')""",org)
     hold=uuid4()
@@ -406,6 +455,7 @@ async def test_suppression_fence_retention_requires_purged_source_and_removed_re
         assert not await conn.fetchval("SELECT has_column_privilege(current_user,'public.c24_suppression_lifecycle_audit','operation_id','SELECT')")
         await conn.execute('RESET ROLE')
     await pool.execute("UPDATE messages SET status='handled',handling_type='ai',created_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND id=$2",org,source)
+    await age_message(pool,org,source,91)
     await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
       VALUES($1,'messages_content','qa-content',TRUE,90,FALSE,'test:qa','qa',clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day'),
             ($1,'technical_receipts','qa-receipts',TRUE,90,FALSE,'test:qa','qa',clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day')""",org)

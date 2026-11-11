@@ -105,7 +105,10 @@ def create_router(app_config: AppConfig = None, repo = None, security: MetaWebho
                 payload = change.model_dump(by_alias=True, exclude_none=True)
                 classification = await inbound_classification_status(active_repo, org_id)
                 if classification != "unknown":
-                    payload = minimize_whatsapp_change(payload, quarantine=classification == "error")
+                    payload = minimize_whatsapp_change(
+                        payload, quarantine=classification == "error",
+                        allow_medical_admin=classification == "restricted",
+                    )
                 await inbox.enqueue(org_id, "whatsapp", {
                     "object": webhook.object if classification == "unknown" else "whatsapp_business_account",
                     "entry": [{"id": entry.id if classification == "unknown" else None, "changes": [payload]}],
@@ -192,7 +195,11 @@ async def _handle_inbound_message(repo, org_id, msg, contacts, trace_id=None):
     classification = await inbound_classification_status(repo, org_id)
     if classification != "unknown":
         from src.whatsapp.models import MessageEntry
-        clean = minimize_whatsapp_change({"value": {"messages": [msg.model_dump(by_alias=True, exclude_none=True)]}}, quarantine=classification == "error")
+        clean = minimize_whatsapp_change(
+            {"value": {"messages": [msg.model_dump(by_alias=True, exclude_none=True)]}},
+            quarantine=classification == "error",
+            allow_medical_admin=classification == "restricted",
+        )
         msg = MessageEntry.model_validate(clean["value"]["messages"][0])
     from_number = msg.from_
     contact = await repo.get_or_create_contact(org_id, from_number)

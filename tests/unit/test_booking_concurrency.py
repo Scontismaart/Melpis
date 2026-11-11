@@ -157,6 +157,7 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
         "processing_at": None,
     }
     mock_repo.get_conversation.return_value = {"ticket_status": "OPEN"}
+    mock_repo.get_org_business_profile.return_value = {"verticale": "ristorante"}
     mock_repo.get_outbound_dedup.return_value = None
     mock_repo.check_booking_exists.return_value = False
     mock_repo.mark_ai_disclosure_sent.return_value = True
@@ -211,6 +212,7 @@ async def test_outbound_dedup_prevents_duplicate_send_on_worker_crash_retry():
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("src.core.inbound.service.load_tenant_config", AsyncMock(return_value=mock_tc))
+        mp.setattr("src.core.bookings.privacy_boundary.inbound_classification_status", AsyncMock(return_value="unknown"))
         mp.setattr("src.core.billing.quota_reservations.QuotaReservations", lambda _pool: quota)
 
         # Run 1: sends message and saves outbound dedup

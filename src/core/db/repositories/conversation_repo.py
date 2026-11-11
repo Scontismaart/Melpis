@@ -88,7 +88,8 @@ class ConversationRepository(TenantScopedRepository):
                            FROM messages m
                            WHERE m.organization_id = $1::uuid
                              AND m.conversation_id = c.id AND m.deleted_at IS NULL
-                             AND m.created_at > NOW() - INTERVAL '60 days'
+                             AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
+                                  ELSE (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                            ORDER BY m.created_at DESC
                            LIMIT 1
                        ) lm ON TRUE
@@ -146,7 +147,8 @@ class ConversationRepository(TenantScopedRepository):
                            FROM messages m
                            WHERE m.organization_id = $2::uuid
                              AND m.conversation_id = c.id AND m.deleted_at IS NULL
-                             AND m.created_at > NOW() - INTERVAL '60 days'
+                             AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
+                                  ELSE (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                            ORDER BY m.created_at DESC
                            LIMIT 1
                        ) lm ON TRUE
@@ -189,7 +191,8 @@ class ConversationRepository(TenantScopedRepository):
                    WHERE m.conversation_id = $1::uuid
                      AND m.organization_id = $2::uuid
                      AND m.deleted_at IS NULL
-                     AND m.created_at > NOW() - INTERVAL '60 days'
+                     AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
+                          ELSE (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    ORDER BY m.created_at ASC
                    LIMIT $3 OFFSET $4""",
                 conversation_id, org_id, limit, offset

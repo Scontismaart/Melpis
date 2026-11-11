@@ -28,7 +28,7 @@ def validate_sector_admission(config: Mapping, catalog: CatalogDraft,
             or set(policy) != {'enabled', 'version', 'sector', 'authority'}
             or policy['enabled'] is not True
             or type(policy['version']) is not int or policy['version'] != 1
-            or policy['sector'] not in {'parrucchiere', 'centro_estetico'}
+            or policy['sector'] not in {'parrucchiere', 'centro_estetico', 'studio_medico_dentista'}
             or policy['sector'] != catalog.sector or policy['authority'] != 'internal'):
         raise SectorAdmissionDenied('Sector admission policy unavailable')
     if (type(request) is not AllocationRequest or request.action != 'allocate'

@@ -5,6 +5,7 @@ Observation uses an existing synthetic booking; a separate typed command creates
 (or, for hotel, creates a source-proven stay). No provider is called.
 """
 from dataclasses import asdict
+from datetime import date, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -29,6 +30,21 @@ pytestmark = pytest.mark.asyncio
 SECTORS = ('ristorante', 'parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista')
 
 
+def _future_booking_date():
+    day = date.today() + timedelta(days=7)
+    while day.weekday() == 6:
+        day += timedelta(days=1)
+    return day
+
+
+def _request_for_command(env, booking_id, command, sector):
+    if sector == 'hotel_bnb':
+        return env.request(booking_id, arrival_date=command.arrival_date,
+                           departure_date=command.departure_date, room_count=command.coperti)
+    return env.request(booking_id, appointment_date=command.data,
+                       appointment_time=command.ora, party_size=command.coperti)
+
+
 @pytest.mark.parametrize('sector', SECTORS)
 async def test_sector_dark_catalog_observation_and_owner_mutation(pg_pool, sector):
     # State reduction is deliberately independent: no production bridge claims
@@ -40,21 +56,23 @@ async def test_sector_dark_catalog_observation_and_owner_mutation(pg_pool, secto
 
     if sector == 'hotel_bnb':
         env, lineage = await hotel_setup(pg_pool)
-        command = BookingMutation('create_stay', 'Synthetic', '', '', '2026-10-28', '14:00', 1,
-                                  arrival_date='2026-10-28', departure_date='2026-10-29')
+        arrival = _future_booking_date()
+        departure = arrival + timedelta(days=1)
+        command = BookingMutation('create_stay', 'Synthetic', '', '', arrival.isoformat(), '14:00', 1,
+                                  arrival_date=arrival.isoformat(), departure_date=departure.isoformat())
     else:
         env = await create_environment(pg_pool, sector)
         lineage = NewBookingLineage(None, None)
-        command = BookingMutation('create', 'Synthetic', '3900000001', '', '2026-10-28', '10:00', 1)
+        command = BookingMutation('create', 'Synthetic', '3900000001', '', _future_booking_date().isoformat(), '10:00', 1)
 
     probe = await env.booking()
-    observation = await env.observe(env.request(probe))
+    observation = await env.observe(_request_for_command(env, probe, command, sector))
     assert observation['outcome'] == 'available'
     assert not observation['runtime_enabled'] and not observation['confirmation_authorized']
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1', env.org) == 0
 
     booking = uuid4()
-    request = env.request(booking)
+    request = _request_for_command(env, booking, command, sector)
     first = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command, new_booking=lineage)
     replay = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=command, new_booking=lineage)
     assert first['outcome'] == 'allocated' and replay['replayed'] is True
@@ -70,12 +88,14 @@ async def test_five_sector_owner_api_postgres(pg_pool, monkeypatch, sector):
     """Exercise the gated HTTP bridge and real transaction with synthetic data."""
     if sector == 'hotel_bnb':
         env, lineage = await hotel_setup(pg_pool)
-        command = BookingMutation('create_stay', 'Synthetic', '', '', '2026-10-28', '14:00', 1,
-                                  arrival_date='2026-10-28', departure_date='2026-10-29')
+        arrival = _future_booking_date()
+        departure = arrival + timedelta(days=1)
+        command = BookingMutation('create_stay', 'Synthetic', '', '', arrival.isoformat(), '14:00', 1,
+                                  arrival_date=arrival.isoformat(), departure_date=departure.isoformat())
     else:
         env = await create_environment(pg_pool, sector)
         lineage = NewBookingLineage(None, None)
-        command = BookingMutation('create', 'Synthetic', '3900000001', '', '2026-10-28', '10:00', 1)
+        command = BookingMutation('create', 'Synthetic', '3900000001', '', _future_booking_date().isoformat(), '10:00', 1)
 
     identity = {'organization_id': str(env.org), 'auth_user_id': str(env.auth),
                 'user_id': str(env.actor), 'ruolo': 'owner', 'source': 'jwt', 'aal': 'aal2'}
@@ -88,7 +108,7 @@ async def test_five_sector_owner_api_postgres(pg_pool, monkeypatch, sector):
     app.dependency_overrides[get_current_user] = verified
     app.dependency_overrides[get_organization_context] = verified
     booking = uuid4()
-    body = {'allocation': env.request(booking).model_dump(mode='json'),
+    body = {'allocation': _request_for_command(env, booking, command, sector).model_dump(mode='json'),
             'mutation': asdict(command),
             'new_booking': {k: str(v) if v is not None else None for k, v in asdict(lineage).items()}}
 
@@ -121,5 +141,5 @@ async def test_five_sector_owner_api_postgres(pg_pool, monkeypatch, sector):
     if sector == 'hotel_bnb':
         stay = await pg_pool.fetchrow('SELECT * FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
         assert stay['original_subject_id'] == lineage.contact_id
-        assert str(stay['arrival_date']) == '2026-10-28' and str(stay['departure_date']) == '2026-10-29'
+        assert str(stay['arrival_date']) == arrival.isoformat() and str(stay['departure_date']) == departure.isoformat()
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0

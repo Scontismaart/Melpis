@@ -32,6 +32,7 @@ async def env(monkeypatch):
     audit = AsyncMock()
     monkeypatch.setattr(routes, 'apply_booking_mutation', apply)
     monkeypatch.setattr(routes, '_audit_booking', audit)
+    monkeypatch.setattr(routes, '_sector_fenced', AsyncMock(return_value=False))
     monkeypatch.setenv('BOOKING_TYPED_OWNER_MUTATIONS_ENABLED', 'true')
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         yield client, identity, service, apply, audit

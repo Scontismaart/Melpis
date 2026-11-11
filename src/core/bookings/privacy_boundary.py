@@ -36,6 +36,27 @@ def medical_restricted(profile, classification=None):
     )
 
 
+def medical_administrative_text_allowed(text):
+    """Allow only the bounded C2.4 administrative vocabulary for medical tenants.
+
+    This never classifies clinical text as safe. Unknown words, clinical terms,
+    oversized input, and malformed confirmation commands remain handoff-only.
+    """
+    if not isinstance(text, str) or not text.strip() or len(text) > 512:
+        return False
+    import re
+    if re.fullmatch(r"CONFIRM [0-9a-f-]{36}", text.strip()):
+        return True
+    from types import SimpleNamespace
+    from src.core.bookings.conversation_state import medical_source_requires_handoff
+    try:
+        return not medical_source_requires_handoff(
+            text, SimpleNamespace(sector="studio_medico_dentista"),
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 async def inbound_classification_status(repo, organization_id):
     """Return restricted, unknown, or error without interpreting unknown as medical."""
     try:
@@ -62,25 +83,35 @@ async def inbound_classification_status(repo, organization_id):
         return "error"
 
 
-async def medical_restricted_for_inbound(repo, organization_id, business_profile):
-    if medical_restricted(business_profile):
-        return True
-    if getattr(repo, "pool", None) is None:
-        # Local/in-memory processing has no database attestation to consult.
+async def medical_restricted_for_inbound(repo, organization_id, business_profile,
+                                         *, text="", allow_administrative=False):
+    status = await inbound_classification_status(repo, organization_id)
+    if status == "unknown":
+        # Preserve a positive medical signal supplied by the caller even when
+        # an older schema cannot attest the classification. Unknown stays
+        # permissive only for profiles with no medical signal, matching the
+        # pre-existing fail-closed boundary.
+        return medical_restricted(business_profile)
+    # Administrative messages pass only after the database has affirmatively
+    # classified this tenant and only when the separately gated private worker
+    # is enabled. Provider errors, old schemas and ambiguous profiles fail closed.
+    if status == "restricted" and allow_administrative and medical_administrative_text_allowed(text):
         return False
-    return await inbound_classification_status(repo, organization_id) != "unknown"
+    return True
 
 
 QUARANTINE_TEXT = "Classificazione non disponibile: intervento umano"
 
 
-def minimized_inbound_text(text, *, quarantine=False):
+def minimized_inbound_text(text, *, quarantine=False, allow_medical_admin=False):
     """Preserve opt-out semantics as a canonical command, never source text."""
     from src.whatsapp.service import OPT_OUT_KEYWORDS, _normalize_text
 
     normalized = _normalize_text(text if isinstance(text, str) else "")
     if any(word in normalized for word in OPT_OUT_KEYWORDS["it"]):
         return "stop"
+    if allow_medical_admin and medical_administrative_text_allowed(text):
+        return text.strip()
     return QUARANTINE_TEXT if quarantine else "Richiesta riservata: intervento umano"
 
 
@@ -92,7 +123,7 @@ def _identifier(value, *, digits=False):
     return value if isinstance(value, str) and re.fullmatch(pattern, value) else None
 
 
-def minimize_whatsapp_change(change, *, quarantine=False):
+def minimize_whatsapp_change(change, *, quarantine=False, allow_medical_admin=False):
     """Build a fresh routing envelope, never copying unknown provider fields."""
     value = change.get("value") if isinstance(change, dict) else None
     value = value if isinstance(value, dict) else {}
@@ -120,7 +151,8 @@ def minimize_whatsapp_change(change, *, quarantine=False):
             "type": "text",
             "text": {
                 "body": minimized_inbound_text(
-                    source.get("body", ""), quarantine=quarantine
+                    source.get("body", ""), quarantine=quarantine,
+                    allow_medical_admin=allow_medical_admin and not quarantine,
                 )
             },
         }

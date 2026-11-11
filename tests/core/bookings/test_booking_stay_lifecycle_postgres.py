@@ -96,7 +96,7 @@ async def test_retention_respects_active_scoped_holds(pg_pool, scope):
     assert await _purge_retention(pg_pool, env.org, booking) == 2
 
 
-async def test_owner_purge_is_scoped_and_preserves_booking_and_source_records(pg_pool):
+async def test_owner_purge_is_scoped_and_removes_booking_content(pg_pool):
     from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence, _archive
     env, target_lineage, target = await _complete_with_old_evidence(pg_pool)
     await _archive(pg_pool, env, target)
@@ -113,17 +113,13 @@ async def test_owner_purge_is_scoped_and_preserves_booking_and_source_records(pg
         env.org, target,
     )
 
-    source_before = await pg_pool.fetchrow(
-        'SELECT organization_id,contact_id,id_conversazione,data,ora,coperti,stato FROM bookings WHERE organization_id=$1 AND id=$2',
-        env.org, target,
-    )
     assert await _purge_retention(pg_pool, env.org, target) == 2
 
     source_after = await pg_pool.fetchrow(
         'SELECT organization_id,contact_id,id_conversazione,data,ora,coperti,stato FROM bookings WHERE organization_id=$1 AND id=$2',
         env.org, target,
     )
-    assert dict(source_after) == dict(source_before)
+    assert source_after is None
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, target,
     ) == 0
@@ -150,6 +146,9 @@ async def test_owner_purge_is_scoped_and_preserves_booking_and_source_records(pg
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND id=$3',
         env.org, target_lineage.conversation_id, target_lineage.source_message_id,
+    ) == 1
+    assert await pg_pool.fetchval(
+        'SELECT count(*) FROM contacts WHERE organization_id=$1 AND id=$2', env.org, target_lineage.contact_id,
     ) == 1
 
     audit = await pg_pool.fetchrow(
@@ -211,7 +210,7 @@ async def test_owner_erasure_purge_requires_barrier_matching_operation_scope_and
                VALUES($1,$2,'organization',NULL)''', env.org, operation,
         )
 
-    with pytest.raises(Exception, match='Scoped erasure barrier required'):
+    with pytest.raises(Exception, match='Scoped hotel erasure barrier required'):
         await pg_pool.fetchval(
             "SELECT public.booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')",
             env.org, booking, operation,
@@ -355,7 +354,7 @@ async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, 
         (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
         VALUES($1,$2,'contact',$3,$4,'synthetic')""", env.org, operation, lineage.contact_id, 'a' * 64)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
-    with pytest.raises(Exception, match='Stay content held'):
+    with pytest.raises(Exception, match='Hotel stay content is held'):
         await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) > 0
@@ -366,3 +365,4 @@ async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, 
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 0

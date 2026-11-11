@@ -2,17 +2,19 @@
 
 No Google SDK request is executed: only the transport boundary is substituted.
 """
-from copy import deepcopy
-from datetime import date, datetime, timedelta, timezone
 import json
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
-from cryptography.fernet import Fernet
-from googleapiclient.errors import HttpError
 import httplib2
 import pytest
+import asyncpg
+from cryptography.fernet import Fernet
+from googleapiclient.errors import HttpError
 
 from src.core.bookings.service import BookingService
 from src.core.calendar.service import GoogleCalendarService
@@ -112,15 +114,16 @@ async def setup(pool, org, monkeypatch, mode="internal_calendar_sync", *, create
             VALUES($1,$2::jsonb,'{"19:00":10,"20:00":10}')""", org,
             json.dumps({"a05": {"enabled": False, "authority": mode}}))
         await conn.execute("""INSERT INTO google_calendar_credentials(organization_id,access_token,refresh_token,
-            token_expiry,connection_status,sync_enabled,granted_scopes,calendar_id)
-            VALUES($1,$2,$3,$4,'connected',TRUE,$5::jsonb,'stage@example.test')""", org,
+            token_expiry,connection_status,sync_enabled,granted_scopes,calendar_id,last_verified_at)
+            VALUES($1,$2,$3,$4,'connected',TRUE,$5::jsonb,'stage@example.test',clock_timestamp())""", org,
             service.encrypt_secret("synthetic-access"), service.encrypt_secret("synthetic-refresh"),
             datetime.now(timezone.utc) + timedelta(hours=1), json.dumps([
                 "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.events.freebusy"]))
     booking_repo = BookingRepository(pool)
     if not create_booking:
         return service, google, booking_repo, None
-    booking = await booking_repo.create_booking(org, "Synthetic Guest", (date.today() + timedelta(days=5)).isoformat(),
+    local_today = datetime.now(ZoneInfo("Europe/Rome")).date()
+    booking = await booking_repo.create_booking(org, "Synthetic Guest", (local_today + timedelta(days=5)).isoformat(),
                                                 "19:00", 2, telefono="+393330009999")
     return service, google, booking_repo, booking
 
@@ -187,7 +190,7 @@ async def test_authoritative_manual_confirmation_has_durable_revision_scoped_not
 
 async def test_timeout_is_reconciled_by_get_without_second_post(pg_pool, sample_org, monkeypatch):
     org = sample_org["id"]
-    service, google, repo, booking = await setup(pg_pool, org, monkeypatch)
+    service, google, _repo, booking = await setup(pg_pool, org, monkeypatch)
     google.timeout = True
     await service.process_pending()
     assert (await ledger(pg_pool, org, booking))["sync_status"] == "uncertain"
@@ -249,22 +252,20 @@ async def test_timezone_change_during_provider_write_invalidates_confirmation(pg
         assert await conn.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
 
 
-async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai(repo, pg_pool, sample_org, monkeypatch):
-    from tests.core.bookings.test_a05_auto_booking import _canonical, _message, _policy, _processor
-    org = sample_org["id"]
-    service, google, booking_repo, _ = await setup(pg_pool, org, monkeypatch, "google_authoritative", create_booking=False)
-    async with pg_pool.acquire() as conn:
-        await conn.execute("""UPDATE organizations SET business_profile=$2::jsonb,
-            subscription_status='trialing',trial_start=NOW()-INTERVAL '1 hour',
-            trial_end=NOW()+INTERVAL '6 days',ai_accounting_blocked=FALSE WHERE id=$1""",
-            org, json.dumps({"verticale": "ristorante"}))
-        await conn.execute("UPDATE booking_settings SET config=$2::jsonb WHERE organization_id=$1", org,
-                           json.dumps(_policy("google_authoritative")))
-    day = (date.today() + timedelta(days=8)).isoformat()
-    message = await _message(pg_pool, org, day)
-    processor = _processor(repo, BookingService(booking_repo=booking_repo, calendar_service=service))
-    pending = await processor._apply_committed_booking(org, message, {}, _canonical(day))
-    assert pending.requires_staff
+async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai(
+    pg_pool, private_worker_pool, monkeypatch,
+):
+    from tests.core.test_a04_review_regressions import _enable_private_a05, _worker
+
+    case = await _worker(pg_pool, monkeypatch)
+    org = case.org["id"]
+    service, google, _, _ = await setup(pg_pool, org, monkeypatch, "google_authoritative", create_booking=False)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch,
+                              authority="google_authoritative")
+    case.service.booking_service.calendar_service = service
+    case.service.legacy_pipeline.booking_service.calendar_service = service
+    initial = await case.service.process_message(case.msg)
+    assert initial.action == "handled"
     assert google.calls == []
     async with pg_pool.acquire() as conn:
         before = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
@@ -275,11 +276,86 @@ async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai
         after = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
         assert after["stato"] == "confermata" and not after["calendar_confirm_pending"]
         notice = await conn.fetchrow("SELECT * FROM booking_confirmation_outbox WHERE organization_id=$1", org)
-        assert notice["inbound_message_id"] == message["id"]
+        assert notice["inbound_message_id"] == case.msg["id"]
         assert await conn.fetchval("SELECT count(*) FROM usage_events WHERE organization_id=$1 AND event_type='system.provider_attempt'", org) == 0
-    replay = await processor._apply_committed_booking(org, message, {}, _canonical(day))
-    assert replay.persisted_state == "confirmed"
+    replay = await case.service.process_message(case.msg)
+    assert replay.action == "handled"
     assert google.calls.count("POST") == 1
+    assert case.generate.await_count == 1
+
+
+@pytest.mark.parametrize("credential_state", ["missing", "disconnected"])
+async def test_inbound_google_authority_without_ready_credentials_stays_pending(
+    pg_pool, private_worker_pool, monkeypatch, credential_state,
+):
+    from tests.core.test_a04_review_regressions import _enable_private_a05, _worker
+
+    case = await _worker(pg_pool, monkeypatch)
+    org = case.org["id"]
+    await setup(pg_pool, org, monkeypatch, "google_authoritative", create_booking=False)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch,
+                              authority="google_authoritative")
+    if credential_state == "missing":
+        await pg_pool.execute("DELETE FROM google_calendar_credentials WHERE organization_id=$1", org)
+    else:
+        await pg_pool.execute("""UPDATE google_calendar_credentials
+            SET connection_status='revoked',sync_enabled=false WHERE organization_id=$1""", org)
+
+    first = await case.service.process_message(case.msg)
+    assert first.action == "handled"
+    assert not await pg_pool.fetchval("""SELECT has_function_privilege('service_role',
+        'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)', 'EXECUTE')""")
+    async with pg_pool.acquire() as conn:
+        booking = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
+        assert booking["stato"] == "in_attesa" and booking["calendar_confirm_pending"]
+        assert booking["richiede_intervento"]
+        sync = await conn.fetchrow("""SELECT sync_status,calendar_action,calendar_authoritative
+            FROM external_booking_sync WHERE organization_id=$1 AND internal_booking_id=$2
+              AND provider='google'""", org, booking["id"])
+        assert dict(sync) == {
+            "sync_status": "blocked", "calendar_action": "authoritative", "calendar_authoritative": True,
+        }
+        assert await conn.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
+        assert await conn.fetchval("""SELECT count(*) FROM usage_events WHERE organization_id=$1
+            AND event_type='system.quota_reservation' AND metadata->>'state'='committed'""", org) == 1
+
+    async with private_worker_pool.acquire() as worker:
+        assert not await worker.fetchval("SELECT has_table_privilege(current_user,'public.google_calendar_credentials','SELECT')")
+        assert not await worker.fetchval("SELECT has_table_privilege(current_user,'public.external_booking_sync','UPDATE')")
+        assert await worker.fetchval(
+            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+            org, booking["id"], case.msg["id"],
+        ) is True
+        assert await worker.fetchval(
+            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+            org, booking["id"], uuid4(),
+        ) is False
+        assert await worker.fetchval(
+            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+            uuid4(), booking["id"], case.msg["id"],
+        ) is False
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await worker.fetch("SELECT * FROM public.google_calendar_credentials WHERE organization_id=$1", org)
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await worker.execute("UPDATE public.external_booking_sync SET calendar_id=NULL WHERE organization_id=$1", org)
+
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await pg_pool.fetchval(
+            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+            org, booking["id"], case.msg["id"],
+        )
+
+    replay = await case.service.process_message(case.msg)
+    assert replay.action == "handled"
+    assert case.generate.await_count == 1
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org) == 1
+    assert await pg_pool.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
+    await pg_pool.execute("UPDATE bookings SET stato='cancellata',calendar_confirm_pending=false WHERE organization_id=$1", org)
+    async with private_worker_pool.acquire() as worker:
+        assert await worker.fetchval(
+            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+            org, booking["id"], case.msg["id"],
+        ) is False
 
 
 @pytest.mark.parametrize("lost_response", [False, True])

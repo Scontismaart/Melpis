@@ -268,11 +268,40 @@ async def test_hotel_last_room_race_commits_one_source_proven_stay_only(pg_pool)
 
 @pytest.mark.parametrize('target', ['receipt', 'stay'])
 async def test_backend_sql_cannot_recreate_a_purged_booking(pg_pool, target):
-    env, booking, item = await _purged_stay(pg_pool)
-    row = await pg_pool.fetchrow('SELECT contact_id,id_conversazione FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
-    source = await pg_pool.fetchval('SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2', env.org, __import__('uuid').UUID(row['id_conversazione']))
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await _archive(pg_pool, env, booking)
+    await _purge_retention(env.pool, env.org, booking)
+
+    # The legacy booking writer has no direct INSERT grant, and the owner-only
+    # database guard also fences a privileged re-creation attempt.
+    with pytest.raises(Exception, match='Purged booking cannot be recreated'):
+        await pg_pool.execute("""INSERT INTO bookings(
+            id,organization_id,contact_id,nome_cliente,telefono,data,ora,coperti,note,stato,id_conversazione
+        ) VALUES($1,$2,$3,'Synthetic replay','','2026-11-30','12:00',1,'','cancellata',$4)""",
+            booking, env.org, lineage.contact_id, str(lineage.conversation_id))
     async with pg_pool.acquire() as conn, conn.transaction():
-        with pytest.raises(Exception, match='Purged (booking|stay) cannot be recreated'):
+        with pytest.raises(Exception, match='permission denied for table bookings'):
+            async with conn.transaction():
+                await conn.execute('SET LOCAL ROLE service_role')
+                await conn.execute("""INSERT INTO bookings(
+                    id,organization_id,contact_id,nome_cliente,telefono,data,ora,coperti,note,stato,id_conversazione
+                ) VALUES($1,$2,$3,'Synthetic replay','','2026-11-30','12:00',1,'','cancellata',$4)""",
+                    booking, env.org, lineage.contact_id, str(lineage.conversation_id))
+
+    # Model a stale parent from an incomplete restore so the child-table
+    # replay guards are reached instead of failing early on their FK. This is
+    # test-only fixture setup; the production booking guard remains enabled.
+    async with pg_pool.acquire() as admin, admin.transaction():
+        await admin.execute('ALTER TABLE bookings DISABLE TRIGGER booking_stay_purge_recreate_guard')
+        await admin.execute("""INSERT INTO bookings(
+            id,organization_id,contact_id,nome_cliente,telefono,data,ora,coperti,note,stato,id_conversazione
+        ) VALUES($1,$2,$3,'Synthetic restored parent','','2026-11-30','12:00',1,'','cancellata',$4)""",
+            booking, env.org, lineage.contact_id, str(lineage.conversation_id))
+        await admin.execute('ALTER TABLE bookings ENABLE TRIGGER booking_stay_purge_recreate_guard')
+
+    expected = 'Purged booking cannot be recreated' if target == 'receipt' else 'Purged stay cannot be recreated'
+    async with pg_pool.acquire() as conn, conn.transaction():
+        with pytest.raises(Exception, match=expected):
             async with conn.transaction():
                 await conn.execute('SET LOCAL ROLE service_role')
                 if target == 'receipt':
@@ -280,6 +309,9 @@ async def test_backend_sql_cannot_recreate_a_purged_booking(pg_pool, target):
                         VALUES($1,$2,$3,$4,'allocate',$5,'unknown',$6)""", env.org, uuid4(), booking, env.actor, 'a'*64, env.revision)
                 else:
                     await conn.execute("""INSERT INTO booking_stays(organization_id,booking_id,original_subject_id,original_conversation_id,source_message_id,arrival_date,departure_date,revision)
-                        VALUES($1,$2,$3,$4,$5,'2026-10-28','2026-10-29',1)""", env.org, booking, row['contact_id'], __import__('uuid').UUID(row['id_conversazione']), source)
+                        VALUES($1,$2,$3,$4,$5,'2026-11-30','2026-12-01',1)""",
+                        env.org, booking, lineage.contact_id, lineage.conversation_id, lineage.source_message_id)
+
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
+    await pg_pool.execute('DELETE FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)

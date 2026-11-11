@@ -77,10 +77,6 @@ class StrictFakeRepo:
                 }
                 self._rows[key] = row
                 return dict(row), True
-            if existing.get("sync_status") == "failed":
-                existing["sync_status"] = "pending"
-                existing["sync_error"] = None
-                return dict(existing), True
             return dict(existing), False
 
     async def record_sync_prepare(
@@ -193,8 +189,8 @@ class TestSyncPrepareContract:
 
         assert res.success is False
         row = repo.row(ORG_A, "ext-book:contract-fail")
-        assert row["sync_status"] == "failed"
-        assert row["sync_error"] == "Slot occupato"
+        assert row["sync_status"] == "uncertain"
+        assert row["sync_error"] == "external_outcome_unverified"
         assert row["provider"] == "beds24"
 
     @pytest.mark.asyncio
@@ -234,12 +230,12 @@ class TestSyncPrepareContract:
             mode=BookingMode.AUTHORITATIVE, verticale="parrucchiere",
         )
 
-        assert res.sync_status == "pending_retry"
+        assert res.sync_status == "uncertain"
         adapter.create_booking.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_failed_allows_retry(self):
-        """failed -> retry consentito, la chiamata esterna riparte."""
+    async def test_historical_failed_requires_reconciliation(self):
+        """failed storico non fornisce la prova di mancato invio."""
         repo = StrictFakeRepo()
         router = BookingAdapterRouter(repo=repo)
         req = _make_req("ext-book:contract-retry")
@@ -252,9 +248,9 @@ class TestSyncPrepareContract:
             mode=BookingMode.AUTHORITATIVE, verticale="parrucchiere",
         )
 
-        assert res.success is True
-        adapter.create_booking.assert_awaited_once()
-        assert repo.row(ORG_A, "ext-book:contract-retry")["sync_status"] == "synced"
+        assert res.success is False and res.sync_status == "uncertain"
+        adapter.create_booking.assert_not_awaited()
+        assert repo.row(ORG_A, "ext-book:contract-retry")["sync_status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_concurrent_dispatches_single_row_no_crash(self):

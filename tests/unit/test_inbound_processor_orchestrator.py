@@ -91,6 +91,7 @@ async def test_inbound_processor_flag_disabled_uses_legacy(
          patch("src.whatsapp.inbound_processor.genera_risposta_async") as mock_gen, \
          patch("src.whatsapp.inbound_processor.valida_risposta") as mock_valida, \
          patch("src.whatsapp.inbound_processor.route_llm") as mock_route, \
+         patch("src.core.bookings.privacy_boundary.medical_restricted_for_inbound", new_callable=AsyncMock, return_value=False), \
          patch("src.core.billing.quota_reservations.validate_final_response", side_effect=lambda _op, _ticket, response, **_kw: SimpleNamespace(serialized=response.model_dump_json())), \
          patch.object(processor, "_send_ai_reply", new_callable=AsyncMock) as mock_send, \
          patch.object(processor, "_finalize_message", new_callable=AsyncMock):
@@ -165,6 +166,7 @@ async def test_inbound_processor_flag_enabled_uses_orchestrator(base_config, moc
 
     with patch("src.whatsapp.inbound_processor.load_tenant_config") as mock_tenant, \
          patch("src.whatsapp.inbound_processor.genera_risposta_async") as mock_gen, \
+         patch("src.core.bookings.privacy_boundary.medical_restricted_for_inbound", new_callable=AsyncMock, return_value=False), \
          patch.object(processor, "_send_ai_reply", new_callable=AsyncMock) as mock_send, \
          patch.object(processor, "_finalize_message", new_callable=AsyncMock) as mock_fin:
 

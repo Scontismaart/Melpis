@@ -52,6 +52,7 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
     key = b'synthetic-checkpoint-key-32-bytes'
     async with pg_pool.acquire() as conn, conn.transaction():
         # Preserve pre-purge copies to simulate an incomplete restore replay.
+        await conn.execute('CREATE TEMP TABLE restored_booking AS SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
         await conn.execute('CREATE TEMP TABLE restored_sets AS SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
         await conn.execute('CREATE TEMP TABLE restored_claims AS SELECT * FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
         await conn.execute('CREATE TEMP TABLE restored_completion AS SELECT * FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
@@ -76,6 +77,14 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
         for source in ('restored_archived_sets', 'restored_sets', 'restored_completion'):
             savepoint = conn.transaction()
             await savepoint.start()
+            # Reintroduce the parent row only inside this savepoint, modeling a
+            # stale restore image so the child FK can be satisfied and the
+            # signed-journal verifier—not an orphan-FK error—is exercised.
+            # Production's purge-recreate trigger remains enabled everywhere
+            # outside this owner-only fixture window.
+            await conn.execute('ALTER TABLE bookings DISABLE TRIGGER booking_stay_purge_recreate_guard')
+            await conn.execute('INSERT INTO bookings SELECT * FROM restored_booking')
+            await conn.execute('ALTER TABLE bookings ENABLE TRIGGER booking_stay_purge_recreate_guard')
             if source == 'restored_completion':
                 await conn.execute('INSERT INTO booking_stay_completion_evidence SELECT * FROM restored_completion')
             else:

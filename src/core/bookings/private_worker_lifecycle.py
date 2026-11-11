@@ -61,7 +61,10 @@ async def assert_private_booking_ready(pool, *, application_pool=None):
                 SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
                 WHERE n.nspname='public' AND p.prosecdef
                   AND has_function_privilege(current_user,p.oid,'EXECUTE')
-                  AND p.oid<>to_regprocedure('public.booking_sector_mark_worker_insert(uuid,uuid)'))""")
+                  AND p.oid NOT IN (
+                    to_regprocedure('public.booking_sector_mark_worker_insert(uuid,uuid)'),
+                    to_regprocedure('public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)')
+                  ))""")
             schema_ok = await conn.fetchval("""SELECT
                 current_user <> pg_get_userbyid(o.relowner)
                 AND current_user <> pg_get_userbyid(c.relowner)

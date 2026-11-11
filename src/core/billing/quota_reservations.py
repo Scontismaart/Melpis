@@ -615,19 +615,31 @@ class QuotaReservations:
                     WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3""",
                 operation.organization_id, operation.actor_id, operation.id, final.serialized, now,
             )
-            if operation.channel == "inbound" and "booking_state_proposal" in payload:
-                lineage = await conn.fetchrow('''SELECT m.conversation_id,m.c24_original_subject_id
-                    FROM messages m JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
-                    WHERE m.organization_id=$1 AND c.organization_id=$1 AND m.id=$2 AND m.deleted_at IS NULL
-                      AND m.c24_original_subject_id=c.contact_id FOR SHARE OF m,c''',
-                    operation.organization_id, operation.source_id)
-                if not lineage:
+            private_booking_enabled = False
+            if operation.channel == "inbound":
+                from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
+                private_booking_enabled = private_booking_worker_enabled()
+                c24_lineage_available = await conn.fetchval("""SELECT count(*) = 3
+                    FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='simulation_requests'
+                      AND column_name IN ('c24_subject_id','c24_conversation_id','c24_source_message_id')""")
+                if c24_lineage_available:
+                    lineage = await conn.fetchrow('''SELECT m.conversation_id,m.c24_original_subject_id
+                        FROM messages m JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
+                        WHERE m.organization_id=$1 AND c.organization_id=$1 AND m.id=$2 AND m.deleted_at IS NULL
+                          AND m.c24_original_subject_id=c.contact_id FOR SHARE OF m,c''',
+                        operation.organization_id, operation.source_id)
+                    if not lineage:
+                        _deny()
+                    await conn.execute('''UPDATE simulation_requests SET c24_subject_id=$4,
+                        c24_conversation_id=$5,c24_source_message_id=$6
+                        WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3''',
+                        operation.organization_id, operation.actor_id, operation.id,
+                        lineage['c24_original_subject_id'], lineage['conversation_id'], operation.source_id)
+                elif private_booking_enabled:
+                    # The enabled private worker depends on durable C2.4
+                    # subject lineage; never proceed on a partially migrated schema.
                     _deny()
-                await conn.execute('''UPDATE simulation_requests SET c24_subject_id=$4,
-                    c24_conversation_id=$5,c24_source_message_id=$6
-                    WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3''',
-                    operation.organization_id, operation.actor_id, operation.id,
-                    lineage['c24_original_subject_id'], lineage['conversation_id'], operation.source_id)
             if operation.channel == "inbound":
                 await conn.execute(
                     """UPDATE messages SET ai_reply_cache=$3::jsonb,
@@ -643,12 +655,11 @@ class QuotaReservations:
             if final.knowledge_epoch is not None:
                 metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
-            if operation.channel == "inbound" and "booking_state_proposal" in payload:
+            if private_booking_enabled:
                 from src.core.db.inbound_worker_provenance import (
-                    private_booking_worker_enabled, record_committed_operation,
+                    record_committed_operation,
                 )
-                if private_booking_worker_enabled():
-                    await record_committed_operation(conn, operation)
+                await record_committed_operation(conn, operation)
             return payload
 
     async def renew(self, operation: QuotaOperation, ticket: QuotaTicket):

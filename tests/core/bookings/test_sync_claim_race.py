@@ -51,9 +51,6 @@ class AtomicClaimFakeRepo:
                 self._rows[key] = row
                 await asyncio.sleep(0)  # finestra di race: il perdente deve vedere pending
                 return dict(row), True
-            if existing.get("sync_status") == "failed":
-                existing["sync_status"] = "pending"
-                return dict(existing), True
             return dict(existing), False
 
     async def record_sync_success(self, organization_id, idempotency_key,
@@ -124,5 +121,5 @@ class TestSyncClaimRace:
         # Il perdente non tocca mai l'esterna: o trova pending (pending_retry)
         # o arriva a call completata (replay synced). Entrambi esiti legittimi.
         statuses = sorted(r.sync_status for r in results)
-        assert statuses in (["pending_retry", "synced"], ["synced", "synced"])
-        assert all(r.success for r in results)
+        assert statuses in (["synced", "uncertain"], ["synced", "synced"])
+        assert all(r.success == (r.sync_status == "synced") for r in results)

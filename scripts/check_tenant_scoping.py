@@ -55,6 +55,8 @@ ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
 # reviewed worker/tenant-resolution functions may omit a tenant bind filter.
 # A new decorator use remains visible to the checker unless explicitly added.
 SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
+    "src/core/backup/drill.py::_table_counts":
+        "isolated encrypted backup parity check counts every table in the verified source/quarantine snapshot; identifiers come only from pg_catalog and are quoted",
     "src/core/bookings/private_worker_lifecycle.py::assert_private_booking_ready":
         "read-only PostgreSQL catalog readiness check for the dedicated private worker principal; no tenant records are read",
     "src/core/retention_job.py::_expired_exports":
@@ -118,6 +120,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    ("src/core/backup/drill.py::_table_counts", "f08aece79bca5267c69ac02de5fcd8cc60586cb968d40e30674403c0ec39c395"):
+        "dynamic count is restricted to schema/table identifiers obtained from pg_catalog, each identifier is independently quoted, and the function compares only verified backup/restore snapshots",
     ("src/core/bookings/private_worker_lifecycle.py::assert_private_booking_ready", "8c0fb690e1bc6108c73e7b401eedd14b509df0387cbf2ed71b40779c49a40e4a"):
         "exact read-only pg_class/pg_attribute readiness query; verifies table ownership and required schema only",
     ("src/core/retention_job.py::_expired_exports", "78b2481fd729638ce87ca4abc5bc58025e7c1d7c3597c276cf1979cbd9a8d8cb"):
@@ -163,8 +167,8 @@ ALLOWLISTED_SQL_FINGERPRINTS.update({
     ("src/core/db/repositories/organization_repo.py::create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "single-organization provisioning uses the id returned by its new_org CTE",
     ("src/api/routes/team.py::list_my_organizations", "f018234f9a40424316a12de8391d250b8c03179c1a30953029f60b3928893ecf"): "enumerates only memberships bound to the authenticated principal",
     ("src/core/team_invitations.py::accept_invitation", "b890eeb6b0db2692e70655634732f3cd3e534f279df2919da0253b31dbd269be"): "hashed invite-token lookup resolves its organization before scoped acceptance",
-    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "a5a4c52ae35ad1735ef533d7ae5c0c0a012ab3c902d737a424df02d2305ca2bd"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
-    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "f5f422ea8542734e5dbc66e288b1ebcd00f0113f7d4f8a66f2547c9a6ca68c53"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "c98911815b3dcd95ee3d831f476325da9b83a45eb02dc2c26f1b93d93b2a8191"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "f9ff9857504b6b64973f0c74a4ac96044fc0f2025bdfffc1f3cd3fe1a40ee9c4"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
 })
 
 _SQL_KEYWORD_RE = re.compile(

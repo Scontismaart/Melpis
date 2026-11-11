@@ -59,6 +59,52 @@ def test_migration_inventory_is_ordered_and_replay_is_exact():
     assert preflight.migration_plan("replay") == files
 
 
+def test_migration_versions_are_unique_across_entire_catalog():
+    files = preflight.migration_files(1, 999, require_contiguous=False)
+    versions = [int(path.name[:3]) for path in files]
+    assert len(versions) == len(set(versions))
+    assert any(path.name == "072_hotel_retention_eligibility.sql" for path in files)
+    assert any(path.name == "088_calendar_refresh_dispatch_dark.sql" for path in files)
+
+
+def test_hotel_prerequisite_precedes_consumers_and_calendar_column_is_not_used_early():
+    files = preflight.migration_files(1, 999, require_contiguous=False)
+    names = [path.name for path in files]
+    hotel = names.index("072_hotel_retention_eligibility.sql")
+    calendar = names.index("088_calendar_refresh_dispatch_dark.sql")
+    assert hotel < names.index("077_hotel_allocation_archive.sql")
+    assert hotel < names.index("080_hotel_retention_purge.sql")
+    assert all("refresh_dispatch_id" not in path.read_text(encoding="utf-8")
+               for path in files[:calendar])
+
+
+def test_duplicate_outside_requested_c01_range_is_rejected(tmp_path, monkeypatch):
+    for name in ("060_baseline.sql", "088_first.sql", "088_second.sql"):
+        (tmp_path / name).write_text("-- synthetic migration\n", encoding="utf-8")
+    monkeypatch.setattr(preflight, "MIGRATIONS", tmp_path)
+
+    with pytest.raises(preflight.PreflightError, match="Migrazione duplicata"):
+        preflight.migration_files(60, 60)
+
+
+@pytest.mark.parametrize("name", ["88_unpadded.sql", "000_invalid.sql", "nested/090_ignored.sql"])
+def test_unusable_migration_file_cannot_escape_catalog_check(tmp_path, monkeypatch, name):
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("-- synthetic migration\n", encoding="utf-8")
+    monkeypatch.setattr(preflight, "MIGRATIONS", tmp_path)
+
+    with pytest.raises(preflight.PreflightError, match="Nome o percorso migrazione non valido"):
+        preflight.migration_files(1, 999, require_contiguous=False)
+
+
+def test_empty_migration_catalog_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, "MIGRATIONS", tmp_path)
+
+    with pytest.raises(preflight.PreflightError, match="Catalogo migrazioni vuoto"):
+        preflight.migration_files(1, 999, require_contiguous=False)
+
+
 def test_upgrade_requires_explicit_go_before_importing_database_driver(monkeypatch):
     monkeypatch.delenv("C01_PREFLIGHT_GO", raising=False)
     with pytest.raises(preflight.PreflightError, match="Manca C01_PREFLIGHT_GO"):

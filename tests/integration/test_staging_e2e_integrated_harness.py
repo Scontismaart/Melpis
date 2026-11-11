@@ -52,6 +52,40 @@ from src.whatsapp.config import AppConfig
 # High-Fidelity Stateful Relational Repository for Staging Tests
 # ==============================================================================
 
+class _ClassificationConnection:
+    def __init__(self, repo):
+        self.repo = repo
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def fetchval(self, query: str, *args):
+        if "to_regclass('public.booking_privacy_classification_reader')" in query:
+            return "booking_privacy_classification_reader"
+        return None
+
+    async def fetchrow(self, query: str, *args):
+        if "booking_privacy_classification_reader" not in query or not args:
+            return None
+        org_id = uuid.UUID(str(args[0]))
+        async with self.repo._lock:
+            organization = self.repo.organizations.get(org_id)
+            if not organization:
+                return None
+            return {"sector": organization["business_profile"]["verticale"]}
+
+
+class _ClassificationPool:
+    def __init__(self, repo):
+        self.repo = repo
+
+    def acquire(self):
+        return _ClassificationConnection(self.repo)
+
+
 class StagingRelationalRepo:
     """
     Repository relazionale in-memory ad alta fedelta che replica esattamente
@@ -71,7 +105,7 @@ class StagingRelationalRepo:
         self.outbound_dedup: dict[tuple[uuid.UUID, uuid.UUID], dict[str, Any]] = {}
         self.heartbeat_logs: list[tuple[uuid.UUID, uuid.UUID, datetime.datetime]] = []
         self._lock = asyncio.Lock()
-        self.pool = None
+        self.pool = _ClassificationPool(self)
 
     async def create_organization(self, org_id: uuid.UUID, name: str, messages_limit: int = 1000):
         async with self._lock:
@@ -81,7 +115,31 @@ class StagingRelationalRepo:
                 "messages_used_this_period": 0,
                 "messages_limit": messages_limit,
                 "subscription_status": "active",
+                # This in-memory harness explicitly models the trusted
+                # classification reader. It never infers sector from a name.
+                "business_profile": {"nome": name, "verticale": "ristorante"},
             }
+
+    async def get_org_business_profile(self, org_id: uuid.UUID):
+        async with self._lock:
+            organization = self.organizations.get(org_id)
+            return dict(organization["business_profile"]) if organization else None
+
+    async def escalate_to_human(self, conversation_id: str, organization_id: uuid.UUID):
+        async with self._lock:
+            conversation = self.conversations.get(uuid.UUID(str(conversation_id)))
+            if not conversation or conversation["organization_id"] != organization_id:
+                return None
+            conversation["ticket_status"] = "PENDING_STAFF"
+            return dict(conversation)
+
+    async def record_processing_failure(self, message_id: uuid.UUID, organization_id: uuid.UUID, reason: str):
+        async with self._lock:
+            message = self.messages.get(uuid.UUID(str(message_id)))
+            if not message or message["organization_id"] != organization_id:
+                return False
+            message["processing_failure"] = reason
+            return True
 
     async def get_or_create_contact(self, org_id: uuid.UUID, phone_number: str) -> dict[str, Any]:
         async with self._lock:
@@ -240,7 +298,7 @@ class StagingRelationalRepo:
     ):
         async with self._lock:
             msg = self.messages.get(message_id)
-            if msg:
+            if msg and (organization_id is None or msg["organization_id"] == organization_id):
                 msg["sent_at"] = datetime.datetime.now(datetime.timezone.utc)
                 msg["status"] = "sent"
                 if meta_message_id:
@@ -251,8 +309,9 @@ class StagingRelationalRepo:
     ):
         async with self._lock:
             msg = self.messages.get(message_id)
-            if msg:
+            if msg and (organization_id is None or msg["organization_id"] == organization_id):
                 msg["status"] = "replied"
+                msg["replied_at"] = datetime.datetime.now(datetime.timezone.utc)
                 if handling_type:
                     msg["handling_type"] = handling_type
                 return dict(msg)

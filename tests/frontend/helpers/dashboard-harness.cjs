@@ -57,6 +57,7 @@ function responseBody(pathname) {
   if (pathname === "/api/report") return {};
   if (pathname === "/api/bookings/catalog") return { revision: 0, draft: null, published: null, published_revision: null, runtime_enabled: false, organization_sector: "ristorante", capabilities: { can_save: true, can_publish: false } };
   if (pathname === "/api/bookings/catalog/sector-admission") return { enabled: false, eligible: false, published_revision: null };
+  if (pathname === "/api/bookings/c24-status") return { fenced: false, enabled: false };
   if (pathname === "/api/bookings/settings") return { capienze_orarie: {}, fasce_orarie: [] };
   if (pathname === "/api/bookings/semaforo") return [];
   if (pathname === "/api/bookings") return [];

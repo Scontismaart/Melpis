@@ -169,7 +169,22 @@ class BookingConversationRepository:
     @staticmethod
     async def _load(conn, org, conversation):
         # Parent source locks precede the child row lock, matching FK erasure.
-        row = await conn.fetchrow("SELECT *, updated_at <= clock_timestamp() - interval '30 days' AS idle_expired FROM booking_conversation_states WHERE organization_id=$1 AND conversation_id=$2", org, conversation)
+        # A processed timestamp can be later than the customer's activity. On
+        # SQL074+ the immutable server receipt time of the latest applied
+        # source is the only trusted retention anchor. Historical sources
+        # without that evidence are deliberately unavailable for replay.
+        row = await conn.fetchrow("""SELECT s.*,
+            CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL
+              THEN s.updated_at <= clock_timestamp() - interval '30 days'
+              ELSE COALESCE((to_jsonb(m)->>'c24_received_at')::timestamptz
+                    <= clock_timestamp() - interval '30 days', true)
+            END AS idle_expired
+            FROM booking_conversation_states s
+            LEFT JOIN messages m ON m.organization_id=s.organization_id
+              AND m.organization_id=$1
+              AND m.conversation_id=s.conversation_id AND m.id=s.source_message_id
+              AND m.c24_original_subject_id=s.subject_id AND m.direction='inbound'
+            WHERE s.organization_id=$1 AND s.conversation_id=$2""", org, conversation)
         if not row: return None, None
         if row['idle_expired']:
             raise ConversationStateUnavailable('Idle state requires lifecycle cleanup')
@@ -360,6 +375,18 @@ class BookingConversationRepository:
                 OR EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND deleted_at IS NOT NULL)''', org, conversation):
                 raise ConversationStateDenied('Conversation metadata was revoked')
             source, provider_time, source_hash = await self._source(conn, org, conversation, source_id)
+            # Expiry removes proposal content from A04 caches. Check the
+            # durable source fence before attempting to parse that old cache,
+            # so a replay fails deterministically without a new generation.
+            if await conn.fetchval("SELECT to_regclass('public.c24_idle_watermarks') IS NOT NULL"):
+                expired = await conn.fetchval('''SELECT EXISTS(
+                    SELECT 1 FROM c24_source_fences f JOIN c24_idle_watermarks w
+                      ON w.organization_id=f.organization_id AND w.conversation_id=f.conversation_id
+                    WHERE f.organization_id=$1 AND w.organization_id=$1
+                      AND f.conversation_id=$2 AND f.source_message_id=$3
+                      AND f.fenced_at<=w.expired_at)''', org, conversation, source_id)
+                if expired:
+                    raise StateConflict('State request belongs to an expired conversation generation')
             if worker:
                 prior = await conn.fetchrow('''SELECT applied_revision FROM booking_conversation_requests
                     WHERE organization_id=$1 AND conversation_id=$2 AND request_id=$3''', org, conversation, request)
@@ -471,7 +498,7 @@ class BookingConversationRepository:
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)''', org, request, conversation, source_id,
                     actor, action, operation_hash, updated.revision, canonical_hash, prompt_message_id, prompt_hash)
             if (worker and action == 'proposal' and authority == 'internal'
-                    and catalog.sector in {'ristorante', 'parrucchiere', 'centro_estetico', 'hotel_bnb'} and updated.intent == 'booking'
+                    and catalog.sector in {'ristorante', 'parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista'} and updated.intent == 'booking'
                     and not updated.handoff_reason and not updated.missing_fields
                     and not updated.ambiguous_fields and not updated.details_confirmed):
                 from src.core.bookings.auto_policy import parse_and_validate_auto_booking

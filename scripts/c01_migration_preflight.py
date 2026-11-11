@@ -50,13 +50,23 @@ def parse_local_dsn(dsn: str) -> dict[str, str | int]:
 def migration_files(first: int, last: int, *, require_contiguous: bool = True) -> list[Path]:
     if first < 1 or last < first:
         raise PreflightError("Intervallo migrazioni non valido")
-    files = sorted(MIGRATIONS.glob("[0-9][0-9][0-9]_*.sql"))
+    files = sorted(MIGRATIONS.rglob("*.sql"))
+    if not files:
+        raise PreflightError("Catalogo migrazioni vuoto")
+    if any(path.parent != MIGRATIONS
+           or not re.fullmatch(r"[0-9]{3}_[A-Za-z0-9_]+\.sql", path.name)
+           or int(path.name[:3]) == 0 for path in files):
+        raise PreflightError("Nome o percorso migrazione non valido")
+    # A migration version identifies a file in the complete catalog, not
+    # just within the subset selected for a C01 rehearsal. Check the complete
+    # tree before applying or presenting any subset.
+    versions = [int(path.name[:3]) for path in files]
+    if len(versions) != len(set(versions)):
+        raise PreflightError("Migrazione duplicata")
     selected = [path for path in files if first <= int(path.name[:3]) <= last]
     found = [int(path.name[:3]) for path in selected]
     if require_contiguous and found != list(range(first, last + 1)):
         raise PreflightError("Sequenza migrazioni incompleta o duplicata")
-    if len(found) != len(set(found)):
-        raise PreflightError("Migrazione duplicata")
     return selected
 
 

@@ -10,6 +10,17 @@ from src.core.bookings.private_worker_lifecycle import assert_private_booking_re
 @pytest.mark.asyncio
 async def test_worker_readiness_requires_dedicated_identity(private_worker_pool, pg_pool, postgres_container):
     await assert_private_booking_ready(private_worker_pool, application_pool=pg_pool)
+    assert await private_worker_pool.fetchval(
+        "SELECT has_function_privilege(current_user,"
+        "'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)','EXECUTE')"
+    )
+    async with pg_pool.acquire() as app_conn:
+        for role in ("anon", "authenticated", "service_role"):
+            assert not await app_conn.fetchval(
+                "SELECT has_function_privilege($1,"
+                "'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)','EXECUTE')",
+                role,
+            )
     with pytest.raises(RuntimeError, match='readiness failed'):
         await assert_private_booking_ready(private_worker_pool, application_pool=private_worker_pool)
     assert await private_worker_pool.fetchval("SELECT has_table_privilege(current_user,'public.messages','INSERT')")

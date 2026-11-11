@@ -8,12 +8,18 @@ on:
       - "src/core/db/schema.sql"
       - "src/core/db/triggers.sql"
       - "src/whatsapp/schema.sql"
+      - "scripts/c01_migration_preflight.py"
+      - "tests/unit/test_c01_migration_preflight.py"
+      - ".github/workflows/migrations.yml"
   pull_request:
     paths:
       - "src/core/db/migrations/*.sql"
       - "src/core/db/schema.sql"
       - "src/core/db/triggers.sql"
       - "src/whatsapp/schema.sql"
+      - "scripts/c01_migration_preflight.py"
+      - "tests/unit/test_c01_migration_preflight.py"
+      - ".github/workflows/migrations.yml"
 
 jobs:
   validate:
@@ -47,20 +53,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check migration versions across the catalog
+        run: python3 -c 'from scripts.c01_migration_preflight import migration_files; migration_files(1, 999, require_contiguous=False)'
+
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /usr/share/swift /usr/local/.ghcup
           sudo apt-get autoremove -y
           sudo apt-get clean
 
-      - name: Install psql
+      - name: Use psql from the PostgreSQL service
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client
+          container_id="$(docker ps --quiet --filter ancestor=pgvector/pgvector:0.7.4-pg16)"
+          test -n "$container_id"
+          echo "MIGRATION_POSTGRES_CONTAINER=$container_id" >> "$GITHUB_ENV"
+          docker exec -u postgres "$container_id" psql --version
 
       - name: Create auth stubs (Supabase schema not available in vanilla Postgres)
         run: |
-          PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test <<'EOSQL'
+          docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test <<'EOSQL'
           CREATE SCHEMA IF NOT EXISTS auth;
           CREATE TABLE IF NOT EXISTS auth.users (
               id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -87,17 +98,17 @@ jobs:
           EOSQL
 
       - name: Apply whatsapp schema
-        run: PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f src/whatsapp/schema.sql
+        run: docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test < src/whatsapp/schema.sql
 
       - name: Apply core schema
-        run: PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f src/core/db/schema.sql
+        run: docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test < src/core/db/schema.sql
 
       - name: Apply triggers
-        run: PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f src/core/db/triggers.sql
+        run: docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test < src/core/db/triggers.sql
 
       - name: Configure test database search_path
         run: |
-          PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test <<'EOSQL'
+          docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test <<'EOSQL'
           CREATE SCHEMA IF NOT EXISTS extensions;
           ALTER DATABASE test SET search_path TO public, extensions;
           ALTER ROLE postgres SET search_path TO public, extensions;
@@ -105,9 +116,9 @@ jobs:
 
       - name: Apply all migrations in order
         run: |
-          for f in $(ls src/core/db/migrations/0*.sql | sort); do
+          for f in $(ls src/core/db/migrations/[0-9][0-9][0-9]_*.sql | sort); do
             echo "--- Applying $f ---"
-            PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f "$f"
+            docker exec -i -u postgres "$MIGRATION_POSTGRES_CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d test -f - < "$f"
           done
 
       - uses: actions/setup-python@v5

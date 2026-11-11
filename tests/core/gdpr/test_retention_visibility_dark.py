@@ -45,6 +45,22 @@ async def test_inbox_hides_old_content_but_keeps_recent_and_tenant_scope(pg_pool
                                contact, org, '+1555' + uuid4().hex[:7])
             await conn.execute('INSERT INTO conversations(id,organization_id,contact_id) VALUES($1,$2,$3)',
                                conversation, org, contact)
+            has_c24_retention = await conn.fetchval(
+                "SELECT to_regclass('public.c24_idle_watermarks') IS NOT NULL",
+            )
+            if days > 60 and has_c24_retention:
+                # Model a pre-existing historical row with its immutable
+                # provider-receipt time. The session-local trigger bypass is
+                # limited to this synthetic fixture; the recent rows below
+                # exercise the production insert trigger normally.
+                async with conn.transaction():
+                    await conn.execute('SET LOCAL session_replication_role=replica')
+                    await conn.execute('''INSERT INTO messages(id,organization_id,conversation_id,direction,
+                        message_type,content,content_text,status,handling_type,created_at,c24_received_at)
+                        VALUES($1,$2,$3,'inbound','text','{}'::jsonb,$4,'handled','human',
+                               NOW()-make_interval(days=>$5),
+                               NOW()-make_interval(days=>$5))''', message, org, conversation, text, days)
+                return message
             await conn.execute('''INSERT INTO messages(id,organization_id,conversation_id,direction,
                 message_type,content,content_text,status,handling_type,created_at)
                 VALUES($1,$2,$3,'inbound','text','{}'::jsonb,$4,'handled','human',
