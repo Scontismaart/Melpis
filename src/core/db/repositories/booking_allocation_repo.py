@@ -14,8 +14,7 @@ from src.core.bookings.allocation_contracts import (
     AllocationRequest, derive_allocation, semantic_request_hash,
 )
 from src.core.bookings.catalog_contracts import (
-    CatalogDraft, MinuteDuration, WeeklyAvailability, civil_stay_interval,
-    validate_catalog_json,
+    WeeklyAvailability, validate_catalog_json,
 )
 from src.core.calendar.availability import local_instant
 from src.core.db.repositories.booking_catalog_repo import (
@@ -222,7 +221,10 @@ class BookingAllocationRepository:
                      FROM booking_allocation_requests r WHERE organization_id=$1 AND request_id=$2""",
                 org, request.request_id)
             if previous:
-                if authority not in {"internal", "internal_calendar_sync"}:
+                worker_google_authority = (
+                    worker is not None and authority == "google_authoritative" and current.sector == "ristorante"
+                )
+                if authority not in {"internal", "internal_calendar_sync"} and not worker_google_authority:
                     raise AllocationUnavailable("Current authority is not supported")
                 if (previous["booking_id"] != request.booking_id or previous["actor_user_id"] != actor
                         or previous["action"] != request.action or previous["payload_hash"] != digest
@@ -303,7 +305,10 @@ class BookingAllocationRepository:
         # A change of authority must not silently release local capacity.
         # Cancellation is an admission operation too; no provider protocol
         # is implemented by this disconnected repository.
-        if authority not in {"internal", "internal_calendar_sync"} or current.sector not in {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"}:
+        worker_google_authority = (
+            worker is not None and authority == "google_authoritative" and current.sector == "ristorante"
+        )
+        if (authority not in {"internal", "internal_calendar_sync"} and not worker_google_authority) or current.sector not in {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "studio_medico_dentista"}:
             if not observe:
                 await self._receipt(conn, org, request, actor, digest, "unknown", None, current.revision, mutation_hash, worker)
             return self._result("unknown", None, old, current.revision, current.revision, False)

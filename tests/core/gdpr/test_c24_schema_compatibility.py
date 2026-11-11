@@ -70,6 +70,12 @@ async def test_approved_erasure_commits_before_conversation_schema(legacy_pool, 
     await legacy_pool.execute("INSERT INTO organizations(id,name) VALUES($1,'Synthetic legacy erasure')", org)
     await approve_policies(legacy_pool, org)
     contact, _, message, _ = await seed_contact_data(legacy_pool, org)
+    legacy_booking = await legacy_pool.fetchval(
+        """INSERT INTO bookings(organization_id,contact_id,nome_cliente,telefono,data,ora,coperti,note,stato)
+           VALUES($1,$2,'Synthetic Legacy Customer','+15550000100',CURRENT_DATE,TIME '12:00',2,
+                  'synthetic private booking','completata') RETURNING id""",
+        org, contact,
+    )
 
     result = await Deletion(legacy_pool).request(
         org, 'synthetic', uuid4(), scope='contact', subject_id=contact,
@@ -85,3 +91,7 @@ async def test_approved_erasure_commits_before_conversation_schema(legacy_pool, 
     assert await legacy_pool.fetchval(
         'SELECT content_text FROM messages WHERE organization_id=$1 AND id=$2', org, message,
     ) is None
+    assert await legacy_pool.fetchrow(
+        'SELECT nome_cliente,telefono,note FROM bookings WHERE organization_id=$1 AND id=$2',
+        org, legacy_booking,
+    ) == ("REDACTED", "", "")

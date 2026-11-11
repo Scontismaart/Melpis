@@ -278,7 +278,7 @@ class WorkerBookingAuthority:
         decision = parse_and_validate_auto_booking(policy_settings, source.get('timezone'), {
             'service':'ristorante/tavolo','date':proposal.data,'time':proposal.ora,
             'party_size':proposal.coperti,'duration_minutes':60}, now=source['verified_now'])
-        if (not decision.accepted or decision.booking.authority not in {'internal','internal_calendar_sync'}
+        if (not decision.accepted or decision.booking.authority not in {'internal','internal_calendar_sync','google_authoritative'}
                 or not validate_auto_booking_configuration(policy_settings, source.get('timezone'),'ristorante').valid):
             raise WorkerProofDenied('Current A05 policy denied')
         organization = await conn.fetchrow('SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE', org)
@@ -290,7 +290,8 @@ class WorkerBookingAuthority:
                             and any(req.resource_id == resource.resource_id for req in item.resources)
                             for resource in catalog.resources)]
         if (sector != 'ristorante' or catalog.sector != 'ristorante' or catalog.timezone != source.get('timezone')
-                or authority not in {'internal','internal_calendar_sync'} or len(eligible) != 1):
+                or authority not in {'internal','internal_calendar_sync','google_authoritative'}
+                or authority != decision.booking.authority or len(eligible) != 1):
             raise WorkerProofDenied('Published restaurant allocation catalog unavailable')
         service_id = eligible[0].service_id
         from src.core.bookings.allocation_contracts import derive_allocation
@@ -314,7 +315,8 @@ class WorkerBookingAuthority:
         return (org, source['conversation_id'], message, source_row['c24_original_subject_id'],
                 source_row['created_at'].timestamp(), text_hash, response_hash, 1, response_hash,
                 catalog.revision, provenance['inbox_id'], provenance['operation_id'],
-                _SectorSlot(decision.booking.date, decision.booking.time, proposal.coperti, decision.booking.capacity), service_id)
+                _SectorSlot(decision.booking.date, decision.booking.time, proposal.coperti, decision.booking.capacity),
+                service_id, authority, source_row['canale'])
 
     async def claim(self, conn, org, message, *, lease_seconds=30):
         """Acquire a fenced lease only for persisted, committed inbound evidence."""
@@ -596,8 +598,27 @@ class WorkerBookingAuthority:
         if not private_booking_worker_enabled():
             raise WorkerProofDenied('Private booking worker disabled')
         prior = await self._consume(conn, capability)
+        if type(prior) is not tuple:
+            raise WorkerProofDenied('Booking proof shape unavailable')
+        if capability._kind == 'a05':
+            if len(prior) != 16:
+                raise WorkerProofDenied('A05 proof shape unavailable')
+            inbox, operation, slot, service_id, authority, channel = prior[10:]
+        elif capability._kind == 'c24':
+            if len(prior) != 14:
+                raise WorkerProofDenied('C2.4 proof shape unavailable')
+            inbox, operation, slot, service_id = prior[10:]
+            # Generic confirmed-state proof validates these server-side.
+            # It never grants Google authority or a non-WhatsApp channel.
+            authority, channel = 'internal', 'whatsapp'
+        else:
+            raise WorkerProofDenied('Unknown booking proof kind')
+        if channel != 'whatsapp':
+            raise WorkerProofDenied('Booking proof channel unavailable')
+        if (capability._kind == 'a05'
+                and authority not in {'internal', 'internal_calendar_sync', 'google_authoritative'}):
+            raise WorkerProofDenied('A05 authority unavailable')
         org, conversation, message, subject = prior[:4]
-        inbox, operation, slot, service_id = prior[10:]
         request_id, booking_id, semantic_hash = service_receipt_v2(org, message, 'create', prior[6])
         temporal = ({'arrival_date': slot.date, 'departure_date': slot.departure, 'room_count': slot.room_count}
                     if isinstance(slot, _HotelSlot) else
@@ -655,12 +676,13 @@ class WorkerBookingAuthority:
                 raise WorkerProofDenied('Verified customer details unavailable')
             from src.core.gdpr.guard import check_contact_intake
             await check_contact_intake(conn, org, phone)
+            google_pending = authority == 'google_authoritative'
             booking = await conn.fetchrow("""INSERT INTO bookings
                 (id,organization_id,contact_id,id_conversazione,nome_cliente,telefono,data,ora,coperti,
-                 note,stato,origine,source_message_id)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'','confermata','WhatsApp',$10) RETURNING *""",
+                 note,stato,origine,source_message_id,calendar_confirm_pending,richiede_intervento)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'',$11,'WhatsApp',$10,$12,$12) RETURNING *""",
                 booking_id, org, subject, str(conversation), name, phone, slot.date, slot.time,
-                slot.party_size, str(message),
+                slot.party_size, str(message), 'in_attesa' if google_pending else 'confermata', google_pending,
             )
             if isinstance(slot, _HotelSlot):
                 await conn.execute('''INSERT INTO booking_stays(organization_id,booking_id,original_subject_id,
@@ -675,6 +697,13 @@ class WorkerBookingAuthority:
             if isinstance(slot, _HotelSlot):
                 from src.core.bookings.hotel_confirmation import enqueue_hotel_confirmation
                 await enqueue_hotel_confirmation(conn, dict(booking), message, slot.date, slot.departure)
+            elif google_pending:
+                queued = await conn.fetchval(
+                    'SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)',
+                    org, booking_id, message,
+                )
+                if not queued:
+                    raise WorkerProofDenied('Authoritative Calendar job unavailable')
             else:
                 await BookingRepository(None).enqueue_calendar_confirmation(conn, dict(booking), message, 'whatsapp')
             claim = capability._claim

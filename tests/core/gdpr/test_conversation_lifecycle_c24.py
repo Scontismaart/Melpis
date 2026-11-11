@@ -47,18 +47,27 @@ async def test_historical_source_without_original_subject_cannot_be_adopted(stat
     assert await _used(env['pool'], env['org']) == 1
 
 
+@pytest.mark.migration_limit(91)
 async def test_contact_erasure_covers_canonical_copy_after_source_hard_delete(state_env, monkeypatch):
     env = state_env
     await populated(env)
     contact = await subject(env)
     await env['pool'].execute('DELETE FROM messages WHERE organization_id=$1 AND id=$2', env['org'], env['message'])
-    assert await counts(env) == (0, 0)
+    # Source deletion must leave the durable receipt until its approved,
+    # tenant-scoped technical-receipt lifecycle removes it.
+    assert await counts(env) == (0, 1)
     assert await env['pool'].fetchval('SELECT count(*) FROM simulation_requests WHERE organization_id=$1 AND c24_subject_id=$2', env['org'], contact) == 1
     await approve_policies(env['pool'], env['org'])
     monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
     blocked = await Deletion(env['pool']).request(env['org'], 'synthetic-c24', uuid4(), scope='contact', subject_id=contact)
     assert 'policy_required.booking_conversation_content' in blocked['manifest']['blockers']
     await approve_conversation(env['pool'], env['org'])
+    receipt_blocked = await Deletion(env['pool']).request(
+        env['org'], 'synthetic-c24', uuid4(), scope='contact', subject_id=contact,
+    )
+    assert receipt_blocked['status'] == 'blocked'
+    assert any('technical_receipts' in item for item in receipt_blocked['manifest']['blockers'])
+    await approve_technical_receipts(env['pool'], env['org'])
     result = await Deletion(env['pool']).request(env['org'], 'synthetic-c24', uuid4(), scope='contact', subject_id=contact)
     assert result['status'] == 'partial'
     assert await env['pool'].fetchval('SELECT count(*) FROM simulation_requests WHERE organization_id=$1 AND c24_subject_id=$2', env['org'], contact) == 0
@@ -127,6 +136,7 @@ async def approve_technical_receipts(pool, org):
         'test:receipts','qa-c24',NOW()-INTERVAL '1 minute',NOW()+INTERVAL '1 day')""", org)
 
 
+@pytest.mark.migration_limit(91)
 async def test_erasure_requires_conversation_policy_then_removes_all_copies(state_env, monkeypatch):
     env = state_env
     request = await populated(env)
@@ -139,6 +149,12 @@ async def test_erasure_requires_conversation_policy_then_removes_all_copies(stat
     assert any('booking_conversation_content' in item for item in blocked['manifest']['blockers'])
     assert await counts(env) == (1, 1)
     await approve_conversation(env['pool'], env['org'])
+    receipt_blocked = await Deletion(env['pool']).request(
+        env['org'], 'synthetic-c24', uuid4(), scope='contact', subject_id=contact,
+    )
+    assert receipt_blocked['status'] == 'blocked'
+    assert any('technical_receipts' in item for item in receipt_blocked['manifest']['blockers'])
+    await approve_technical_receipts(env['pool'], env['org'])
     result = await Deletion(env['pool']).request(env['org'], 'synthetic-c24', uuid4(), scope='contact', subject_id=contact)
     assert result['status'] == 'partial'
     assert await counts(env) == (0, 0)
@@ -255,6 +271,7 @@ async def test_approved_message_retention_invalidates_entire_state(state_env, mo
     assert await _used(env['pool'], env['org']) == 2
 
 
+@pytest.mark.migration_limit(91)
 async def test_concurrent_erasure_and_apply_cannot_resurrect_state(state_env, monkeypatch):
     env = state_env
     await commit_source(env, env['message'], '2026-11-12', {'service_id': 'standard'}, 1700000000)
@@ -262,6 +279,7 @@ async def test_concurrent_erasure_and_apply_cannot_resurrect_state(state_env, mo
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
     await approve_policies(env['pool'], env['org'])
     await approve_conversation(env['pool'], env['org'])
+    await approve_technical_receipts(env['pool'], env['org'])
     monkeypatch.setenv('GDPR_ERASURE_EXECUTION_ENABLED', 'true')
     # Queue both operations behind the same advisory fence, then release it.
     async with env['pool'].acquire() as holder:

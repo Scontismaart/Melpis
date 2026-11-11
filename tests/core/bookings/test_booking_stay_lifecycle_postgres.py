@@ -210,7 +210,7 @@ async def test_owner_erasure_purge_requires_barrier_matching_operation_scope_and
                VALUES($1,$2,'organization',NULL)''', env.org, operation,
         )
 
-    with pytest.raises(Exception, match='Scoped erasure barrier required'):
+    with pytest.raises(Exception, match='Scoped hotel erasure barrier required'):
         await pg_pool.fetchval(
             "SELECT public.booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')",
             env.org, booking, operation,
@@ -354,7 +354,7 @@ async def test_completed_stay_erasure_respects_hold_then_fences_replay(pg_pool, 
         (organization_id,operation_id,scope,subject_id,identifier_digest,key_id)
         VALUES($1,$2,'contact',$3,$4,'synthetic')""", env.org, operation, lineage.contact_id, 'a' * 64)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
-    with pytest.raises(Exception, match='Stay content held'):
+    with pytest.raises(Exception, match='Hotel stay content is held'):
         await pg_pool.fetchval("SELECT booking_stay_admin_purge($1,$2,'erasure',$3,'synthetic-stay-v1')", env.org, booking, operation)
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', env.org, booking) > 0

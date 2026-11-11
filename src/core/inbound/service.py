@@ -901,12 +901,23 @@ class InboundProcessingService:
                     await release_quota_if_safe()
                     return
                 raise RuntimeError("A04 final response proof missing")
-            # A model-proposed booking without customer authorization is only
-            # a deterministic staff handoff, not a commercial AI final.
+            # A pure escalation is not a customer-facing commercial final.
+            # A guardrail-approved substantive answer remains billable even
+            # when it also asks staff to follow up.
             from src.core.ai_safety import BOOKING_FAILURE_REPLY
+            from src.core.guardrails.validator import FALLBACK_STAFF_TEXT
             from src.models.schemas import RispostaOutput
             payload = json.loads(final_response.serialized)
             candidate = RispostaOutput.model_validate(payload)
+            handoff_only = (
+                candidate.categoria.strip().casefold() == "escalation"
+                or candidate.risposta.strip() in {FALLBACK_STAFF_TEXT, BOOKING_FAILURE_REPLY}
+            )
+            if candidate.richiede_umano and handoff_only:
+                await release_quota_if_safe()
+                risposta_text = candidate.risposta
+                richiede_umano = True
+                return
             proposal = candidate.prenotazione
             if (proposal and proposal.data and proposal.ora and proposal.coperti
                     and not candidate.richiede_umano):

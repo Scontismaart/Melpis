@@ -6,14 +6,17 @@ usage, booking capacity/idempotency and lease fencing use the real database.
 
 import asyncio
 import json
-from datetime import timedelta
+from copy import deepcopy
+from datetime import date, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
-import pytest
 import httpx
+import pytest
 
+from src.core.ai_safety import BOOKING_RECEIVED_REPLY
 from src.core.billing.quota_reservations import (
     QuotaConflict,
     QuotaLease,
@@ -21,10 +24,10 @@ from src.core.billing.quota_reservations import (
     validate_final_response,
 )
 from src.core.bookings.service import BookingService
+from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository
 from src.core.db.repositories.booking_repo import BookingRepository
 from src.core.documenti.rag_context import ContestoDocumenti
 from src.core.receptionist.conversation_orchestrator import ConversationOrchestrator
-from src.core.ai_safety import BOOKING_RECEIVED_REPLY
 from src.models.schemas import DatiPrenotazione, RispostaOutput
 from tests.core.test_quota_reservation_lifecycle import (
     _auth_member,
@@ -38,10 +41,14 @@ from tests.core.test_quota_reservation_lifecycle import (
     _used,
 )
 
+_A05_CATALOGS = json.loads((Path(__file__).parent / "bookings/fixtures/catalogs_v2.json").read_text(encoding="utf-8"))
 
-async def _worker(pool, monkeypatch, *, legacy=False,
-                  text="Vorrei prenotare un tavolo per 2 persone il 2030-12-22 alle 20:00"):
+
+async def _worker(pool, monkeypatch, *, legacy=False, text=None):
     org = await _organization(pool)
+    booking_day = await pool.fetchval("SELECT (clock_timestamp() AT TIME ZONE 'Europe/Rome')::date + 10")
+    if text is None:
+        text = f"Vorrei prenotare un tavolo per 2 persone il {booking_day.isoformat()} alle 20:00, mi chiamo Mario Rossi"
     message_id = await _inbound_message(pool, org["id"])
     await pool.execute(
         "UPDATE messages SET content_text=$3,content=$4::jsonb WHERE organization_id=$1 AND id=$2",
@@ -51,7 +58,7 @@ async def _worker(pool, monkeypatch, *, legacy=False,
         "SELECT conversation_id FROM messages WHERE organization_id=$1 AND id=$2",
         org["id"], message_id,
     )
-    service, repo, ai, _, send, config = _inbound_service_with_real_quota(pool, org, None)
+    service, repo, _ai, _, send, config = _inbound_service_with_real_quota(pool, org, None)
     repo.list_conversation_messages.return_value = []
     repo.escalate_to_human.return_value = None
     repo.mark_ai_disclosure_sent.return_value = False
@@ -69,7 +76,7 @@ async def _worker(pool, monkeypatch, *, legacy=False,
         risposta="**Richiesta ricevuta, in attesa di verifica.**",
         richiede_umano=False, motivo="", categoria="prenotazione",
         prenotazione=DatiPrenotazione(
-            nome_cliente="Cliente sintetico", data="2030-12-22", ora="20:00", coperti=2,
+            nome_cliente="Mario Rossi", data=booking_day.isoformat(), ora="20:00", coperti=2,
         ),
     )
     generate = AsyncMock(side_effect=lambda *a, **k: proposal.model_copy(deep=True))
@@ -88,6 +95,58 @@ async def _worker(pool, monkeypatch, *, legacy=False,
                            send=send, generate=generate, proposal=proposal)
 
 
+async def _enable_private_a05(case, pool, private_worker_pool, monkeypatch, *, authority="internal"):
+    """Give positive A05 regressions real webhook proof, policy and worker identity."""
+    from tests.core.bookings.test_worker_authority_postgres import _persist_ingress
+
+    org_id = case.org["id"]
+    monkeypatch.setenv("C24_PRIVATE_BOOKING_WORKER_ENABLED", "true")
+    case.service.private_booking_pool = private_worker_pool
+    await pool.execute(
+        "UPDATE organizations SET business_profile=$2::jsonb,timezone='Europe/Rome' WHERE id=$1",
+        org_id, json.dumps({"verticale": "ristorante", "nome": "Pizzeria Bella"}),
+    )
+    auth_user_id = await _auth_member(pool, org_id, role="owner")
+    actor_user_id = await pool.fetchval(
+        "SELECT id FROM user_profiles WHERE auth_user_id=$1", auth_user_id,
+    )
+    intervals = [{"start": "09:00", "end": "22:00"}]
+    policy = {"a05": {
+        "enabled": True, "version": 1, "authority": authority,
+        "verticale": "ristorante", "service": "ristorante/tavolo",
+        "duration_minutes": 60, "closed_dates": [],
+        "weekly_opening_intervals": {day: intervals for day in (
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        )},
+    }}
+    await case.service.booking_service.aggiorna_impostazioni(
+        org_id, capienze_orarie={"20:00": 10}, config=policy,
+    )
+    booking_repo = BookingRepository(pool)
+    catalog_repo = BookingCatalogRepository(booking_repo)
+    catalog = deepcopy(_A05_CATALOGS["ristorante"])
+    for weekday in catalog["availability"]["days"]:
+        weekday["windows"] = [{"start_minute": 540, "end_minute": 1320}]
+    await catalog_repo.write(org_id, actor_user_id, auth_user_id, action="draft_saved",
+                             expected_revision=0, request_id=uuid4(), catalog=catalog)
+    await catalog_repo.write(org_id, actor_user_id, auth_user_id, action="published",
+                             expected_revision=1, request_id=uuid4())
+
+    provider_id = "synthetic-a04-" + uuid4().hex
+    stamp = await pool.fetchval("SELECT floor(extract(epoch from clock_timestamp()))::bigint")
+    text = case.msg["content_text"]
+    phone = case.msg["content"]["from"]
+    body = {"id": provider_id, "type": "text", "timestamp": str(stamp),
+            "from": phone, "text": {"body": text}}
+    await pool.execute(
+        """UPDATE messages SET wam_id=$3,content=$4::jsonb,c24_original_subject_id=(
+                   SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=messages.conversation_id)
+             WHERE organization_id=$1 AND id=$2""",
+        org_id, case.msg["id"], provider_id, json.dumps(body),
+    )
+    await _persist_ingress(pool, org_id, provider_id)
+
+
 async def _bookings(pool, org_id):
     return await pool.fetch("SELECT * FROM bookings WHERE organization_id=$1", org_id)
 
@@ -102,19 +161,23 @@ async def _stored(pool, operation):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
-async def test_booking_only_after_successful_canonical_commit_and_replay(pg_pool, monkeypatch, legacy):
+async def test_booking_only_after_successful_canonical_commit_and_replay(
+    pg_pool, private_worker_pool, monkeypatch, legacy,
+):
     case = await _worker(pg_pool, monkeypatch, legacy=legacy)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch)
     operation = _inbound_operation(case.org["id"], case.msg["id"], text=case.msg["content_text"])
-    real_create = case.service.booking_service.create_booking
+    from src.core.bookings.worker_authority import WorkerBookingAuthority
+    real_process = WorkerBookingAuthority.process_a05_booking
 
-    async def checked_create(*args, **kwargs):
+    async def checked_process(authority, worker_pool, organization_id, message_id, canonical):
         # Real persistence is visible before even the first booking side effect.
         assert await _used(pg_pool, case.org["id"]) == 1
         assert (await _reservation_metadata(pg_pool, case.org["id"], operation.id))["state"] == "committed"
         assert await _stored(pg_pool, operation)
-        return await real_create(*args, **kwargs)
+        return await real_process(authority, worker_pool, organization_id, message_id, canonical)
 
-    case.service.booking_service.create_booking = checked_create
+    monkeypatch.setattr(WorkerBookingAuthority, "process_a05_booking", checked_process)
     first = await case.service.process_message(case.msg)
     assert first.action == "handled"
     assert len(await _bookings(pg_pool, case.org["id"])) == 1
@@ -133,8 +196,11 @@ async def test_booking_only_after_successful_canonical_commit_and_replay(pg_pool
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
-async def test_commit_postgres_failure_leaves_no_booking_or_charge_then_retry(pg_pool, monkeypatch, legacy):
+async def test_commit_postgres_failure_leaves_no_booking_or_charge_then_retry(
+    pg_pool, private_worker_pool, monkeypatch, legacy,
+):
     case = await _worker(pg_pool, monkeypatch, legacy=legacy)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch)
     # Fault after response UPDATE: the whole A04 transaction must roll back.
     await pg_pool.execute("""
         CREATE FUNCTION reject_review_commit() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -181,6 +247,21 @@ async def test_useful_valid_ai_answer_with_human_followup_is_not_refunded(pg_poo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
+async def test_handoff_only_escalation_does_not_consume_commercial_quota(pg_pool, monkeypatch, legacy):
+    case = await _worker(pg_pool, monkeypatch, legacy=legacy, text="Vorrei parlare con il responsabile")
+    case.proposal.risposta = "Ti metto in contatto con il responsabile."
+    case.proposal.richiede_umano = True
+    case.proposal.categoria = "escalation"
+    case.proposal.prenotazione = None
+    outcome = await case.service.process_message(case.msg)
+    assert outcome.action == "handled" and outcome.richiede_umano
+    assert await _used(pg_pool, case.org["id"]) == 0
+    assert not await _bookings(pg_pool, case.org["id"])
+    case.repo.escalate_to_human.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
 async def test_booking_shaped_model_output_does_not_authorize_a_booking_for_faq(pg_pool, monkeypatch, legacy):
     case = await _worker(pg_pool, monkeypatch, legacy=legacy, text="Quali sono gli ingredienti della pizza?")
     await case.service.process_message(case.msg)
@@ -202,16 +283,19 @@ async def test_booking_authorization_uses_stored_source_not_modified_worker_enve
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
-@pytest.mark.parametrize("field,value", [(None, None), ("data", "2030-12-23"),
-                                         ("ora", "21:00"), ("coperti", 4)])
+@pytest.mark.parametrize("field", [None, "data", "ora", "coperti"])
 async def test_customer_intent_cannot_authorize_invented_or_mismatched_booking_values(
-    pg_pool, monkeypatch, legacy, field, value,
+    pg_pool, monkeypatch, legacy, field,
 ):
-    text = ("Vorrei prenotare" if field is None
-            else "Vorrei prenotare un tavolo per 2 persone il 2030-12-22 alle 20:00")
+    text = "Vorrei prenotare" if field is None else None
     case = await _worker(pg_pool, monkeypatch, legacy=legacy, text=text)
-    if field is not None:
-        setattr(case.proposal.prenotazione, field, value)
+    if field == "data":
+        valid_day = date.fromisoformat(case.proposal.prenotazione.data)
+        case.proposal.prenotazione.data = (valid_day + timedelta(days=1)).isoformat()
+    elif field == "ora":
+        case.proposal.prenotazione.ora = "21:00"
+    elif field == "coperti":
+        case.proposal.prenotazione.coperti = 4
     await case.service.process_message(case.msg)
     assert not await _bookings(pg_pool, case.org["id"])
     assert await _used(pg_pool, case.org["id"]) == 0
@@ -253,7 +337,7 @@ async def test_delivery_failure_after_valid_reply_never_refunds_or_regenerates(p
 @pytest.mark.asyncio
 @pytest.mark.parametrize("legacy", [False, True])
 async def test_final_guardrail_rejection_cannot_leave_a_booking(pg_pool, monkeypatch, legacy):
-    from src.core.guardrails.validator import EsitoValidazione, FALLBACK_STAFF_TEXT
+    from src.core.guardrails.validator import FALLBACK_STAFF_TEXT, EsitoValidazione
 
     case = await _worker(pg_pool, monkeypatch, legacy=legacy)
     monkeypatch.setattr(
@@ -323,8 +407,11 @@ async def test_uncertain_provider_failure_keeps_capacity_and_prevents_second_gen
 
 
 @pytest.mark.asyncio
-async def test_crash_after_commit_before_booking_resumes_from_durable_payload_without_ai(pg_pool, monkeypatch):
+async def test_crash_after_commit_before_booking_resumes_from_durable_payload_without_ai(
+    pg_pool, private_worker_pool, monkeypatch,
+):
     case = await _worker(pg_pool, monkeypatch)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch)
     operation = _inbound_operation(case.org["id"], case.msg["id"], text=case.msg["content_text"])
     quota = QuotaReservations(pg_pool)
     reserved = await quota.reserve(operation)
@@ -340,42 +427,18 @@ async def test_crash_after_commit_before_booking_resumes_from_durable_payload_wi
 
 
 @pytest.mark.asyncio
-async def test_concurrent_booking_continuations_share_original_authorizing_source(pg_pool, monkeypatch):
-    case = await _worker(pg_pool, monkeypatch, text="sì")
-    original_id, second_id = uuid4(), uuid4()
-    await pg_pool.execute(
-        "INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content,content_text,status,created_at) "
-        "SELECT $1,organization_id,conversation_id,'inbound','text',content,"
-        "'Vorrei prenotare un tavolo per 2 il 2030-12-22 alle 20:00','processing',"
-        "created_at-interval '2 minutes' FROM messages WHERE id=$2",
-        original_id, case.msg["id"],
-    )
-    await pg_pool.execute(
-        "INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content,content_text,status) "
-        "SELECT $1,organization_id,conversation_id,'inbound','text',content,'sì','processing' "
-        "FROM messages WHERE id=$2", second_id, case.msg["id"],
-    )
-    barrier = asyncio.Barrier(2)
-    calls = {}
-    authorize = case.service._booking_context
-
-    async def overlapping_authorization(*args, **kwargs):
-        source = await authorize(*args, **kwargs)
-        task = asyncio.current_task()
-        calls[task] = calls.get(task, 0) + 1
-        if calls[task] == 1:
-            await asyncio.wait_for(barrier.wait(), timeout=10)
-        return source
-
-    monkeypatch.setattr(case.service, "_booking_context", overlapping_authorization)
-    second_message = dict(case.msg, id=second_id)
-    results = await asyncio.gather(case.service.process_message(case.msg),
-                                   case.service.process_message(second_message))
-    assert all(result.action == "handled" for result in results)
+async def test_concurrent_replay_cannot_duplicate_booking_or_charge(
+    pg_pool, private_worker_pool, monkeypatch,
+):
+    case = await _worker(pg_pool, monkeypatch)
+    await _enable_private_a05(case, pg_pool, private_worker_pool, monkeypatch)
+    results = await asyncio.gather(*(case.service.process_message(dict(case.msg)) for _ in range(2)))
+    assert all(result.action in {"handled", "yielded"} for result in results)
     bookings = await _bookings(pg_pool, case.org["id"])
     assert len(bookings) == 1
-    assert str(bookings[0]["source_message_id"]) == str(original_id)
-    assert await _used(pg_pool, case.org["id"]) == 2
+    assert str(bookings[0]["source_message_id"]) == str(case.msg["id"])
+    assert await _used(pg_pool, case.org["id"]) == 1
+    assert case.generate.await_count == 1
 
 
 @pytest.mark.asyncio

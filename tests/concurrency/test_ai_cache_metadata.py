@@ -287,30 +287,19 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
 
     assert llm_call_count["count"] == 1, "L'LLM doveva essere chiamato al 1° tentativo"
 
-    # Verifica stato DB dopo il crash:
-    # - billed_at DEVE essere popolato
-    # - ai_reply_cache DEVE essere JSONB con richiede_umano = true
-    # - l'escalation DB è autorevole anche se la courtesy delivery è incerta:
-    #   replied_at chiude l'inbound per impedire un secondo invio.
+    # A04 counts only a valid final customer answer. This LLM result is only
+    # an escalation, so it must not consume commercial quota or masquerade as
+    # a billable cached reply. The durable staff handoff fences the retry.
     async with real_db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT billed_at, ai_reply_cache, sent_at, replied_at, status FROM messages WHERE id = $1",
             msg_id
         )
-        assert row["billed_at"] is not None
+        assert row["billed_at"] is None
         assert row["sent_at"] is None
         assert row["replied_at"] is not None
-        cache_in_db = row["ai_reply_cache"]
-        if isinstance(cache_in_db, str):
-            cache_in_db = json.loads(cache_in_db)
-        assert isinstance(cache_in_db, dict), f"Atteso dict JSONB, trovato {type(cache_in_db)}"
-        assert cache_in_db["richiede_umano"] is True
-        # A04's public persisted final-response shape is RispostaOutput
-        # (`risposta`); accept `text` only for legacy fixtures, never as
-        # replay authority.
-        cached_text = cache_in_db.get("risposta", cache_in_db.get("text"))
-        assert isinstance(cached_text, str)
-        assert "responsabile eventi" in cached_text
+        assert row["ai_reply_cache"] is None
+        assert row["status"] == "handled"
 
         quota_event = await conn.fetchrow(
             """SELECT metadata FROM usage_events
@@ -321,8 +310,11 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
         quota_metadata = quota_event["metadata"]
         if isinstance(quota_metadata, str):
             quota_metadata = json.loads(quota_metadata)
-        assert quota_metadata["state"] == "committed"
-        assert quota_metadata["response_hash"]
+        assert quota_metadata["state"] == "released"
+        assert quota_metadata["response_hash"] is None
+        assert await conn.fetchval(
+            "SELECT messages_used_this_period FROM organizations WHERE id=$1", org_id,
+        ) == 0
 
     # --- FASE 2: Worker 2 (RETRY) riparte ---
     service_worker2 = AsyncMock()
@@ -343,7 +335,7 @@ async def test_ai_cache_jsonb_preserves_richiede_umano_across_worker_crash_and_r
         await processor2._process_one(msg_row_retry)
 
     # 1. Verifica che l'LLM NON sia stato rigenerato (costo risparmiato)
-    assert llm_call_count["count"] == 1, "L'LLM NON deve essere richiamato nel retry: doveva riusare la cache JSONB!"
+    assert llm_call_count["count"] == 1, "Il retry di una escalation durevole non deve richiamare l'LLM."
 
     # 2. Il retry non deve reinviare una courtesy dall'esito ambiguo.
     service_worker2.send_whatsapp_message.assert_not_awaited()

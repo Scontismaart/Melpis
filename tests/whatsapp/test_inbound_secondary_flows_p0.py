@@ -36,7 +36,7 @@ def fake_tenant():
         phone_number_id="391234567890",
         waba_id="waba_123",
         access_token="tok_abc",
-        business_profile={"nome": "Ristorante Test", "orari": "12:00-23:00"},
+        business_profile={"nome": "Ristorante Test", "verticale": "ristorante", "orari": "12:00-23:00"},
     )
 
 
@@ -63,7 +63,8 @@ async def test_quota_exceeded_meta_failure_finalizes_persisted_escalation(base_a
     mock_service.check_opt_out = AsyncMock(return_value={"is_opt_out": False})
     mock_service.send_whatsapp_message = AsyncMock(side_effect=Exception("Meta 503 Service Unavailable"))
 
-    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)):
+    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)), \
+         patch("src.core.bookings.privacy_boundary.inbound_classification_status", AsyncMock(return_value="unknown")):
         processor = InboundProcessor(base_app_config, mock_repo, mock_service)
         await processor._process_one(msg)
 
@@ -99,7 +100,8 @@ async def test_wants_human_meta_failure_finalizes_persisted_escalation(base_app_
     mock_service.check_human_request = AsyncMock(return_value=True)
     mock_service.send_whatsapp_message = AsyncMock(side_effect=Exception("Meta 500 Network Error"))
 
-    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)):
+    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)), \
+         patch("src.core.bookings.privacy_boundary.inbound_classification_status", AsyncMock(return_value="unknown")):
         processor = InboundProcessor(base_app_config, mock_repo, mock_service)
         await processor._process_one(msg)
 
@@ -128,6 +130,7 @@ async def test_fast_reply_meta_failure_does_not_mark_replied(base_app_config, fa
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
+    mock_repo.get_org_business_profile = AsyncMock(return_value={"verticale": "ristorante"})
     mock_repo.try_mark_replied = AsyncMock()
     mock_repo.mark_message_sent = AsyncMock()
     mock_repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4()})
@@ -139,7 +142,8 @@ async def test_fast_reply_meta_failure_does_not_mark_replied(base_app_config, fa
     mock_service.fast_path_match = AsyncMock(return_value="Ciao! Benvenuto.")
     mock_service.send_whatsapp_message = AsyncMock(side_effect=Exception("Meta Timeout"))
 
-    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)):
+    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)), \
+         patch("src.core.bookings.privacy_boundary.inbound_classification_status", AsyncMock(return_value="unknown")):
         processor = InboundProcessor(base_app_config, mock_repo, mock_service)
         await processor._process_one(msg)
 
@@ -165,6 +169,7 @@ async def test_all_successful_flows_finalize_properly(base_app_config, fake_tena
     mock_repo.claim_message_for_processing = AsyncMock(return_value={"status": "claimed", "ai_reply_cache": None})
     mock_repo.get_outbound_dedup = AsyncMock(return_value=None)
     mock_repo.get_org_subscription_state = AsyncMock(return_value={"subscription_status": "active"})
+    mock_repo.get_org_business_profile = AsyncMock(return_value={"verticale": "ristorante"})
     mock_repo.try_mark_replied = AsyncMock(return_value={"id": msg_id, "status": "handled"})
     mock_repo.mark_message_sent = AsyncMock()
     mock_repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4()})
@@ -176,7 +181,8 @@ async def test_all_successful_flows_finalize_properly(base_app_config, fake_tena
     mock_service.fast_path_match = AsyncMock(return_value="Ciao! Benvenuto.")
     mock_service.send_whatsapp_message = AsyncMock(return_value={"status": "sent", "wam_id": "wamid_12345"})
 
-    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)):
+    with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant)), \
+         patch("src.core.bookings.privacy_boundary.inbound_classification_status", AsyncMock(return_value="unknown")):
         processor = InboundProcessor(base_app_config, mock_repo, mock_service)
         await processor._process_one(msg)
 

@@ -67,7 +67,10 @@ class Deletion:
             )
             policies = {p['category']: dict(p) for p in policies}
             required = {'contact_content', 'transient_content', 'cutover'}
-            if await conn.fetchval("SELECT to_regclass('public.booking_stays') IS NOT NULL"):
+            booking_stays_available = bool(await conn.fetchval(
+                "SELECT to_regclass('public.booking_stays') IS NOT NULL",
+            ))
+            if booking_stays_available:
                 if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays
                     WHERE organization_id=$1 AND ($2::uuid IS NULL OR original_subject_id=$2))''', org, op['subject_id']):
                     required.add('booking_stay_content')
@@ -252,13 +255,22 @@ class Deletion:
                     await conn.execute(
                         'DELETE FROM simulation_requests WHERE organization_id=$1 AND request_id=$2', org, operation.id,
                     )
-            await conn.execute(
-                '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
-                   WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)
-                     AND NOT EXISTS(SELECT 1 FROM booking_stays s
-                       WHERE s.organization_id=$1 AND s.organization_id=bookings.organization_id
-                         AND s.booking_id=bookings.id)''', org, subject,
-            )
+            if booking_stays_available:
+                # Keep hotel booking content until its scoped, policy-checked
+                # purge capability runs below. On older schemas the relation
+                # does not exist, so retain the legacy relational erasure path.
+                await conn.execute(
+                    '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
+                       WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)
+                         AND NOT EXISTS(SELECT 1 FROM booking_stays s
+                           WHERE s.organization_id=$1 AND s.organization_id=bookings.organization_id
+                             AND s.booking_id=bookings.id)''', org, subject,
+                )
+            else:
+                await conn.execute(
+                    '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
+                       WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)''', org, subject,
+                )
             await conn.execute(
                 '''UPDATE reviews SET autore='REDACTED',testo='',bozza_risposta='',is_anonymized=TRUE
                    WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)''', org, subject,

@@ -112,6 +112,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "inbound_worker_receipts": ("direct", "Verified ingress evidence is organization-scoped."),
     "inbound_worker_operations": ("direct", "Committed worker evidence is organization-scoped."),
     "booking_stay_completion_evidence": ("direct", "Hotel completion evidence belongs to one organization."),
+    "booking_stay_owner_markers": ("direct", "Transaction-bound owner lineage proof is scoped to one stay and tenant."),
     "booking_privacy_classifications": ("direct", "Private classification belongs to one organization."),
     "booking_privacy_classification_reader": ("direct", "Minimal attestation belongs to one organization."),
     "meta_webhook_inbox": ("direct", "Accepted webhook event is assigned to one organization before persistence."),

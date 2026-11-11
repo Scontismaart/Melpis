@@ -131,6 +131,9 @@ async def private_worker_pool(pg_pool, postgres_container):
 @pytest.fixture
 async def reset_db(pg_pool):
     async with pg_pool.acquire() as conn:
+        quota_trust_marker = await conn.fetchrow("""SELECT id,metadata::text AS metadata
+            FROM usage_events WHERE id='6206d423-cea9-5480-bb9b-59d757503f14'::uuid
+              AND organization_id IS NULL AND event_type='system.quota_trust_epoch' AND quantity=0""")
         await conn.execute("""
             TRUNCATE TABLE
                 audit_log, user_profiles, organization_memberships,
@@ -153,6 +156,13 @@ async def reset_db(pg_pool):
                 weekly_report_log
             CASCADE
         """)
+        # TRUNCATE organizations CASCADE also removes this fixed global trust
+        # marker. Preserve the migration-owned value so reset_db cannot disable
+        # A04 in tests that exercise it; never mint a replacement here.
+        if quota_trust_marker is not None:
+            await conn.execute("""INSERT INTO usage_events(id,organization_id,event_type,quantity,metadata)
+                VALUES($1,NULL,'system.quota_trust_epoch',0,$2::jsonb)""",
+                quota_trust_marker["id"], quota_trust_marker["metadata"])
 
 
 @pytest.fixture
