@@ -52,7 +52,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                    AND out_m.conversation_id = (e.dettagli->>'conversation_id')::uuid 
                    AND out_m.direction = 'outbound' 
                    AND out_m.deleted_at IS NULL
-                   AND out_m.created_at > NOW() - INTERVAL '60 days'
+                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN out_m.created_at
+                        ELSE (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= e.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 ''
@@ -69,7 +70,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                           WHERE source_m.organization_id = e.organization_id
                             AND source_m.id = e.source_id
                             AND source_m.deleted_at IS NULL
-                            AND source_m.created_at > NOW() - INTERVAL '60 days')
+                            AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN source_m.created_at
+                                 ELSE (to_jsonb(source_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days')
           ))
         
         UNION ALL
@@ -91,7 +93,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                    AND out_m.organization_id = $1
                    AND out_m.direction = 'outbound' 
                    AND out_m.deleted_at IS NULL
-                   AND out_m.created_at > NOW() - INTERVAL '60 days'
+                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN out_m.created_at
+                        ELSE (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= m.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 (m.ai_reply_cache->>'text'),
@@ -106,7 +109,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
         WHERE m.organization_id = $1
           AND m.direction = 'inbound'
           AND m.deleted_at IS NULL
-          AND m.created_at > NOW() - INTERVAL '60 days'
+          AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
+               ELSE (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
           AND m.created_at >= NOW() - make_interval(days => $2)
           AND NOT EXISTS (
               SELECT 1 FROM event_log e 

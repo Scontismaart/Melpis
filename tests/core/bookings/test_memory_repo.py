@@ -136,7 +136,7 @@ async def test_booking_service_update_profile_fields_keeps_status_and_skips_noti
 async def test_booking_service_update_schedule_excludes_booking_and_notifies():
     repo = InMemoryBookingRepo()
     whatsapp = AsyncMock()
-    whatsapp.send_whatsapp_message = AsyncMock(return_value={"status": "sent"})
+    whatsapp.send_whatsapp_message = AsyncMock(return_value={"status": "sent", "wam_id": "synthetic-id"})
     svc = BookingService(repo=repo, whatsapp_service=whatsapp, app_config=object())
     svc._load_tenant_config = AsyncMock(return_value=object())
     org = uuid.uuid4()
@@ -158,7 +158,7 @@ async def test_booking_service_update_schedule_excludes_booking_and_notifies():
     )
 
 
-async def test_booking_service_update_schedule_rolls_back_when_notification_fails():
+async def test_booking_service_update_schedule_keeps_new_state_when_delivery_uncertain():
     repo = InMemoryBookingRepo()
     whatsapp = AsyncMock()
     whatsapp.send_whatsapp_message = AsyncMock(side_effect=RuntimeError("Meta down"))
@@ -173,6 +173,29 @@ async def test_booking_service_update_schedule_rolls_back_when_notification_fail
     with pytest.raises(RuntimeError, match="Meta down"):
         await svc.update_booking(org, booking["id"], data="2026-08-02")
 
-    restored = await repo.get_booking(org, booking["id"])
-    assert restored["data"] == date(2026, 8, 1)
-    assert restored["stato"] == "confermata"
+    stored = await repo.get_booking(org, booking["id"])
+    assert stored["data"] == date(2026, 8, 2)
+    assert stored["stato"] == "in_attesa"
+    assert stored["richiede_intervento"] is True
+
+
+async def test_booking_service_does_not_report_ambiguous_delivery_as_sent():
+    from src.core.channels.delivery import DeliveryUnconfirmed
+
+    repo = InMemoryBookingRepo()
+    whatsapp = AsyncMock()
+    whatsapp.send_whatsapp_message = AsyncMock(return_value={"status": "sending_ambiguous"})
+    svc = BookingService(repo=repo, whatsapp_service=whatsapp, app_config=object())
+    svc._load_tenant_config = AsyncMock(return_value=object())
+    org = uuid.uuid4()
+    booking = await repo.create_booking(organization_id=org, nome_cliente="Synthetic", telefono="123",
+        data="2026-08-01", ora="20:00", coperti=1, stato="confermata")
+
+    with pytest.raises(DeliveryUnconfirmed):
+        await svc.update_booking(org, booking["id"], data="2026-08-02")
+
+    stored = await repo.get_booking(org, booking["id"])
+    assert stored["data"] == date(2026, 8, 2)
+    assert stored["stato"] == "in_attesa"
+    assert stored["richiede_intervento"] is True
+    whatsapp.send_whatsapp_message.assert_awaited_once()

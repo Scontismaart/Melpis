@@ -440,7 +440,7 @@ async def test_lifecycle_migration_replay_preserves_never_provisioned_and_disabl
         str(disabled_id): await lifecycle_row(pg_pool, disabled_id),
     }
     migrations = []
-    for path in sorted(glob.glob("src/core/db/migrations/0*.sql")):
+    for path in sorted(glob.glob("src/core/db/migrations/[0-9][0-9][0-9]_*.sql")):
         with open(path, encoding="utf-8") as migration_file:
             if "auth_access_lifecycle" in migration_file.read():
                 migrations.append(path)

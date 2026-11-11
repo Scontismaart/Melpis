@@ -253,6 +253,7 @@ async def lifespan(app: FastAPI):
                 service=wservice,
                 booking_service=app.state.booking_service,
                 orchestrator=app.state.orchestrator,
+                private_booking_pool=getattr(app.state, "private_booking_pool", None),
             )
             retry_worker = RetryWorker(
                 app_config=whatsapp_app_config,

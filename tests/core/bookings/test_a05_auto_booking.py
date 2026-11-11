@@ -81,7 +81,7 @@ def _processor(repo, booking):
     )
 
 
-async def test_internal_auto_confirmation_is_durable_without_google(
+async def test_a05_never_falls_back_to_legacy_writers_without_private_identity(
     repo, pg_pool, sample_org,
 ):
     org_id = sample_org["id"]
@@ -93,20 +93,18 @@ async def test_internal_auto_confirmation_is_durable_without_google(
 
     first = await processor._apply_committed_booking(org_id, msg, {}, _canonical(day))
     replay = await processor._apply_committed_booking(org_id, msg, {}, _canonical(day))
-    assert first.requires_staff is replay.requires_staff is False
-    assert first.persisted_state == replay.persisted_state == "confirmed"
+    assert first.requires_staff is replay.requires_staff is True
+    assert first.persisted_state == replay.persisted_state is None
     async with pg_pool.acquire() as conn:
         rows = await conn.fetch("SELECT * FROM bookings WHERE organization_id=$1", org_id)
         outbox = await conn.fetch("SELECT * FROM booking_confirmation_outbox WHERE organization_id=$1", org_id)
         notices = await conn.fetch("""
             SELECT * FROM messages WHERE organization_id=$1 AND handling_type='booking_confirmation'
         """, org_id)
-    assert len(rows) == len(outbox) == len(notices) == 1
-    assert rows[0]["stato"] == "confermata"
-    assert outbox[0]["status"] == "waiting_for_reply"
+    assert rows == outbox == notices == []
 
 
-async def test_cancellation_serializes_with_confirmation_delivery(
+async def test_missing_private_worker_does_not_enqueue_unreserved_confirmation(
     repo, pg_pool, sample_org,
 ):
     org_id = sample_org["id"]
@@ -117,31 +115,13 @@ async def test_cancellation_serializes_with_confirmation_delivery(
     result = await _processor(repo, booking)._apply_committed_booking(
         org_id, msg, {}, _canonical(day),
     )
-    assert result.requires_staff is False
-    assert result.persisted_state == "confirmed"
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT o.outbound_message_id,o.booking_id FROM booking_confirmation_outbox o
-            WHERE o.organization_id=$1
-        """, org_id)
-        await conn.execute("UPDATE messages SET replied_at=NOW() WHERE id=$1", msg["id"])
-    assert await repo.msg_repo.enqueue_ready_booking_confirmations() == 1
-
-    async with repo.msg_repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
-        assert valid is True
-        cancellation = asyncio.create_task(
-            repo.booking_repo.update_booking_status(
-                org_id, row["booking_id"], "cancellata", expected_status="confermata",
-            )
-        )
-        await asyncio.sleep(0.05)
-        assert not cancellation.done()
-    assert await asyncio.wait_for(cancellation, timeout=2) is not None
-    async with repo.msg_repo.booking_confirmation_delivery_guard(org_id, row["outbound_message_id"]) as valid:
-        assert valid is False
+    assert result.requires_staff is True
+    assert result.persisted_state is None
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 0
+    assert await pg_pool.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org_id) == 0
 
 
-async def test_optional_calendar_failure_preserves_internal_confirmation(
+async def test_optional_calendar_does_not_bypass_private_writer(
     repo, pg_pool, sample_org,
 ):
     org_id = sample_org["id"]
@@ -152,15 +132,9 @@ async def test_optional_calendar_failure_preserves_internal_confirmation(
     result = await _processor(repo, booking)._apply_committed_booking(
         org_id, msg, {}, _canonical(day),
     )
-    assert result.requires_staff is False
-    assert result.persisted_state == "confirmed"
-    async with pg_pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT b.stato,s.provider,s.sync_status FROM bookings b
-            JOIN external_booking_sync s ON s.internal_booking_id=b.id
-             AND s.organization_id=b.organization_id WHERE b.organization_id=$1
-        """, org_id)
-    assert dict(row) == {"stato": "confermata", "provider": "google", "sync_status": "blocked"}
+    assert result.requires_staff is True
+    assert result.persisted_state is None
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 0
 
 
 async def test_external_authority_cannot_fall_back_to_internal(
@@ -203,7 +177,7 @@ async def test_newer_cancellation_blocks_stale_worker(repo, pg_pool, sample_org)
         assert await conn.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 0
 
 
-async def test_competing_last_seat_is_serialized(repo, pg_pool, sample_org):
+async def test_competing_proposals_without_private_identity_are_both_handed_off(repo, pg_pool, sample_org):
     org_id = sample_org["id"]
     booking = BookingService(repo)
     await _configure(pg_pool, booking, org_id)
@@ -215,6 +189,5 @@ async def test_competing_last_seat_is_serialized(repo, pg_pool, sample_org):
         processor._apply_committed_booking(org_id, first, {}, _canonical(day)),
         processor._apply_committed_booking(org_id, second, {}, _canonical(day)),
     )
-    assert sorted(result.requires_staff for result in results) == [False, True]
-    async with pg_pool.acquire() as conn:
-        assert await conn.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 1
+    assert all(result.requires_staff for result in results)
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 0

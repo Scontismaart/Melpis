@@ -80,6 +80,38 @@ def test_webhook_minimizes_before_inbox_enqueue(monkeypatch, channel):
     if channel == 'whatsapp':
         assert payload['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'] == 'stop'
 
+
+def test_medical_admin_input_is_bounded_and_clinical_additions_are_rejected():
+    from src.core.bookings.privacy_boundary import (
+        medical_administrative_text_allowed, minimize_whatsapp_change,
+    )
+
+    safe = 'Mi chiamo Mario Rossi, vorrei un appuntamento amministrativo il 2026-11-12 alle 10:00'
+    assert medical_administrative_text_allowed(safe)
+    clean = minimize_whatsapp_change(
+        {'value': {'messages': [{'id': 'm', 'from': '123', 'type': 'text',
+                                 'text': {'body': safe}}]}},
+        allow_medical_admin=True,
+    )
+    assert clean['value']['messages'][0]['text']['body'] == safe
+
+    clinical = safe + ', ho dolore e assumo una terapia'
+    assert not medical_administrative_text_allowed(clinical)
+    blocked = minimize_whatsapp_change(
+        {'value': {'messages': [{'id': 'm2', 'from': '123', 'type': 'text',
+                                 'text': {'body': clinical}}]}},
+        allow_medical_admin=True,
+    )
+    assert blocked['value']['messages'][0]['text']['body'] == 'Richiesta riservata: intervento umano'
+    assert clinical not in str(blocked)
+
+
+def test_medical_admin_confirmation_token_must_be_exact():
+    from src.core.bookings.privacy_boundary import medical_administrative_text_allowed
+
+    assert medical_administrative_text_allowed('CONFIRM 123e4567-e89b-42d3-a456-426614174000')
+    assert not medical_administrative_text_allowed('CONFIRM 123e4567-e89b-42d3-a456-426614174000 dolore')
+
 @pytest.mark.asyncio
 async def test_classification_errors_quarantine_and_missing_schema_stays_unknown():
     from src.core.bookings.privacy_boundary import inbound_classification_status
@@ -93,6 +125,42 @@ async def test_classification_errors_quarantine_and_missing_schema_stays_unknown
         async def __aexit__(self, *args): return False
     repo.pool = MagicMock(acquire=MagicMock(return_value=Acquire()))
     assert await inbound_classification_status(repo, uuid.uuid4()) == 'unknown'
+
+
+@pytest.mark.asyncio
+async def test_medical_positive_caller_signal_is_never_overridden_by_unknown_schema():
+    from src.core.bookings.privacy_boundary import medical_restricted_for_inbound
+
+    class Conn(Context):
+        async def fetchval(self, sql): return None
+    repo = MagicMock(pool=MagicMock(acquire=MagicMock(return_value=Conn())))
+    repo.get_org_business_profile = AsyncMock(return_value={})
+    assert await medical_restricted_for_inbound(
+        repo, uuid.uuid4(), {'verticale': 'studio_medico_dentista'},
+        text='vorrei un appuntamento', allow_administrative=True,
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_medical_admin_requires_positive_database_classification():
+    from src.core.bookings.privacy_boundary import medical_restricted_for_inbound
+
+    org = uuid.uuid4()
+    conn = MagicMock(fetchval=AsyncMock(return_value='booking_privacy_classification_reader'),
+                     fetchrow=AsyncMock(return_value={'sector': 'studio_medico_dentista'}))
+    class Acquire:
+        async def __aenter__(self): return conn
+        async def __aexit__(self, *args): return False
+    repo = MagicMock(pool=MagicMock(acquire=MagicMock(return_value=Acquire())))
+    repo.get_org_business_profile = AsyncMock(return_value={})
+    safe = 'Mi chiamo Mario Rossi, vorrei un appuntamento amministrativo il 2026-11-12 alle 10:00'
+    assert await medical_restricted_for_inbound(repo, org, {'verticale': 'studio_medico_dentista'},
+                                                text=safe, allow_administrative=True) is False
+    assert await medical_restricted_for_inbound(repo, org, {'verticale': 'studio_medico_dentista'},
+                                                text=safe, allow_administrative=False) is True
+    conn.fetchrow.return_value = None
+    assert await medical_restricted_for_inbound(repo, org, {'verticale': 'studio_medico_dentista'},
+                                                text=safe, allow_administrative=True) is True
 
 @pytest.mark.asyncio
 async def test_ingestion_database_error_persists_only_quarantine(monkeypatch):

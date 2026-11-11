@@ -6,19 +6,19 @@ import pytest
 
 from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied
 from src.core.db.inbound_worker_provenance import record_committed_operation, record_receipt
-from tests.core.bookings.test_conversation_state_postgres import apply, commit_source, state_env
+from tests.core.bookings.test_conversation_state_postgres import apply, commit_source, state_env  # noqa: F401
 from tests.core.test_quota_reservation_lifecycle import _inbound_operation
 
 
 @pytest.mark.asyncio
-async def test_private_worker_claim_requires_persisted_provenance_and_fences_retry(state_env):
+async def test_private_worker_claim_requires_persisted_provenance_and_fences_retry(state_env, private_worker_pool):  # noqa: F811
     env = state_env
     org, message, pool = env["org"], env["message"], env["pool"]
     text = "2026-11-12"
     await commit_source(env, message, text, {"service_id": "standard"}, 1700000000)
     await apply(env, message)
     authority = WorkerBookingAuthority()
-    async with pool.acquire() as conn, conn.transaction():
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         with pytest.raises(WorkerProofDenied, match="provenance"):
             await authority.claim(conn, org, message)
         with pytest.raises(WorkerProofDenied, match="Organization"):
@@ -35,6 +35,8 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         await record_receipt(conn, {"id": inbox, "organization_id": org, "lease_token": lease}, provider)
         await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)
         await record_committed_operation(conn, _inbound_operation(org, message, text=text))
+
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         first = await authority.claim(conn, org, message)
         with pytest.raises(WorkerProofDenied, match="State preimage"):
             await authority.mint(conn, first, env["conv"],
@@ -52,7 +54,7 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
     ('AI_ACTIVE', False, False), ('PENDING_STAFF', False, False),
     ('CLAIMED', False, False), ('AI_ACTIVE', True, False), ('AI_ACTIVE', False, True),
 ])
-async def test_private_worker_validates_confirmed_a04_proposal(state_env, private_worker_pool, ticket_status, closed_date, entrypoint, monkeypatch):
+async def test_private_worker_validates_confirmed_a04_proposal(state_env, private_worker_pool, ticket_status, closed_date, entrypoint, monkeypatch):  # noqa: F811
     from src.core.bookings.conversation_state import render_confirmation_prompt
     from tests.core.bookings.test_a05_auto_booking import _policy
 
@@ -132,7 +134,7 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
         assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
             WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
         return
-    async with pool.acquire() as conn, conn.transaction():
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         authority = WorkerBookingAuthority()
         claim = await authority.claim(conn, org, message)
         if ticket_status != 'AI_ACTIVE':

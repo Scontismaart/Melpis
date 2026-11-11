@@ -161,7 +161,7 @@ class BookingResult(BaseModel):
     data: date | None = None
     ora_inizio: time | None = None
     dettagli: dict[str, Any] = Field(default_factory=dict)
-    sync_status: Literal["synced", "pending_retry", "failed", "local_only", "skipped_shadow"] = "synced"
+    sync_status: Literal["synced", "pending_retry", "failed", "uncertain", "local_only", "skipped_shadow"] = "synced"
     error_code: str | None = None
     error_message: str | None = None
 

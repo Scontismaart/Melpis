@@ -20,7 +20,6 @@ from src.core.bookings.adapters.internal_adapter import InternalBookingAdapter
 from src.core.bookings.adapters.simplybook_adapter import (
     CircuitOpenError,
     SimplyBookAdapter,
-    SimplyBookTimeoutError,
 )
 from src.core.bookings.adapters.zak_adapter import ZakAdapter
 from src.core.bookings.ports.base import (
@@ -306,7 +305,7 @@ class BookingAdapterRouter:
            l'esterna; replay 'synced' -> no-op, 'pending' -> guard)
         2. Data minimization a monte (Invariante 6)
         3. Invocazione adapter secondo la modalità (authoritative, shadow, mirror)
-        4. Aggiornamento stato 'synced' o 'failed'
+        4. Registrazione della prova di successo oppure dello stato incerto.
         """
         org_uuid = uuid.UUID(str(org_id))
 
@@ -329,6 +328,13 @@ class BookingAdapterRouter:
                 "Modalità 'mirror' non supportata senza webhook in ingresso dal gestionale esterno."
             )
 
+        if not self.repo:
+            # An external mutation without a durable claim can be duplicated
+            # by a retry after a process or network failure.
+            return BookingResult(success=False, stato="errore", sync_status="uncertain",
+                                 error_code="sync_store_unavailable",
+                                 error_message="Sincronizzazione non disponibile")
+
         # 1. Claim atomico Send-Then-Mark (sostituisce pre-check + prepare
         # separati: il check-then-act non atomico permetteva doppie chiamate
         # esterne in race; qui un solo vincitore per (org, key) procede).
@@ -342,7 +348,7 @@ class BookingAdapterRouter:
             )
             if not acquired:
                 sync_st = (sync_row or {}).get("sync_status")
-                if sync_st == "synced":
+                if sync_st == "synced" and (sync_row or {}).get("external_booking_id"):
                     logger.info(
                         "Replay idempotente rilevato (già sincronizzato) per org %s key %s",
                         org_uuid,
@@ -360,13 +366,11 @@ class BookingAdapterRouter:
                     req.idempotency_key,
                 )
                 return BookingResult(
-                    success=True,
+                    success=False,
                     stato="in_attesa",
-                    sync_status="pending_retry",
-                    error_message="Sincronizzazione già in corso",
+                    sync_status="uncertain",
+                    error_message="Esito esterno da riconciliare",
                 )
-                # Riga 'failed' -> il claim l'ha gia' riportata a pending e
-                # acquisita: si procede oltre (retry consentito).
 
         # 2. Data Minimization Fail-Closed a monte
         minimized_req = self.data_minimizer.apply(
@@ -375,78 +379,55 @@ class BookingAdapterRouter:
 
         # 3. Invocazione in modalità SHADOW
         if mode == BookingMode.SHADOW:
+            shadow_uncertain = False
             try:
                 shadow_res = await adapter.create_booking(org_uuid, minimized_req)
-                if self.repo:
-                    await self.repo.record_sync_success(
-                        org_uuid,
-                        req.idempotency_key,
-                        (shadow_res.external_booking_id or "") if shadow_res else "",
-                    )
+                if not shadow_res or not shadow_res.success or not shadow_res.external_booking_id:
+                    raise RuntimeError("External booking outcome unverified")
+                marked = await self.repo.record_sync_success(
+                    org_uuid, req.idempotency_key, shadow_res.external_booking_id,
+                )
+                if not marked:
+                    raise RuntimeError("External booking receipt unavailable")
             except Exception as e:
-                logger.warning("Shadow booking external call failed (non-blocking): %s", e)
-                if self.repo:
-                    await self.repo.record_sync_failure(
-                        org_uuid,
-                        req.idempotency_key,
-                        str(e),
-                    )
+                shadow_uncertain = True
+                logger.warning("Shadow booking outcome unverified org=%s error_type=%s", org_uuid, type(e).__name__)
+                try:
+                    await self.repo.record_sync_failure(org_uuid, req.idempotency_key,
+                        "external_outcome_unverified", sync_status="uncertain")
+                except Exception as mark_error:
+                    logger.error("External receipt update failed org=%s error_type=%s", org_uuid, type(mark_error).__name__)
             return BookingResult(
                 success=True,
                 stato="confermata",
-                sync_status="skipped_shadow",
+                sync_status="uncertain" if shadow_uncertain else "skipped_shadow",
+                error_message="Esito esterno da riconciliare" if shadow_uncertain else None,
             )
 
         # 5. Invocazione in modalità AUTHORITATIVE o MIRROR
         try:
             res = await adapter.create_booking(org_uuid, minimized_req)
-            if res.success:
-                if self.repo:
-                    await self.repo.record_sync_success(
-                        org_uuid,
-                        req.idempotency_key,
-                        res.external_booking_id or "",
-                    )
-                return res
-            else:
-                if self.repo:
-                    await self.repo.record_sync_failure(
-                        org_uuid,
-                        req.idempotency_key,
-                        res.error_message or "External booking rejected",
-                    )
-                return res
-
-        except CircuitOpenError as coe:
-            logger.error("Circuit breaker aperto per org %s: %s", org_uuid, coe)
-            if self.repo:
-                await self.repo.record_sync_failure(
-                    org_uuid,
-                    req.idempotency_key,
-                    str(coe),
-                )
-            return BookingResult(
-                success=False,
-                stato="errore",
-                error_code="circuit_open",
-                error_message=str(coe),
-                sync_status="failed",
-            )
-
+            # The adapter contract does not prove whether a failure result
+            # happened before the mutating request reached the provider.
+            if not res.success or not res.external_booking_id:
+                raise RuntimeError("External booking outcome unverified")
+            marked = await self.repo.record_sync_success(org_uuid, req.idempotency_key, res.external_booking_id)
+            if not marked:
+                raise RuntimeError("External booking receipt unavailable")
+            return res
         except Exception as exc:
-            logger.error("Errore durante chiamata adapter esterno per org %s: %s", org_uuid, exc)
-            if self.repo:
-                await self.repo.record_sync_failure(
-                    org_uuid,
-                    req.idempotency_key,
-                    str(exc),
-                )
+            logger.error("External booking outcome unverified org=%s error_type=%s", org_uuid, type(exc).__name__)
+            try:
+                await self.repo.record_sync_failure(org_uuid, req.idempotency_key,
+                    "external_outcome_unverified", sync_status="uncertain")
+            except Exception as mark_error:
+                logger.error("External receipt update failed org=%s error_type=%s", org_uuid, type(mark_error).__name__)
             return BookingResult(
                 success=False,
                 stato="errore",
-                error_code="network_error",
-                error_message=str(exc),
-                sync_status="failed",
+                error_code="external_outcome_uncertain",
+                error_message="Esito esterno da riconciliare",
+                sync_status="uncertain",
             )
 
     async def dispatch_get_availability(
@@ -500,6 +481,11 @@ class BookingAdapterRouter:
         if mode == BookingMode.LOCAL_ONLY or isinstance(adapter, InternalBookingAdapter):
             return BookingResult(success=True, stato="cancellata", sync_status="local_only")
 
+        if not self.repo:
+            return BookingResult(success=False, stato="errore", sync_status="uncertain",
+                                 error_code="sync_store_unavailable",
+                                 error_message="Sincronizzazione non disponibile")
+
         # Claim atomico: doppio click / retry non duplicano la chiamata esterna.
         provider_name = getattr(adapter, "provider_name", getattr(adapter, "_company_login", "external"))
         if self.repo:
@@ -524,40 +510,34 @@ class BookingAdapterRouter:
                     req.idempotency_key,
                 )
                 return BookingResult(
-                    success=True,
+                    success=False,
                     stato="in_attesa",
-                    sync_status="pending_retry",
-                    error_message="Cancellazione già in corso",
+                    sync_status="uncertain",
+                    error_message="Esito esterno da riconciliare",
                 )
 
         try:
             res = await adapter.cancel_booking(org_uuid, req)
-            if self.repo:
-                if res.success:
-                    await self.repo.record_sync_success(
-                        org_uuid,
-                        req.idempotency_key,
-                        res.external_booking_id or "",
-                    )
-                else:
-                    await self.repo.record_sync_failure(
-                        org_uuid,
-                        req.idempotency_key,
-                        res.error_message or "External cancel rejected",
-                    )
+            if not res.success:
+                raise RuntimeError("External cancellation outcome unverified")
+            marked = await self.repo.record_sync_success(
+                org_uuid, req.idempotency_key, res.external_booking_id or req.external_booking_id,
+            )
+            if not marked:
+                raise RuntimeError("External cancellation receipt unavailable")
             return res
         except Exception as exc:
-            logger.error("Cancellazione esterna fallita per org %s: %s", org_uuid, exc)
-            if self.repo:
-                await self.repo.record_sync_failure(
-                    org_uuid,
-                    req.idempotency_key,
-                    str(exc),
-                )
+            logger.error("External cancellation outcome unverified org=%s error_type=%s", org_uuid, type(exc).__name__)
+            try:
+                await self.repo.record_sync_failure(org_uuid, req.idempotency_key,
+                    "external_outcome_unverified", sync_status="uncertain")
+            except Exception as mark_error:
+                logger.error("External receipt update failed org=%s error_type=%s", org_uuid, type(mark_error).__name__)
             return BookingResult(
                 success=False,
                 stato="errore",
-                error_code="cancel_failed",
-                error_message=str(exc),
+                error_code="external_outcome_uncertain",
+                error_message="Esito esterno da riconciliare",
+                sync_status="uncertain",
             )
 

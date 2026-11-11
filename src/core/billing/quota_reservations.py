@@ -615,7 +615,7 @@ class QuotaReservations:
                     WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3""",
                 operation.organization_id, operation.actor_id, operation.id, final.serialized, now,
             )
-            if operation.channel == "inbound" and "booking_state_proposal" in payload:
+            if operation.channel == "inbound":
                 lineage = await conn.fetchrow('''SELECT m.conversation_id,m.c24_original_subject_id
                     FROM messages m JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
                     WHERE m.organization_id=$1 AND c.organization_id=$1 AND m.id=$2 AND m.deleted_at IS NULL
@@ -643,7 +643,7 @@ class QuotaReservations:
             if final.knowledge_epoch is not None:
                 metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
-            if operation.channel == "inbound" and "booking_state_proposal" in payload:
+            if operation.channel == "inbound":
                 from src.core.db.inbound_worker_provenance import (
                     private_booking_worker_enabled, record_committed_operation,
                 )

@@ -1,8 +1,7 @@
-"""Explicitly targeted SQL074 lifecycle continuation, disabled by default.
+"""Least-privilege C2.4 retention controller, disabled by default.
 
-The caller supplies reviewed tenant/record pairs and a dedicated retention-operator pool. This
-module neither discovers targets nor grants lifecycle privileges to a worker.
-SQL074 remains the authority for policy, hold, lineage and concurrency checks.
+The dedicated operator can process reviewed targets or a bounded automatic
+database sweep. SQL remains authoritative for policy, holds, lineage and locks.
 """
 import argparse
 import asyncio
@@ -15,8 +14,46 @@ from uuid import UUID
 import asyncpg
 
 
+def _enabled():
+    return (os.getenv("GDPR_RETENTION_EXECUTION_ENABLED") == "true"
+            and os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") == "true")
+
+
+async def _assume_operator(conn):
+    # SET ROLE alone must not allow a privileged login to impersonate this
+    # narrow capability. Validate the original session before each batch.
+    allowed_login = await conn.fetchval("""SELECT EXISTS (
+        SELECT 1 FROM pg_roles r WHERE r.rolname=session_user
+          AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
+          AND pg_has_role(r.oid, 'melpis_c24_retention', 'MEMBER')
+          AND NOT EXISTS (SELECT 1 FROM pg_namespace n
+            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+              AND has_schema_privilege(r.oid,n.oid,'CREATE'))
+          AND NOT EXISTS (SELECT 1 FROM pg_roles granted
+            WHERE granted.oid <> r.oid AND granted.oid <> 'melpis_c24_retention'::regrole
+              AND pg_has_role(r.oid, granted.oid, 'MEMBER'))
+          AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
+              AND c.relkind IN ('r','p','v','m','f')
+              AND (has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                OR has_any_column_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))
+          AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' AND p.prosecdef
+              AND NOT ((p.proname='c24_retention_operator_allowed'
+                        AND pg_get_function_identity_arguments(p.oid)='')
+                       OR (p.proname='c24_run_retention_target'
+                        AND pg_get_function_identity_arguments(p.oid)='p_kind text, p_org uuid, p_id uuid'))
+              AND has_function_privilege(r.oid,p.oid,'EXECUTE'))
+    )""")
+    if not allowed_login:
+        raise PermissionError("c24_retention_operator_required")
+    await conn.execute("SET LOCAL ROLE melpis_c24_retention")
+    if not await conn.fetchval("SELECT public.c24_retention_operator_allowed()"):
+        raise PermissionError("c24_retention_operator_required")
+
+
 async def run_c24_retention_targets(
-    pool, *, message_targets=(), conversation_targets=(), receipt_targets=(),
+    pool, *, inbox_targets=(), message_targets=(), conversation_targets=(), receipt_targets=(),
     suppression_targets=(), suppression_audit_targets=(),
 ):
     """Attempt at most 500 explicitly supplied targets, each in its own transaction.
@@ -26,16 +63,18 @@ async def run_c24_retention_targets(
     run for a completed one. SQL074 functions are idempotent on retry.
     """
     counts = {
+        "inboxes_purged": 0,
         "messages_purged": 0,
         "conversations_expired": 0,
         "receipts_cleaned": 0,
         "suppressions_cleaned": 0,
         "suppression_audit_rows_expired": 0,
     }
-    if os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") != "true":
+    if not _enabled():
         return counts
     # Bound iteration as well as database work, including generator inputs.
     groups = (
+        (inbox_targets, "inbox", "inboxes_purged"),
         (message_targets, "message", "messages_purged"),
         (conversation_targets, "conversation", "conversations_expired"),
         (receipt_targets, "receipt", "receipts_cleaned"),
@@ -54,36 +93,7 @@ async def run_c24_retention_targets(
         for organization_id, record_id in targets:
             async with pool.acquire() as conn:
                 async with conn.transaction(isolation="read_committed"):
-                    # SET ROLE alone would let a privileged login impersonate the
-                    # narrow operator. Validate the original session first.
-                    allowed_login = await conn.fetchval("""SELECT EXISTS (
-                        SELECT 1 FROM pg_roles r WHERE r.rolname=session_user
-                          AND NOT (r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls)
-                          AND pg_has_role(r.oid, 'melpis_c24_retention', 'MEMBER')
-                          AND NOT EXISTS (SELECT 1 FROM pg_namespace n
-                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
-                              AND has_schema_privilege(r.oid,n.oid,'CREATE'))
-                          AND NOT EXISTS (SELECT 1 FROM pg_roles granted
-                            WHERE granted.oid <> r.oid AND granted.oid <> 'melpis_c24_retention'::regrole
-                              AND pg_has_role(r.oid, granted.oid, 'MEMBER'))
-                          AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
-                              AND c.relkind IN ('r','p','v','m','f')
-                              AND (has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                                OR has_any_column_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES')))
-                          AND NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-                            WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema' AND p.prosecdef
-                              AND NOT ((p.proname='c24_retention_operator_allowed'
-                                        AND pg_get_function_identity_arguments(p.oid)='')
-                                       OR (p.proname='c24_run_retention_target'
-                                        AND pg_get_function_identity_arguments(p.oid)='p_kind text, p_org uuid, p_id uuid'))
-                              AND has_function_privilege(r.oid,p.oid,'EXECUTE'))
-                    )""")
-                    if not allowed_login:
-                        raise PermissionError("c24_retention_operator_required")
-                    await conn.execute("SET LOCAL ROLE melpis_c24_retention")
-                    if not await conn.fetchval("SELECT public.c24_retention_operator_allowed()"):
-                        raise PermissionError("c24_retention_operator_required")
+                    await _assume_operator(conn)
                     applied = await conn.fetchval(
                         "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
                         function, organization_id, record_id,
@@ -93,7 +103,7 @@ async def run_c24_retention_targets(
 
 
 _TARGET_KEYS = (
-    "message_targets", "conversation_targets", "receipt_targets",
+    "inbox_targets", "message_targets", "conversation_targets", "receipt_targets",
     "suppression_targets", "suppression_audit_targets",
 )
 
@@ -126,7 +136,7 @@ def read_target_manifest(path: Path):
 
 
 async def _run_manifest(path: Path):
-    if os.getenv("GDPR_C24_OWNER_RETENTION_ENABLED") != "true":
+    if not _enabled():
         raise SystemExit("C2.4 retention is disabled.")
     targets = read_target_manifest(path)
     dsn = os.getenv("GDPR_C24_OWNER_RETENTION_DSN")
@@ -141,15 +151,68 @@ async def _run_manifest(path: Path):
                          + type(exc).__name__) from None
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run C2.4 retention for a reviewed target manifest.")
-    parser.add_argument("manifest", type=Path)
-    args = parser.parse_args()
+async def run_c24_retention_sweep(pool):
+    """Run one cursor-backed batch of at most 100 database-selected targets.
+
+    A false ``batch_clear`` means at least one target was deferred. The cursor
+    still advances so a held or uncertain record cannot starve other tenants.
+    """
+    if not _enabled() or os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") != "true":
+        return {"enabled": False, "batch_clear": False}
+    async with pool.acquire() as conn, conn.transaction(isolation="read_committed"):
+        await _assume_operator(conn)
+        zero = UUID(int=0)
+        clear = await conn.fetchval(
+            "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+            "sweep", zero, zero,
+        )
+        hotel_clear = await conn.fetchval(
+            "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+            "hotel_sweep", zero, zero,
+        )
+    return {"enabled": True, "batch_clear": clear is True and hotel_clear is True}
+
+
+async def _run_auto(*, loop=False):
+    if not _enabled() or os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") != "true":
+        raise SystemExit("C2.4 automatic retention is disabled.")
+    dsn = os.getenv("GDPR_C24_OWNER_RETENTION_DSN")
+    if not dsn:
+        raise SystemExit("C2.4 retention requires a dedicated connection.")
     try:
-        counts = asyncio.run(_run_manifest(args.manifest))
+        interval = int(os.getenv("GDPR_C24_RETENTION_INTERVAL_SECONDS", "3600"))
+        if not 60 <= interval <= 86400:
+            raise ValueError
+    except ValueError:
+        raise SystemExit("C2.4 retention interval is invalid.") from None
+    try:
+        async with asyncpg.create_pool(dsn=dsn, min_size=1, max_size=1) as pool:
+            if not loop:
+                return await run_c24_retention_sweep(pool)
+            while _enabled() and os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") == "true":
+                print(json.dumps(await run_c24_retention_sweep(pool), sort_keys=True), flush=True)
+                await asyncio.sleep(interval)
+    except Exception as exc:
+        raise SystemExit("C2.4 retention stopped after a database error; error type: "
+                         + type(exc).__name__) from None
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run gated C2.4 retention.")
+    parser.add_argument("manifest", nargs="?", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--sweep", action="store_true")
+    mode.add_argument("--loop", action="store_true")
+    args = parser.parse_args()
+    if bool(args.manifest) == bool(args.sweep or args.loop):
+        parser.error("Choose a reviewed manifest, --sweep or --loop.")
+    try:
+        counts = asyncio.run(_run_auto(loop=args.loop) if args.sweep or args.loop
+                             else _run_manifest(args.manifest))
     except (ValueError, OSError):
         parser.exit(2, "C2.4 retention manifest is invalid.\n")
-    print(json.dumps(counts, sort_keys=True))
+    if counts is not None:
+        print(json.dumps(counts, sort_keys=True))
 
 
 if __name__ == "__main__":

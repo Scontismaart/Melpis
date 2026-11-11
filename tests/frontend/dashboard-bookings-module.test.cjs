@@ -19,6 +19,7 @@ function fixture({ bookings = [pending(), confirmed()], settings = { capienze_or
     overrides: {
       "/api/auth/me": { user_id: "user-1", organization_id: "org-1", email: "qa@example.test", ruolo: role },
       "/api/bookings": () => json(bookings),
+      "/api/bookings/c24-status": () => json({ fenced: false, enabled: false }),
       "/api/bookings/settings": () => json(settings),
       "/api/bookings/semaforo": (request) => request.search.includes(`data=${BOOKING_DATE}`) ? json(slots) : json([]),
       ...overrides,
@@ -204,6 +205,31 @@ test("Rapid duplicate create submits are serialized to one POST", async (t) => {
   assert.equal(requests(h, "POST", "/api/bookings").length, 1);
 });
 
+test("Managed retries persist only opaque idempotency scope after an uncertain response", async (t) => {
+  const h = fixture({ overrides: {
+    "/api/bookings/c24-status": () => json({ fenced: true, enabled: true }),
+    "/api/bookings/catalog": () => json({ published_revision: 3, published: {
+      version: 2, revision: 3, sector: "ristorante", timezone: "Europe/Rome",
+      services: [{ service_id: "table", name: "Tavolo", duration: { kind: "minutes", minutes: 60 } }],
+    } }),
+    "POST /api/bookings": () => json({ detail: "Synthetic timeout" }, 503),
+  } });
+  t.after(() => h.dispose()); await openBookings(h);
+  h.document.getElementById("booking-new-trigger").click(); await h.settle(); fillForm(h);
+  h.document.getElementById("booking-service").value = "table";
+  h.document.getElementById("booking-form").dispatchEvent(new h.window.Event("submit", { bubbles: true, cancelable: true }));
+  await settleRequests(h);
+  const sent = requests(h, "POST", "/api/bookings").at(-1);
+  assert.ok(sent.options.headers["Idempotency-Key"]);
+  const body = JSON.parse(sent.options.body);
+  assert.equal(body.c24.allocation.request_id, sent.options.headers["Idempotency-Key"]);
+  const storageValues = Array.from({ length: h.window.sessionStorage.length }, (_, index) =>
+    h.window.sessionStorage.getItem(h.window.sessionStorage.key(index))).filter(Boolean);
+  assert.equal(storageValues.length, 1);
+  assert.doesNotMatch(storageValues[0], /Nuovo QA|\+39000999|Nota sintetica/);
+  assert.match(storageValues[0], /request_id|booking_id/);
+});
+
 test("Detail edit submits PUT to the selected booking ID with the form payload", async (t) => {
   let edited;
   const h = fixture({ overrides: { "PUT /api/bookings/qa-pending-1": (request) => { edited = request; return json(pending()); } } });
@@ -246,6 +272,7 @@ test("Action failures keep detail open and do not emit success toasts", async (t
   t.after(() => h.dispose()); await openBookings(h);
   h.document.querySelector('[data-open-booking-id="qa-pending-1"]').click();
   h.document.getElementById("booking-confirm-btn").click(); await settleRequests(h);
+  await h.waitFor(() => h.document.getElementById("toast-container"), "the action failure must be visible to the owner");
   assert.equal(h.document.getElementById("booking-modal").hidden, false);
   assert.doesNotMatch(h.document.getElementById("toast-container").textContent, /Prenotazione confermata/);
   assert.match(h.document.getElementById("toast-container").textContent, /Azione negata QA/);
@@ -404,7 +431,8 @@ test("Pending write lock survives route exit and reopening until the request set
   const h = fixture({ overrides: { "POST /api/bookings": () => write.promise } });
   t.after(() => h.dispose()); await openBookings(h);
   const submit = () => { h.document.getElementById("booking-new-trigger").click(); fillForm(h); h.document.getElementById("booking-form").dispatchEvent(new h.window.Event("submit", { cancelable: true })); };
-  submit(); await h.navigate("panoramica"); await h.navigate("prenotazioni"); submit();
+  submit(); await h.waitFor(() => requests(h, "POST", "/api/bookings").length === 1, "the first write must reach the API before route exit");
+  await h.navigate("panoramica"); await h.navigate("prenotazioni"); submit();
   assert.equal(requests(h, "POST", "/api/bookings").length, 1);
   write.resolve(json(pending(), 201)); await h.settle();
   assert.equal(h.document.getElementById("booking-create-modal").hidden, false);

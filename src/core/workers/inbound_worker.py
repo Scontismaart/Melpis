@@ -26,6 +26,10 @@ class InboundWorker:
         self.batch_size = batch_size
         self._booking_worker = None
         self.private_booking_pool = private_booking_pool
+        # The synchronous A05 post-A04 bridge may use only the dedicated
+        # service-role pool. It never falls back to BookingService writers.
+        if self.inbound_service is not None:
+            self.inbound_service.private_booking_pool = private_booking_pool
 
     async def process_next_batch(self):
         """Esegue il reaper dei claim pendenti/scaduti e preleva il prossimo batch atomico."""

@@ -49,7 +49,7 @@ _ADMINISTRATIVE_MEDICAL_WORDS = frozenset('''
     amministrativa standard orario data ora giorno cambiare spostare annullare
     cancellare confermo confermare mio mia nome telefono email numero appuntamenti
     lunedi martedi mercoledi giovedi venerdi sabato domenica oggi domani
-    please i would like to book an a the appointment administrative visit check
+    mi chiamo please i would like to book an a the appointment administrative visit check
     at on for with and or instead change move cancel my name phone email date time
     hello thanks thank you just only monday tuesday wednesday thursday friday
     saturday sunday today tomorrow
@@ -462,6 +462,18 @@ def medical_source_requires_handoff(text, catalog):
     if _MEDICAL.search(normalized):
         return True
     scrubbed = re.sub(r'\b\d{4}-\d{2}-\d{2}\b|\b(?:[01]\d|2[0-3]):[0-5]\d\b', ' ', normalized)
+    # A strictly bounded self-identification is administrative data required
+    # for an appointment, not a free-text clinical field. Preserve the name
+    # only after this exact phrase and exactly two capitalized name tokens;
+    # all other unknown words continue to require staff review.
+    scrubbed = re.sub(
+        r'(?i:\bmi\s+chiamo)\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ\'-]{1,39}\s+'
+        r'[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ\'-]{1,39}\b',
+        ' ', text,
+    )
+    scrubbed = ''.join(c for c in unicodedata.normalize('NFKD', scrubbed.lower())
+                       if not unicodedata.combining(c))
+    scrubbed = re.sub(r'\b\d{4}-\d{2}-\d{2}\b|\b(?:[01]\d|2[0-3]):[0-5]\d\b', ' ', scrubbed)
     words = re.findall(r'[^\W\d_]+', scrubbed, re.UNICODE)
     if any(word not in _ADMINISTRATIVE_MEDICAL_WORDS for word in words):
         return True

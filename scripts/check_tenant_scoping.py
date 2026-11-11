@@ -163,8 +163,8 @@ ALLOWLISTED_SQL_FINGERPRINTS.update({
     ("src/core/db/repositories/organization_repo.py::create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "single-organization provisioning uses the id returned by its new_org CTE",
     ("src/api/routes/team.py::list_my_organizations", "f018234f9a40424316a12de8391d250b8c03179c1a30953029f60b3928893ecf"): "enumerates only memberships bound to the authenticated principal",
     ("src/core/team_invitations.py::accept_invitation", "b890eeb6b0db2692e70655634732f3cd3e534f279df2919da0253b31dbd269be"): "hashed invite-token lookup resolves its organization before scoped acceptance",
-    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "a5a4c52ae35ad1735ef533d7ae5c0c0a012ab3c902d737a424df02d2305ca2bd"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
-    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "f5f422ea8542734e5dbc66e288b1ebcd00f0113f7d4f8a66f2547c9a6ca68c53"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "c98911815b3dcd95ee3d831f476325da9b83a45eb02dc2c26f1b93d93b2a8191"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "f9ff9857504b6b64973f0c74a4ac96044fc0f2025bdfffc1f3cd3fe1a40ee9c4"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
 })
 
 _SQL_KEYWORD_RE = re.compile(

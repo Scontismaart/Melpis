@@ -268,7 +268,8 @@ class TestBookingModes:
         )
 
         assert res.success is False
-        assert res.error_code == "circuit_open"
+        assert res.error_code == "external_outcome_uncertain"
+        assert res.sync_status == "uncertain"
         mock_repo.record_sync_failure.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -293,7 +294,7 @@ class TestBookingModes:
 
         # In shadow mode, l'esito principale è comunque confermato localmente
         assert res.success is True
-        assert res.sync_status == "skipped_shadow"
+        assert res.sync_status == "uncertain"
 
     @pytest.mark.asyncio
     async def test_idempotent_replay_returns_cached_sync(
@@ -349,20 +350,21 @@ class TestBookingModes:
             medical_dpa_signed=False,
         )
 
-        assert res.sync_status == "pending_retry"
+        assert res.sync_status == "uncertain"
+        assert res.success is False
         mock_adapter.create_booking.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_idempotent_replay_failed_allows_retry(
+    async def test_historical_failed_replay_requires_reconciliation(
         self, mock_repo, sample_create_req
     ):
-        """Se una prenotazione era failed, una nuova richiesta/retry ESEGUE la chiamata all'adapter."""
+        """Un vecchio failed non dimostra che il provider non abbia ricevuto la richiesta."""
         mock_repo.claim_sync_slot.return_value = (
             {
                 "idempotency_key": sample_create_req.idempotency_key,
-                "sync_status": "pending",
+                "sync_status": "failed",
             },
-            True,
+            False,
         )
         mock_adapter = MagicMock(spec=BookingSystemPort)
         mock_adapter.create_booking = AsyncMock(
@@ -384,13 +386,11 @@ class TestBookingModes:
             medical_dpa_signed=False,
         )
 
-        assert res.success is True
-        assert res.external_booking_id == "ext-retry-success"
-        mock_adapter.create_booking.assert_awaited_once()
+        assert res.success is False
+        assert res.sync_status == "uncertain"
+        mock_adapter.create_booking.assert_not_awaited()
         mock_repo.claim_sync_slot.assert_awaited_once()
-        mock_repo.record_sync_success.assert_awaited_once_with(
-            ORG_ID, sample_create_req.idempotency_key, "ext-retry-success"
-        )
+        mock_repo.record_sync_success.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_mirror_mode_raises_not_implemented(

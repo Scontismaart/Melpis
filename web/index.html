@@ -664,6 +664,9 @@
           <button type="button" class="booking-modal-close" data-booking-create-close aria-label="Chiudi" data-i18n-aria="dashboard:bookings.close">&times;</button>
         </div>
         <form class="booking-form" id="booking-form">
+          <label id="booking-service-label" hidden>Servizio <select class="doc-config-input" id="booking-service"></select></label>
+          <label id="booking-departure-label" hidden>Partenza <input class="doc-config-input" id="booking-departure" type="date"></label>
+          <label id="booking-rooms-label" hidden>Camere <input class="doc-config-input" id="booking-rooms" type="number" min="1" max="50" value="1"></label>
           <input class="doc-config-input" id="booking-name" type="text" placeholder="Nome cliente" data-i18n-placeholder="dashboard:bookings.customer_name" required>
           <input class="doc-config-input" id="booking-phone" type="tel" placeholder="Telefono" data-i18n-placeholder="dashboard:bookings.phone">
           <input class="doc-config-input" id="booking-date" type="date" required>

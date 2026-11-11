@@ -16,18 +16,18 @@ from src.core.db.repositories.booking_repo import BookingRepository
 from tests.core.test_quota_reservation_lifecycle import _auth_member, _organization
 
 pytestmark = pytest.mark.asyncio
-CATALOG = json.loads((Path(__file__).parent / 'fixtures/catalogs_v2.json').read_text(encoding='utf-8'))['parrucchiere']
+CATALOGS = json.loads((Path(__file__).parent / 'fixtures/catalogs_v2.json').read_text(encoding='utf-8'))
 
 
-async def make_api(pool, *, historic=False):
+async def make_api(pool, *, historic=False, sector='parrucchiere'):
     org = (await _organization(pool))['id']
     await pool.execute("UPDATE organizations SET business_profile=$2::jsonb WHERE id=$1", org,
-                       json.dumps({'verticale': 'parrucchiere'}))
+                       json.dumps({'verticale': sector}))
     auth = await _auth_member(pool, org, role='owner')
     actor = await pool.fetchval('SELECT id FROM user_profiles WHERE auth_user_id=$1', auth)
     repo = BookingRepository(pool)
     publisher = BookingCatalogRepository(repo)
-    draft = copy.deepcopy(CATALOG)
+    draft = copy.deepcopy(CATALOGS[sector])
     await publisher.write(org, actor, auth, action='draft_saved', expected_revision=0,
                           request_id=uuid4(), catalog=draft)
     published = await publisher.write(org, actor, auth, action='published', expected_revision=1,
@@ -53,8 +53,9 @@ async def make_api(pool, *, historic=False):
     return client, identity, org, published['published_revision']
 
 
-async def test_owner_mfa_opt_in_status_revision_and_idempotent_replay(pg_pool):
-    client, identity, org, revision = await make_api(pg_pool)
+@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista'])
+async def test_owner_mfa_opt_in_status_revision_and_idempotent_replay(pg_pool, sector):
+    client, identity, org, revision = await make_api(pg_pool, sector=sector)
     async with client:
         endpoint = '/api/bookings/catalog/sector-admission'
         status = await client.get(endpoint)

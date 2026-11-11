@@ -56,6 +56,12 @@ def _trusted_uuid(value):
     return UUID(str(value))
 
 
+async def _require_private_identity(conn):
+    if not conn.is_in_transaction() or not await conn.fetchval("""SELECT session_user=current_user
+        AND current_user='melpis_c24_booking_worker'"""):
+        raise WorkerProofDenied('Private booking worker identity unavailable')
+
+
 def service_receipt_v2(org, message, operation, canonical_hash):
     """Stable service identity, separate from existing human v1 receipt hashes."""
     try:
@@ -84,10 +90,11 @@ class _Claim:
 
 
 class _Capability:
-    __slots__ = ('_owner', '_connection', '_transaction_id', '_task', '_claim', '_proof', '__weakref__')
-    def __init__(self, owner, connection, transaction_id, task, claim, proof):
+    __slots__ = ('_owner', '_connection', '_transaction_id', '_task', '_claim', '_proof', '_kind', '__weakref__')
+    def __init__(self, owner, connection, transaction_id, task, claim, proof, kind='c24'):
         self._owner, self._connection, self._transaction_id, self._task = owner, connection, transaction_id, task
         self._claim, self._proof = claim, proof
+        self._kind = kind
 
 
 class WorkerBookingAuthority:
@@ -99,9 +106,8 @@ class WorkerBookingAuthority:
 
     async def _confirmed_jobs(self, pool, limit):
         async with pool.acquire() as conn:
-            if not await conn.fetchval("""SELECT current_user='melpis_c24_booking_worker'
-                OR current_user = pg_get_userbyid(relowner)
-                FROM pg_class WHERE oid='public.inbound_worker_operations'::regclass"""):
+            if not await conn.fetchval("""SELECT session_user=current_user
+                AND current_user='melpis_c24_booking_worker'"""):
                 raise WorkerProofDenied('Private booking worker identity unavailable')
             prior_org, prior_conversation = self._cursor or (None, None)
             org = await conn.fetchval("""SELECT id FROM organizations
@@ -161,6 +167,7 @@ class WorkerBookingAuthority:
             _trusted_uuid, (organization_id, conversation_id, confirmation_id),
         )
         async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+            await _require_private_identity(conn)
             candidate = await conn.fetchrow("""SELECT p.source_message_id,s.revision,s.catalog_revision
                 FROM booking_conversation_states s
                 JOIN booking_conversation_requests p
@@ -179,9 +186,138 @@ class WorkerBookingAuthority:
             )
             return await self.create_booking(conn, capability)
 
+    async def process_a05_booking(self, pool, organization_id, message_id, canonical_response):
+        """Commit an already A04-billed restaurant booking under private DB identity."""
+        if not private_booking_worker_enabled():
+            raise WorkerProofDenied('Private booking worker disabled')
+        org, message = map(_trusted_uuid, (organization_id, message_id))
+        async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+            await _require_private_identity(conn)
+            try:
+                claim = await self.claim(conn, org, message)
+            except WorkerProofDenied as exc:
+                if str(exc) != 'Booking claim already held':
+                    raise
+                # A concurrent retry may arrive while the first transaction
+                # owns the lease. Return success only after its complete
+                # booking, allocation receipt, and confirmation outbox commit.
+                existing = await conn.fetchval('''SELECT b.id FROM bookings b
+                    JOIN booking_allocation_requests r ON r.organization_id=b.organization_id AND r.booking_id=b.id
+                    JOIN booking_allocation_sets a ON a.organization_id=b.organization_id AND a.booking_id=b.id
+                    JOIN booking_confirmation_outbox o ON o.organization_id=b.organization_id AND o.booking_id=b.id
+                      AND o.booking_revision=b.calendar_revision
+                    WHERE b.organization_id=$1 AND b.source_message_id=$2 AND b.stato='confermata'
+                      AND r.actor_kind='inbound_worker' AND r.action='allocate' AND r.outcome='allocated'
+                      AND a.state='active' AND a.booking_calendar_revision=b.calendar_revision
+                      AND EXISTS(SELECT 1 FROM booking_resource_allocations x
+                        WHERE x.organization_id=b.organization_id AND x.booking_id=b.id)
+                    LIMIT 1''', org, str(message))
+                if existing:
+                    return existing
+                raise
+            proof = await self._proof_a05(conn, claim, canonical_response)
+            capability = _Capability(self, conn, await conn.fetchval('SELECT txid_current()'),
+                                     asyncio.current_task(), claim, proof, kind='a05')
+            self._issued.add(capability)
+            return await self.create_booking(conn, capability)
+
+    async def _proof_a05(self, conn, claim, supplied_response=None):
+        """Revalidate A04, tenant intent, and the fixed restaurant/table policy."""
+        await _require_private_identity(conn)
+        if type(claim) is not _Claim:
+            raise WorkerProofDenied('Scoped A05 transaction required')
+        org, message = claim.organization_id, claim.message_id
+        source_row = await conn.fetchrow('''SELECT m.id,m.organization_id,m.conversation_id,m.content,m.content_text,
+                m.created_at,m.deleted_at,m.c24_original_subject_id,m.ai_reply_cache,m.billed_at,c.canale,o.business_profile,o.timezone,
+                o.subscription_status,o.subscription_id,o.trial_start,o.trial_end,o.current_period_start,
+                o.current_period_end,o.ai_accounting_blocked,clock_timestamp() AS verified_now
+            FROM messages m JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
+            JOIN organizations o ON o.id=m.organization_id
+            WHERE m.organization_id=$1 AND c.organization_id=$1 AND o.id=$1 AND m.id=$2
+              AND m.direction='inbound' AND m.deleted_at IS NULL FOR SHARE OF m,c,o''', org, message)
+        if not source_row or not source_row['conversation_id'] or source_row['canale'] != 'whatsapp':
+            raise WorkerProofDenied('A05 source unavailable')
+        # Match the inbound writer's conversation lock: a cancellation already
+        # stored wins; one arriving later is serialized after this booking txn.
+        conversation = await conn.fetchrow('''SELECT id,contact_id,deleted_at,status,ticket_status
+            FROM conversations WHERE organization_id=$1 AND id=$2 FOR UPDATE''', org, source_row['conversation_id'])
+        if (not conversation or conversation['deleted_at'] is not None
+                or conversation['contact_id'] != source_row['c24_original_subject_id']
+                or conversation['status'] != 'active' or conversation['ticket_status'] != 'AI_ACTIVE'):
+            raise WorkerProofDenied('A05 conversation unavailable')
+        from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
+        response, response_hash = await BookingConversationRepository._canonical_response(conn, org, source_row)
+        from src.models.schemas import RispostaOutput
+        try:
+            parsed = RispostaOutput.model_validate(response)
+            if supplied_response is not None and parsed.model_dump(mode='json') != RispostaOutput.model_validate(supplied_response).model_dump(mode='json'):
+                raise ValueError()
+        except Exception:
+            raise WorkerProofDenied('Canonical A04 response unavailable') from None
+        proposal = parsed.prenotazione
+        if parsed.richiede_umano or proposal is None or not (proposal.data and proposal.ora and proposal.coperti) or proposal.note:
+            raise WorkerProofDenied('A05 proposal is not eligible')
+        from src.core.inbound.service import InboundProcessingService, _booking_action_is_fresh
+        from src.core.db.repositories.booking_repo import BookingRepository
+        verifier = InboundProcessingService.__new__(InboundProcessingService)
+        verifier.repo = BookingRepository(None)
+        source = await verifier._booking_context(org, dict(source_row), proposal, conn=conn,
+                                                require_latest=True, require_explicit_party=True)
+        if (source is None or not _booking_action_is_fresh(source, proposal)
+                or source['booking_source_message_id'] != str(message)):
+            raise WorkerProofDenied('Customer booking intent is not current')
+        profile = source.get('business_profile') or {}
+        profile = decode(profile) if isinstance(profile, str) else profile
+        if not isinstance(profile, dict) or profile.get('verticale') != 'ristorante':
+            raise WorkerProofDenied('A05 is restricted to restaurants')
+        settings = await conn.fetchrow('SELECT * FROM booking_settings WHERE organization_id=$1 FOR SHARE', org)
+        config = decode(settings['config']) if settings else None
+        capacities = decode(settings['capienze_orarie']) if settings else None
+        policy_settings = {'config': config, 'capienze_orarie': capacities}
+        decision = parse_and_validate_auto_booking(policy_settings, source.get('timezone'), {
+            'service':'ristorante/tavolo','date':proposal.data,'time':proposal.ora,
+            'party_size':proposal.coperti,'duration_minutes':60}, now=source['verified_now'])
+        if (not decision.accepted or decision.booking.authority not in {'internal','internal_calendar_sync'}
+                or not validate_auto_booking_configuration(policy_settings, source.get('timezone'),'ristorante').valid):
+            raise WorkerProofDenied('Current A05 policy denied')
+        organization = await conn.fetchrow('SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE', org)
+        catalog, sector, authority = await self._allocation._catalog(conn, org, organization, settings)
+        from src.core.bookings.catalog_contracts import MinuteDuration
+        eligible = [item for item in catalog.services if isinstance(item.duration, MinuteDuration)
+                    and item.duration.minutes == 60
+                    and any(resource.kind in {'table','seat_pool'}
+                            and any(req.resource_id == resource.resource_id for req in item.resources)
+                            for resource in catalog.resources)]
+        if (sector != 'ristorante' or catalog.sector != 'ristorante' or catalog.timezone != source.get('timezone')
+                or authority not in {'internal','internal_calendar_sync'} or len(eligible) != 1):
+            raise WorkerProofDenied('Published restaurant allocation catalog unavailable')
+        service_id = eligible[0].service_id
+        from src.core.bookings.allocation_contracts import derive_allocation
+        request = AllocationRequest(request_id=uuid4(), booking_id=uuid4(), action='allocate',
+            expected_allocation_revision=0, expected_catalog_revision=catalog.revision,
+            service_id=service_id, appointment_date=decision.booking.date,
+            appointment_time=decision.booking.time, party_size=proposal.coperti)
+        try:
+            derive_allocation(request, catalog)
+        except (ValueError, TypeError, OverflowError):
+            raise WorkerProofDenied('Restaurant allocation does not match published catalog') from None
+        provenance = await conn.fetchrow('''SELECT o.operation_id,o.inbox_id FROM inbound_worker_operations o
+            JOIN inbound_worker_receipts r ON r.organization_id=o.organization_id AND r.message_id=o.message_id AND r.inbox_id=o.inbox_id
+            WHERE o.organization_id=$1 AND o.message_id=$2 ORDER BY o.operation_id LIMIT 1 FOR SHARE OF o,r''', org, message)
+        if not provenance:
+            raise WorkerProofDenied('Committed ingress provenance unavailable')
+        from src.core.bookings.conversation_state import digest
+        text_hash = digest({'organization_id':str(org),'conversation_id':str(source['conversation_id']),
+                            'message_id':str(message),'content_text':source_row['content_text']})
+        return (org, source['conversation_id'], message, source_row['c24_original_subject_id'],
+                source_row['created_at'].timestamp(), text_hash, response_hash, 1, response_hash,
+                catalog.revision, provenance['inbox_id'], provenance['operation_id'],
+                _SectorSlot(decision.booking.date, decision.booking.time, proposal.coperti, decision.booking.capacity), service_id)
+
     async def claim(self, conn, org, message, *, lease_seconds=30):
         """Acquire a fenced lease only for persisted, committed inbound evidence."""
-        if not conn.is_in_transaction() or type(lease_seconds) is not int or not 1 <= lease_seconds <= 60:
+        await _require_private_identity(conn)
+        if type(lease_seconds) is not int or not 1 <= lease_seconds <= 60:
             raise WorkerProofDenied('Invalid claim scope')
         if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
             raise WorkerProofDenied('Worker proof requires read committed isolation')
@@ -217,7 +353,8 @@ class WorkerBookingAuthority:
         return _Claim(org, message, claim_id, row['generation'])
 
     async def _proof(self, conn, claim, conversation, expected_revision, expected_catalog):
-        if not conn.is_in_transaction() or type(claim) is not _Claim:
+        await _require_private_identity(conn)
+        if type(claim) is not _Claim:
             raise WorkerProofDenied('Scoped transaction required')
         if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
             raise WorkerProofDenied('Worker proof requires read committed isolation')
@@ -338,7 +475,7 @@ class WorkerBookingAuthority:
                 or not validate_auto_booking_configuration({**dict(settings), 'config': config,
                     'capienze_orarie': decode(settings['capienze_orarie'])}, organization['timezone'], sector).valid):
                 raise WorkerProofDenied('Current policy or catalog unavailable')
-        elif sector in {'parrucchiere', 'centro_estetico', 'hotel_bnb'}:
+        elif sector in {'parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista'}:
             if not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences
                     WHERE organization_id=$1 AND sector=$2)''', org, sector):
                 raise WorkerProofDenied('Sector admission fence unavailable')
@@ -419,6 +556,7 @@ class WorkerBookingAuthority:
                 operation.id, slot, slots.get('service_id'))
 
     async def mint(self, conn, claim, conversation, *, expected_state_revision, expected_catalog_revision):
+        await _require_private_identity(conn)
         if type(expected_state_revision) is not int or expected_state_revision < 1 or type(expected_catalog_revision) is not int or expected_catalog_revision < 1:
             raise ValueError('Strict revision expectations required')
         proof = await self._proof(conn, claim, conversation, expected_state_revision, expected_catalog_revision)
@@ -427,13 +565,16 @@ class WorkerBookingAuthority:
         return token
 
     async def _consume(self, conn, capability):
+        await _require_private_identity(conn)
         if (type(capability) is not _Capability or capability not in self._issued or capability._owner is not self
             or capability._connection is not conn or capability._task is not asyncio.current_task()
             or not conn.is_in_transaction() or await conn.fetchval('SELECT txid_current()') != capability._transaction_id):
             raise WorkerProofDenied('Capability scope changed')
         self._issued.remove(capability)
         prior = capability._proof
-        current = await self._proof(conn, capability._claim, prior[1], prior[7], prior[9])
+        current = (await self._proof_a05(conn, capability._claim)
+                   if capability._kind == 'a05' else
+                   await self._proof(conn, capability._claim, prior[1], prior[7], prior[9]))
         if current != prior:
             raise WorkerProofDenied('Verified evidence changed')
         return prior
@@ -449,6 +590,7 @@ class WorkerBookingAuthority:
 
     async def create_booking(self, conn, capability):
         """Create a confirmed internal A05 booking from a single-use capability."""
+        await _require_private_identity(conn)
         if not private_booking_worker_enabled():
             raise WorkerProofDenied('Private booking worker disabled')
         prior = await self._consume(conn, capability)
@@ -493,6 +635,10 @@ class WorkerBookingAuthority:
                 )
                 if used + slot.party_size > slot.capacity:
                     raise WorkerProofDenied('Slot capacity unavailable')
+                if (await conn.fetchval("SELECT to_regclass('public.booking_sector_admission_fences') IS NOT NULL")
+                    and await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_sector_admission_fences
+                        WHERE organization_id=$1)''', org)):
+                    await self._mark_sector_admission(conn, org, booking_id)
             else:
                 await self._mark_sector_admission(conn, org, booking_id)
             # Only a customer-authored self-identification supplies the booking name.

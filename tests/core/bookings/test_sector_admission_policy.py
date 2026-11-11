@@ -9,7 +9,7 @@ from src.core.bookings.sector_admission_policy import SectorAdmissionDenied, val
 from tests.core.bookings.test_conversation_state import catalog
 
 
-@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico'])
+@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico', 'studio_medico_dentista'])
 def test_opted_in_local_sector_uses_published_resources(sector):
     _, scoped = catalog(sector)
     current = scoped.catalog

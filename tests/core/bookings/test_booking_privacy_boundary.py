@@ -107,22 +107,24 @@ async def test_replay_does_not_send_again(boundary, booking_request, state):
     repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': 'authoritative'}}
     repo.claim_sync_slot.return_value = ({'sync_status': state, 'external_booking_id': 'existing'}, False)
     result = await router.dispatch_create_booking(ORG, booking_request, verticale='studio_medico')
-    assert result.sync_status == ('synced' if state == 'synced' else 'pending_retry')
+    assert result.sync_status == ('synced' if state == 'synced' else 'uncertain')
     adapter.create_booking.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['shadow', 'authoritative'])
-async def test_failed_attempt_and_retry_are_minimized(boundary, booking_request, mode):
+async def test_uncertain_attempt_is_minimized_and_not_retried(boundary, booking_request, mode):
     repo, adapter, router = boundary
     repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode}}
     adapter.create_booking.side_effect = [RuntimeError('temporary failure'), BookingResult(
         success=True, external_booking_id='retried', stato='confermata', sync_status='synced')]
+    repo.claim_sync_slot.side_effect = [({'sync_status': 'pending'}, True),
+                                       ({'sync_status': 'uncertain'}, False)]
     await router.dispatch_create_booking(ORG, booking_request, verticale='studio_medico')
     await router.dispatch_create_booking(ORG, booking_request, verticale='studio_medico')
-    assert [call.args[1].note for call in adapter.create_booking.await_args_list] == ['', '']
+    assert [call.args[1].note for call in adapter.create_booking.await_args_list] == ['']
     repo.record_sync_failure.assert_awaited_once()
-    repo.record_sync_success.assert_awaited_once()
+    repo.record_sync_success.assert_not_awaited()
     assert booking_request.note == NOTE
 
 

@@ -274,10 +274,11 @@ class ExternalBookingRepository(TenantScopedRepository):
         Sostituisce la sequenza non atomica pre-check + prepare (check-then-act)
         che permetteva doppie chiamate esterne in race. Ritorna (riga, acquired):
         - riga nuova -> (row pending, True): il chiamante ESEGUE la call esterna;
-        - riga esistente 'failed' -> transizione atomica a pending, (row, True):
-          retry esplicito acquisito;
-        - riga esistente 'synced'/'pending' -> (row, False): replay / guard,
-          NON chiamare l'esterna.
+        - qualsiasi riga esistente -> (row, False): nessuna seconda chiamata.
+
+        Le vecchie righe ``failed`` non attestano che il provider non abbia
+        ricevuto la richiesta. Nessuno stato viene riarmato senza un percorso
+        di riconciliazione che verifichi prove specifiche del provider.
         """
         if isinstance(organization_id, str):
             organization_id = uuid.UUID(organization_id)
@@ -306,30 +307,14 @@ class ExternalBookingRepository(TenantScopedRepository):
 
             row = await conn.fetchrow(
                 """
-                UPDATE external_booking_sync
-                SET sync_status = 'pending',
-                    sync_error = NULL,
-                    last_attempt_at = NOW(),
-                    updated_at = NOW()
-                WHERE organization_id = $1
-                  AND idempotency_key = $2
-                  AND sync_status = 'failed'
-                RETURNING *
-                """,
-                organization_id,
-                idempotency_key,
-            )
-            if row:
-                return dict(row), True
-
-            row = await conn.fetchrow(
-                """
                 SELECT * FROM external_booking_sync
                 WHERE organization_id = $1 AND idempotency_key = $2
                 """,
                 organization_id,
                 idempotency_key,
             )
+            if row and (row["provider"] != provider or row["internal_booking_id"] != internal_booking_id):
+                raise ValueError("External booking idempotency scope mismatch")
             return (dict(row) if row else None), False
 
     async def record_sync_prepare(
@@ -370,6 +355,7 @@ class ExternalBookingRepository(TenantScopedRepository):
                     sync_error = NULL,
                     updated_at = NOW()
                 WHERE organization_id = $1 AND idempotency_key = $2
+                  AND sync_status = 'pending'
                 RETURNING *
                 """,
                 organization_id,
@@ -385,9 +371,11 @@ class ExternalBookingRepository(TenantScopedRepository):
         error_message: str,
         sync_status: str = "failed",
     ) -> dict[str, Any] | None:
-        """Registra il fallimento del sync o lo stato di pending_retry per il worker di background."""
+        """Registra l'esito non confermato solo se la richiesta è ancora in corso."""
         if isinstance(organization_id, str):
             organization_id = uuid.UUID(organization_id)
+        if sync_status not in {"failed", "uncertain"}:
+            raise ValueError("Unsupported external sync outcome")
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -399,6 +387,7 @@ class ExternalBookingRepository(TenantScopedRepository):
                     last_attempt_at = NOW(),
                     updated_at = NOW()
                 WHERE organization_id = $1 AND idempotency_key = $2
+                  AND sync_status IN ('pending', 'pending_retry')
                 RETURNING *
                 """,
                 organization_id,

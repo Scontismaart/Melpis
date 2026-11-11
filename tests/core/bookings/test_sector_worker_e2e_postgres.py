@@ -19,7 +19,7 @@ from tests.core.test_quota_reservation_lifecycle import _auth_member, _inbound_m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico'])
+@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico', 'studio_medico_dentista'])
 async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool, private_worker_pool, monkeypatch, sector):
     pool = pg_pool
     org = (await _organization(pool))['id']
@@ -47,7 +47,7 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     while appointment.weekday() == 6:
         appointment += timedelta(days=1)
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
-    await commit_source(env, message, f'Mi chiamo Mario Rossi. {appointment} 10:00',
+    await commit_source(env, message, f'Mi chiamo Mario Rossi, vorrei un appuntamento amministrativo il {appointment} alle 10:00',
         {'service_id': 'standard', 'customer_name': True, 'appointment_date': appointment.isoformat(),
          'appointment_time': '10:00'}, 1700000000, provider_id=wam)
     result = await env['repo'].apply_worker_source(org, conversation, message)

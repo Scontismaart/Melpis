@@ -86,9 +86,200 @@
       let bookingDetailTransition = 0;
       let bookingPollTimer = null;
       let bookingSnapshot = new Map();
+      let c24Status = null, c24Catalog = null, bookingEditingSnapshot = null;
+      const c24Pending = new Map();
       const bookingModal = document.getElementById("booking-modal");
       const bookingSummary = document.getElementById("booking-summary");
       const bookingPendingValue = document.getElementById("booking-pending-value");
+      const c24Service = document.getElementById("booking-service");
+      const c24ServiceLabel = document.getElementById("booking-service-label");
+      const c24Departure = document.getElementById("booking-departure");
+      const c24DepartureLabel = document.getElementById("booking-departure-label");
+      const c24Rooms = document.getElementById("booking-rooms");
+      const c24RoomsLabel = document.getElementById("booking-rooms-label");
+
+      async function loadC24Status(token) {
+        const response = await apiFetch(`${API_BASE}/api/bookings/c24-status`);
+        if (!current(token)) throw new Error("Contesto cambiato.");
+        if (!response.ok) throw new Error("Stato prenotazioni non disponibile. Riprova.");
+        const state = await response.json();
+        if (!current(token) || typeof state?.fenced !== "boolean" || typeof state?.enabled !== "boolean") throw new Error("Stato prenotazioni non disponibile. Riprova.");
+        c24Status = state;
+        if (!state.fenced) { c24Catalog = null; return state; }
+        if (!state.enabled || getSession()?.ruolo !== "owner") throw new Error("Serve il proprietario con verifica a due fattori e prenotazioni abilitate.");
+        const catalogResponse = await apiFetch(`${API_BASE}/api/bookings/catalog`);
+        if (!current(token) || !catalogResponse.ok) throw new Error("Catalogo non disponibile. Riprova.");
+        const data = await catalogResponse.json();
+        if (!current(token) || !data?.published || !Number.isSafeInteger(data.published_revision)
+          || !Array.isArray(data.published.services) || !data.published.services.length) throw new Error("Catalogo non disponibile. Riprova.");
+        c24Catalog = data.published;
+        if (c24Service) {
+          const previous = c24Service.value;
+          c24Service.replaceChildren(...c24Catalog.services.map((item) => {
+            const option = document.createElement("option"); option.value = item.service_id; option.textContent = item.name; return option;
+          }));
+          if (c24Catalog.services.some((item) => item.service_id === previous)) c24Service.value = previous;
+        }
+        return state;
+      }
+
+      function renderC24Fields() {
+        const fenced = c24Status?.fenced === true && Boolean(c24Catalog);
+        const hotel = fenced && c24Catalog.sector === "hotel_bnb";
+        if (c24ServiceLabel) c24ServiceLabel.hidden = !fenced || Boolean(bookingEditingId);
+        if (c24DepartureLabel) c24DepartureLabel.hidden = !hotel;
+        if (c24RoomsLabel) c24RoomsLabel.hidden = !hotel;
+        const note = document.getElementById("booking-note");
+        if (note) { note.hidden = fenced && c24Catalog.sector === "studio_medico_dentista"; if (note.hidden) note.value = ""; }
+      }
+
+      async function managedContext(token, bookingId) {
+        const response = await apiFetch(`${API_BASE}/api/bookings/${encodeURIComponent(bookingId)}/c24-context`);
+        if (!current(token) || !response.ok) throw new Error("Stato della prenotazione non disponibile. Ricarica.");
+        const state = await response.json();
+        if (!current(token) || !state?.allocation || state.allocation.booking_id !== String(bookingId)
+          || !Number.isSafeInteger(state.allocation.expected_allocation_revision)
+          || !Number.isSafeInteger(state.allocation.expected_catalog_revision)) throw new Error("Stato della prenotazione non valido.");
+        return state;
+      }
+
+      function managedHeaders(allocation) {
+        return { "Content-Type": "application/json", "Idempotency-Key": allocation.request_id,
+          "X-Booking-Allocation-Revision": String(allocation.expected_allocation_revision),
+          "X-Booking-Catalog-Revision": String(allocation.expected_catalog_revision) };
+      }
+
+      function persistedMutationKey(action) {
+        // Keep only opaque IDs/revisions in session storage. Never persist
+        // customer details, clinical data, or appointment payloads.
+        return `melpis.c24.booking:${scopeKey()}:${action}`;
+      }
+      function readPersistedMutation(action) {
+        try {
+          const raw = root.sessionStorage?.getItem(persistedMutationKey(action));
+          if (!raw) return null;
+          const value = JSON.parse(raw);
+          const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          if (!value || value.action !== action || !uuid.test(value.request_id)
+            || !uuid.test(value.booking_id) || !Number.isSafeInteger(value.expected_allocation_revision)
+            || !Number.isSafeInteger(value.expected_catalog_revision)) throw new Error("Invalid stored retry");
+          return value;
+        } catch (_) { throw new Error("Richiesta precedente da riconciliare; ricarica le prenotazioni prima di riprovare."); }
+      }
+      function persistMutation(action, allocation) {
+        try {
+          if (!root.sessionStorage) throw new Error("Session storage unavailable");
+          root.sessionStorage.setItem(persistedMutationKey(action), JSON.stringify({
+            action, request_id: allocation.request_id, booking_id: allocation.booking_id,
+            expected_allocation_revision: allocation.expected_allocation_revision,
+            expected_catalog_revision: allocation.expected_catalog_revision,
+          }));
+        } catch (_) { throw new Error("Non è possibile proteggere il retry. Riprova dopo aver riaperto la dashboard."); }
+      }
+      function clearPersistedMutation(action) {
+        try { root.sessionStorage?.removeItem(persistedMutationKey(action)); } catch (_) {}
+      }
+
+      async function managedAction(token, key, action, booking) {
+        const signature = JSON.stringify([scopeKey(), action, booking.id]);
+        const previous = c24Pending.get(key);
+        if (previous) {
+          if (previous.signature !== signature) throw new Error("Completa prima la richiesta precedente.");
+          return previous;
+        }
+        const state = await loadC24Status(token);
+        if (!state.fenced) return null;
+        const context = await managedContext(token, booking.id);
+        const saved = readPersistedMutation(key);
+        if (!saved && context.state !== "active") throw new Error("Allocazione non attiva. Ricarica la prenotazione.");
+        const id = saved?.request_id || root.crypto.randomUUID();
+        const release = ["cancel", "reject", "mark-no-show"].includes(action);
+        const allocation = release ? { booking_id: context.allocation.booking_id,
+          expected_allocation_revision: saved?.expected_allocation_revision ?? context.allocation.expected_allocation_revision,
+          expected_catalog_revision: saved?.expected_catalog_revision ?? context.allocation.expected_catalog_revision, request_id: id, action: "cancel" }
+          : { ...context.allocation, request_id: id, action: "replace" };
+        if (saved) {
+          allocation.expected_allocation_revision = saved.expected_allocation_revision;
+          allocation.expected_catalog_revision = saved.expected_catalog_revision;
+        }
+        persistMutation(key, allocation);
+        const mutation = { operation: action === "mark-completed" ? "complete" : action,
+          nome_cliente: "", telefono: "", note: "", notice: action === "confirm" };
+        const pending = { signature, headers: managedHeaders(allocation),
+          body: release ? undefined : JSON.stringify({ c24: { allocation, mutation, new_booking: null } }) };
+        c24Pending.set(key, pending);
+        return pending;
+      }
+
+      async function managedSave(token, payload, editingId) {
+        const key = "save", signature = JSON.stringify([scopeKey(), editingId, payload,
+          c24Service?.value, c24Departure?.value, c24Rooms?.value]);
+        const previous = c24Pending.get(key);
+        if (previous) {
+          if (previous.signature !== signature) throw new Error("Esito precedente incerto: riprova con gli stessi dati.");
+          return previous;
+        }
+        const state = await loadC24Status(token);
+        if (!state.fenced) return null;
+        const saved = readPersistedMutation(key);
+        if (saved && (saved.booking_id !== (editingId || saved.booking_id))) throw new Error("Completa prima la richiesta precedente.");
+        const requestId = saved?.request_id || root.crypto.randomUUID();
+        let allocation, mutation, lineage = null;
+        if (!editingId) {
+          const service = c24Catalog.services.find((item) => item.service_id === c24Service?.value);
+          if (!service) throw new Error("Seleziona un servizio del catalogo.");
+          const hotel = service.duration?.kind === "civil_nights";
+          allocation = { request_id: requestId, booking_id: saved?.booking_id || root.crypto.randomUUID(), action: "allocate",
+            expected_allocation_revision: saved?.expected_allocation_revision ?? 0, expected_catalog_revision: saved?.expected_catalog_revision ?? c24Catalog.revision,
+            service_id: service.service_id, party_size: payload.coperti };
+          if (hotel) {
+            if (!payload.telefono || !c24Departure?.value || !Number.isInteger(Number(c24Rooms?.value)) || Number(c24Rooms.value) < 1) throw new Error("Inserisci telefono, partenza e numero camere.");
+            allocation.arrival_date = payload.data; allocation.departure_date = c24Departure.value;
+            allocation.room_count = Number(c24Rooms.value);
+            mutation = { operation: "create_stay", ...payload, ora: String(service.duration.check_in).slice(0, 5),
+              arrival_date: payload.data, departure_date: c24Departure.value };
+          } else {
+            allocation.appointment_date = payload.data; allocation.appointment_time = payload.ora;
+            mutation = { operation: "create", ...payload };
+          }
+          if (c24Catalog.sector === "studio_medico_dentista") mutation.note = "";
+          lineage = { contact_id: null, conversation_id: null, source_message_id: null };
+        } else {
+          const context = await managedContext(token, editingId);
+          if (context.state !== "active" || !bookingEditingSnapshot) throw new Error("Allocazione non disponibile. Ricarica.");
+          const previousBooking = bookingEditingSnapshot;
+          const hotel = context.sector === "hotel_bnb";
+          const timeChanged = payload.data !== previousBooking.data || payload.ora !== String(previousBooking.ora || "").slice(0, 5)
+            || Number(payload.coperti) !== Number(previousBooking.coperti)
+            || (hotel && c24Departure?.value !== context.allocation.departure_date);
+          const contactChanged = payload.nome_cliente !== (previousBooking.nome_cliente || "")
+            || payload.telefono !== (previousBooking.telefono || "") || payload.note !== (previousBooking.note || "");
+          if (timeChanged && contactChanged) throw new Error("Modifica contatto e orario in due operazioni separate.");
+          allocation = { ...context.allocation, request_id: requestId, action: "replace",
+            expected_allocation_revision: saved?.expected_allocation_revision ?? context.allocation.expected_allocation_revision,
+            expected_catalog_revision: saved?.expected_catalog_revision ?? context.allocation.expected_catalog_revision };
+          if (timeChanged && hotel) {
+            if (!Number.isSafeInteger(context.stay_revision)) throw new Error("Revisione soggiorno non disponibile.");
+            allocation.arrival_date = payload.data; allocation.departure_date = c24Departure.value;
+            mutation = { operation: "reschedule_stay", nome_cliente: "", telefono: "", note: "", data: payload.data,
+              ora: payload.ora, coperti: payload.coperti, arrival_date: payload.data, departure_date: c24Departure.value,
+              expected_stay_revision: context.stay_revision, notice: true };
+          } else if (timeChanged) {
+            allocation.appointment_date = payload.data; allocation.appointment_time = payload.ora; allocation.party_size = payload.coperti;
+            mutation = { operation: "reschedule", nome_cliente: "", telefono: "", note: "", data: payload.data,
+              ora: payload.ora, coperti: payload.coperti, notice: true };
+          } else {
+            if (hotel) throw new Error("Modifica dei contatti del soggiorno non disponibile: contatta lo staff tecnico.");
+            mutation = { operation: "edit_contact", nome_cliente: payload.nome_cliente, telefono: payload.telefono,
+              note: c24Catalog.sector === "studio_medico_dentista" ? "" : payload.note };
+          }
+        }
+        const pending = { signature, headers: managedHeaders(allocation),
+          body: JSON.stringify({ c24: { allocation, mutation, new_booking: lineage } }) };
+        persistMutation(key, allocation);
+        c24Pending.set(key, pending);
+        return pending;
+      }
       const bookingDetail = {
         title: document.getElementById("booking-modal-title"),
         date: document.getElementById("booking-detail-date"),
@@ -166,20 +357,26 @@
           }
           if (!isCurrent() || !canManage()) return;
           bottoni.forEach((b) => { b.disabled = true; });
-          const res = await apiFetch(`${API_BASE}/api/bookings/${encodeURIComponent(p.id)}/${azione}`, { method: "POST" });
+          const managed = await managedAction(token, key, azione, p);
+          if (!isCurrent()) return;
+          const res = await apiFetch(`${API_BASE}/api/bookings/${encodeURIComponent(p.id)}/${azione}`,
+            managed ? { method: "POST", headers: managed.headers, body: managed.body } : { method: "POST" });
           if (!isCurrent()) return;
           if (!res.ok) {
+            if ([400, 401, 403, 422].includes(res.status)) { c24Pending.delete(key); clearPersistedMutation(key); }
             const errData = await res.json().catch(() => ({}));
             if (!isCurrent()) return;
             throw new Error(errData.detail || "Operazione non riuscita.");
           }
           const updated = await res.json();
           if (!isCurrent()) return;
+          c24Pending.delete(key);
+          clearPersistedMutation(key);
           prenotazioneCorrente = updated;
           chiudiDettaglioPrenotazione();
           detailTransition = bookingDetailTransition;
           toast(
-            azione === "confirm" ? "Prenotazione confermata."
+            azione === "confirm" ? (managed ? "Prenotazione confermata. Comunicazione in attesa di invio." : "Prenotazione confermata.")
               : azione === "reject" ? "Prenotazione rifiutata."
                 : azione === "mark-no-show" ? "Prenotazione segnata come no-show."
                   : azione === "mark-completed" ? "Prenotazione completata."
@@ -311,6 +508,7 @@
         if (entryScope !== scopeKey()) { ensureScope(); return; }
         if (!current(capture())) return;
         bookingEditingId = prenotazione?.id || null;
+        bookingEditingSnapshot = prenotazione ? { ...prenotazione } : null;
         bookingForm?.reset();
         document.getElementById("booking-name").value = prenotazione?.nome_cliente || "";
         document.getElementById("booking-phone").value = prenotazione?.telefono || "";
@@ -319,6 +517,15 @@
         document.getElementById("booking-seats").value = prenotazione?.coperti || "";
         document.getElementById("booking-note").value = prenotazione?.note || "";
         bookingStatusText.textContent = "";
+        renderC24Fields();
+        if (bookingEditingId && c24Status?.fenced && c24Catalog?.sector === "hotel_bnb") {
+          const token = capture(), id = bookingEditingId;
+          managedContext(token, id).then((context) => {
+            if (!current(token) || bookingEditingId !== id) return;
+            if (c24Departure) c24Departure.value = context.allocation.departure_date || "";
+            if (c24Rooms) c24Rooms.value = context.allocation.room_count || 1;
+          }).catch(() => { if (current(token) && bookingEditingId === id) bookingStatusText.textContent = "Stato soggiorno non disponibile. Ricarica."; });
+        }
         document.getElementById("booking-create-title").textContent = bookingEditingId ? "Modifica prenotazione" : "Nuova prenotazione";
         apriBookingModal("booking-create-modal");
       }
@@ -777,18 +984,23 @@
           note: document.getElementById("booking-note").value.trim(),
         };
         try {
+          const managed = await managedSave(token, payload, submittedEditingId);
+          if (!isCurrent()) return;
           const res = await apiFetch(`${API_BASE}/api/bookings${submittedEditingId ? `/${encodeURIComponent(submittedEditingId)}` : ""}`, {
             method: submittedEditingId ? "PUT" : "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            headers: managed?.headers || { "Content-Type": "application/json" },
+            body: managed?.body || JSON.stringify(payload),
           });
           if (!isCurrent()) return;
           if (!res.ok) {
+            if ([400, 401, 403, 422].includes(res.status)) { c24Pending.delete("save"); clearPersistedMutation("save"); }
             const err = await res.json().catch(() => null);
             if (!isCurrent()) return;
             throw new Error(err?.detail?.messaggio || err?.detail || "Errore salvataggio");
           }
           const wasEditing = Boolean(submittedEditingId);
+          c24Pending.delete("save");
+          clearPersistedMutation("save");
           bookingForm.reset();
           document.getElementById("booking-date").value = payload.data;
           bookingStatusText.textContent = wasEditing ? "Modifica salvata." : "Prenotazione aggiunta.";
@@ -970,6 +1182,10 @@
         bookingOpenHours = {};
         bookingPendingOnly = false;
         bookingEditingId = null;
+        bookingEditingSnapshot = null;
+        c24Status = null;
+        c24Catalog = null;
+        c24Pending.clear();
         bookingForm?.reset();
         bookingCalendar?.destroy();
         bookingCalendar = null;
@@ -997,6 +1213,9 @@
         const token = capture();
         const transition = getContext()?.transition;
         const isCurrent = () => current(token) && getContext()?.transition === transition;
+        try { await loadC24Status(token); } catch (_) { c24Status = null; c24Catalog = null; }
+        if (!isCurrent()) return;
+        renderC24Fields();
         await aggiornaImpostazioniPrenotazioni();
         if (!isCurrent()) return;
         inizializzaCalendarioPrenotazioni();

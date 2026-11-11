@@ -8,12 +8,18 @@ on:
       - "src/core/db/schema.sql"
       - "src/core/db/triggers.sql"
       - "src/whatsapp/schema.sql"
+      - "scripts/c01_migration_preflight.py"
+      - "tests/unit/test_c01_migration_preflight.py"
+      - ".github/workflows/migrations.yml"
   pull_request:
     paths:
       - "src/core/db/migrations/*.sql"
       - "src/core/db/schema.sql"
       - "src/core/db/triggers.sql"
       - "src/whatsapp/schema.sql"
+      - "scripts/c01_migration_preflight.py"
+      - "tests/unit/test_c01_migration_preflight.py"
+      - ".github/workflows/migrations.yml"
 
 jobs:
   validate:
@@ -46,6 +52,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check migration versions across the catalog
+        run: python3 -c 'from scripts.c01_migration_preflight import migration_files; migration_files(1, 999, require_contiguous=False)'
 
       - name: Free disk space
         run: |
@@ -105,7 +114,7 @@ jobs:
 
       - name: Apply all migrations in order
         run: |
-          for f in $(ls src/core/db/migrations/0*.sql | sort); do
+          for f in $(ls src/core/db/migrations/[0-9][0-9][0-9]_*.sql | sort); do
             echo "--- Applying $f ---"
             PGPASSWORD=test psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d test -f "$f"
           done

@@ -41,7 +41,7 @@ async def sector_admission_status(request: Request, user: dict = Depends(require
             and policy.get('authority') == 'internal')
         return {
             'enabled': bool(valid_policy and state.get('published_revision') is not None),
-            'eligible': sector in {'parrucchiere', 'centro_estetico', 'hotel_bnb'},
+            'eligible': sector in {'parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista'},
             'published_revision': state.get('published_revision'),
         }
     except (ValueError, TypeError, KeyError):
@@ -82,7 +82,7 @@ async def sector_admission(request: Request, user: dict = Depends(require_ruolo(
                 return {'enabled': previous['enabled'], 'published_revision': previous['published_revision'], 'replayed': True}
             sector = await repo._sector(conn, org)
             if (state['published'] is None or state['published_revision'] != body.expected_published_revision
-                    or sector not in {'parrucchiere', 'centro_estetico', 'hotel_bnb'}
+                    or sector not in {'parrucchiere', 'centro_estetico', 'hotel_bnb', 'studio_medico_dentista'}
                     or state['published']['sector'] != sector):
                 raise HTTPException(409, 'Published catalog or sector changed')
             if authority_from({'config': config}) != 'internal':

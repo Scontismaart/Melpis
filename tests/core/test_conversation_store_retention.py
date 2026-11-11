@@ -25,3 +25,15 @@ def test_conversation_history_has_a_hard_memory_bound(monkeypatch):
 
     assert store.recupera_cronologia("first") == []
     assert store.recupera_cronologia("second") == [("Hello", "Hi")]
+
+
+def test_erasure_clears_tenant_simulator_cache_without_touching_other_scopes():
+    store = ConversationStore()
+    store.aggiungi("org-a:staff-a:conversation", "synthetic", "response")
+    store.aggiungi("org-b:staff-b:conversation", "other", "response")
+    store.aggiungi("demo:session", "anonymous", "response")
+
+    assert store.erase_organization("org-a") == 1
+    assert store.recupera_cronologia("org-a:staff-a:conversation") == []
+    assert store.recupera_cronologia("org-b:staff-b:conversation") == [("other", "response")]
+    assert store.recupera_cronologia("demo:session") == [("anonymous", "response")]

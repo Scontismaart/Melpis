@@ -380,3 +380,107 @@ async def test_inventory_review_cannot_be_claimed_or_overridden_by_provider_conf
     assert final["steps"]
     assert {step["name"]: step["status"] for step in final["steps"]}["provider.inventory_review"] == "held"
     assert final["manifest"]["external_copies"] == "pending_verified_receipts"
+
+
+@pytest.mark.asyncio
+async def test_deletion_purges_terminal_hotel_stay_under_scoped_barrier(
+    pg_pool, monkeypatch,
+):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await approve_policies(pg_pool, env.org)
+    monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
+    operation = await Deletion(pg_pool).request(
+        env.org, "qa-hotel-owner", uuid.uuid4(), scope="contact", subject_id=lineage.contact_id,
+    )
+
+    assert operation["status"] == "partial"
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2",
+        env.org, booking,
+    ) == 0
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM booking_stay_purge_audit WHERE organization_id=$1 AND booking_id=$2 "
+        "AND purpose='erasure' AND operation_id=$3", env.org, booking, operation["id"],
+    ) == 1
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1 AND operation_id=$2 "
+        "AND scope='contact' AND subject_id=$3", env.org, operation["id"], lineage.contact_id,
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_hotel_erasure_purge_failure_rolls_back_barrier_and_redaction(
+    pg_pool, monkeypatch,
+):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    await approve_policies(pg_pool, env.org)
+    monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
+    async with pg_pool.acquire() as admin:
+        await admin.execute("""CREATE FUNCTION public.qa_fail_hotel_purge_audit() RETURNS trigger
+            LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic hotel purge failure'; END $$""")
+        await admin.execute("""CREATE TRIGGER qa_fail_hotel_purge_audit
+            BEFORE INSERT ON public.booking_stay_purge_audit
+            FOR EACH ROW EXECUTE FUNCTION public.qa_fail_hotel_purge_audit()""")
+    try:
+        with pytest.raises(Exception, match="synthetic hotel purge failure"):
+            await Deletion(pg_pool).request(
+                env.org, "qa-hotel-rollback", uuid.uuid4(),
+                scope="contact", subject_id=lineage.contact_id,
+            )
+    finally:
+        async with pg_pool.acquire() as admin:
+            await admin.execute("DROP TRIGGER IF EXISTS qa_fail_hotel_purge_audit ON public.booking_stay_purge_audit")
+            await admin.execute("DROP FUNCTION IF EXISTS public.qa_fail_hotel_purge_audit()")
+
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2",
+        env.org, booking,
+    ) == 1
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1 AND subject_id=$2",
+        env.org, lineage.contact_id,
+    ) == 0
+    assert await pg_pool.fetchval(
+        "SELECT deleted_at IS NULL AND phone_number<>('erased:'||id::text) "
+        "FROM contacts WHERE organization_id=$1 AND id=$2", env.org, lineage.contact_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_hotel_stay_is_not_purged_when_another_erasure_blocker_exists(
+    pg_pool, monkeypatch,
+):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    # The stay policy exists, but the other required contact/transient/cutover
+    # approvals are intentionally absent. The stay-only branch must not run.
+    monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
+    result = await Deletion(pg_pool).request(
+        env.org, "qa-hotel-blocked", uuid.uuid4(), scope="contact", subject_id=lineage.contact_id,
+    )
+    assert result["status"] == "blocked"
+    assert any(item.startswith("policy_required.") for item in result["manifest"]["blockers"])
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2",
+        env.org, booking,
+    ) == 1
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1 AND subject_id=$2",
+        env.org, lineage.contact_id,
+    ) == 0
+
+
+@pytest.mark.asyncio
+async def test_service_role_hotel_bridge_requires_active_scoped_operation(pg_pool):
+    async with pg_pool.acquire() as conn, conn.transaction(isolation="read_committed"):
+        await conn.execute("SET LOCAL ROLE service_role")
+        with pytest.raises(Exception, match="Active erasure operation required"):
+            await conn.fetchval(
+                "SELECT public.c24_purge_hotel_for_erasure($1,$2,$3,$4)",
+                uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), "synthetic-policy-v1",
+            )

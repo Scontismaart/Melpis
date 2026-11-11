@@ -1,11 +1,16 @@
 """Tests for the explicitly enabled owner lifecycle controller."""
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import asyncpg
 
 from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
+
+
+@pytest.fixture(autouse=True)
+def enabled_primary_retention_for_synthetic_tests(monkeypatch):
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
 
 
 def pool_with_results(results):
@@ -25,10 +30,43 @@ async def test_controller_is_disabled_without_explicit_owner_cutover(monkeypatch
     monkeypatch.delenv("GDPR_C24_OWNER_RETENTION_ENABLED", raising=False)
     pool, _ = pool_with_results([])
     assert await run_c24_retention_targets(pool, message_targets=[(uuid4(), uuid4())]) == {
-        "messages_purged": 0, "conversations_expired": 0, "receipts_cleaned": 0,
+        "inboxes_purged": 0, "messages_purged": 0, "conversations_expired": 0, "receipts_cleaned": 0,
         "suppressions_cleaned": 0, "suppression_audit_rows_expired": 0,
     }
     pool.acquire.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_global_flag_blocks_even_an_authorized_operator(monkeypatch):
+    monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
+    monkeypatch.delenv("GDPR_RETENTION_EXECUTION_ENABLED", raising=False)
+    pool, _ = pool_with_results([])
+    counts = await run_c24_retention_targets(pool, inbox_targets=[(uuid4(), uuid4())])
+    assert counts["inboxes_purged"] == 0
+    pool.acquire.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_automatic_sweep_requires_its_own_flag_and_dedicated_role(monkeypatch):
+    from src.core.gdpr.c24_retention_controller import run_c24_retention_sweep
+
+    monkeypatch.setenv("GDPR_C24_OWNER_RETENTION_ENABLED", "true")
+    monkeypatch.delenv("GDPR_C24_AUTO_RETENTION_ENABLED", raising=False)
+    pool, _ = pool_with_results([])
+    assert await run_c24_retention_sweep(pool) == {"enabled": False, "batch_clear": False}
+    pool.acquire.assert_not_called()
+
+    monkeypatch.setenv("GDPR_C24_AUTO_RETENTION_ENABLED", "true")
+    pool, conn = pool_with_results([True, True, True, False])
+    assert await run_c24_retention_sweep(pool) == {"enabled": True, "batch_clear": False}
+    assert conn.fetchval.await_args_list[-1].args == (
+        "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+        "hotel_sweep", UUID(int=0), UUID(int=0),
+    )
+    assert conn.fetchval.await_args_list[-2].args == (
+        "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+        "sweep", UUID(int=0), UUID(int=0),
+    )
 
 
 @pytest.mark.asyncio
@@ -40,7 +78,7 @@ async def test_controller_delegates_targeted_mutations_to_owner_functions(monkey
                                            conversation_targets=[(org, conversation)],
                                            receipt_targets=[(org, receipt)],
                                            suppression_audit_targets=[(org, audit)]) == {
-        "messages_purged": 1, "conversations_expired": 0, "receipts_cleaned": 1,
+        "inboxes_purged": 0, "messages_purged": 1, "conversations_expired": 0, "receipts_cleaned": 1,
         "suppressions_cleaned": 0, "suppression_audit_rows_expired": 1,
     }
     for index, kind, record in [(2, "message", message), (5, "conversation", conversation),
@@ -73,7 +111,7 @@ def test_manifest_validates_complete_batch_before_execution(tmp_path):
     org, receipt = uuid4(), uuid4()
     path.write_text(json.dumps({"receipt_targets": [[str(org), str(receipt)]]}))
     assert read_target_manifest(path) == {
-        "message_targets": [], "conversation_targets": [], "receipt_targets": [(org, receipt)],
+        "inbox_targets": [], "message_targets": [], "conversation_targets": [], "receipt_targets": [(org, receipt)],
         "suppression_targets": [], "suppression_audit_targets": [],
     }
     path.write_text(json.dumps({"message_targets": [[str(org), str(receipt)]],
@@ -132,7 +170,7 @@ async def test_retention_operator_database_role_and_dispatch(pg_pool, postgres_c
 
 from tests.core.bookings.test_conversation_state_postgres import state_env, commit_source, apply
 from tests.core.gdpr.test_conversation_lifecycle_c24 import approve_conversation
-from tests.core.gdpr.test_c24_idle_expiry import age_state
+from tests.core.gdpr.test_c24_idle_expiry import age_message, age_state
 
 
 @pytest.mark.asyncio
@@ -155,6 +193,7 @@ async def test_operator_dispatches_eligible_targets(state_env, other_org, postgr
     await pool.execute("""UPDATE messages SET status='handled',handling_type='ai',
         created_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND id=$2""",
         env['org'], env['message'])
+    await age_message(pool, env['org'], env['message'], 91)
     await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
         retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
         VALUES($1,'messages_content','test',true,90,false,'test:source','qa',
