@@ -474,7 +474,8 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
             # message when the outbox's revision key has already been used.
             existing = await conn.fetchrow('''SELECT m.content FROM booking_confirmation_outbox o
                 JOIN messages m ON m.organization_id=o.organization_id AND m.id=o.outbound_message_id
-                WHERE o.organization_id=$1 AND o.booking_id=$2 AND o.booking_revision=$3
+                WHERE o.organization_id=$1 AND m.organization_id=$1
+                  AND o.booking_id=$2 AND o.booking_revision=$3
                 FOR UPDATE OF o''', org, request.booking_id, booking['calendar_revision'])
             if stay:
                 from src.core.bookings.hotel_confirmation import enqueue_hotel_confirmation
@@ -537,8 +538,8 @@ async def _enqueue_reschedule_notice(conn, booking, request, mutation):
     conversation = booking['id_conversazione']
     if conversation:
         row = await conn.fetchrow('''SELECT c.id,s.phone_number,s.deleted_at,s.consent_status FROM conversations c
-            JOIN contacts s ON s.organization_id=c.organization_id AND s.id=c.contact_id
-            WHERE c.organization_id=$1 AND c.id=$2 AND c.deleted_at IS NULL FOR SHARE OF c,s''', org, UUID(str(conversation)))
+            JOIN contacts s ON s.organization_id=c.organization_id AND s.organization_id=$1 AND s.id=c.contact_id
+            WHERE c.organization_id=$1 AND s.organization_id=$1 AND c.id=$2 AND c.deleted_at IS NULL FOR SHARE OF c,s''', org, UUID(str(conversation)))
         if (not row or row['deleted_at'] is not None or row['consent_status'] == 'withdrawn'
                 or re.sub(r'[^0-9]', '', row['phone_number']) != normalized):
             raise AllocationDenied('Reconfirmation subject unavailable')
@@ -571,7 +572,8 @@ async def _enqueue_reschedule_notice(conn, booking, request, mutation):
     key = f"booking-reconfirmation:{org}:{booking['id']}:{booking['calendar_revision']}"
     existing = await conn.fetchrow('''SELECT m.content,m.handling_type FROM booking_confirmation_outbox o
         JOIN messages m ON m.organization_id=o.organization_id AND m.id=o.outbound_message_id
-        WHERE o.organization_id=$1 AND o.booking_id=$2 AND o.booking_revision=$3 FOR UPDATE OF o''',
+        WHERE o.organization_id=$1 AND m.organization_id=$1
+          AND o.booking_id=$2 AND o.booking_revision=$3 FOR UPDATE OF o''',
         org, booking['id'], booking['calendar_revision'])
     if existing:
         from src.core.db.repositories.booking_catalog_repo import decode

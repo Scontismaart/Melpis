@@ -206,11 +206,12 @@ class WorkerBookingAuthority:
                     JOIN booking_allocation_sets a ON a.organization_id=b.organization_id AND a.booking_id=b.id
                     JOIN booking_confirmation_outbox o ON o.organization_id=b.organization_id AND o.booking_id=b.id
                       AND o.booking_revision=b.calendar_revision
-                    WHERE b.organization_id=$1 AND b.source_message_id=$2 AND b.stato='confermata'
+                    WHERE b.organization_id=$1 AND r.organization_id=$1 AND a.organization_id=$1
+                      AND o.organization_id=$1 AND b.source_message_id=$2 AND b.stato='confermata'
                       AND r.actor_kind='inbound_worker' AND r.action='allocate' AND r.outcome='allocated'
                       AND a.state='active' AND a.booking_calendar_revision=b.calendar_revision
                       AND EXISTS(SELECT 1 FROM booking_resource_allocations x
-                        WHERE x.organization_id=b.organization_id AND x.booking_id=b.id)
+                        WHERE x.organization_id=$1 AND x.organization_id=b.organization_id AND x.booking_id=b.id)
                     LIMIT 1''', org, str(message))
                 if existing:
                     return existing
@@ -303,7 +304,8 @@ class WorkerBookingAuthority:
             raise WorkerProofDenied('Restaurant allocation does not match published catalog') from None
         provenance = await conn.fetchrow('''SELECT o.operation_id,o.inbox_id FROM inbound_worker_operations o
             JOIN inbound_worker_receipts r ON r.organization_id=o.organization_id AND r.message_id=o.message_id AND r.inbox_id=o.inbox_id
-            WHERE o.organization_id=$1 AND o.message_id=$2 ORDER BY o.operation_id LIMIT 1 FOR SHARE OF o,r''', org, message)
+            WHERE o.organization_id=$1 AND r.organization_id=$1 AND o.message_id=$2
+            ORDER BY o.operation_id LIMIT 1 FOR SHARE OF o,r''', org, message)
         if not provenance:
             raise WorkerProofDenied('Committed ingress provenance unavailable')
         from src.core.bookings.conversation_state import digest

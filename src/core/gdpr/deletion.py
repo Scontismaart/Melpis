@@ -256,7 +256,8 @@ class Deletion:
                 '''UPDATE bookings SET nome_cliente='REDACTED',telefono='',note='',id_conversazione=NULL
                    WHERE organization_id=$1 AND ($2::uuid IS NULL OR contact_id=$2)
                      AND NOT EXISTS(SELECT 1 FROM booking_stays s
-                       WHERE s.organization_id=bookings.organization_id AND s.booking_id=bookings.id)''', org, subject,
+                       WHERE s.organization_id=$1 AND s.organization_id=bookings.organization_id
+                         AND s.booking_id=bookings.id)''', org, subject,
             )
             await conn.execute(
                 '''UPDATE reviews SET autore='REDACTED',testo='',bozza_risposta='',is_anonymized=TRUE

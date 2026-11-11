@@ -28,6 +28,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from src.core.db.scoping import system_scope
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +358,7 @@ async def _extension_inventory(conn) -> tuple[tuple[str, str, str], ...]:
     return tuple((row["extname"], row["extversion"], row["nspname"]) for row in rows)
 
 
+@system_scope("isolated encrypted backup parity check counts every table in the verified source/quarantine snapshot")
 async def _table_counts(conn) -> dict[tuple[str, str], int]:
     tables = await conn.fetch("""SELECT n.nspname AS schema_name,c.relname AS table_name
         FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
