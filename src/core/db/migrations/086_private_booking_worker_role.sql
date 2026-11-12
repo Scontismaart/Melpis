@@ -4,9 +4,17 @@ DO $$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='melpis_c24_booking_worker') THEN
   CREATE ROLE melpis_c24_booking_worker LOGIN NOINHERIT NOSUPERUSER NOCREATEDB
       NOCREATEROLE NOREPLICATION BYPASSRLS;
+  -- PostgreSQL 16+ gives a non-superuser CREATEROLE creator ADMIN OPTION on
+  -- the new role. Remove only that automatic self-membership; no app role is
+  -- allowed to receive the private BYPASSRLS identity.
+  REVOKE melpis_c24_booking_worker FROM CURRENT_USER;
  ELSE
-  ALTER ROLE melpis_c24_booking_worker LOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-      NOCREATEROLE NOREPLICATION BYPASSRLS;
+  -- Do not normalize an existing role or its credential state. Accept only
+  -- the exact dormant role shape and fail closed on unexpected attributes.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='melpis_c24_booking_worker' AND
+       (NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls)) THEN
+   RAISE EXCEPTION 'C2.4 worker role has unexpected attributes';
+  END IF;
  END IF;
  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='melpis_c24_booking_worker' AND
       (NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
