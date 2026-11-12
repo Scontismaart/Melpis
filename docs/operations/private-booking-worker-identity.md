@@ -11,11 +11,19 @@ same immutable per-database identity marker and PostgreSQL database OID. A
 worker DSN pointed at another database fails closed even when it uses the
 expected login. A missing or unsuitable identity fails closed.
 
-Migration `086_private_booking_worker_role.sql` provisions the dedicated login
-without a password and grants access only to the booking evidence, policy,
-allocation, confirmation, and message-delivery tables used by this worker. It
-does not grant access to catalogs, billing, membership, credentials, or other
-product domains. `BYPASSRLS` is confined to this non-inheriting backend login;
+Before migration `086_private_booking_worker_role.sql`, a database superuser
+must provision `melpis_c24_booking_worker` with `NOLOGIN`, the exact remaining
+role attributes, no password, and no role memberships. PostgreSQL requires a superuser to create a
+`BYPASSRLS` role; a `CREATEROLE` migration user cannot create or repair it
+safely. Migration 086 verifies role attributes and memberships, but cannot
+read the password verifier as the migration user; the C01 superuser preflight
+must verify that no password is set without displaying the verifier. The
+migration then grants access only to the booking evidence, policy, allocation,
+confirmation, and message-delivery tables used by this worker. It does not
+create or alter the role, set credentials, or grant access to catalogs, billing,
+membership, credentials, or other product domains. `BYPASSRLS` is confined to
+this non-inheriting backend role, which remains `NOLOGIN` until a separate
+activation approval;
 the worker's tenant-scoped queries and authorization checks remain mandatory
 and the readiness check rejects other table or security-definer privileges.
 PostgreSQL row-lock privileges are granted only at column scope for protected
@@ -26,8 +34,8 @@ cannot be updated or deleted.
 The capability function that permits fenced sector admission is the only
 security-definer function allowed to this identity.
 
-The database credential must be provisioned in a protected secret store after
-the migration has been reviewed and applied in an authorized environment. No
+Before a separately approved worker activation, an administrator must enable
+`LOGIN` and provision the credential through the protected secret store. No
 credential is stored in the repository. The worker remains off in all
 operational environments until that provisioning, the migration, and the
 separate C2.4 activation approval are complete. This repository change does

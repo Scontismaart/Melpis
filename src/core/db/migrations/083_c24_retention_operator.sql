@@ -1,4 +1,44 @@
 -- Dedicated, explicitly provisioned retention operator; no application role gains access.
+-- Supabase grants PUBLIC SELECT on these monitoring views by default. Retention
+-- operators must not inherit cross-tenant query telemetry; preserve owner and
+-- explicit dashboard grants while removing only PUBLIC SELECT.
+DO $monitoring_acl$
+DECLARE
+    extension_oid oid;
+    relation_name text;
+    relation_oid oid;
+BEGIN
+    SELECT e.oid INTO extension_oid
+      FROM pg_extension e
+      JOIN pg_namespace n ON n.oid=e.extnamespace
+     WHERE e.extname='pg_stat_statements' AND n.nspname='extensions';
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    FOREACH relation_name IN ARRAY ARRAY['pg_stat_statements','pg_stat_statements_info'] LOOP
+        relation_oid := to_regclass(format('extensions.%I',relation_name));
+        IF relation_oid IS NULL THEN
+            CONTINUE;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1
+              FROM pg_class c
+              JOIN pg_depend d ON d.classid='pg_class'::regclass AND d.objid=c.oid
+             WHERE c.oid=relation_oid
+               AND c.relkind='v'
+               AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+               AND d.refclassid='pg_extension'::regclass
+               AND d.refobjid=extension_oid
+               AND d.deptype='e'
+        ) THEN
+            RAISE EXCEPTION 'Unexpected pg_stat_statements extension object or owner';
+        END IF;
+        EXECUTE format('REVOKE SELECT ON TABLE extensions.%I FROM PUBLIC',relation_name);
+    END LOOP;
+END
+$monitoring_acl$;
+
 DO $$
 DECLARE retention_role oid;
 BEGIN

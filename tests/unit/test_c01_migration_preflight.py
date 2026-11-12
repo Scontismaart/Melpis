@@ -78,6 +78,19 @@ def test_hotel_prerequisite_precedes_consumers_and_calendar_column_is_not_used_e
                for path in files[:calendar])
 
 
+def test_private_booking_worker_role_is_preprovisioned_by_superuser():
+    migration = (preflight.MIGRATIONS / "086_private_booking_worker_role.sql").read_text(encoding="utf-8")
+    preflight_block = migration.split("GRANT USAGE ON SCHEMA public", 1)[0]
+    assert "CREATE ROLE melpis_c24_booking_worker" not in migration
+    assert "ALTER ROLE melpis_c24_booking_worker" not in migration
+    assert "worker role must be provisioned by a superuser before migration 086" in preflight_block
+    assert "rolcanlogin OR rolinherit" in preflight_block
+    workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "migrations.yml").read_text(encoding="utf-8")
+    assert "CREATE ROLE melpis_c24_booking_worker NOLOGIN" in workflow
+    assert "m.member=worker_role OR m.roleid=worker_role" in preflight_block
+    assert migration.index("worker role must be provisioned") < migration.index("GRANT USAGE")
+
+
 def test_duplicate_outside_requested_c01_range_is_rejected(tmp_path, monkeypatch):
     for name in ("060_baseline.sql", "088_first.sql", "088_second.sql"):
         (tmp_path / name).write_text("-- synthetic migration\n", encoding="utf-8")

@@ -1,20 +1,20 @@
--- Dedicated database login for the dormant C2.4 worker. A password or other
--- credential is provisioned outside migrations and is never stored here.
-DO $$ BEGIN
- IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='melpis_c24_booking_worker') THEN
-  CREATE ROLE melpis_c24_booking_worker LOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-      NOCREATEROLE NOREPLICATION BYPASSRLS;
- ELSE
-  ALTER ROLE melpis_c24_booking_worker LOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-      NOCREATEROLE NOREPLICATION BYPASSRLS;
+-- BYPASSRLS is a superuser-only attribute, and a CREATEROLE migration user
+-- cannot safely create or repair this identity. A superuser must provision the
+-- exact dormant role out of band before this migration. This migration never
+-- creates, alters, or grants membership in the worker identity.
+DO $$
+DECLARE worker_role oid;
+BEGIN
+ SELECT oid INTO worker_role FROM pg_roles WHERE rolname='melpis_c24_booking_worker';
+ IF worker_role IS NULL THEN
+  RAISE EXCEPTION 'C2.4 worker role must be provisioned by a superuser before migration 086'
+   USING ERRCODE='55000';
  END IF;
- IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='melpis_c24_booking_worker' AND
-      (NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
-    OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member
-      WHERE r.rolname='melpis_c24_booking_worker')
-    OR EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid
-      WHERE r.rolname='melpis_c24_booking_worker') THEN
-  RAISE EXCEPTION 'C2.4 worker login must remain isolated';
+ IF EXISTS (SELECT 1 FROM pg_roles WHERE oid=worker_role AND
+      (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
+    OR EXISTS (SELECT 1 FROM pg_auth_members m
+      WHERE m.member=worker_role OR m.roleid=worker_role) THEN
+  RAISE EXCEPTION 'C2.4 worker role must remain dormant with exact attributes and no memberships';
  END IF;
 END $$;
 
