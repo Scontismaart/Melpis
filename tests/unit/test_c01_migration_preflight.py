@@ -84,6 +84,9 @@ def test_private_booking_worker_role_is_preprovisioned_by_superuser():
     assert "CREATE ROLE melpis_c24_booking_worker" not in migration
     assert "ALTER ROLE melpis_c24_booking_worker" not in migration
     assert "worker role must be provisioned by a superuser before migration 086" in preflight_block
+    assert "rolcanlogin OR rolinherit" in preflight_block
+    workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "migrations.yml").read_text(encoding="utf-8")
+    assert "CREATE ROLE melpis_c24_booking_worker NOLOGIN" in workflow
     assert "m.member=worker_role OR m.roleid=worker_role" in preflight_block
     assert migration.index("worker role must be provisioned") < migration.index("GRANT USAGE")
 

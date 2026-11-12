@@ -11,10 +11,10 @@ BEGIN
    USING ERRCODE='55000';
  END IF;
  IF EXISTS (SELECT 1 FROM pg_roles WHERE oid=worker_role AND
-      (NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
+      (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
     OR EXISTS (SELECT 1 FROM pg_auth_members m
       WHERE m.member=worker_role OR m.roleid=worker_role) THEN
-  RAISE EXCEPTION 'C2.4 worker login must have exact attributes and no memberships';
+  RAISE EXCEPTION 'C2.4 worker role must remain dormant with exact attributes and no memberships';
  END IF;
 END $$;
 

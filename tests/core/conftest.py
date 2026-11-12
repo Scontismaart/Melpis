@@ -68,6 +68,10 @@ async def pg_pool(postgres_container, request):
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
                     CREATE ROLE service_role;
                 END IF;
+                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'melpis_c24_booking_worker') THEN
+                    CREATE ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB
+                        NOCREATEROLE NOREPLICATION BYPASSRLS;
+                END IF;
             END $$;
             DROP SCHEMA IF EXISTS public CASCADE;
             CREATE SCHEMA public;
@@ -112,20 +116,28 @@ async def private_worker_pool(pg_pool, postgres_container):
     import asyncpg
 
     password = secrets.token_hex(24)
-    async with pg_pool.acquire() as conn:
-        await conn.execute(f"ALTER ROLE melpis_c24_booking_worker PASSWORD '{password}'")
-    pool = await asyncpg.create_pool(
-        dsn=postgres_container.get_connection_url().replace("+psycopg2", ""),
-        user="melpis_c24_booking_worker", password=password,
-        min_size=1, max_size=4,
-        server_settings={"search_path": "public, extensions"},
-    )
+    pool = None
     try:
+        async with pg_pool.acquire() as conn:
+            await conn.execute(f"ALTER ROLE melpis_c24_booking_worker LOGIN PASSWORD '{password}'")
+        pool = await asyncpg.create_pool(
+            dsn=postgres_container.get_connection_url().replace("+psycopg2", ""),
+            user="melpis_c24_booking_worker", password=password,
+            min_size=1, max_size=4,
+            server_settings={"search_path": "public, extensions"},
+        )
         yield pool
     finally:
-        await pool.close()
+        if pool is not None:
+            await pool.close()
         async with pg_pool.acquire() as conn:
-            await conn.execute("ALTER ROLE melpis_c24_booking_worker PASSWORD NULL")
+            await conn.execute("ALTER ROLE melpis_c24_booking_worker NOLOGIN PASSWORD NULL")
+            dormant = await conn.fetchval("""
+                SELECT NOT r.rolcanlogin AND a.rolpassword IS NULL
+                FROM pg_roles r JOIN pg_authid a ON a.oid=r.oid
+                WHERE r.rolname='melpis_c24_booking_worker'
+            """)
+            assert dormant is True
 
 
 @pytest.fixture
