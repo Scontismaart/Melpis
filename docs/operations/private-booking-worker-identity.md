@@ -11,11 +11,18 @@ same immutable per-database identity marker and PostgreSQL database OID. A
 worker DSN pointed at another database fails closed even when it uses the
 expected login. A missing or unsuitable identity fails closed.
 
-Migration `086_private_booking_worker_role.sql` provisions the dedicated login
-without a password and grants access only to the booking evidence, policy,
-allocation, confirmation, and message-delivery tables used by this worker. It
-does not grant access to catalogs, billing, membership, credentials, or other
-product domains. `BYPASSRLS` is confined to this non-inheriting backend login;
+Before migration `086_private_booking_worker_role.sql`, a database superuser
+must provision `melpis_c24_booking_worker` with the exact login attributes and
+no password or role memberships. PostgreSQL requires a superuser to create a
+`BYPASSRLS` role; a `CREATEROLE` migration user cannot create or repair it
+safely. Migration 086 verifies role attributes and memberships, but cannot
+read the password verifier as the migration user; the C01 superuser preflight
+must verify that no password is set without displaying the verifier. The
+migration then grants access only to the booking evidence, policy, allocation,
+confirmation, and message-delivery tables used by this worker. It does not
+create or alter the role, set credentials, or grant access to catalogs, billing,
+membership, credentials, or other product domains. `BYPASSRLS` is confined to
+this non-inheriting backend login;
 the worker's tenant-scoped queries and authorization checks remain mandatory
 and the readiness check rejects other table or security-definer privileges.
 PostgreSQL row-lock privileges are granted only at column scope for protected
