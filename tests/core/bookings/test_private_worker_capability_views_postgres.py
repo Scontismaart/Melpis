@@ -54,6 +54,31 @@ _PRIVATE_EXECUTABLES = {
 }
 
 
+async def test_093_simulator_worker_scope_uses_live_tenant_membership(pg_pool):
+    definition = await pg_pool.fetchval("""
+        SELECT pg_get_functiondef(
+            'c24_private.c24_worker_issue_capability(uuid,uuid,uuid,bigint,uuid,jsonb,text,integer)'::regprocedure
+        )
+    """)
+    scope_definition = await pg_pool.fetchval("""
+        SELECT pg_get_functiondef(
+            'c24_private.c24_worker_scope_allows_simulation_request(uuid,uuid,uuid,text)'::regprocedure
+        )
+    """)
+    for checked in (definition, scope_definition):
+        assert "JOIN public.auth_access_lifecycle AS access" in checked
+        assert "access.disabled_at IS NULL" in checked
+        assert "JOIN public.user_profiles AS profile" in checked
+        assert "JOIN public.organization_memberships AS membership" in checked
+        assert "membership.joined_at IS NOT NULL" in checked
+        assert "membership.ruolo IN ('owner','manager','staff')" in checked
+    assert "membership.organization_id=op.organization_id" in definition
+    assert "membership.organization_id=request.organization_id" in scope_definition
+    assert "request.auth_user_id=p_actor_id" in scope_definition
+    assert "request.auth_user_id='" not in definition
+    assert "request.auth_user_id='" not in scope_definition
+
+
 async def test_093_worker_role_and_capability_acl_inventory(pg_pool):
     role = await pg_pool.fetchrow("""
         SELECT rolcanlogin,rolinherit,rolsuper,rolcreatedb,rolcreaterole,

@@ -440,8 +440,15 @@ BEGIN
              ON event.organization_id=op.organization_id AND event.id=op.operation_id
            JOIN public.simulation_requests AS request
              ON request.organization_id=op.organization_id
-            AND request.auth_user_id='c7a07dfd-ee70-534e-a33d-86defd371f38'::uuid
             AND request.request_id=op.operation_id
+            JOIN public.auth_access_lifecycle AS access
+              ON access.auth_user_id=request.auth_user_id AND access.disabled_at IS NULL
+            JOIN public.user_profiles AS profile
+              ON profile.auth_user_id=request.auth_user_id
+            JOIN public.organization_memberships AS membership
+              ON membership.organization_id=op.organization_id
+             AND membership.user_id=profile.id AND membership.joined_at IS NOT NULL
+             AND membership.ruolo IN ('owner','manager','staff')
            WHERE op.organization_id=p_organization_id AND op.message_id=p_message_id
              AND op.operation_id=NULLIF(p_payload->>'operation_id','')::uuid
              AND inbox.channel='whatsapp' AND inbox.status='completed'
@@ -642,15 +649,29 @@ CREATE OR REPLACE FUNCTION c24_private.c24_worker_scope_allows_simulation_reques
 LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
     SELECT session_user='melpis_c24_booking_worker'
        AND p_effective_role='melpis_c24_booking_worker'
-       AND p_actor_id='c7a07dfd-ee70-534e-a33d-86defd371f38'::uuid
-       AND EXISTS (SELECT 1 FROM c24_private.worker_context AS ctx
+       AND EXISTS (
+         SELECT 1 FROM public.simulation_requests AS request
+         JOIN public.auth_access_lifecycle AS access
+           ON access.auth_user_id=request.auth_user_id AND access.disabled_at IS NULL
+         JOIN public.user_profiles AS profile
+           ON profile.auth_user_id=request.auth_user_id
+         JOIN public.organization_memberships AS membership
+           ON membership.organization_id=request.organization_id
+          AND membership.user_id=profile.id AND membership.joined_at IS NOT NULL
+          AND membership.ruolo IN ('owner','manager','staff')
+         JOIN c24_private.worker_context AS ctx
+           ON ctx.organization_id=request.organization_id
+          AND ctx.operation_id=request.request_id
          JOIN public.booking_worker_claims AS claim
            ON claim.organization_id=ctx.organization_id AND claim.message_id=ctx.message_id
           AND claim.claim_id=ctx.claim_id AND claim.generation=ctx.generation
           AND claim.lease_until=ctx.lease_until
-         WHERE ctx.backend_pid=pg_backend_pid() AND ctx.transaction_id=pg_current_xact_id()
-           AND ctx.organization_id=p_organization_id AND ctx.operation_id=p_request_id
-           AND ctx.lease_until>clock_timestamp())
+         WHERE request.organization_id=p_organization_id
+           AND request.auth_user_id=p_actor_id AND request.request_id=p_request_id
+           AND request.status='completed' AND request.response IS NOT NULL
+           AND ctx.backend_pid=pg_backend_pid() AND ctx.transaction_id=pg_current_xact_id()
+           AND ctx.lease_until>clock_timestamp()
+       )
 $$;
 REVOKE ALL ON FUNCTION c24_private.c24_worker_scope_allows_simulation_request(uuid,uuid,uuid,text)
     FROM PUBLIC;
