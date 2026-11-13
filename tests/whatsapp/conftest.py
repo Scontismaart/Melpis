@@ -65,10 +65,6 @@ async def pg_pool(postgres_container):
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
                     CREATE ROLE service_role;
                 END IF;
-                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'melpis_c24_booking_worker') THEN
-                    CREATE ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-                        NOCREATEROLE NOREPLICATION BYPASSRLS;
-                END IF;
             END $$;
             DROP SCHEMA IF EXISTS public CASCADE;
             CREATE SCHEMA public;

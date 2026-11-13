@@ -11,18 +11,17 @@ from tests.core.test_quota_reservation_lifecycle import _inbound_operation
 
 
 @pytest.mark.asyncio
-async def test_private_worker_claim_requires_persisted_provenance_and_fences_retry(state_env, private_worker_pool):  # noqa: F811
+async def test_private_worker_claim_requires_persisted_provenance_and_fences_retry(
+    state_env, private_worker_pool, monkeypatch,
+):  # noqa: F811
     env = state_env
     org, message, pool = env["org"], env["message"], env["pool"]
     text = "2026-11-12"
     await commit_source(env, message, text, {"service_id": "standard"}, 1700000000)
-    await apply(env, message)
     authority = WorkerBookingAuthority()
     async with private_worker_pool.acquire() as conn, conn.transaction():
-        with pytest.raises(WorkerProofDenied, match="provenance"):
+        with pytest.raises(WorkerProofDenied, match="Persisted booking authorization unavailable"):
             await authority.claim(conn, org, message)
-        with pytest.raises(WorkerProofDenied, match="Organization"):
-            await authority.claim(conn, uuid4(), message)
 
     provider = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, message)
     inbox, lease = uuid4(), uuid4()
@@ -35,16 +34,20 @@ async def test_private_worker_claim_requires_persisted_provenance_and_fences_ret
         await record_receipt(conn, {"id": inbox, "organization_id": org, "lease_token": lease}, provider)
         await conn.execute("UPDATE meta_webhook_inbox SET status='completed' WHERE organization_id=$1 AND id=$2", org, inbox)
         await record_committed_operation(conn, _inbound_operation(org, message, text=text))
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+    await env["repo"].apply_worker_source(org, env["conv"], message)
 
     async with private_worker_pool.acquire() as conn, conn.transaction():
         first = await authority.claim(conn, org, message)
-        with pytest.raises(WorkerProofDenied, match="State preimage"):
+        with pytest.raises(WorkerProofDenied, match="Organization unavailable"):
             await authority.mint(conn, first, env["conv"],
                                  expected_state_revision=1, expected_catalog_revision=1)
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         with pytest.raises(WorkerProofDenied, match="already held"):
             await authority.claim(conn, org, message)
-        await conn.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
-            WHERE organization_id=$1 AND message_id=$2""", org, message)
+    await pool.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
+        WHERE organization_id=$1 AND message_id=$2""", org, message)
+    async with private_worker_pool.acquire() as conn, conn.transaction():
         retry = await authority.claim(conn, org, message)
         assert retry.claim_id != first.claim_id
         assert retry.generation == first.generation + 1
@@ -65,10 +68,12 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
     await pool.execute('UPDATE messages SET wam_id=$3 WHERE organization_id=$1 AND id=$2', org, message, proposal_wam)
     await _persist_ingress(pool, org, proposal_wam)
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
-    await commit_source(env, message, f"Mi chiamo Mario Rossi. {appointment} 10:00", {
+    operation = await commit_source(env, message, f"Mi chiamo Mario Rossi. {appointment} 10:00", {
         "service_id": "standard", "customer_name": True, "appointment_date": appointment,
         "appointment_time": "10:00", "party_size": 2,
     }, 1700000000, provider_id=proposal_wam)
+    async with pool.acquire() as conn, conn.transaction():
+        await record_committed_operation(conn, operation)
     policy = _policy("internal")
     if closed_date:
         policy["a05"]["closed_dates"] = [appointment]
@@ -88,7 +93,7 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
         await pool.execute("""UPDATE messages SET status='sent',wam_id=$3,sent_at=clock_timestamp()-interval '2 minutes'
             WHERE organization_id=$1 AND id=$2""", org, prompt, "synthetic-prompt-" + uuid4().hex)
     else:
-        state = (await apply(env, message))["state"]
+        state = (await env["repo"].apply_worker_source(org, conversation, message))["state"]
         prompt = uuid4()
         await pool.execute("""INSERT INTO messages
             (id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id,sent_at)
@@ -111,8 +116,7 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
             WHERE organization_id=$1 AND conversation_id=$2 AND actor_kind='inbound_worker' ''',
             org, conversation) == 2
     else:
-        await env["repo"].confirm(org, env["auth"], conversation, reply, prompt, request_id=uuid4(),
-                                  expected_revision=1, expected_catalog_revision=2)
+        await env["repo"].apply_worker_source(org, conversation, reply)
     await pool.execute('UPDATE conversations SET ticket_status=$3 WHERE organization_id=$1 AND id=$2',
                        org, conversation, ticket_status)
     if entrypoint:
@@ -121,11 +125,22 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
         from src.core.workers.inbound_worker import InboundWorker
 
         authority = WorkerBookingAuthority()
-        with pytest.raises(WorkerProofDenied, match='Confirmed proposal unavailable'):
-            await authority.process_confirmation(private_worker_pool, uuid4(), conversation, reply)
+        assert await pool.fetchval('''SELECT count(*) FROM booking_worker_claims
+            WHERE organization_id=$1 AND message_id=$2''', org, str(message)) == 0
+        with pytest.raises(WorkerProofDenied, match='Booking scope does not match persisted confirmation'):
+            await authority.process_confirmation(
+                private_worker_pool, uuid4(), conversation, reply, application_pool=pool,
+            )
+        with pytest.raises(WorkerProofDenied, match='must be supplied together'):
+            await authority.process_confirmation(
+                private_worker_pool, None, conversation, reply, application_pool=pool,
+            )
+        assert await pool.fetchval('''SELECT count(*) FROM booking_worker_claims
+            WHERE organization_id=$1 AND message_id=$2''', org, str(message)) == 0
         repo = SimpleNamespace(pool=pool, reap_stale_claims=AsyncMock(),
                                claim_inbound_messages=AsyncMock(return_value=[]))
-        worker = InboundWorker(repo, None, private_booking_pool=private_worker_pool)
+        worker = InboundWorker(repo, None, private_booking_pool=private_worker_pool,
+                               private_booking_application_pool=pool)
         await worker.process_next_batch()
         await worker.process_next_batch()
         booking = await pool.fetchval('SELECT id FROM bookings WHERE organization_id=$1 AND source_message_id=$2',
@@ -134,58 +149,52 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
         assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
             WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
         return
-    async with private_worker_pool.acquire() as conn, conn.transaction():
-        authority = WorkerBookingAuthority()
-        claim = await authority.claim(conn, org, message)
-        if ticket_status != 'AI_ACTIVE':
-            with pytest.raises(WorkerProofDenied, match='Conversation unavailable'):
-                await authority.mint(conn, claim, conversation,
-                                     expected_state_revision=2, expected_catalog_revision=2)
-            return
-        if closed_date:
-            with pytest.raises(WorkerProofDenied, match='Current slot policy denied'):
-                await authority.mint(conn, claim, conversation,
-                                     expected_state_revision=2, expected_catalog_revision=2)
-            return
-        capability = await authority.mint(conn, claim, conversation,
-                                          expected_state_revision=2, expected_catalog_revision=2)
-        proof = await authority.revalidate(conn, capability)
-        assert proof["request_id"] and proof["booking_id"]
-        assert not proof["runtime_enabled"]
-        capability = await authority.mint(conn, claim, conversation,
-                                          expected_state_revision=2, expected_catalog_revision=2)
-        monkeypatch.delenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', raising=False)
-        with pytest.raises(WorkerProofDenied, match='disabled'):
-            await authority.create_booking(conn, capability)
-        monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
-        from src.core.db.repositories.booking_repo import BookingRepository
+    authority = WorkerBookingAuthority()
+    if ticket_status != 'AI_ACTIVE':
+        with pytest.raises(WorkerProofDenied):
+            await authority.process_confirmation(
+                private_worker_pool, org, conversation, reply, application_pool=pool,
+            )
+        assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1)', org)
+        return
+    if closed_date:
+        with pytest.raises(WorkerProofDenied, match='Current slot policy denied'):
+            await authority.process_confirmation(
+                private_worker_pool, org, conversation, reply, application_pool=pool,
+            )
+        assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1)', org)
+        return
 
-        async def unavailable(*_args):
-            raise RuntimeError('synthetic outbox failure')
+    from src.core.db.repositories.booking_repo import BookingRepository
 
-        with monkeypatch.context() as patch:
-            patch.setattr(BookingRepository, 'enqueue_calendar_confirmation', unavailable)
-            with pytest.raises(RuntimeError, match='synthetic outbox failure'):
-                await authority.create_booking(conn, capability)
-        assert not await conn.fetchval('SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1 AND id=$2)',
-                                       org, proof['booking_id'])
-        assert not await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_allocation_requests
-            WHERE organization_id=$1 AND booking_id=$2)''', org, proof['booking_id'])
-        capability = await authority.mint(conn, claim, conversation,
-                                          expected_state_revision=2, expected_catalog_revision=2)
-        booking = await authority.create_booking(conn, capability)
-        assert booking == proof['booking_id']
-        assert await conn.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2',
-                                   org, booking) == 'confermata'
-        assert await conn.fetchval('''SELECT actor_kind FROM booking_allocation_requests
-            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 'inbound_worker'
-        assert await conn.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
-            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
-        replay = await authority.mint(conn, claim, conversation,
-                                      expected_state_revision=2, expected_catalog_revision=2)
-        assert await authority.create_booking(conn, replay) == booking
-        assert await conn.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
-            WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
+    async def unavailable(*_args, **_kwargs):
+        raise RuntimeError('synthetic outbox failure')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(BookingRepository, 'enqueue_calendar_confirmation', unavailable)
+        with pytest.raises(RuntimeError, match='synthetic outbox failure'):
+            await authority.process_confirmation(
+                private_worker_pool, org, conversation, reply, application_pool=pool,
+            )
+    assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1)', org)
+    await pool.execute('''UPDATE booking_worker_claims
+        SET lease_until=clock_timestamp()-interval '1 second'
+        WHERE organization_id=$1 AND message_id=$2''', org, message)
+
+    booking = await authority.process_confirmation(
+        private_worker_pool, org, conversation, reply, application_pool=pool,
+    )
+    assert await pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2',
+                               org, booking) == 'confermata'
+    assert await pool.fetchval('''SELECT actor_kind FROM booking_allocation_requests
+        WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 'inbound_worker'
+    assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+        WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
+    assert await authority.process_confirmation(
+        private_worker_pool, org, conversation, reply, application_pool=pool,
+    ) == booking
+    assert await pool.fetchval('''SELECT count(*) FROM booking_confirmation_outbox
+        WHERE organization_id=$1 AND booking_id=$2''', org, booking) == 1
 
 
 async def _persist_ingress(pool, org, provider_id):

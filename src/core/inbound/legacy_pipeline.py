@@ -345,7 +345,11 @@ class LegacyInboundPipeline:
 
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id))
         if risposta.prenotazione is not None:
-            risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, text)
+            risposta = risposta.model_copy(update={
+                "prenotazione": strategy.valida_e_arricchisci_prenotazione(
+                    risposta.prenotazione, text
+                ),
+            })
         pren = risposta.prenotazione
         result.pren = pren
         from src.core.bookings.conversation_state import StructuredConversationResponse
