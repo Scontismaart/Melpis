@@ -140,13 +140,14 @@ class BookingConversationRepository:
             raise ConversationStateUnavailable('Source timestamp or provenance is unavailable') from None
 
     @staticmethod
-    async def _canonical_response(conn, org, source):
+    async def _canonical_response(conn, org, source, *, private_trust_epoch=False):
         """Read-only A04 proof, never reserve/renew/commit or a provider call."""
+        org = _uuid(org)
         source_id = _uuid(source['id'])
         payload_hash = digest({'organization_id': str(org), 'message_id': str(source_id),
                                'channel': 'whatsapp', 'text': source['content_text']})
         operation = QuotaOperation(org, source_id, 'inbound', payload_hash)
-        epoch = await require_quota_trust_epoch(conn)
+        epoch = await require_quota_trust_epoch(conn, private_rpc=private_trust_epoch)
         entry = await conn.fetchrow('SELECT event_type,quantity,metadata FROM usage_events WHERE organization_id=$1 AND id=$2 FOR SHARE', org, operation.id)
         receipt = await conn.fetchrow('''SELECT payload_hash,claim_token,status,response FROM simulation_requests
             WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3 FOR SHARE''', org, operation.actor_id, operation.id)
@@ -505,6 +506,7 @@ class BookingConversationRepository:
                 settings = await conn.fetchrow('''SELECT config,capienze_orarie FROM booking_settings
                     WHERE organization_id=$1''', org)
                 slots = {slot.field:slot.value for slot in updated.slots}
+                auto_a05 = False
                 if catalog.sector == 'ristorante':
                     decision = parse_and_validate_auto_booking(
                         {'config':decode(settings['config']), 'capienze_orarie':decode(settings['capienze_orarie'])}
@@ -515,6 +517,15 @@ class BookingConversationRepository:
                         now=await conn.fetchval('SELECT clock_timestamp()'),
                     )
                     eligible = decision.accepted
+                    legacy = cached.get('prenotazione') if isinstance(cached, dict) else None
+                    if isinstance(legacy, dict):
+                        auto_a05 = (
+                            eligible and cached.get('richiede_umano') is False
+                            and legacy.get('data') == slots.get('appointment_date')
+                            and legacy.get('ora') == slots.get('appointment_time')
+                            and legacy.get('coperti') == slots.get('party_size')
+                            and not legacy.get('note')
+                        )
                 else:
                     from datetime import date, time
                     from src.core.bookings.allocation_contracts import AllocationRequest
@@ -542,7 +553,10 @@ class BookingConversationRepository:
                             eligible = True
                     except (KeyError, ValueError, TypeError, SectorAdmissionDenied):
                         pass
-                if not eligible:
+                if not eligible or auto_a05:
+                    # A05's fixed restaurant flow creates the booking from the
+                    # same committed proposal. Do not also queue C2.4's
+                    # explicit-confirmation prompt for that auto-confirm path.
                     return self._result(updated, updated.revision, False, catalog.revision)
                 # The state, worker receipt and outbound attempt commit together.
                 # The retry worker must hold the C2.4 delivery guard through send.

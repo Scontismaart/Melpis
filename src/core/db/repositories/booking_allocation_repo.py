@@ -11,16 +11,21 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
 from src.core.bookings.allocation_contracts import (
-    AllocationRequest, derive_allocation, semantic_request_hash,
+    AllocationRequest,
+    derive_allocation,
+    semantic_request_hash,
 )
 from src.core.bookings.catalog_contracts import (
-    WeeklyAvailability, validate_catalog_json,
+    WeeklyAvailability,
+    validate_catalog_json,
 )
 from src.core.calendar.availability import local_instant
 from src.core.db.repositories.booking_catalog_repo import (
-    BookingCatalogRepository, CatalogUnavailable, canonical, decode,
+    BookingCatalogRepository,
+    CatalogUnavailable,
+    canonical,
+    decode,
 )
-
 
 class AllocationDenied(PermissionError):
     """Current principal, tenant, or erasure state does not authorize access."""
@@ -188,8 +193,14 @@ class BookingAllocationRepository:
             raise AllocationUnavailable("Catalog scope changed")
 
         # Final parent lock follows catalog serialization; re-read all lineage.
-        booking = await conn.fetchrow(
-            "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE", org, request.booking_id)
+        if worker is None:
+            booking = await conn.fetchrow(
+                "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE",
+                org, request.booking_id)
+        else:
+            booking = await conn.fetchrow(
+                "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2",
+                org, request.booking_id)
         if not booking:
             raise AllocationDenied("Booking is unavailable")
         conversation_id, subject = await self._lineage(conn, org, booking)
@@ -239,9 +250,14 @@ class BookingAllocationRepository:
                 return self._result(previous["outcome"], previous["applied_allocation_revision"],
                     current_set, previous["catalog_revision"], current.revision, True)
 
-        old = await conn.fetchrow(
-            "SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE",
-            org, request.booking_id)
+        if worker is None:
+            old = await conn.fetchrow(
+                "SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE",
+                org, request.booking_id)
+        else:
+            old = await conn.fetchrow(
+                "SELECT * FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2",
+                org, request.booking_id)
         old_claims = await conn.fetch(
             "SELECT resource_id,resource_kind,exclusive,quantity,starts_at,ends_at FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id",
             org, request.booking_id)
@@ -383,10 +399,12 @@ class BookingAllocationRepository:
                     status = "unknown"
                 else:
                     status = await self._availability(conn, org, current, new_bounds, new_claims,
-                                                      request.booking_id, old_claims, old, fingerprint)
+                                                      request.booking_id, old_claims, old, fingerprint,
+                                                      worker=worker is not None)
             else:
                 status = await self._availability(conn, org, current, new_bounds, new_claims,
-                                                  request.booking_id, old_claims, old, fingerprint)
+                                                  request.booking_id, old_claims, old, fingerprint,
+                                                  worker=worker is not None)
             if observe:
                 return self._result(status, None, old, current.revision, current.revision, False)
             if status != "available" or old and old["state"] == "active" and stale:
@@ -400,25 +418,44 @@ class BookingAllocationRepository:
                 if not observe:
                     start, end, _ = new_bounds
                     temporal = "civil_nights" if request.arrival_date is not None else "minutes"
-                    await conn.execute("DELETE FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2", org, request.booking_id)
-                    await conn.execute("""INSERT INTO booking_allocation_sets
-                        (organization_id,booking_id,allocation_revision,state,catalog_revision,service_id,timezone,temporal_kind,starts_at,ends_at,arrival_date,departure_date,booking_fingerprint,booking_calendar_revision)
-                        VALUES($1,$2,$3,'active',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                        ON CONFLICT(organization_id,booking_id) DO UPDATE SET
-                          allocation_revision=EXCLUDED.allocation_revision,state='active',catalog_revision=EXCLUDED.catalog_revision,
-                          service_id=EXCLUDED.service_id,timezone=EXCLUDED.timezone,temporal_kind=EXCLUDED.temporal_kind,
-                          starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,arrival_date=EXCLUDED.arrival_date,
-                          departure_date=EXCLUDED.departure_date,booking_fingerprint=EXCLUDED.booking_fingerprint,
-                          booking_calendar_revision=EXCLUDED.booking_calendar_revision,updated_at=NOW()""",
-                        org, request.booking_id, applied, current.revision, request.service_id, current.timezone,
-                        temporal, start, end, request.arrival_date, request.departure_date, fingerprint,
-                        booking.get("calendar_revision") or 0)
-                    for rid, kind, exclusive, quantity in new_claims:
-                        await conn.execute("""INSERT INTO booking_resource_allocations
-                            (organization_id,booking_id,allocation_revision,catalog_revision,state,resource_id,resource_kind,exclusive,quantity,starts_at,ends_at)
-                            VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10)""",
-                            org, request.booking_id, applied, current.revision, rid, kind, exclusive,
-                            quantity, start, end)
+                    if worker is not None:
+                        # The private service identity can create a fresh allocation only.
+                        # Existing/replacement state is reconciled by the human path;
+                        # no tenant-wide DELETE or upsert is granted to this worker.
+                        if old is not None:
+                            raise AllocationDenied("Private worker cannot replace an existing allocation")
+                        await conn.execute("""INSERT INTO worker_allocation_sets
+                            (organization_id,booking_id,allocation_revision,state,catalog_revision,service_id,timezone,temporal_kind,starts_at,ends_at,arrival_date,departure_date,booking_fingerprint,booking_calendar_revision)
+                            VALUES($1,$2,$3,'active',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+                            org, request.booking_id, applied, current.revision, request.service_id, current.timezone,
+                            temporal, start, end, request.arrival_date, request.departure_date, fingerprint,
+                            booking.get("calendar_revision") or 0)
+                        for rid, kind, exclusive, quantity in new_claims:
+                            await conn.execute("""INSERT INTO worker_resource_allocations
+                                (organization_id,booking_id,allocation_revision,catalog_revision,state,resource_id,resource_kind,exclusive,quantity,starts_at,ends_at)
+                                VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10)""",
+                                org, request.booking_id, applied, current.revision, rid, kind, exclusive,
+                                quantity, start, end)
+                    else:
+                        await conn.execute("DELETE FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2", org, request.booking_id)
+                        await conn.execute("""INSERT INTO booking_allocation_sets
+                            (organization_id,booking_id,allocation_revision,state,catalog_revision,service_id,timezone,temporal_kind,starts_at,ends_at,arrival_date,departure_date,booking_fingerprint,booking_calendar_revision)
+                            VALUES($1,$2,$3,'active',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                            ON CONFLICT(organization_id,booking_id) DO UPDATE SET
+                              allocation_revision=EXCLUDED.allocation_revision,state='active',catalog_revision=EXCLUDED.catalog_revision,
+                              service_id=EXCLUDED.service_id,timezone=EXCLUDED.timezone,temporal_kind=EXCLUDED.temporal_kind,
+                              starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,arrival_date=EXCLUDED.arrival_date,
+                              departure_date=EXCLUDED.departure_date,booking_fingerprint=EXCLUDED.booking_fingerprint,
+                              booking_calendar_revision=EXCLUDED.booking_calendar_revision,updated_at=NOW()""",
+                            org, request.booking_id, applied, current.revision, request.service_id, current.timezone,
+                            temporal, start, end, request.arrival_date, request.departure_date, fingerprint,
+                            booking.get("calendar_revision") or 0)
+                        for rid, kind, exclusive, quantity in new_claims:
+                            await conn.execute("""INSERT INTO booking_resource_allocations
+                                (organization_id,booking_id,allocation_revision,catalog_revision,state,resource_id,resource_kind,exclusive,quantity,starts_at,ends_at)
+                                VALUES($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10)""",
+                                org, request.booking_id, applied, current.revision, rid, kind, exclusive,
+                                quantity, start, end)
         if not observe:
             await self._receipt(conn, org, request, actor, digest, outcome, applied, current.revision, mutation_hash, worker)
         current_set = old
@@ -471,6 +508,10 @@ class BookingAllocationRepository:
             raise AllocationDenied("Erasure barrier rejects allocation access")
 
     async def _catalog(self, conn, org, orgrow, settings):
+        # asyncpg exposes PostgreSQL UUID values through its own UUID class;
+        # the catalog contract deliberately binds only stdlib UUID instances.
+        # Normalize this database-derived tenant scope at the repository edge.
+        org = _uuid(org)
         business = decode(orgrow["business_profile"])
         sector = business.get("verticale") if isinstance(business, dict) else None
         config = settings["config"] if settings else {}
@@ -517,7 +558,8 @@ class BookingAllocationRepository:
                                 f"allocation-resource|{org}|{resource_id}")
         return await self._availability(conn, org, catalog, (start,end,None), claims, None, (), None, None)
 
-    async def _availability(self, conn, org, catalog, bounds, claims, booking_id, old_claims, old, fingerprint):
+    async def _availability(self, conn, org, catalog, bounds, claims, booking_id, old_claims, old, fingerprint,
+                            *, worker=False):
         start, end, _ = bounds
         fits = self._weekly_fits(catalog.availability, start, end, catalog.timezone)
         if fits is None:
@@ -534,14 +576,29 @@ class BookingAllocationRepository:
                 org, rid, kind, exclusive)
             if changed:
                 return "unknown"
-            rows = await conn.fetch("""SELECT a.booking_id,a.starts_at,a.ends_at,a.quantity,
-                    s.booking_fingerprint,b.data,b.ora,b.coperti,b.stato,b.contact_id,b.id_conversazione,b.calendar_revision,b.completata_at,b.no_show_at
-                FROM booking_resource_allocations a JOIN booking_allocation_sets s
-                  ON s.organization_id=a.organization_id AND s.booking_id=a.booking_id
-                JOIN bookings b ON b.organization_id=a.organization_id AND b.id=a.booking_id
-                WHERE a.organization_id=$1 AND s.organization_id=$1 AND b.organization_id=$1
-                  AND a.resource_id=$2 AND a.starts_at<$4 AND a.ends_at>$3
-                  AND ($5::uuid IS NULL OR a.booking_id<>$5) ORDER BY a.starts_at,a.ends_at""", org, rid, start, end, booking_id)
+            if worker:
+                # The write-capability views intentionally show only the job's
+                # bound booking. Conflict detection needs every allocation in
+                # this tenant, through a separate minimal same-tenant view.
+                rows = await conn.fetch("""SELECT booking_id,starts_at,ends_at,quantity,
+                        booking_fingerprint,data,ora,coperti,stato,contact_id,id_conversazione,
+                        calendar_revision,completata_at,no_show_at
+                    FROM booking_resource_availability
+                    WHERE organization_id=$1 AND resource_id=$2
+                      AND starts_at<$4 AND ends_at>$3
+                      AND ($5::uuid IS NULL OR booking_id<>$5)
+                    ORDER BY starts_at,ends_at""", org, rid, start, end, booking_id)
+            else:
+                rows = await conn.fetch("""SELECT a.booking_id,a.starts_at,a.ends_at,a.quantity,
+                        s.booking_fingerprint,b.data,b.ora,b.coperti,b.stato,b.contact_id,
+                        b.id_conversazione,b.calendar_revision,b.completata_at,b.no_show_at
+                    FROM booking_resource_allocations a JOIN booking_allocation_sets s
+                      ON s.organization_id=a.organization_id AND s.booking_id=a.booking_id
+                    JOIN bookings b ON b.organization_id=a.organization_id AND b.id=a.booking_id
+                    WHERE a.organization_id=$1 AND s.organization_id=$1 AND b.organization_id=$1
+                      AND a.resource_id=$2 AND a.starts_at<$4 AND a.ends_at>$3
+                      AND ($5::uuid IS NULL OR a.booking_id<>$5) ORDER BY a.starts_at,a.ends_at""",
+                    org, rid, start, end, booking_id)
             if any(row["booking_fingerprint"] != _booking_fingerprint(row) for row in rows):
                 return "unknown"
             if exclusive and rows:
@@ -630,7 +687,7 @@ class BookingAllocationRepository:
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""", org, request.request_id, request.booking_id,
                 actor, request.action, digest, outcome, applied, catalog_revision, mutation_hash)
         else:
-            await conn.execute("""INSERT INTO booking_allocation_requests
+            await conn.execute("""INSERT INTO worker_allocation_requests
                 (organization_id,request_id,booking_id,actor_user_id,actor_kind,service_message_id,service_inbox_id,service_operation_id,action,payload_hash,outcome,applied_allocation_revision,catalog_revision,mutation_hash)
                 VALUES($1,$2,$3,NULL,'inbound_worker',$4,$5,$6,$7,$8,$9,$10,$11,$12)""",
                 org, request.request_id, request.booking_id, *worker[:3], request.action, digest,

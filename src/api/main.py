@@ -254,6 +254,7 @@ async def lifespan(app: FastAPI):
                 booking_service=app.state.booking_service,
                 orchestrator=app.state.orchestrator,
                 private_booking_pool=getattr(app.state, "private_booking_pool", None),
+                private_booking_application_pool=getattr(app.state, "pool", None),
             )
             retry_worker = RetryWorker(
                 app_config=whatsapp_app_config,
@@ -303,7 +304,10 @@ async def lifespan(app: FastAPI):
                 if private_booking_enabled:
                     from src.core.bookings.private_worker_lifecycle import run_private_booking_worker
                     app.state.private_booking_task = asyncio.create_task(
-                        run_private_booking_worker(app.state.private_booking_pool)
+                        run_private_booking_worker(
+                            app.state.private_booking_pool,
+                            application_pool=app.state.pool,
+                        )
                     )
         except Exception as e:
             if private_booking_enabled:

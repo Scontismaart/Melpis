@@ -10,7 +10,19 @@ from src.core.bookings.private_worker_lifecycle import assert_private_booking_re
 @pytest.mark.asyncio
 async def test_worker_readiness_requires_dedicated_identity(private_worker_pool, pg_pool, postgres_container):
     await assert_private_booking_ready(private_worker_pool, application_pool=pg_pool)
+    assert await pg_pool.fetchval(
+        "SELECT has_function_privilege(current_user,"
+        "'c24_private.c24_worker_issue_capability(uuid,uuid,uuid,bigint,uuid,jsonb,text,integer)','EXECUTE')"
+    )
+    assert not await private_worker_pool.fetchval(
+        "SELECT has_function_privilege(current_user,"
+        "'c24_private.c24_worker_issue_capability(uuid,uuid,uuid,bigint,uuid,jsonb,text,integer)','EXECUTE')"
+    )
     assert await private_worker_pool.fetchval(
+        "SELECT has_function_privilege(current_user,"
+        "'c24_private.c24_worker_attach_calendar_source(uuid,uuid,uuid)','EXECUTE')"
+    )
+    assert not await private_worker_pool.fetchval(
         "SELECT has_function_privilege(current_user,"
         "'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)','EXECUTE')"
     )
@@ -18,13 +30,20 @@ async def test_worker_readiness_requires_dedicated_identity(private_worker_pool,
         for role in ("anon", "authenticated", "service_role"):
             assert not await app_conn.fetchval(
                 "SELECT has_function_privilege($1,"
-                "'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)','EXECUTE')",
+                "'c24_private.c24_worker_attach_calendar_source(uuid,uuid,uuid)','EXECUTE')",
                 role,
             )
+    assert not await private_worker_pool.fetchval(
+        "SELECT has_table_privilege(current_user,'public.messages','INSERT')"
+    )
+    assert not await private_worker_pool.fetchval(
+        "SELECT has_table_privilege(current_user,'public.organization_memberships','SELECT')"
+    )
+    assert not await private_worker_pool.fetchval(
+        "SELECT has_table_privilege(current_user,'c24_private.worker_context','SELECT,INSERT,UPDATE,DELETE')"
+    )
     with pytest.raises(RuntimeError, match='readiness failed'):
         await assert_private_booking_ready(private_worker_pool, application_pool=private_worker_pool)
-    assert await private_worker_pool.fetchval("SELECT has_table_privilege(current_user,'public.messages','INSERT')")
-    assert not await private_worker_pool.fetchval("SELECT has_table_privilege(current_user,'public.organization_memberships','SELECT')")
     assert not await private_worker_pool.fetchval("SELECT has_column_privilege(current_user,'public.messages','content_text','UPDATE')")
     with pytest.raises(RuntimeError, match='readiness failed'):
         await assert_private_booking_ready(pg_pool)
@@ -51,13 +70,54 @@ async def test_worker_readiness_requires_dedicated_identity(private_worker_pool,
 
 
 @pytest.mark.asyncio
-async def test_worker_cannot_mutate_parent_primary_key_but_can_lock_it(private_worker_pool, pg_pool, sample_org):
+async def test_worker_readiness_fails_closed_when_allowlisted_function_is_missing(
+    private_worker_pool, pg_pool,
+):
+    signature = 'c24_private.c24_worker_next_jobs(uuid,integer)'
+    rogue_signature = 'c24_private.c24_worker_unexpected_readiness_test()'
+    async with pg_pool.acquire() as admin:
+        original_definition = await admin.fetchval(
+            'SELECT pg_get_functiondef(to_regprocedure($1)::oid)', signature,
+        )
+        assert original_definition
+    try:
+        async with pg_pool.acquire() as admin:
+            await admin.execute(f'DROP FUNCTION {signature}')
+            await admin.execute('''
+                CREATE FUNCTION c24_private.c24_worker_unexpected_readiness_test()
+                RETURNS boolean
+                LANGUAGE sql
+                SECURITY DEFINER
+                SET search_path=pg_catalog
+                AS 'SELECT true'
+            ''')
+            await admin.execute(
+                f'REVOKE ALL ON FUNCTION {rogue_signature} FROM PUBLIC'
+            )
+            await admin.execute(
+                f'GRANT EXECUTE ON FUNCTION {rogue_signature} TO melpis_c24_booking_worker'
+            )
+        with pytest.raises(RuntimeError, match='readiness failed'):
+            await assert_private_booking_ready(private_worker_pool)
+    finally:
+        async with pg_pool.acquire() as admin:
+            await admin.execute(f'DROP FUNCTION IF EXISTS {rogue_signature}')
+            await admin.execute(original_definition)
+            await admin.execute(
+                f'REVOKE ALL ON FUNCTION {signature} FROM PUBLIC'
+            )
+            await admin.execute(
+                f'GRANT EXECUTE ON FUNCTION {signature} TO melpis_c24_booking_worker'
+            )
+
+
+@pytest.mark.asyncio
+async def test_worker_cannot_read_or_mutate_parent_organization(private_worker_pool, pg_pool, sample_org):
     org_id = sample_org['id']
     async with private_worker_pool.acquire() as worker:
         async with worker.transaction():
-            assert await worker.fetchval('SELECT id FROM organizations WHERE id=$1 FOR UPDATE', org_id) == org_id
-        with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            await worker.execute('UPDATE organizations SET id=$2 WHERE id=$1', org_id, uuid4())
+            assert await worker.fetchval('SELECT id FROM organizations WHERE id=$1 FOR UPDATE', org_id) is None
+            assert await worker.execute('UPDATE organizations SET id=$2 WHERE id=$1', org_id, uuid4()) == 'UPDATE 0'
     async with pg_pool.acquire() as admin:
         assert await admin.fetchval('SELECT id FROM organizations WHERE id=$1', org_id) == org_id
 

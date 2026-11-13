@@ -1,24 +1,47 @@
--- BYPASSRLS is a superuser-only attribute, and a CREATEROLE migration user
--- cannot safely create or repair this identity. A superuser must provision the
--- exact dormant role out of band before this migration. This migration never
--- creates, alters, or grants membership in the worker identity.
+-- The private worker is dormant by default and has no direct database data
+-- privileges. Supabase's ordinary postgres role can create this NOLOGIN role
+-- with CREATEROLE; the worker obtains data only through the RPC surface added
+-- in migration 093. Never use BYPASSRLS or an application-role membership.
 DO $$
 DECLARE worker_role oid;
 BEGIN
  SELECT oid INTO worker_role FROM pg_roles WHERE rolname='melpis_c24_booking_worker';
  IF worker_role IS NULL THEN
-  RAISE EXCEPTION 'C2.4 worker role must be provisioned by a superuser before migration 086'
-   USING ERRCODE='55000';
+  CREATE ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB
+   NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD NULL;
+ ELSE
+  -- Supabase's managed postgres login has CREATEROLE but cannot ALTER every
+  -- protected role attribute. Never try to rewrite attributes it cannot
+  -- grant: verify them first, then fail closed if the existing role is unsafe.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE oid=worker_role AND
+      (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)) THEN
+   RAISE EXCEPTION 'existing C2.4 worker role has unsafe privileged attributes';
+  END IF;
+  ALTER ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT PASSWORD NULL;
  END IF;
+ SELECT oid INTO worker_role FROM pg_roles WHERE rolname='melpis_c24_booking_worker';
  IF EXISTS (SELECT 1 FROM pg_roles WHERE oid=worker_role AND
-      (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR NOT rolbypassrls))
+      (rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls))
+    OR EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member=worker_role)
     OR EXISTS (SELECT 1 FROM pg_auth_members m
-      WHERE m.member=worker_role OR m.roleid=worker_role) THEN
-  RAISE EXCEPTION 'C2.4 worker role must remain dormant with exact attributes and no memberships';
+      JOIN pg_roles member ON member.oid=m.member
+      JOIN pg_roles grantor ON grantor.oid=m.grantor
+      WHERE m.roleid=worker_role AND NOT (
+       member.rolname='postgres' AND grantor.rolname IN ('supabase_admin','postgres')
+       AND m.admin_option AND NOT m.inherit_option AND NOT m.set_option))
+    OR EXISTS (SELECT 1 FROM pg_class c WHERE c.relowner=worker_role)
+    OR EXISTS (SELECT 1 FROM pg_proc p WHERE p.proowner=worker_role)
+    OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner=worker_role) THEN
+  RAISE EXCEPTION 'C2.4 worker identity has an unsafe attribute, membership, or owned object';
  END IF;
 END $$;
 
-GRANT USAGE ON SCHEMA public TO melpis_c24_booking_worker;
+-- Do not expose public objects to the worker. Subsequent migrations grant no
+-- table/view/sequence access; only the isolated c24_private RPC schema is used.
+REVOKE ALL ON SCHEMA public FROM melpis_c24_booking_worker;
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM melpis_c24_booking_worker;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM melpis_c24_booking_worker;
+REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM melpis_c24_booking_worker;
 
 -- Bind the worker connection to this logical database as well as to its login.
 -- The random marker is provisioned per database and cannot be changed later;
@@ -40,78 +63,7 @@ CREATE TRIGGER c24_database_instance_identity_immutable
  BEFORE UPDATE OR DELETE ON public.c24_database_instance_identity
  FOR EACH ROW EXECUTE FUNCTION public.c24_database_instance_identity_immutable();
 REVOKE ALL ON public.c24_database_instance_identity FROM PUBLIC,anon,authenticated,service_role;
-GRANT SELECT ON public.c24_database_instance_identity TO melpis_c24_booking_worker;
 REVOKE ALL ON FUNCTION public.c24_database_instance_identity_immutable() FROM PUBLIC;
-
--- Narrow data access for confirmed private booking work. Tenant conditions
--- remain mandatory in application SQL; the role cannot read unrelated product
--- domains, modify catalogs, or manage accounts, billing, consent, or policy.
-GRANT SELECT ON public.organizations, public.bookings, public.booking_stays,
-    public.booking_settings, public.messages, public.conversations, public.contacts,
-    public.booking_catalog_publications, public.booking_catalog_requests,
-    public.booking_conversation_states, public.booking_conversation_requests,
-    public.booking_conversation_revocations, public.booking_worker_claims,
-    public.inbound_worker_operations, public.inbound_worker_receipts,
-    public.meta_webhook_inbox, public.booking_sector_admission_fences,
-    public.booking_allocation_sets, public.booking_resource_allocations,
-    public.booking_allocation_requests, public.booking_confirmation_outbox,
-    public.booking_stay_purge_fences,
-    public.booking_stay_tombstones, public.gdpr_erasure_barriers,
-    public.simulation_requests
-TO melpis_c24_booking_worker;
-GRANT SELECT ON public.usage_events TO melpis_c24_booking_worker;
-
--- Row-lock clauses require UPDATE privilege in PostgreSQL. Grant it only on
--- immutable key/revision columns used by FOR SHARE/UPDATE; actual mutation
--- privileges below remain limited to allocation and receipt tables.
-GRANT UPDATE (id) ON public.organizations, public.messages, public.conversations,
-    public.contacts, public.bookings TO melpis_c24_booking_worker;
-GRANT UPDATE (organization_id) ON public.booking_settings,
-    public.inbound_worker_receipts, public.inbound_worker_operations,
-    public.meta_webhook_inbox TO melpis_c24_booking_worker;
-GRANT UPDATE (id) ON public.usage_events TO melpis_c24_booking_worker;
-GRANT UPDATE (request_id) ON public.simulation_requests TO melpis_c24_booking_worker;
-GRANT UPDATE (organization_id, conversation_id) ON public.booking_conversation_states,
-    public.booking_conversation_requests TO melpis_c24_booking_worker;
-GRANT UPDATE (revision) ON public.booking_stays TO melpis_c24_booking_worker;
-
--- PostgreSQL requires UPDATE privilege for SELECT ... FOR UPDATE/SHARE. The
--- worker receives only column-level lock privileges; a trigger rejects every
--- attempted data UPDATE on these read-only evidence/parent tables. This keeps
--- row-lock semantics without granting a usable mutation capability.
-CREATE OR REPLACE FUNCTION public.c24_private_worker_reject_update()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
-BEGIN
- IF session_user='melpis_c24_booking_worker' THEN
-  RAISE EXCEPTION 'private booking worker cannot update protected rows' USING ERRCODE='42501';
- END IF;
- RETURN NEW;
-END $$;
-REVOKE ALL ON FUNCTION public.c24_private_worker_reject_update() FROM PUBLIC;
-DO $$
-DECLARE rel text;
-BEGIN
- FOREACH rel IN ARRAY ARRAY[
-  'organizations','messages','conversations','contacts','bookings','booking_settings',
-  'inbound_worker_receipts','inbound_worker_operations','meta_webhook_inbox','usage_events',
-  'simulation_requests','booking_conversation_states','booking_conversation_requests','booking_stays'
- ] LOOP
-  EXECUTE format('DROP TRIGGER IF EXISTS c24_private_worker_readonly_update ON public.%I',rel);
-  EXECUTE format('CREATE TRIGGER c24_private_worker_readonly_update BEFORE UPDATE ON public.%I '
-    'FOR EACH ROW EXECUTE FUNCTION public.c24_private_worker_reject_update()',rel);
- END LOOP;
-END $$;
-
-GRANT INSERT, UPDATE ON public.booking_worker_claims TO melpis_c24_booking_worker;
-GRANT INSERT ON public.bookings, public.booking_stays, public.booking_allocation_sets,
-    public.booking_resource_allocations, public.booking_allocation_requests,
-    public.booking_confirmation_outbox, public.messages,
-    public.message_delivery_attempts TO melpis_c24_booking_worker;
-GRANT UPDATE, DELETE ON public.booking_allocation_sets, public.booking_resource_allocations
-    TO melpis_c24_booking_worker;
-
-GRANT EXECUTE ON FUNCTION public.booking_sector_mark_worker_insert(uuid,uuid)
-    TO melpis_c24_booking_worker;
 
 -- Booking writes queue Calendar synchronization through a narrow definer
 -- trigger; the worker receives no direct credential or sync-outbox privileges.
@@ -167,13 +119,15 @@ END $$;
 -- transferring table ownership away from the application/database owner.
 CREATE OR REPLACE FUNCTION public.booking_allocation_validate_worker_source()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
-DECLARE active_role text;
+DECLARE owner_role text; active_role text;
 BEGIN
  IF NEW.actor_kind='inbound_worker' THEN
-  active_role := COALESCE(NULLIF(current_setting('role'),'none'),session_user);
-  IF active_role IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class
-       WHERE oid='public.inbound_worker_operations'::regclass))
-     AND active_role IS DISTINCT FROM 'melpis_c24_booking_worker' THEN
+  owner_role := pg_get_userbyid((SELECT relowner FROM pg_class
+       WHERE oid='public.inbound_worker_operations'::regclass));
+  active_role := COALESCE(NULLIF(current_setting('role'), 'none'), session_user);
+  IF NOT ((session_user=owner_role AND active_role=owner_role)
+       OR (session_user='melpis_c24_booking_worker'
+           AND active_role='melpis_c24_booking_worker')) THEN
    RAISE EXCEPTION 'Worker receipt requires dedicated identity' USING ERRCODE='42501';
   END IF;
   PERFORM 1 FROM public.inbound_worker_operations
@@ -187,13 +141,15 @@ REVOKE ALL ON FUNCTION public.booking_allocation_validate_worker_source() FROM P
 
 CREATE OR REPLACE FUNCTION public.booking_conversation_validate_worker_source()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
-DECLARE active_role text;
+DECLARE owner_role text; active_role text;
 BEGIN
  IF NEW.actor_kind='inbound_worker' THEN
-  active_role := COALESCE(NULLIF(current_setting('role'),'none'),session_user);
-  IF active_role IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class
-       WHERE oid='public.inbound_worker_operations'::regclass))
-     AND active_role IS DISTINCT FROM 'melpis_c24_booking_worker' THEN
+  owner_role := pg_get_userbyid((SELECT relowner FROM pg_class
+       WHERE oid='public.inbound_worker_operations'::regclass));
+  active_role := COALESCE(NULLIF(current_setting('role'), 'none'), session_user);
+  IF NOT ((session_user=owner_role AND active_role=owner_role)
+       OR (session_user='melpis_c24_booking_worker'
+           AND active_role='melpis_c24_booking_worker')) THEN
    RAISE EXCEPTION 'Worker receipt requires dedicated identity' USING ERRCODE='42501';
   END IF;
   PERFORM 1 FROM public.inbound_worker_receipts r
@@ -215,12 +171,14 @@ REVOKE ALL ON FUNCTION public.booking_conversation_validate_worker_source() FROM
 
 CREATE OR REPLACE FUNCTION public.booking_sector_mark_worker_insert(p_org uuid,p_booking uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
-DECLARE active_role text;
+DECLARE owner_role text; active_role text;
 BEGIN
- active_role := COALESCE(NULLIF(current_setting('role'),'none'),session_user);
- IF active_role IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class
-       WHERE oid='public.booking_sector_admission_fences'::regclass))
-    AND active_role IS DISTINCT FROM 'melpis_c24_booking_worker' THEN
+ owner_role := pg_get_userbyid((SELECT relowner FROM pg_class
+       WHERE oid='public.booking_sector_admission_fences'::regclass));
+ active_role := COALESCE(NULLIF(current_setting('role'), 'none'), session_user);
+ IF NOT ((session_user=owner_role AND active_role=owner_role)
+      OR (session_user='melpis_c24_booking_worker'
+          AND active_role='melpis_c24_booking_worker')) THEN
   RAISE EXCEPTION 'dedicated booking worker required' USING ERRCODE='42501';
  END IF;
  PERFORM public.booking_sector_lock_epoch(p_org);
@@ -231,4 +189,3 @@ BEGIN
  INSERT INTO public.booking_sector_admission_markers VALUES(txid_current(),p_org,p_booking);
 END $$;
 REVOKE ALL ON FUNCTION public.booking_sector_mark_worker_insert(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.booking_sector_mark_worker_insert(uuid,uuid) TO melpis_c24_booking_worker;
