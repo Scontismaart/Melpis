@@ -45,19 +45,38 @@ async def pg_pool(postgres_container, request):
         server_settings={"search_path": "public, extensions"},
     )
     async with pool.acquire() as conn:
+        auth_schema_exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='auth')"
+        )
+        auth_ready = await conn.fetchval("""
+            SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname='auth')
+               AND EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                            WHERE n.nspname='auth' AND c.relname='users' AND c.relkind IN ('r','p'))
+               AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                            WHERE n.nspname='auth' AND p.proname='uid' AND p.pronargs=0)
+               AND EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                            WHERE n.nspname='auth' AND p.proname='jwt' AND p.pronargs=0)
+        """)
+        if not auth_ready:
+            if auth_schema_exists:
+                raise RuntimeError(
+                    "Disposable test database has a provider-owned partial auth schema; "
+                    "use the repository's PostgreSQL fixture instead of modifying Supabase Auth."
+                )
+            await conn.execute("""
+                CREATE SCHEMA IF NOT EXISTS auth;
+                CREATE TABLE IF NOT EXISTS auth.users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    email TEXT
+                );
+                CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+                    SELECT NULL::uuid
+                $$ LANGUAGE sql STABLE;
+                CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
+                    SELECT '{}'::jsonb
+                $$ LANGUAGE sql STABLE;
+            """)
         await conn.execute("""
-            CREATE SCHEMA IF NOT EXISTS auth;
-            CREATE TABLE IF NOT EXISTS auth.users (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                email TEXT
-            );
-            CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-                SELECT NULL::uuid
-            $$ LANGUAGE sql STABLE;
-            CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
-                SELECT '{}'::jsonb
-            $$ LANGUAGE sql STABLE;
-            
             DO $$ BEGIN
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
                     CREATE ROLE anon;
@@ -67,10 +86,6 @@ async def pg_pool(postgres_container, request):
                 END IF;
                 IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
                     CREATE ROLE service_role;
-                END IF;
-                IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'melpis_c24_booking_worker') THEN
-                    CREATE ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-                        NOCREATEROLE NOREPLICATION BYPASSRLS;
                 END IF;
             END $$;
             DROP SCHEMA IF EXISTS public CASCADE;
@@ -124,7 +139,7 @@ async def private_worker_pool(pg_pool, postgres_container):
             dsn=postgres_container.get_connection_url().replace("+psycopg2", ""),
             user="melpis_c24_booking_worker", password=password,
             min_size=1, max_size=4,
-            server_settings={"search_path": "public, extensions"},
+            server_settings={"search_path": "pg_catalog, c24_private, pg_temp"},
         )
         yield pool
     finally:

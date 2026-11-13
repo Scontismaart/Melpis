@@ -38,12 +38,22 @@ def _object(value):
 
 
 @system_scope("Read only the fixed global quota trust marker and ACL metadata; no tenant rows")
-async def require_quota_trust_epoch(conn) -> UUID:
+async def require_quota_trust_epoch(conn, *, private_rpc=False) -> UUID:
     """Require current server-only ACLs and the exact post-hardening marker.
 
     The caller must hold a transaction while verifying the tenant admission.
     No fallback, marker creation, role change or permission repair is allowed.
     """
+    if private_rpc:
+        # The private booking runtime must not receive UPDATE on the global
+        # ledger merely to take a row lock. The migration RPC exposes only the
+        # immutable epoch and authorizes the worker only inside a consumed,
+        # live capability context. Missing RPC or bad context fails closed.
+        epoch = await conn.fetchval('SELECT c24_private.c24_quota_trust_epoch()')
+        if not isinstance(epoch, UUID) or epoch.int == 0:
+            raise InvalidQuotaAdmission("Quota provenance is unavailable")
+        return epoch
+
     writes = ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
     if int(await conn.fetchval("SHOW server_version_num")) >= 170000:
         writes.append("MAINTAIN")
@@ -67,6 +77,22 @@ async def require_quota_trust_epoch(conn) -> UUID:
     )
     if safe is not True:
         raise InvalidQuotaAdmission("Quota provenance is unavailable")
+    getter_available = await conn.fetchval(
+        "SELECT to_regprocedure('c24_private.c24_quota_trust_epoch()') IS NOT NULL"
+    )
+    if getter_available:
+        try:
+            epoch = await conn.fetchval('SELECT c24_private.c24_quota_trust_epoch()')
+            epoch = UUID(str(epoch))
+            if epoch.int == 0:
+                raise ValueError('Invalid trust epoch')
+            return epoch
+        except Exception:
+            raise InvalidQuotaAdmission("Quota provenance is unavailable") from None
+
+    # Before migration 093 the callers use the original row-level lock. The
+    # newer private worker intentionally has no UPDATE privilege on usage_events;
+    # 093 replaces this with the fixed-marker SECURITY DEFINER getter above.
     row = await conn.fetchrow(
         """SELECT organization_id, event_type, quantity, metadata
              FROM public.usage_events

@@ -79,7 +79,8 @@ async def _worker(pool, monkeypatch, *, legacy=False, text=None):
             nome_cliente="Mario Rossi", data=booking_day.isoformat(), ora="20:00", coperti=2,
         ),
     )
-    generate = AsyncMock(side_effect=lambda *a, **k: proposal.model_copy(deep=True))
+    generated = {"response": proposal}
+    generate = AsyncMock(side_effect=lambda *a, **k: generated["response"].model_copy(deep=True))
     monkeypatch.setattr("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=config))
     monkeypatch.setattr("src.core.receptionist.conversation_orchestrator.genera_risposta_async", generate)
     monkeypatch.setattr("src.whatsapp.inbound_processor.genera_risposta_async", generate)
@@ -92,7 +93,7 @@ async def _worker(pool, monkeypatch, *, legacy=False, text=None):
            "conversation_id": conversation_id, "content_text": text,
            "content": {"from": "+390000000001"}, "canale": "whatsapp"}
     return SimpleNamespace(org=org, msg=msg, service=service, repo=repo,
-                           send=send, generate=generate, proposal=proposal)
+                           send=send, generate=generate, proposal=proposal, generated=generated)
 
 
 async def _enable_private_a05(case, pool, private_worker_pool, monkeypatch, *, authority="internal"):
@@ -102,6 +103,7 @@ async def _enable_private_a05(case, pool, private_worker_pool, monkeypatch, *, a
     org_id = case.org["id"]
     monkeypatch.setenv("C24_PRIVATE_BOOKING_WORKER_ENABLED", "true")
     case.service.private_booking_pool = private_worker_pool
+    case.service.private_booking_application_pool = pool
     await pool.execute(
         "UPDATE organizations SET business_profile=$2::jsonb,timezone='Europe/Rome' WHERE id=$1",
         org_id, json.dumps({"verticale": "ristorante", "nome": "Pizzeria Bella"}),
@@ -131,6 +133,33 @@ async def _enable_private_a05(case, pool, private_worker_pool, monkeypatch, *, a
                              expected_revision=0, request_id=uuid4(), catalog=catalog)
     await catalog_repo.write(org_id, actor_user_id, auth_user_id, action="published",
                              expected_revision=1, request_id=uuid4())
+
+    from src.core.bookings.catalog_contracts import validate_catalog_json
+    from src.core.bookings.conversation_state import parse_structured_response_json
+    published = await catalog_repo.read(org_id)
+    scoped_catalog = validate_catalog_json(
+        json.dumps(published["published"]), organization_id=org_id,
+    )
+    appointment = case.proposal.prenotazione
+    structured = parse_structured_response_json(json.dumps({
+        "risposta": case.proposal.risposta,
+        "richiede_umano": False,
+        "motivo": "",
+        "categoria": "prenotazione",
+        "prenotazione": appointment.model_dump(mode="json"),
+        "booking_state_proposal": {
+            "intent": "booking",
+            "slots": [
+                {"field": "service_id", "value": "standard"},
+                {"field": "customer_name", "value": True},
+                {"field": "appointment_date", "value": appointment.data},
+                {"field": "appointment_time", "value": appointment.ora},
+                {"field": "party_size", "value": appointment.coperti},
+            ],
+        },
+    }), catalog=scoped_catalog, organization_id=org_id)
+    case.generated["response"] = structured
+    case.proposal = structured
 
     provider_id = "synthetic-a04-" + uuid4().hex
     stamp = await pool.fetchval("SELECT floor(extract(epoch from clock_timestamp()))::bigint")
@@ -170,12 +199,14 @@ async def test_booking_only_after_successful_canonical_commit_and_replay(
     from src.core.bookings.worker_authority import WorkerBookingAuthority
     real_process = WorkerBookingAuthority.process_a05_booking
 
-    async def checked_process(authority, worker_pool, organization_id, message_id, canonical):
+    async def checked_process(authority, worker_pool, organization_id, message_id, canonical,
+                              *, application_pool=None):
         # Real persistence is visible before even the first booking side effect.
         assert await _used(pg_pool, case.org["id"]) == 1
         assert (await _reservation_metadata(pg_pool, case.org["id"], operation.id))["state"] == "committed"
         assert await _stored(pg_pool, operation)
-        return await real_process(authority, worker_pool, organization_id, message_id, canonical)
+        return await real_process(authority, worker_pool, organization_id, message_id, canonical,
+                                  application_pool=application_pool)
 
     monkeypatch.setattr(WorkerBookingAuthority, "process_a05_booking", checked_process)
     first = await case.service.process_message(case.msg)
@@ -421,6 +452,19 @@ async def test_crash_after_commit_before_booking_resumes_from_durable_payload_wi
     assert not await _bookings(pg_pool, case.org["id"])
     await asyncio.gather(*(case.service.process_message(case.msg) for _ in range(4)))
     case.generate.assert_not_awaited()
+    assert await _used(pg_pool, case.org["id"]) == 1
+    if not await _bookings(pg_pool, case.org["id"]):
+        # A bounded concurrent replay may lose on a deadlock or active lease.
+        # Expire only the deterministic worker lease after the transaction has
+        # failed, then prove that the durable A04 payload completes the booking
+        # without re-entering the provider or changing commercial usage.
+        await pg_pool.execute("""UPDATE booking_worker_claims
+            SET lease_until=clock_timestamp()-interval '1 second'
+            WHERE organization_id=$1 AND message_id=$2""",
+            case.org["id"], case.msg["id"],
+        )
+        recovered = await case.service.process_message(case.msg)
+        assert recovered.action == "handled"
     assert await _used(pg_pool, case.org["id"]) == 1
     assert len(await _bookings(pg_pool, case.org["id"])) == 1
     assert await _stored(pg_pool, operation) == canonical

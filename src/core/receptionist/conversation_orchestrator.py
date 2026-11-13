@@ -355,7 +355,11 @@ class ConversationOrchestrator:
         # 11. Vertical Strategy & Booking Creation / Validation
         strategy = get_vertical_strategy(profilo.verticale, organization_id=str(org_id) if org_id else None)
         if risposta.prenotazione is not None:
-            risposta.prenotazione = strategy.valida_e_arricchisci_prenotazione(risposta.prenotazione, req.text)
+            risposta = risposta.model_copy(update={
+                "prenotazione": strategy.valida_e_arricchisci_prenotazione(
+                    risposta.prenotazione, req.text,
+                ),
+            })
         pren = risposta.prenotazione
         from src.core.bookings.conversation_state import StructuredConversationResponse
         structured_booking = isinstance(risposta, StructuredConversationResponse)

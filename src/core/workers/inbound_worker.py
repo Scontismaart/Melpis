@@ -20,16 +20,19 @@ class InboundWorker:
         inbound_service: InboundProcessingService,
         batch_size: int = 10,
         private_booking_pool: Any = None,
+        private_booking_application_pool: Any = None,
     ):
         self.repo = repo
         self.inbound_service = inbound_service
         self.batch_size = batch_size
         self._booking_worker = None
         self.private_booking_pool = private_booking_pool
-        # The synchronous A05 post-A04 bridge may use only the dedicated
-        # service-role pool. It never falls back to BookingService writers.
+        self.private_booking_application_pool = private_booking_application_pool
+        # The synchronous A05 post-A04 bridge requires both the dedicated
+        # worker login and the separately verified capability-issuer pool.
         if self.inbound_service is not None:
             self.inbound_service.private_booking_pool = private_booking_pool
+            self.inbound_service.private_booking_application_pool = private_booking_application_pool
 
     async def process_next_batch(self):
         """Esegue il reaper dei claim pendenti/scaduti e preleva il prossimo batch atomico."""
@@ -46,6 +49,9 @@ class InboundWorker:
                 from src.core.bookings.worker_authority import WorkerBookingAuthority
                 self._booking_worker = WorkerBookingAuthority()
             try:
-                await self._booking_worker.process_next_batch(self.private_booking_pool)
+                await self._booking_worker.process_next_batch(
+                    self.private_booking_pool,
+                    application_pool=self.private_booking_application_pool,
+                )
             except Exception as exc:
                 logger.error("Private booking worker batch failed: %s", type(exc).__name__)

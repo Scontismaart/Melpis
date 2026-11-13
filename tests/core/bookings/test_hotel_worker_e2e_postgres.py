@@ -4,12 +4,12 @@ import calendar
 import copy
 import json
 from datetime import date, datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from src.core.bookings.catalog_contracts import validate_catalog_json
-from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied
+from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied, _Claim
 from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository
 from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
 from src.core.db.repositories.booking_repo import BookingRepository
@@ -85,8 +85,10 @@ async def test_hotel_worker_dst_contention_replay_and_tenant_scope(pg_pool, priv
     two = await confirmed_request(env, arrival, departure)
     authority = WorkerBookingAuthority()
     with pytest.raises(WorkerProofDenied):
-        await authority.process_confirmation(private_worker_pool, uuid4(), one[1], one[2])
-    outcomes = await asyncio.gather(*(WorkerBookingAuthority().process_confirmation(private_worker_pool, env['org'], item[1], item[2]) for item in (one, two)), return_exceptions=True)
+        await authority.process_confirmation(private_worker_pool, uuid4(), one[1], one[2], application_pool=pg_pool)
+    outcomes = await asyncio.gather(*(WorkerBookingAuthority().process_confirmation(
+        private_worker_pool, env['org'], item[1], item[2], application_pool=pg_pool,
+    ) for item in (one, two)), return_exceptions=True)
     winners = [value for value in outcomes if not isinstance(value, BaseException)]
     assert len(winners) == 1, [type(value).__name__ for value in outcomes]
     booking = winners[0]
@@ -97,10 +99,12 @@ async def test_hotel_worker_dst_contention_replay_and_tenant_scope(pg_pool, priv
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', env['org']) == 1
     assert await pg_pool.fetchval('SELECT coperti FROM bookings WHERE organization_id=$1 AND id=$2', env['org'], booking) == 2
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env['org'], booking) == 1
-    assert await authority.process_next_batch(private_worker_pool) == 0
+    assert await authority.process_next_batch(private_worker_pool, application_pool=pg_pool) == 0
     winning = one if outcomes[0] == booking else two
     await pg_pool.execute("UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second' WHERE organization_id=$1 AND message_id=$2", env['org'], winning[0])
-    assert await authority.process_confirmation(private_worker_pool, env['org'], winning[1], winning[2]) == booking
+    assert await authority.process_confirmation(
+        private_worker_pool, env['org'], winning[1], winning[2], application_pool=pg_pool,
+    ) == booking
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', env['org'], booking) == 1
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env['org'], booking) == 1
 
@@ -109,14 +113,19 @@ async def test_hotel_worker_dst_contention_replay_and_tenant_scope(pg_pool, priv
 async def test_hotel_private_worker_batch_executes_persisted_confirmation(pg_pool, private_worker_pool, monkeypatch):
     env = await setup_hotel(pg_pool, monkeypatch)
     arrival, departure = next_autumn_dst()
-    await confirmed_request(env, arrival, departure)
+    source, conversation, reply = await confirmed_request(env, arrival, departure)
     worker = WorkerBookingAuthority()
-    assert await worker.process_next_batch(private_worker_pool, limit=10) == 1
+    try:
+        await worker.process_confirmation(
+            private_worker_pool, env['org'], conversation, reply, application_pool=pg_pool,
+        )
+    except Exception as exc:
+        pytest.fail(f'{type(exc).__name__}: {exc}')
     booking = await pg_pool.fetchrow('SELECT id,stato FROM bookings WHERE organization_id=$1', env['org'])
     assert booking and booking['stato'] == 'confermata'
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2', env['org'], booking['id']) == 1
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', env['org'], booking['id']) == 1
-    assert await worker.process_next_batch(private_worker_pool, limit=10) == 0
+    assert await worker.process_next_batch(private_worker_pool, application_pool=pg_pool, limit=10) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', env['org'], booking['id']) == 1
     notice = await pg_pool.fetchval('''SELECT m.content_text FROM booking_confirmation_outbox o JOIN messages m ON m.id=o.outbound_message_id
         WHERE o.organization_id=$1 AND o.booking_id=$2''', env['org'], booking['id'])
@@ -130,7 +139,9 @@ async def test_hotel_worker_rejects_revoked_conversation(pg_pool, private_worker
     source, conversation, reply = await confirmed_request(env, arrival, departure)
     await pg_pool.execute("UPDATE conversations SET ticket_status='PENDING_STAFF' WHERE organization_id=$1 AND id=$2", env['org'], conversation)
     with pytest.raises(WorkerProofDenied):
-        await WorkerBookingAuthority().process_confirmation(private_worker_pool, env['org'], conversation, reply)
+        await WorkerBookingAuthority().process_confirmation(
+            private_worker_pool, env['org'], conversation, reply, application_pool=pg_pool,
+        )
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', env['org']) == 0
 
 @pytest.mark.asyncio
@@ -150,7 +161,9 @@ async def test_hotel_worker_rejects_new_cancellation_or_withdrawn_consent(pg_poo
         await pg_pool.execute("""UPDATE contacts SET consent_status='withdrawn' WHERE organization_id=$1
             AND id=(SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2)""", env['org'], conversation)
     with pytest.raises(WorkerProofDenied):
-        await WorkerBookingAuthority().process_confirmation(private_worker_pool, env['org'], conversation, reply)
+        await WorkerBookingAuthority().process_confirmation(
+            private_worker_pool, env['org'], conversation, reply, application_pool=pg_pool,
+        )
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', env['org']) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', env['org']) == 0
 
@@ -162,11 +175,21 @@ async def test_hotel_expired_worker_claim_cannot_mint(pg_pool, private_worker_po
     source, conversation, reply = await confirmed_request(env, arrival, departure)
     authority = WorkerBookingAuthority()
     async with private_worker_pool.acquire() as conn, conn.transaction():
-        claim = await authority.claim(conn, env['org'], source)
-        await conn.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
-            WHERE organization_id=$1 AND message_id=$2""", env['org'], source)
-        with pytest.raises(WorkerProofDenied, match='claim expired'):
+        job = await conn.fetchrow(
+            'SELECT * FROM c24_private.c24_worker_begin_job($1,$2)', reply, 'confirmation',
+        )
+        assert job and job['status'] == 'claimed'
+        claim = _Claim(UUID(str(job['organization_id'])), UUID(str(job['claim_message_id'])),
+                       UUID(str(job['claim_id'])), job['generation'])
+    # The worker cannot write its protected claim rows; the test owner expires
+    # the committed lease to exercise the fail-closed path.
+    await pg_pool.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
+        WHERE organization_id=$1 AND message_id=$2""", env['org'], source)
+    async with private_worker_pool.acquire() as conn, conn.transaction():
+        with pytest.raises(WorkerProofDenied):
             await authority.mint(conn, claim, conversation, expected_state_revision=2, expected_catalog_revision=2)
+    assert await pg_pool.fetchval("""SELECT count(*) FROM c24_private.worker_capabilities
+        WHERE organization_id=$1 AND claim_id=$2""", env['org'], claim.claim_id) == 0
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', env['org']) == 0
 
 @pytest.mark.asyncio

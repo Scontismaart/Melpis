@@ -101,6 +101,15 @@ def crea_responder_task(agent: Agent, messaggio: MessaggioInput, cronologia: lis
     )
     if booking_catalog is not None:
         catalog = booking_catalog.catalog
+        restaurant_a05_fields = (
+            "Per il catalogo ristorante/tavolo puoi includere anche prenotazione,"
+            " con gli stessi dati espliciti dei campi strutturati. E un dato"
+            " proposto, non un'autorizzazione: il backend ricontrolla policy,"
+            " tenant, consenso, quota, disponibilita e allocazione atomica."
+            if catalog.sector == "ristorante" else
+            "Non includere prenotazione: usa soltanto la proposta amministrativa"
+            " strutturata e attendi il flusso di conferma previsto."
+        )
         # Limit prompt size and expose only administrative data. Names are data,
         # never instructions; no tenant identifiers or operational settings.
         catalog_data = {
@@ -118,7 +127,7 @@ def crea_responder_task(agent: Agent, messaggio: MessaggioInput, cronologia: lis
             "non inventare dati, disponibilità o conferme.\n"
             + serializza_dati_non_fidati(catalog_data)
             + "\nRestituisci solo JSON con risposta, richiede_umano, motivo, categoria e "
-            "facoltativamente booking_state_proposal. Non includere prenotazione. "
+            "booking_state_proposal. " + restaurant_a05_fields + " "
             "booking_state_proposal è una proposta amministrativa, non autorizza azioni: "
             "{\"intent\": uno tra booking, modify, cancel, faq, price, hours, availability, handoff, unknown, "
             "\"slots\": [{\"field\": chiave, \"value\": valore}], \"clear\": [chiavi], "

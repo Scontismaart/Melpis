@@ -1,12 +1,19 @@
 import asyncio
 import gc
-from weakref import ref
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
+from uuid import uuid4
+from weakref import ref
 
 import pytest
 
-from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied, service_receipt_v2
+from src.core.bookings.worker_authority import (
+    WorkerBookingAuthority,
+    WorkerProofDenied,
+    _Claim,
+    _renew_claim,
+    service_receipt_v2,
+)
 
 
 class Connection:
@@ -18,6 +25,8 @@ class Connection:
         return self.active
     async def fetchval(self, query, *args):
         return self.isolation if query == 'SHOW transaction_isolation' else self.txid
+    async def fetchrow(self, query, *args):
+        return None
 
 
 @pytest.mark.asyncio
@@ -74,22 +83,10 @@ def test_receipt_identity_is_scoped_and_strict():
         service_receipt_v2(org, message, 'cancel', 'a'*64)
 
 @pytest.mark.asyncio
-async def test_claim_requires_persisted_ingress_even_with_valid_a04(monkeypatch):
-    from src.core.bookings.worker_authority import BookingConversationRepository
-    org, message, conversation = uuid4(), uuid4(), uuid4()
-    class ClaimConnection(Connection):
-        async def execute(self, *args):
-            pass
-        async def fetchrow(self, query, *args):
-            if 'SELECT id FROM organizations' in query:
-                return {'id': org}
-            if 'SELECT id,conversation_id FROM messages' in query:
-                return {'id': message, 'conversation_id': conversation}
-            return None
-    monkeypatch.setattr(BookingConversationRepository, '_source', AsyncMock(return_value=({'content_text': 'hello'}, 1, 'hash')))
-    monkeypatch.setattr(BookingConversationRepository, '_canonical_response', AsyncMock(return_value=({}, 'a'*64)))
-    with pytest.raises(WorkerProofDenied, match='provenance'):
-        await WorkerBookingAuthority().claim(ClaimConnection(), org, message)
+async def test_claim_requires_database_derived_job_evidence():
+    org, message = uuid4(), uuid4()
+    with pytest.raises(WorkerProofDenied, match='already held'):
+        await WorkerBookingAuthority().claim(Connection(), org, message)
 
 
 @pytest.mark.asyncio
@@ -115,12 +112,55 @@ async def test_claim_rejects_repeatable_read_snapshot():
 @pytest.mark.asyncio
 async def test_poll_advances_past_failed_confirmation(monkeypatch):
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
-    org = uuid4()
-    jobs = [dict(organization_id=org, conversation_id=uuid4(), source_message_id=uuid4())
-            for _ in range(2)]
+    jobs = [uuid4(), uuid4()]
     authority = WorkerBookingAuthority()
-    authority._confirmed_jobs = AsyncMock(return_value=(org, jobs))
+    authority._confirmed_jobs = AsyncMock(return_value=jobs)
     authority.process_confirmation = AsyncMock(side_effect=[RuntimeError('synthetic'), uuid4()])
-    assert await authority.process_next_batch(None) == 1
+    assert await authority.process_next_batch(None, application_pool=object()) == 1
     assert authority.process_confirmation.await_count == 2
-    assert authority._cursor == (org, jobs[1]['conversation_id'])
+    assert authority.process_confirmation.await_args_list[0].args[1:] == (None, None, jobs[0])
+    assert authority._cursor == jobs[1]
+
+
+@pytest.mark.asyncio
+async def test_worker_lease_renewal_is_tenant_bound_and_uses_server_expiry():
+    org, message, claim_id = uuid4(), uuid4(), uuid4()
+    claim = _Claim(org, message, claim_id, 4)
+    renewed_until = datetime.now(timezone.utc) + timedelta(minutes=4)
+    seen = []
+
+    class Conn:
+        def __init__(self): self.args = None; seen.append(self)
+        def is_in_transaction(self): return True
+        def transaction(self, **kwargs): return Acquire()
+        async def fetchval(self, query, *args):
+            if 'c24_worker_renew_job' in query:
+                self.args = args
+                return renewed_until
+            return True
+    class Acquire:
+        async def __aenter__(self): self.conn = Conn(); return self.conn
+        async def __aexit__(self, *args): return False
+    class Pool:
+        def acquire(self): return Acquire()
+
+    await _renew_claim(Pool(), claim)
+    assert seen[0].args == (org, message, claim_id, 4, 300)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('returned', [True, None, datetime.now(timezone.utc) - timedelta(seconds=1)])
+async def test_worker_lease_renewal_fails_closed_without_live_server_timestamp(returned):
+    class Conn:
+        def is_in_transaction(self): return True
+        def transaction(self, **kwargs): return Acquire()
+        async def fetchval(self, query, *args):
+            return returned if 'c24_worker_renew_job' in query else True
+    class Acquire:
+        async def __aenter__(self): return Conn()
+        async def __aexit__(self, *args): return False
+    class Pool:
+        def acquire(self): return Acquire()
+
+    with pytest.raises(WorkerProofDenied, match='lease lost'):
+        await _renew_claim(Pool(), _Claim(uuid4(), uuid4(), uuid4(), 1))

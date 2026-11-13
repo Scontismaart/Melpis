@@ -53,6 +53,17 @@ def test_direct_scope_inventory_matches_static_guard_tables():
         "billing_checkout_intents",
         "governance_outbox",
         "team_invitations",
+        "worker_capabilities",
+        "worker_context",
+        "booking_availability",
+        "booking_resource_availability",
+        "worker_booking_inserts",
+        "worker_booking_stays_inserts",
+        "worker_allocation_sets",
+        "worker_resource_allocations",
+        "worker_allocation_requests",
+        "worker_confirmation_outbox",
+        "worker_outbound_messages",
     } <= direct
 
 

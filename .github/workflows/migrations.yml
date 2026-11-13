@@ -94,10 +94,6 @@ jobs:
               IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
                   CREATE ROLE service_role NOLOGIN BYPASSRLS;
               END IF;
-              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'melpis_c24_booking_worker') THEN
-                  CREATE ROLE melpis_c24_booking_worker NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB
-                      NOCREATEROLE NOREPLICATION BYPASSRLS;
-              END IF;
           END $$;
           EOSQL
 
