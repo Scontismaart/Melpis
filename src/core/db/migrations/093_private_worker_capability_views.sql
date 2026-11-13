@@ -1818,7 +1818,7 @@ BEGIN
     IF session_user IS DISTINCT FROM 'melpis_c24_booking_worker'
        OR p_table_name NOT IN ('organizations','bookings','booking_stays','messages',
             'message_delivery_attempts','booking_allocation_sets','booking_resource_allocations',
-            'booking_allocation_requests','booking_confirmation_outbox')
+            'booking_allocation_requests','booking_confirmation_outbox','external_booking_sync')
        OR p_operation NOT IN ('INSERT','UPDATE') THEN
         RAISE EXCEPTION 'scoped booking worker required' USING ERRCODE='42501';
     END IF;
@@ -1838,6 +1838,43 @@ BEGIN
         org,'melpis_c24_booking_worker') THEN
         RAISE EXCEPTION 'scoped booking worker required' USING ERRCODE='42501';
     END IF;
+    IF p_table_name='external_booking_sync' THEN
+        -- Calendar's booking trigger writes the synchronization receipt while
+        -- the worker's capability is active. Admit only that exact booking's
+        -- deterministic, tenant-bound row; the worker gets no direct table
+        -- privileges and cannot repoint the sync to another booking.
+        IF item->>'provider' IS DISTINCT FROM 'google'
+           OR item->>'internal_booking_id' IS DISTINCT FROM (
+               SELECT ctx.booking_id::text FROM c24_private.worker_context AS ctx
+                WHERE ctx.backend_pid=pg_catalog.pg_backend_pid()
+                  AND ctx.transaction_id=pg_catalog.pg_current_xact_id()
+                  AND ctx.organization_id=org AND ctx.lease_until>pg_catalog.clock_timestamp()
+           )
+           OR item->>'idempotency_key' IS DISTINCT FROM
+              ('google-booking:'||org::text||':'||(item->>'internal_booking_id'))
+           OR item->>'calendar_desired_revision' IS DISTINCT FROM (
+               SELECT b.calendar_revision::text FROM public.bookings AS b
+                WHERE b.organization_id=org
+                  AND b.id=NULLIF(item->>'internal_booking_id','')::uuid
+           )
+           OR NULLIF(item->>'calendar_authoritative','')::boolean IS DISTINCT FROM (
+               SELECT b.calendar_confirm_pending FROM public.bookings AS b
+                WHERE b.organization_id=org
+                  AND b.id=NULLIF(item->>'internal_booking_id','')::uuid
+           )
+           OR item->>'calendar_action' IS DISTINCT FROM (
+               SELECT CASE WHEN b.stato IN ('cancellata','cancellato','rifiutata','no_show')
+                           THEN 'delete' WHEN b.calendar_confirm_pending
+                           THEN 'authoritative' ELSE 'upsert' END
+                 FROM public.bookings AS b
+                WHERE b.organization_id=org
+                  AND b.id=NULLIF(item->>'internal_booking_id','')::uuid
+           )
+           OR item->>'sync_status' NOT IN ('pending','blocked','processing','uncertain') THEN
+            RAISE EXCEPTION 'calendar sync row is outside the active booking capability'
+                USING ERRCODE='42501';
+        END IF;
+    END IF;
     IF p_table_name='usage_events' AND item->>'event_type' <> 'system.provider_attempt' THEN RETURN; END IF;
     PERFORM pg_catalog.pg_advisory_xact_lock_shared(
         pg_catalog.hashtextextended(org::text,606));
@@ -1845,6 +1882,10 @@ BEGIN
         RETURN;
     END IF;
     IF p_table_name='contacts' THEN subject := NULLIF(item->>'id','')::uuid;
+    ELSIF p_table_name='external_booking_sync' THEN
+        SELECT b.contact_id INTO subject FROM public.bookings AS b
+         WHERE b.organization_id=org
+           AND b.id=NULLIF(item->>'internal_booking_id','')::uuid;
     ELSE
         subject := NULLIF(item->>'contact_id','')::uuid;
         IF subject IS NULL AND item->>'conversation_id' IS NOT NULL THEN

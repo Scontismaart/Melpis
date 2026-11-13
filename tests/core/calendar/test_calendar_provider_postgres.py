@@ -270,6 +270,13 @@ async def test_inbound_google_authority_defers_confirmation_without_rerunning_ai
     async with pg_pool.acquire() as conn:
         before = await conn.fetchrow("SELECT * FROM bookings WHERE organization_id=$1", org)
         assert before["stato"] == "in_attesa" and before["calendar_confirm_pending"]
+        sync = await conn.fetchrow("""SELECT * FROM external_booking_sync
+            WHERE organization_id=$1 AND internal_booking_id=$2 AND provider='google'""",
+            org, before["id"],
+        )
+        assert sync["calendar_authoritative"] is True
+        assert sync["calendar_action"] == "authoritative"
+        assert sync["idempotency_key"] == f"google-booking:{org}:{before['id']}"
         assert await conn.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
     await service.process_pending()
     async with pg_pool.acquire() as conn:
@@ -322,18 +329,13 @@ async def test_inbound_google_authority_without_ready_credentials_stays_pending(
     async with private_worker_pool.acquire() as worker:
         assert not await worker.fetchval("SELECT has_table_privilege(current_user,'public.google_calendar_credentials','SELECT')")
         assert not await worker.fetchval("SELECT has_table_privilege(current_user,'public.external_booking_sync','UPDATE')")
-        assert await worker.fetchval(
-            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
-            org, booking["id"], case.msg["id"],
-        ) is True
-        assert await worker.fetchval(
-            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
-            org, booking["id"], uuid4(),
-        ) is False
-        assert await worker.fetchval(
-            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
-            uuid4(), booking["id"], case.msg["id"],
-        ) is False
+        assert not await worker.fetchval("""SELECT has_function_privilege(current_user,
+            'public.c24_attach_calendar_inbound_source(uuid,uuid,uuid)','EXECUTE')""")
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await worker.fetchval(
+                "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+                org, booking["id"], case.msg["id"],
+            )
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
             await worker.fetch("SELECT * FROM public.google_calendar_credentials WHERE organization_id=$1", org)
         with pytest.raises(asyncpg.InsufficientPrivilegeError):
@@ -352,10 +354,11 @@ async def test_inbound_google_authority_without_ready_credentials_stays_pending(
     assert await pg_pool.fetchval("SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1", org) == 0
     await pg_pool.execute("UPDATE bookings SET stato='cancellata',calendar_confirm_pending=false WHERE organization_id=$1", org)
     async with private_worker_pool.acquire() as worker:
-        assert await worker.fetchval(
-            "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
-            org, booking["id"], case.msg["id"],
-        ) is False
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await worker.fetchval(
+                    "SELECT public.c24_attach_calendar_inbound_source($1,$2,$3)",
+                    org, booking["id"], case.msg["id"],
+                )
 
 
 @pytest.mark.parametrize("lost_response", [False, True])
