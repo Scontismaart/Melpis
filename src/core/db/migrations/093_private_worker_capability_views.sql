@@ -441,20 +441,21 @@ BEGIN
            JOIN public.simulation_requests AS request
              ON request.organization_id=op.organization_id
             AND request.request_id=op.operation_id
-            JOIN public.auth_access_lifecycle AS access
-              ON access.auth_user_id=request.auth_user_id AND access.disabled_at IS NULL
-            JOIN public.user_profiles AS profile
-              ON profile.auth_user_id=request.auth_user_id
-            JOIN public.organization_memberships AS membership
-              ON membership.organization_id=op.organization_id
-             AND membership.user_id=profile.id AND membership.joined_at IS NOT NULL
-             AND membership.ruolo IN ('owner','manager','staff')
            WHERE op.organization_id=p_organization_id AND op.message_id=p_message_id
              AND op.operation_id=NULLIF(p_payload->>'operation_id','')::uuid
              AND inbox.channel='whatsapp' AND inbox.status='completed'
              AND event.event_type='system.quota_reservation' AND event.quantity=0
              AND event.metadata->>'channel'='inbound' AND event.metadata->>'state'='committed'
              AND request.status='completed' AND request.response IS NOT NULL
+             -- Inbound uses a server-created synthetic quota actor, not an
+             -- authenticated dashboard user. The durable webhook/receipt,
+             -- committed inbound event, source and claim above authorize it.
+             -- Reject accidental binding to a real account; simulator users
+             -- are checked separately by the worker-scoped request view.
+             AND NOT EXISTS (SELECT 1 FROM public.auth_access_lifecycle AS access
+                 WHERE access.auth_user_id=request.auth_user_id)
+             AND NOT EXISTS (SELECT 1 FROM public.user_profiles AS profile
+                 WHERE profile.auth_user_id=request.auth_user_id)
        ) THEN
         RAISE EXCEPTION 'current persisted worker claim and source required' USING ERRCODE='42501';
     END IF;
@@ -651,14 +652,8 @@ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
        AND p_effective_role='melpis_c24_booking_worker'
        AND EXISTS (
          SELECT 1 FROM public.simulation_requests AS request
-         JOIN public.auth_access_lifecycle AS access
-           ON access.auth_user_id=request.auth_user_id AND access.disabled_at IS NULL
-         JOIN public.user_profiles AS profile
-           ON profile.auth_user_id=request.auth_user_id
-         JOIN public.organization_memberships AS membership
-           ON membership.organization_id=request.organization_id
-          AND membership.user_id=profile.id AND membership.joined_at IS NOT NULL
-          AND membership.ruolo IN ('owner','manager','staff')
+         JOIN public.usage_events AS event
+           ON event.organization_id=request.organization_id AND event.id=request.request_id
          JOIN c24_private.worker_context AS ctx
            ON ctx.organization_id=request.organization_id
           AND ctx.operation_id=request.request_id
@@ -671,6 +666,43 @@ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
            AND request.status='completed' AND request.response IS NOT NULL
            AND ctx.backend_pid=pg_backend_pid() AND ctx.transaction_id=pg_current_xact_id()
            AND ctx.lease_until>clock_timestamp()
+           AND (
+             (
+               event.event_type='system.quota_reservation' AND event.quantity=0
+               AND event.metadata->>'channel'='inbound'
+               AND event.metadata->>'state'='committed'
+               AND NOT EXISTS (SELECT 1 FROM public.auth_access_lifecycle AS access
+                   WHERE access.auth_user_id=request.auth_user_id)
+               AND NOT EXISTS (SELECT 1 FROM public.user_profiles AS profile
+                   WHERE profile.auth_user_id=request.auth_user_id)
+               AND EXISTS (
+                 SELECT 1 FROM public.inbound_worker_operations AS op
+                 JOIN public.inbound_worker_receipts AS receipt
+                   ON receipt.organization_id=op.organization_id
+                  AND receipt.inbox_id=op.inbox_id AND receipt.message_id=op.message_id
+                 JOIN public.meta_webhook_inbox AS inbox
+                   ON inbox.organization_id=receipt.organization_id AND inbox.id=receipt.inbox_id
+                 WHERE op.organization_id=request.organization_id
+                   AND op.message_id=ctx.message_id AND op.operation_id=request.request_id
+                   AND inbox.channel='whatsapp' AND inbox.status='completed'
+               )
+             ) OR (
+               event.event_type='system.quota_reservation' AND event.quantity=0
+               AND event.metadata->>'channel'='simulator'
+               AND event.metadata->>'state'='committed'
+               AND EXISTS (
+                 SELECT 1 FROM public.auth_access_lifecycle AS access
+                 JOIN public.user_profiles AS profile
+                   ON profile.auth_user_id=access.auth_user_id
+                 JOIN public.organization_memberships AS membership
+                   ON membership.organization_id=request.organization_id
+                  AND membership.user_id=profile.id AND membership.joined_at IS NOT NULL
+                  AND membership.ruolo IN ('owner','manager','staff')
+                 WHERE access.auth_user_id=request.auth_user_id
+                   AND access.disabled_at IS NULL
+               )
+             )
+           )
        )
 $$;
 REVOKE ALL ON FUNCTION c24_private.c24_worker_scope_allows_simulation_request(uuid,uuid,uuid,text)

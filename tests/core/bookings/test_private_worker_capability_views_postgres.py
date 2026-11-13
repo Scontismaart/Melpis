@@ -54,7 +54,7 @@ _PRIVATE_EXECUTABLES = {
 }
 
 
-async def test_093_simulator_worker_scope_uses_live_tenant_membership(pg_pool):
+async def test_093_request_scope_separates_inbound_actor_from_simulator_membership(pg_pool):
     definition = await pg_pool.fetchval("""
         SELECT pg_get_functiondef(
             'c24_private.c24_worker_issue_capability(uuid,uuid,uuid,bigint,uuid,jsonb,text,integer)'::regprocedure
@@ -65,14 +65,21 @@ async def test_093_simulator_worker_scope_uses_live_tenant_membership(pg_pool):
             'c24_private.c24_worker_scope_allows_simulation_request(uuid,uuid,uuid,text)'::regprocedure
         )
     """)
-    for checked in (definition, scope_definition):
-        assert "JOIN public.auth_access_lifecycle AS access" in checked
-        assert "access.disabled_at IS NULL" in checked
-        assert "JOIN public.user_profiles AS profile" in checked
-        assert "JOIN public.organization_memberships AS membership" in checked
-        assert "membership.joined_at IS NOT NULL" in checked
-        assert "membership.ruolo IN ('owner','manager','staff')" in checked
-    assert "membership.organization_id=op.organization_id" in definition
+    # Inbound's quota actor is a deterministic internal identity rather than
+    # an Auth user. It is admitted only through the persisted inbound proof;
+    # simulator rows retain live, tenant-scoped membership validation.
+    assert "event.metadata->>'channel'='inbound'" in definition
+    assert "inbox.channel='whatsapp' AND inbox.status='completed'" in definition
+    assert "NOT EXISTS (SELECT 1 FROM public.auth_access_lifecycle AS access" in definition
+    assert "NOT EXISTS (SELECT 1 FROM public.user_profiles AS profile" in definition
+    assert "event.metadata->>'channel'='inbound'" in scope_definition
+    assert "event.metadata->>'channel'='simulator'" in scope_definition
+    assert "FROM public.auth_access_lifecycle AS access" in scope_definition
+    assert "access.disabled_at IS NULL" in scope_definition
+    assert "JOIN public.user_profiles AS profile" in scope_definition
+    assert "JOIN public.organization_memberships AS membership" in scope_definition
+    assert "membership.joined_at IS NOT NULL" in scope_definition
+    assert "membership.ruolo IN ('owner','manager','staff')" in scope_definition
     assert "membership.organization_id=request.organization_id" in scope_definition
     assert "request.auth_user_id=p_actor_id" in scope_definition
     assert "request.auth_user_id='" not in definition
