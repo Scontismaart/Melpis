@@ -99,6 +99,7 @@ class InboundProcessor:
         booking_service=None,
         orchestrator=None,
         private_booking_pool=None,
+        private_booking_application_pool=None,
     ):
         self.app_config = app_config
         self.repo = repo
@@ -144,7 +145,8 @@ class InboundProcessor:
         self.inbound_service.use_orchestrator = self.use_orchestrator
         self.inbound_service.shadow_orchestrator = self.shadow_orchestrator
         self.worker = InboundWorker(repo=repo, inbound_service=self.inbound_service,
-                                    private_booking_pool=private_booking_pool)
+                                    private_booking_pool=private_booking_pool,
+                                    private_booking_application_pool=private_booking_application_pool)
 
     async def process_next_batch(self):
         await self.repo.reap_stale_claims()

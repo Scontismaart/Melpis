@@ -1,10 +1,10 @@
+import asyncio
 import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from datetime import date, time
-import asyncio
 
 import asyncpg
 
@@ -234,7 +234,8 @@ class BookingRepository(TenantScopedRepository):
                 WHERE organization_id=$1 AND booking_id=$2 AND booking_revision=$3)""",
                 uuid.UUID(str(organization_id)), uuid.UUID(str(booking_id)), revision))
 
-    async def enqueue_calendar_confirmation(self, conn, booking, inbound_message_id, channel):
+    async def enqueue_calendar_confirmation(self, conn, booking, inbound_message_id, channel, *,
+                                            worker=False, outbound_message_id=None):
         """Existing idempotent A05 notification, also used after Calendar proof."""
         org_uuid = booking["organization_id"]
         conversation_uuid = uuid.UUID(str(booking["id_conversazione"])) if booking["id_conversazione"] else None
@@ -263,33 +264,67 @@ class BookingRepository(TenantScopedRepository):
         else:
             payload["_delivery_category"] = "service"
         key = f"booking-confirm:{org_uuid}:{source_message_id}"
-        message_id = uuid.uuid4()
-        outbound = await conn.fetchrow("""
-            INSERT INTO messages (id, organization_id, conversation_id, wam_id,
-                                  direction, message_type, content, content_text,
-                                  status, handling_type, idempotency_key)
-            VALUES ($1,$2,$3,NULL,'outbound','text',$4::jsonb,$5,'queued',
-                    'booking_confirmation',$6)
-            ON CONFLICT (organization_id,idempotency_key)
-                WHERE idempotency_key IS NOT NULL DO NOTHING
-            RETURNING id,content
-        """, message_id, org_uuid, conversation_uuid, json.dumps(payload), notice, key)
-        if outbound is None:
+        message_id = uuid.UUID(str(outbound_message_id)) if outbound_message_id else uuid.uuid4()
+        if worker:
+            if await conn.fetchval('SELECT session_user=current_user AND current_user=$1', 'melpis_c24_booking_worker') is not True:
+                raise RuntimeError("Private booking worker identity unavailable")
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1,842))", key)
             outbound = await conn.fetchrow("""
-                SELECT id,content FROM messages
+                SELECT id,content FROM c24_private.worker_outbound_messages
                 WHERE organization_id=$1 AND idempotency_key=$2
             """, org_uuid, key)
+            if outbound is None:
+                await conn.execute("""
+                    INSERT INTO worker_outbound_messages
+                        (id, organization_id, conversation_id, wam_id, direction,
+                         message_type, content, content_text, status, handling_type, idempotency_key)
+                    VALUES ($1,$2,$3,NULL,'outbound','text',$4::jsonb,$5,'queued',
+                            'booking_confirmation',$6)
+                """, message_id, org_uuid, conversation_uuid, json.dumps(payload), notice, key)
+                outbound = await conn.fetchrow("""
+                    SELECT id,content FROM c24_private.worker_outbound_messages
+                    WHERE organization_id=$1 AND idempotency_key=$2
+                """, org_uuid, key)
+        else:
+            outbound = await conn.fetchrow("""
+                INSERT INTO messages (id, organization_id, conversation_id, wam_id,
+                                      direction, message_type, content, content_text,
+                                      status, handling_type, idempotency_key)
+                VALUES ($1,$2,$3,NULL,'outbound','text',$4::jsonb,$5,'queued',
+                        'booking_confirmation',$6)
+                ON CONFLICT (organization_id,idempotency_key)
+                    WHERE idempotency_key IS NOT NULL DO NOTHING
+                RETURNING id,content
+            """, message_id, org_uuid, conversation_uuid, json.dumps(payload), notice, key)
+        if outbound is None:
+            if worker:
+                outbound = await conn.fetchrow("""
+                    SELECT id,content FROM c24_private.worker_outbound_messages
+                    WHERE organization_id=$1 AND idempotency_key=$2
+                """, org_uuid, key)
+            else:
+                outbound = await conn.fetchrow("""
+                    SELECT id,content FROM messages
+                    WHERE organization_id=$1 AND idempotency_key=$2
+                """, org_uuid, key)
             stored = outbound["content"] if outbound else None
             if isinstance(stored, str):
                 stored = json.loads(stored)
             if stored != payload:
                 raise ValueError("Auto booking notification idempotency conflict")
-        await conn.execute("""
-            INSERT INTO booking_confirmation_outbox
-                (organization_id,booking_id,inbound_message_id,outbound_message_id,booking_revision)
-            VALUES ($1,$2,$3,$4,$5)
-            ON CONFLICT (organization_id,booking_id,booking_revision) DO NOTHING
-        """, org_uuid, booking["id"], inbound_uuid, outbound["id"], booking["calendar_revision"])
+        if worker:
+            await conn.execute("""
+                INSERT INTO worker_confirmation_outbox
+                    (organization_id,booking_id,inbound_message_id,outbound_message_id,booking_revision)
+                VALUES ($1,$2,$3,$4,$5)
+            """, org_uuid, booking["id"], inbound_uuid, outbound["id"], booking["calendar_revision"])
+        else:
+            await conn.execute("""
+                INSERT INTO booking_confirmation_outbox
+                    (organization_id,booking_id,inbound_message_id,outbound_message_id,booking_revision)
+                VALUES ($1,$2,$3,$4,$5)
+                ON CONFLICT (organization_id,booking_id,booking_revision) DO NOTHING
+            """, org_uuid, booking["id"], inbound_uuid, outbound["id"], booking["calendar_revision"])
 
     async def insert_google_pending(self, organization_id, conversation_id, inbound_message_id,
                                     source_message_id, *, nome_cliente, telefono, data, ora,

@@ -480,12 +480,16 @@ class InboundProcessingService:
             return BookingApplicationResult(True)
         from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
         private_pool = getattr(self, "private_booking_pool", None)
+        application_pool = getattr(self, "private_booking_application_pool", None)
         if not private_booking_worker_enabled() or private_pool is None:
+            return BookingApplicationResult(True)
+        if application_pool is None:
             return BookingApplicationResult(True)
         try:
             from src.core.bookings.worker_authority import WorkerBookingAuthority
             booking_id = await WorkerBookingAuthority().process_a05_booking(
                 private_pool, org_id, msg["id"], canonical,
+                application_pool=application_pool,
             )
             if not booking_id:
                 return BookingApplicationResult(True)
@@ -908,7 +912,35 @@ class InboundProcessingService:
             from src.core.guardrails.validator import FALLBACK_STAFF_TEXT
             from src.models.schemas import RispostaOutput
             payload = json.loads(final_response.serialized)
-            candidate = RispostaOutput.model_validate(payload)
+            if isinstance(payload, dict) and {
+                "booking_state_proposal", "booking_catalog_revision",
+            }.issubset(payload):
+                # Preserve the sealed, catalog-bound C2.4 proposal across the
+                # A04 commit. Revalidate it against the current published
+                # tenant catalog before guardrails or canonical wording edits.
+                from src.core.bookings.catalog_contracts import validate_catalog_json
+                from src.core.bookings.conversation_state import StructuredConversationResponse
+                from src.core.db.repositories.booking_catalog_repo import (
+                    BookingCatalogRepository, canonical as catalog_canonical,
+                )
+                from src.core.db.repositories.booking_repo import BookingRepository
+
+                catalog_state = await BookingCatalogRepository(
+                    BookingRepository(self.repo.pool)
+                ).read(org_id)
+                if catalog_state.get("published") is None:
+                    raise RuntimeError("Published booking catalog unavailable at A04 commit")
+                scoped_catalog = validate_catalog_json(
+                    catalog_canonical(catalog_state["published"]),
+                    organization_id=uuid.UUID(str(org_id)),
+                )
+                candidate = StructuredConversationResponse.model_validate_json(
+                    final_response.serialized,
+                    context={"catalog": scoped_catalog,
+                             "organization_id": uuid.UUID(str(org_id))},
+                )
+            else:
+                candidate = RispostaOutput.model_validate(payload)
             handoff_only = (
                 candidate.categoria.strip().casefold() == "escalation"
                 or candidate.risposta.strip() in {FALLBACK_STAFF_TEXT, BOOKING_FAILURE_REPLY}
@@ -932,7 +964,7 @@ class InboundProcessingService:
                 # server-owned, truthful receipt now so outbound text and the
                 # canonical commercial response cannot diverge if booking
                 # creation later needs staff review.
-                candidate.risposta = BOOKING_RECEIVED_REPLY
+                candidate = candidate.model_copy(update={"risposta": BOOKING_RECEIVED_REPLY})
                 from src.core.billing.quota_reservations import validate_final_response
                 final_response = validate_final_response(quota_operation, quota_ticket, candidate)
             await lease.checkpoint()

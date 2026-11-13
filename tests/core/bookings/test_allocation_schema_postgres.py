@@ -289,8 +289,8 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             # Simulate the schema before 069, not a partial uninstall of 069
             # beneath 071's dependent FK/trigger. The outer rollback restores
             # the newer stay protections after the first-install failure proof.
-            await c.execute('DROP FUNCTION booking_stay_admin_purge(uuid,uuid,text,uuid,text); DROP TABLE booking_stays')
-            await c.execute('DROP TABLE booking_resource_allocations,booking_allocation_requests,booking_allocation_sets; DROP FUNCTION booking_allocation_guard(); DROP FUNCTION booking_allocation_immutable(); ALTER TABLE bookings DROP CONSTRAINT bookings_org_id_unique')
+            await c.execute('DROP VIEW IF EXISTS c24_private.worker_booking_stays_inserts; DROP VIEW IF EXISTS c24_private.booking_stays; DROP FUNCTION booking_stay_admin_purge(uuid,uuid,text,uuid,text); DROP TABLE booking_stays')
+            await c.execute('DROP TABLE booking_resource_allocations,booking_allocation_requests,booking_allocation_sets CASCADE; DROP FUNCTION booking_allocation_guard(); DROP FUNCTION booking_allocation_immutable(); ALTER TABLE bookings DROP CONSTRAINT bookings_org_id_unique')
             before=await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")
             helper='allocation_defaults_'+uuid4().hex
             await c.execute(f'CREATE ROLE {helper}; GRANT {helper} TO service_role WITH INHERIT FALSE, SET TRUE; ALTER DEFAULT PRIVILEGES GRANT TRUNCATE ON TABLES TO {helper}')
@@ -362,7 +362,7 @@ async def test_admin_membership_regrant_path_cannot_hide_privileges(allocation_d
                 async with c.transaction(): await c.execute(MIGRATION)
         finally: await tx.rollback()
 
-async def test_service_receipt_shape_provenance_and_acl(allocation_data):
+async def test_service_receipt_shape_provenance_and_acl(allocation_data, postgres_container):
     from tests.core.test_quota_reservation_lifecycle import _inbound_message
 
     pool, org, other, _, _, booking, _ = allocation_data
@@ -380,10 +380,39 @@ async def test_service_receipt_shape_provenance_and_acl(allocation_data):
             VALUES($1,$2,$3,$4,$5,$6,$7,$8,'allocate',$9,'unknown',1)"""
         await c.execute(sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64)
         await put_receipt(c, org, booking)
-        with pytest.raises(asyncpg.InsufficientPrivilegeError):
-            async with c.transaction():
-                await c.execute('SET LOCAL ROLE service_role')
-                await c.execute(sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64)
+        import secrets
+        service_password = secrets.token_hex(32)
+        service_conn = None
+        await c.execute(f"ALTER ROLE service_role LOGIN PASSWORD '{service_password}'")
+        try:
+            service_conn = await asyncpg.connect(
+                dsn=postgres_container.get_connection_url().replace('+psycopg2', ''),
+                user='service_role', password=service_password,
+            )
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await service_conn.execute(
+                    sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64,
+                )
+        finally:
+            if service_conn is not None:
+                await service_conn.close()
+            await c.execute('ALTER ROLE service_role NOLOGIN PASSWORD NULL')
+        helper = 'receipt_member_' + uuid4().hex
+        membership_tx = c.transaction()
+        await membership_tx.start()
+        try:
+            await c.execute(f'CREATE ROLE {helper}')
+            await c.execute(f'GRANT service_role TO {helper} WITH INHERIT TRUE, SET TRUE')
+            assert await c.fetchval("SELECT pg_has_role($1,'service_role','MEMBER')", helper)
+            for role in ('service_role', helper):
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    async with c.transaction():
+                        await c.execute(f'SET LOCAL ROLE {role}')
+                        await c.execute(
+                            sql, org, uuid4(), booking, None, 'inbound_worker', inbox, message, operation, 'a'*64,
+                        )
+        finally:
+            await membership_tx.rollback()
         assert await c.fetchval("SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND actor_kind='human' AND actor_user_id IS NOT NULL AND service_inbox_id IS NULL", org) == 1
         for kind, human, i, m, o in [
             ('human', None, None, None, None),

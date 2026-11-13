@@ -78,17 +78,29 @@ def test_hotel_prerequisite_precedes_consumers_and_calendar_column_is_not_used_e
                for path in files[:calendar])
 
 
-def test_private_booking_worker_role_is_preprovisioned_by_superuser():
+def test_private_booking_worker_is_created_dormant_without_bypass_or_data_grants():
     migration = (preflight.MIGRATIONS / "086_private_booking_worker_role.sql").read_text(encoding="utf-8")
-    preflight_block = migration.split("GRANT USAGE ON SCHEMA public", 1)[0]
-    assert "CREATE ROLE melpis_c24_booking_worker" not in migration
-    assert "ALTER ROLE melpis_c24_booking_worker" not in migration
-    assert "worker role must be provisioned by a superuser before migration 086" in preflight_block
-    assert "rolcanlogin OR rolinherit" in preflight_block
+    capability_migration = (preflight.MIGRATIONS / "093_private_worker_capability_views.sql").read_text(encoding="utf-8")
+    assert "CREATE ROLE melpis_c24_booking_worker NOLOGIN" in migration
+    assert "ALTER ROLE melpis_c24_booking_worker NOLOGIN" in migration
+    assert "NOBYPASSRLS" in migration
+    assert "OR NOT rolbypassrls" not in migration
+    assert "REVOKE ALL ON SCHEMA public FROM melpis_c24_booking_worker" in migration
+    assert "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM melpis_c24_booking_worker" in migration
+    assert "REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM melpis_c24_booking_worker" in migration
+    assert "REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA public FROM melpis_c24_booking_worker" in migration
+    assert "worker identity has an unsafe attribute" in migration
+    assert "member.rolname='postgres'" in migration
+    assert "grantor.rolname IN ('supabase_admin','postgres')" in migration
+    assert "m.admin_option AND NOT m.inherit_option AND NOT m.set_option" in migration
     workflow = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "migrations.yml").read_text(encoding="utf-8")
-    assert "CREATE ROLE melpis_c24_booking_worker NOLOGIN" in workflow
-    assert "m.member=worker_role OR m.roleid=worker_role" in preflight_block
-    assert migration.index("worker role must be provisioned") < migration.index("GRANT USAGE")
+    assert "CREATE ROLE melpis_c24_booking_worker" not in workflow
+    # Inbound triggers check both the authenticated session and active role;
+    # the private RPC surface independently rejects SET ROLE/session spoofing.
+    assert "session_user='melpis_c24_booking_worker'" in migration
+    assert "active_role='melpis_c24_booking_worker'" in migration
+    assert "session_user IS DISTINCT FROM 'melpis_c24_booking_worker'" in capability_migration
+    assert "current_setting('tenant_id')" not in capability_migration
 
 
 def test_duplicate_outside_requested_c01_range_is_rejected(tmp_path, monkeypatch):

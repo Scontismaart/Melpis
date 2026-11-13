@@ -13,6 +13,10 @@ from src.core.bookings.private_worker_lifecycle import assert_private_booking_re
 class Pool:
     def __init__(self, ready):
         self.conn = SimpleNamespace(fetchval=AsyncMock(return_value=ready))
+        self.conn.fetchrow = AsyncMock(return_value={
+            'identity_id': '00000000-0000-0000-0000-000000000001',
+            'database_oid': '1',
+        })
         self.close = AsyncMock()
 
     def acquire(self):
@@ -73,8 +77,9 @@ async def test_default_disabled_does_not_check_or_start(app_setup):
 async def test_enabled_starts_one_task_and_shutdown_cancels(app_setup, monkeypatch):
     monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
     started, stopped = asyncio.Event(), asyncio.Event()
-    async def loop(pool):
+    async def loop(pool, *, application_pool=None):
         assert pool is app_setup.worker_pool
+        assert application_pool is app_setup
         started.set()
         try:
             await asyncio.Event().wait()
@@ -86,7 +91,7 @@ async def test_enabled_starts_one_task_and_shutdown_cancels(app_setup, monkeypat
     async with main.lifespan(app):
         await asyncio.wait_for(started.wait(), 1)
         assert app.state.private_booking_task is not None
-        runner.assert_called_once_with(app_setup.worker_pool)
+        runner.assert_called_once_with(app_setup.worker_pool, application_pool=app_setup)
     assert stopped.is_set()
     assert app.state.private_booking_task.cancelled()
     app_setup.close.assert_awaited_once()
