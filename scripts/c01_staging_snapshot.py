@@ -1073,11 +1073,15 @@ def _assert_private_file(path: Path) -> None:
 $p = $env:MELPIS_C01_ACL_TARGET
 Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $acl = Get-Acl -LiteralPath $p
+$parent = Get-Acl -LiteralPath (Split-Path -Parent $p)
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $entries = @($acl.Access | ForEach-Object {
-  [pscustomobject]@{ Who=$_.IdentityReference.Value; Type=$_.AccessControlType.ToString(); Rights=$_.FileSystemRights.ToString(); Inherit=$_.InheritanceFlags.ToString(); Propagate=$_.PropagationFlags.ToString() }
+  [pscustomobject]@{ Who=$_.IdentityReference.Value; Type=$_.AccessControlType.ToString(); Rights=$_.FileSystemRights.ToString(); Inherit=$_.InheritanceFlags.ToString(); Propagate=$_.PropagationFlags.ToString(); Inherited=$_.IsInherited }
 })
-[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; Me=$me; Entries=$entries } | ConvertTo-Json -Compress -Depth 5
+$parentEntries = @($parent.Access | ForEach-Object {
+  [pscustomobject]@{ Who=$_.IdentityReference.Value; Type=$_.AccessControlType.ToString(); Rights=$_.FileSystemRights.ToString(); Inherit=$_.InheritanceFlags.ToString(); Propagate=$_.PropagationFlags.ToString(); Inherited=$_.IsInherited }
+})
+[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; Me=$me; Entries=$entries; ParentProtected=$parent.AreAccessRulesProtected; ParentEntries=$parentEntries } | ConvertTo-Json -Compress -Depth 5
 """
             powershell = shutil.which("pwsh")
             if not powershell:
@@ -1099,12 +1103,48 @@ $entries = @($acl.Access | ForEach-Object {
 
 
 def _windows_private_acl_is_valid(value: Any) -> bool:
-    """Compare Windows account names case-insensitively and require exact ACLs."""
+    """Require exact protected ACEs, or only inherited ACEs from a protected parent."""
     entries = value.get("Entries") if isinstance(value, dict) else None
     if isinstance(entries, dict):  # PowerShell serializes a one-element array as an object.
         entries = [entries]
-    if (not isinstance(entries, list) or value.get("Protected") is not True
-            or not isinstance(value.get("Me"), str)):
+    if not isinstance(entries, list) or not isinstance(value.get("Me"), str):
+        return False
+    expected = {value["Me"].casefold(), "BUILTIN\\administrators".casefold(),
+                "NT AUTHORITY\\system".casefold()}
+    def matches(candidate: Any, *, inherited: bool, inheritance: str) -> bool:
+        if isinstance(candidate, dict):
+            candidate = [candidate]
+        if not isinstance(candidate, list):
+            return False
+        seen = set()
+        for entry in candidate:
+            if not isinstance(entry, dict):
+                return False
+            if (entry.get("Type") != "Allow" or entry.get("Rights") not in ("FullControl", "268435456")
+                    or entry.get("Inherit") != inheritance or entry.get("Propagate") != "None"
+                    or entry.get("Inherited") is not inherited or not isinstance(entry.get("Who"), str)):
+                return False
+            seen.add(entry["Who"].casefold())
+        return seen == expected
+
+    if value.get("Protected") is True:
+        return matches(entries, inherited=False, inheritance="None")
+    parent_entries = value.get("ParentEntries")
+    if isinstance(parent_entries, dict):
+        parent_entries = [parent_entries]
+    return (
+        value.get("ParentProtected") is True
+        and matches(parent_entries, inherited=False, inheritance="ContainerInherit, ObjectInherit")
+        and matches(entries, inherited=True, inheritance="None")
+    )
+
+
+def _windows_private_directory_acl_is_valid(value: Any) -> bool:
+    """Require a protected folder whose exact ACEs flow only to its contents."""
+    entries = value.get("Entries") if isinstance(value, dict) else None
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list) or value.get("Protected") is not True or not isinstance(value.get("Me"), str):
         return False
     expected = {value["Me"].casefold(), "BUILTIN\\administrators".casefold(),
                 "NT AUTHORITY\\system".casefold()}
@@ -1113,7 +1153,8 @@ def _windows_private_acl_is_valid(value: Any) -> bool:
         if not isinstance(entry, dict):
             return False
         if (entry.get("Type") != "Allow" or entry.get("Rights") not in ("FullControl", "268435456")
-                or entry.get("Inherit") != "None" or entry.get("Propagate") != "None"
+                or entry.get("Inherit") != "ContainerInherit, ObjectInherit"
+                or entry.get("Propagate") != "None" or entry.get("Inherited") is not False
                 or not isinstance(entry.get("Who"), str)):
             return False
         seen.add(entry["Who"].casefold())
@@ -1221,7 +1262,7 @@ Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $acl = Get-Acl -LiteralPath $p
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $entries = @($acl.Access | ForEach-Object {
-  [pscustomobject]@{ Who=$_.IdentityReference.Value; Type=$_.AccessControlType.ToString(); Rights=$_.FileSystemRights.ToString(); Inherit=$_.InheritanceFlags.ToString(); Propagate=$_.PropagationFlags.ToString() }
+  [pscustomobject]@{ Who=$_.IdentityReference.Value; Type=$_.AccessControlType.ToString(); Rights=$_.FileSystemRights.ToString(); Inherit=$_.InheritanceFlags.ToString(); Propagate=$_.PropagationFlags.ToString(); Inherited=$_.IsInherited }
 })
 [pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; Me=$me; Entries=$entries } | ConvertTo-Json -Compress -Depth 5
 """
@@ -1237,7 +1278,7 @@ $entries = @($acl.Access | ForEach-Object {
                 env=child_env,
             )
             value = json.loads(proc.stdout) if proc.returncode == 0 else None
-            if not value or not _windows_private_acl_is_valid(value):
+            if not value or not _windows_private_directory_acl_is_valid(value):
                 raise ValueError
         except Exception:
             raise C01SnapshotError("c01_backup_directory_not_private") from None

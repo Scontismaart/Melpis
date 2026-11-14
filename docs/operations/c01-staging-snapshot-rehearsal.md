@@ -26,8 +26,11 @@ encrypted archive.
 The Windows operator key is generated once and persisted as a current-user
 DPAPI-protected blob with application-specific entropy. Its containing folder,
 the key file, the source environment file, and the local-clone connection file
-must pass the protected-ACL check. PowerShell 7 (`pwsh`) is required to inspect
-the exact ACL; absence of the executable or ACL module fails closed. Plaintext key files are rejected. The source
+must pass the protected-ACL check. Files may either have exact protected ACEs
+or inherit only the exact three allowed ACEs from a protected parent; the
+backup directory itself must be protected and pass inheritable ACE checks.
+PowerShell 7 (`pwsh`) is required to inspect the exact ACL; absence of the
+executable or ACL module fails closed. Plaintext key files are rejected. The source
 environment must pin the Staging Session Pooler identity and CA; the separate
 clone-only environment may contain only `127.0.0.1`, the random published port,
 database `postgres`, local user `postgres`, its password, and `PGSSLMODE=disable`.

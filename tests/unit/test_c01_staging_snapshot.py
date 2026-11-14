@@ -149,17 +149,51 @@ def test_windows_private_acl_is_exact_but_case_insensitive():
         "Me": "FAMIGLIA\\muzzo",
         "Entries": [
             {"Who": "Famiglia\\muzzo", "Type": "Allow", "Rights": "FullControl",
-             "Inherit": "None", "Propagate": "None"},
+             "Inherit": "None", "Propagate": "None", "Inherited": False},
             {"Who": "BUILTIN\\Administrators", "Type": "Allow", "Rights": "FullControl",
-             "Inherit": "None", "Propagate": "None"},
+             "Inherit": "None", "Propagate": "None", "Inherited": False},
             {"Who": "NT AUTHORITY\\SYSTEM", "Type": "Allow", "Rights": "FullControl",
-             "Inherit": "None", "Propagate": "None"},
+             "Inherit": "None", "Propagate": "None", "Inherited": False},
         ],
     }
     assert _MODULE._windows_private_acl_is_valid(acl)
     acl["Entries"].append({"Who": "Everyone", "Type": "Allow", "Rights": "FullControl",
-                           "Inherit": "None", "Propagate": "None"})
+                           "Inherit": "None", "Propagate": "None", "Inherited": False})
     assert not _MODULE._windows_private_acl_is_valid(acl)
+
+
+def test_windows_private_acl_accepts_only_expected_inherited_file_entries():
+    expected_parent = [
+        {"Who": "Famiglia\\muzzo", "Type": "Allow", "Rights": "FullControl",
+         "Inherit": "ContainerInherit, ObjectInherit", "Propagate": "None", "Inherited": False},
+        {"Who": "BUILTIN\\Administrators", "Type": "Allow", "Rights": "FullControl",
+         "Inherit": "ContainerInherit, ObjectInherit", "Propagate": "None", "Inherited": False},
+        {"Who": "NT AUTHORITY\\SYSTEM", "Type": "Allow", "Rights": "FullControl",
+         "Inherit": "ContainerInherit, ObjectInherit", "Propagate": "None", "Inherited": False},
+    ]
+    acl = {
+        "Protected": False, "Me": "Famiglia\\muzzo", "ParentProtected": True,
+        "ParentEntries": expected_parent,
+        "Entries": [
+            {"Who": entry["Who"], "Type": "Allow", "Rights": "FullControl",
+             "Inherit": "None", "Propagate": "None", "Inherited": True}
+            for entry in expected_parent
+        ],
+    }
+    assert _MODULE._windows_private_acl_is_valid(acl)
+    acl["ParentProtected"] = False
+    assert not _MODULE._windows_private_acl_is_valid(acl)
+
+
+def test_windows_private_directory_requires_protected_inheritable_acl():
+    entries = [
+        {"Who": who, "Type": "Allow", "Rights": "FullControl",
+         "Inherit": "ContainerInherit, ObjectInherit", "Propagate": "None", "Inherited": False}
+        for who in ("Famiglia\\muzzo", "BUILTIN\\Administrators", "NT AUTHORITY\\SYSTEM")
+    ]
+    assert _MODULE._windows_private_directory_acl_is_valid(
+        {"Protected": True, "Me": "Famiglia\\muzzo", "Entries": entries}
+    )
 
 
 def test_dump_arguments_preserve_database_owner_and_acl():
