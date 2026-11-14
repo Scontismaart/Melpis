@@ -16,7 +16,8 @@ sequence values and parameters, sequence-to-column ownership, column defaults
 and identity/generated metadata, large-object counts/byte totals/content
 fingerprint/owners/ACLs, index validity and readiness flags, and metadata for extensions/dependencies,
 roles/memberships, schemas, default and object ACLs, RLS, policies, Auth
-triggers, functions and `search_path`, constraints, indexes, types, and
+triggers, functions and aggregates, `search_path` and transition definitions,
+constraints, indexes, types, and
 `supabase_migrations` history. It does not include row contents outside the
 encrypted archive.
 

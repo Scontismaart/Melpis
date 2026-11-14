@@ -711,6 +711,7 @@ async def _fetch_catalog_snapshot(conn: asyncpg.Connection) -> dict[str, Any]:
                a.aggminvtransfn::regprocedure::text AS aggregate_inverse_transition,
                a.aggmfinalfn::regprocedure::text AS aggregate_moving_final,
                a.aggtranstype::regtype::text AS aggregate_transition_type,
+               a.aggmtranstype::regtype::text AS aggregate_moving_transition_type,
                a.aggtransspace AS aggregate_transition_space,
                a.agginitval AS aggregate_initial_value,
                a.aggmtransspace AS aggregate_moving_transition_space,
