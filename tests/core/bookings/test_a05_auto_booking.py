@@ -208,7 +208,7 @@ async def test_confirmation_outbox_requires_same_tenant(pg_pool):
             await conn.execute("""
                 INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content,content_text,status,handling_type)
                 VALUES ($1,$3,$4,'inbound','text','{}','Synthetic inbound','handled','ai_handled'),
-                       ($2,$3,$4,'outbound','text','{}','Synthetic outbound','handled','ai_handled')
+                       ($2,$3,$4,'outbound','text','{}','Synthetic outbound','queued',NULL)
             """, inbound, outbound, org, conversation)
             await conn.execute("""
                 INSERT INTO bookings(id,organization_id,contact_id,id_conversazione,nome_cliente,telefono,data,ora,coperti,stato)
