@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- C2.4: permit the same owner-gated, empty-history admission fence for the
 -- medical administrative appointment path. Clinical data is still rejected
 -- by the catalog, inbound boundary, conversation state and owner mutation.

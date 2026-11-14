@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- A05: only the trusted backend may mutate booking authority and state.
 -- Historic tenants remain opted out because config.a05 is absent by default.
 DROP POLICY IF EXISTS bookings_org_member ON public.bookings;

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- C2.2 administrative catalogue only. No booking V2 activation or remote cutover.
 CREATE TABLE IF NOT EXISTS public.booking_catalog_publications (
     organization_id UUID NOT NULL REFERENCES public.booking_settings(organization_id) ON DELETE CASCADE,

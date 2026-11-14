@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- The private worker is dormant by default and has no direct database data
 -- privileges. Supabase's ordinary postgres role can create this NOLOGIN role
 -- with CREATEROLE; the worker obtains data only through the RPC surface added

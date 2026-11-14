@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Establish server-only provenance before quota admission records can be trusted.
 -- Application on a remote database requires separate approval. No tenant rows
 -- are rewritten. Reapplication deliberately rotates the protocol trust epoch.
@@ -24,7 +27,7 @@ BEGIN
         privileges := array_append(privileges, 'MAINTAIN');
     END IF;
 
-    -- Restore the 045 contract on managed projects with drifted default grants.
+    -- Restore 045 for current tables and future tables created by this migration owner.
     -- TRUNCATE is not subject to row-level security.
     REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
     ALTER DEFAULT PRIVILEGES IN SCHEMA public

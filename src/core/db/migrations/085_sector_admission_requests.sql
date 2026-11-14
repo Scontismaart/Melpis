@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 CREATE TABLE public.booking_sector_admission_requests (
     organization_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
     request_id uuid NOT NULL,

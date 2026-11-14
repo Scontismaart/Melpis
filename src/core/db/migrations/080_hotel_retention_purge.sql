@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Owner-only retention checks use immutable completion evidence, the released
 -- allocation archive, and civil time. No runtime scheduling or grant is enabled.
 CREATE OR REPLACE FUNCTION public.hotel_stay_purge_eligible(p_org uuid,p_booking uuid)

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Private evidence only. No client or application role receives privileges here.
 CREATE UNIQUE INDEX IF NOT EXISTS meta_webhook_inbox_org_id_unique
     ON meta_webhook_inbox (organization_id, id);

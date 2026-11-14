@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Evidence is recorded only by the transactional completion operation. It is
 -- not a purge authorization and is not backfilled from legacy timestamps.
 CREATE TABLE IF NOT EXISTS public.booking_stay_completion_evidence (

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Booking credentials/config are backend-only, including encrypted blobs.
 -- Local candidate: remote application requires a separate approved cutover.
 -- No schema-wide/default privilege changes and no new backend capabilities.

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Privacy V1.0 lifecycle for conversation replay-suppression metadata.
 -- Execution remains behind the existing owner-only, disabled-by-default
 -- C2.4 retention operator; this migration does not grant an operational role.

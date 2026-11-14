@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- One statement: atomic even when applied by psql without --single-transaction.
 DO $allocation_migration$
 BEGIN

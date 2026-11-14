@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Eligibility only: the caller must establish that p_completed_at is the
 -- trusted completion instant for a completed hotel stay and p_timezone is the
 -- property's trusted IANA zone. This function does not authorize any purge.

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- A06 capability only: no policy approval, destructive job or remote cutover.
 CREATE TABLE IF NOT EXISTS gdpr_operations (
     id UUID PRIMARY KEY,

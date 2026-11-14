@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- B02: original uploaded bytes, not pgvector storage or commercial replies.
 -- No numeric plan/trial limits are configured by this migration.
 -- Historical provenance is unknown: never infer original size from chunk text

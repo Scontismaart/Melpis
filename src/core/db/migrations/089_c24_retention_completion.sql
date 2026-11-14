@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- C2.4 lifecycle completion. No role is granted new table access and no
 -- retention or erasure execution is enabled by this migration.
 CREATE TABLE IF NOT EXISTS public.c24_idle_copy_cleanup_capability (

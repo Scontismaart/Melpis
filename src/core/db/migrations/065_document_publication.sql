@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- B02: backend-owned, fenced complete-index publication. No historical opt-in.
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS knowledge_epoch BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS index_verified BOOLEAN NOT NULL DEFAULT FALSE;

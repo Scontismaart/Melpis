@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 DO $stay_migration$
 BEGIN
 ALTER TABLE public.booking_allocation_requests

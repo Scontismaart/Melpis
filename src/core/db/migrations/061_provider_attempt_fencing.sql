@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Durable A03 transport state, worker fencing and append-only recovery evidence.
 -- Legacy unresolved attempts are deliberately backfilled as uncertain: age or
 -- the absence of a worker lease cannot prove that an HTTP request was unsent.

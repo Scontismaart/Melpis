@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Owner-only, one-stay administrative archive. No runtime caller is enabled.
 -- This releases expired occupancy, preserving the booking, stay and request
 -- history. A completed booking remains completed; cancelled is the existing
