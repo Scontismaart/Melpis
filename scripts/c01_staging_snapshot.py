@@ -1183,7 +1183,7 @@ async def create_staging_backup(
         role_text = roles_sql.decode("utf-8")
     except UnicodeDecodeError:
         raise C01SnapshotError("c01_roles_dump_invalid") from None
-    if re.search(r"(?im)^\s*(CREATE|ALTER)\s+ROLE\b.*\bPASSWORD\b", role_text):
+    if _role_dump_contains_password(role_text):
         raise C01SnapshotError("c01_roles_dump_invalid")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifact_name = f"c01-staging-{stamp}-{secrets.token_hex(6)}.enc"
@@ -1199,6 +1199,11 @@ def _database_dump_args(snapshot_id: str) -> list[str]:
         raise C01SnapshotError("c01_snapshot_id_invalid")
     return ["pg_dump", "--format=custom", "--create", "--quote-all-identifiers",
             "--snapshot", snapshot_id, "--no-password", "--dbname=postgres"]
+
+
+def _role_dump_contains_password(role_text: str) -> bool:
+    """Reject any role statement carrying a password, including multiline output."""
+    return bool(re.search(r"(?is)\b(?:CREATE|ALTER)\s+ROLE\b[^;]*\bPASSWORD\b", role_text))
 
 
 def _enforce_private_directory(path: Path) -> None:
@@ -1409,7 +1414,7 @@ def restore_encrypted_backup(
     try:
         source_snapshot = json.loads(bundle["snapshot.json"])
         roles_sql = bundle["roles.sql"].decode("utf-8")
-        if re.search(r"(?i)\bPASSWORD\b", roles_sql):
+        if _role_dump_contains_password(roles_sql):
             raise ValueError
         if source_snapshot.get("project_ref") != _PROJECT_REF:
             raise ValueError

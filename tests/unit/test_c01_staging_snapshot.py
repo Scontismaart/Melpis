@@ -169,6 +169,15 @@ def test_dump_arguments_preserve_database_owner_and_acl():
     assert "--no-privileges" not in args
 
 
+@pytest.mark.parametrize("role_dump", [
+    "CREATE ROLE synthetic LOGIN PASSWORD 'hash';\n",
+    "ALTER ROLE synthetic\n WITH LOGIN PASSWORD 'hash';\n",
+])
+def test_role_dump_password_guard_handles_single_and_multiline_statements(role_dump):
+    assert _MODULE._role_dump_contains_password(role_dump)
+    assert not _MODULE._role_dump_contains_password("ALTER ROLE synthetic WITH LOGIN;\n")
+
+
 def test_backup_refuses_password_role_dump_before_persisting_artifact(tmp_path, monkeypatch):
     from contextlib import asynccontextmanager
 
