@@ -70,6 +70,13 @@ The source Staging inventory observed during preflight is:
 | `uuid-ossp` | 1.1 | `extensions` |
 | `vector` | 0.8.2 | `extensions` |
 
+The collector was exercised read-only against the pinned Staging Session Pooler
+on 2026-11-14 using PG17.6 and TLS `verify-full`. It captured 84 application
+tables, 6 extensions, 30 roles, 2 sequences, 238 routines (including 4
+aggregates), and 5 migration-history rows. No row contents, credentials, or
+personally identifying data were emitted by that check. This is a collector
+preflight only; it is not backup/restore or migration certification.
+
 The candidate local Supabase image is PostgreSQL 17.6.1.171, while the remote
 server reports PostgreSQL 17.6.1.166. Its major/minor version and the six
 extension versions above are compatible, but this patch-level difference must
