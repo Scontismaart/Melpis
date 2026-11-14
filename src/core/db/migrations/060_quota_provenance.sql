@@ -24,6 +24,12 @@ BEGIN
         privileges := array_append(privileges, 'MAINTAIN');
     END IF;
 
+    -- Restore the 045 contract on managed projects with drifted default grants.
+    -- TRUNCATE is not subject to row-level security.
+    REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public
+        REVOKE TRUNCATE ON TABLES FROM PUBLIC, anon, authenticated;
+
     -- Take both locks before inspecting ACLs or the reserved control record.
     LOCK TABLE public.messages, public.usage_events IN ACCESS EXCLUSIVE MODE;
     FOREACH relation_name IN ARRAY ARRAY['messages','usage_events'] LOOP
