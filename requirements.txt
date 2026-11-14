@@ -9,10 +9,10 @@ litellm==1.103.10
 huggingface-hub==1.33.0
 # Exact security-fixed SDK; install through scripts/reviewed_runtime.py.
 mcp==1.30.0
-# CVE-2026-114603: align the official fixed OTel family through the reviewed builder.
-opentelemetry-api==1.45.1
-opentelemetry-sdk==1.45.1
-opentelemetry-exporter-otlp-proto-http==1.45.1
+# CVE-2026-114603 and GHSA-mf5v-w3w3-f6cg: pin official 1.45.2 wheels by SHA-256.
+opentelemetry-api @ https://files.pythonhosted.org/packages/a9/2d/610db864d7513158cebb8f36cc88e67e73bd6c7aa1905ef18d89e1281c81/opentelemetry_api-1.45.2-py3-none-any.whl#sha256=2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34
+opentelemetry-sdk @ https://files.pythonhosted.org/packages/9f/a5/9a3b793ef48245f2336a16beb2324c2397dbb3f987cd68942f77cca06156/opentelemetry_sdk-1.45.2-py3-none-any.whl#sha256=ff974ea70ee4f1d51e2ec152db37c2b626c7bf82bb3f7d86114fd8704e7199c6
+opentelemetry-exporter-otlp-proto-http @ https://files.pythonhosted.org/packages/32/65/f64d7d2450217e2989714e1dee15e19bf79a77a313387abac0cac77bc10e/opentelemetry_exporter_otlp_proto_http-1.45.2-py3-none-any.whl#sha256=6e4d025138829d0ee57946930c2ccad6491ad4d92a958e9c7eea69278fe60cfc
 cryptography==50.0.1
 fastapi==0.139.2
 # Official fix for CVE-2026-112909 and CVE-2026-112910.

@@ -20,14 +20,14 @@ OTEL_OLD = (
     b'Requires-Dist: opentelemetry-exporter-otlp-proto-http~=1.42.0\n'
 )
 OTEL_NEW = (
-    b'Requires-Dist: opentelemetry-api<1.46,>=1.45.1\n'
-    b'Requires-Dist: opentelemetry-sdk<1.46,>=1.45.1\n'
-    b'Requires-Dist: opentelemetry-exporter-otlp-proto-http<1.46,>=1.45.1\n'
+    b'Requires-Dist: opentelemetry-api<1.46,>=1.45.2\n'
+    b'Requires-Dist: opentelemetry-sdk<1.46,>=1.45.2\n'
+    b'Requires-Dist: opentelemetry-exporter-otlp-proto-http<1.46,>=1.45.2\n'
 )
 OTEL_PINS = (
-    'opentelemetry-api==1.45.1',
-    'opentelemetry-sdk==1.45.1',
-    'opentelemetry-exporter-otlp-proto-http==1.45.1',
+    'opentelemetry-api @ https://files.pythonhosted.org/packages/a9/2d/610db864d7513158cebb8f36cc88e67e73bd6c7aa1905ef18d89e1281c81/opentelemetry_api-1.45.2-py3-none-any.whl#sha256=2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34',
+    'opentelemetry-sdk @ https://files.pythonhosted.org/packages/9f/a5/9a3b793ef48245f2336a16beb2324c2397dbb3f987cd68942f77cca06156/opentelemetry_sdk-1.45.2-py3-none-any.whl#sha256=ff974ea70ee4f1d51e2ec152db37c2b626c7bf82bb3f7d86114fd8704e7199c6',
+    'opentelemetry-exporter-otlp-proto-http @ https://files.pythonhosted.org/packages/32/65/f64d7d2450217e2989714e1dee15e19bf79a77a313387abac0cac77bc10e/opentelemetry_exporter_otlp_proto_http-1.45.2-py3-none-any.whl#sha256=6e4d025138829d0ee57946930c2ccad6491ad4d92a958e9c7eea69278fe60cfc',
 )
 
 
@@ -361,7 +361,7 @@ def test_runtime_verifier_requires_exact_otel_versions(tmp_path, monkeypatch, pa
         'crewai': '1.15.4',
         'crewai-core': '1.15.4',
         'mcp': '1.30.0',
-        **{name: '1.45.1' for name in module.TELEMETRY_PACKAGES},
+        **{name: '1.45.2' for name in module.TELEMETRY_PACKAGES},
     }
     versions[package] = '1.45.0'
     monkeypatch.setattr(module.metadata, 'version', lambda name: versions[name])
@@ -378,7 +378,7 @@ def test_runtime_verifier_accepts_exact_reviewed_otel_versions(tmp_path, monkeyp
         'crewai': '1.15.4',
         'crewai-core': '1.15.4',
         'mcp': '1.30.0',
-        **{name: '1.45.1' for name in module.TELEMETRY_PACKAGES},
+        **{name: '1.45.2' for name in module.TELEMETRY_PACKAGES},
     }
     monkeypatch.setattr(module.metadata, 'version', lambda name: versions[name])
     monkeypatch.setattr(module.metadata, 'distribution', lambda _name: SimpleNamespace(locate_file=lambda _path: tmp_path))
@@ -398,9 +398,9 @@ from io import StringIO
 from types import SimpleNamespace
 
 expected = {
-    "opentelemetry-api": "1.45.1",
-    "opentelemetry-sdk": "1.45.1",
-    "opentelemetry-exporter-otlp-proto-http": "1.45.1",
+    "opentelemetry-api": "1.45.2",
+    "opentelemetry-sdk": "1.45.2",
+    "opentelemetry-exporter-otlp-proto-http": "1.45.2",
     "crewai": "1.15.4",
     "crewai-core": "1.15.4",
 }
