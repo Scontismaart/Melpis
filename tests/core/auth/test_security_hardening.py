@@ -200,7 +200,7 @@ async def test_outbound_dedup_rls_is_enabled_and_backend_path_survives(
                     "DELETE FROM outbound_dedup WHERE message_id = $1", message_b
                 ) == "DELETE 0"
 
-                with pytest.raises(asyncpg.InsufficientPrivilegeError, match="row-level security"):
+                with pytest.raises(asyncpg.InsufficientPrivilegeError, match="gdpr_erasure_barriers"):
                     async with conn.transaction():  # savepoint keeps outer transaction usable
                         await conn.execute(
                             "INSERT INTO outbound_dedup "
