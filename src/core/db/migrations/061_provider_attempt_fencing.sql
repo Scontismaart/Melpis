@@ -50,7 +50,7 @@ ALTER TABLE provider_attempt_runtime ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS provider_attempt_runtime_deny_clients ON provider_attempt_runtime;
 CREATE POLICY provider_attempt_runtime_deny_clients ON provider_attempt_runtime
     FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
-REVOKE ALL ON provider_attempt_runtime FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON provider_attempt_runtime FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE ON provider_attempt_runtime TO service_role;
 REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON provider_attempt_runtime
     FROM PUBLIC, anon, authenticated, service_role;
@@ -88,7 +88,56 @@ ALTER TABLE provider_attempt_evidence ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS provider_attempt_evidence_deny_clients ON provider_attempt_evidence;
 CREATE POLICY provider_attempt_evidence_deny_clients ON provider_attempt_evidence
     FOR ALL TO anon, authenticated USING (false) WITH CHECK (false);
-REVOKE ALL ON provider_attempt_evidence FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON provider_attempt_evidence FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT ON provider_attempt_evidence TO service_role;
 REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON provider_attempt_evidence
     FROM PUBLIC, anon, authenticated, service_role;
+
+-- A nullable composite FK skips the scope comparison for detached history.
+-- Confirm NULL against the parent while holding a key lock. The existing FK
+-- still handles scoped changes and propagates SET NULL on organization deletion.
+CREATE OR REPLACE FUNCTION public.provider_attempt_check_null_scope() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+DECLARE parent_org uuid;
+BEGIN
+    SELECT organization_id INTO parent_org
+      FROM public.usage_events WHERE id = NEW.attempt_id FOR KEY SHARE;
+    IF NOT FOUND OR parent_org IS NOT NULL THEN
+        RAISE EXCEPTION 'Detached provider attempt requires a detached billing event'
+            USING ERRCODE = '23503';
+    END IF;
+    RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.provider_attempt_check_null_scope()
+    FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS provider_attempt_check_null_scope ON provider_attempt_runtime;
+CREATE TRIGGER provider_attempt_check_null_scope
+    BEFORE INSERT OR UPDATE OF organization_id, attempt_id ON provider_attempt_runtime
+    FOR EACH ROW WHEN (NEW.organization_id IS NULL)
+    EXECUTE FUNCTION public.provider_attempt_check_null_scope();
+DROP TRIGGER IF EXISTS provider_attempt_check_null_scope ON provider_attempt_evidence;
+CREATE TRIGGER provider_attempt_check_null_scope
+    BEFORE INSERT OR UPDATE OF organization_id, attempt_id ON provider_attempt_evidence
+    FOR EACH ROW WHEN (NEW.organization_id IS NULL)
+    EXECUTE FUNCTION public.provider_attempt_check_null_scope();
+
+-- The reverse transition would skip the composite FK's update cascade.
+-- Detached billing history has no supported path back into a tenant.
+CREATE OR REPLACE FUNCTION public.provider_attempt_keep_detached() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $$
+BEGIN
+    IF OLD.event_type = 'system.provider_attempt'
+       OR EXISTS (SELECT 1 FROM public.provider_attempt_runtime WHERE attempt_id = OLD.id)
+       OR EXISTS (SELECT 1 FROM public.provider_attempt_evidence WHERE attempt_id = OLD.id) THEN
+        RAISE EXCEPTION 'Detached provider attempt cannot be assigned to a tenant'
+            USING ERRCODE = '23503';
+    END IF;
+    RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.provider_attempt_keep_detached()
+    FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS provider_attempt_keep_detached ON public.usage_events;
+CREATE TRIGGER provider_attempt_keep_detached
+    BEFORE UPDATE OF organization_id ON public.usage_events
+    FOR EACH ROW WHEN (OLD.organization_id IS NULL AND NEW.organization_id IS NOT NULL)
+    EXECUTE FUNCTION public.provider_attempt_keep_detached();

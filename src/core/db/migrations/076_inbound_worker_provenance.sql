@@ -1,15 +1,23 @@
 -- Private evidence only. No client or application role receives privileges here.
+CREATE UNIQUE INDEX IF NOT EXISTS meta_webhook_inbox_org_id_unique
+    ON meta_webhook_inbox (organization_id, id);
 CREATE TABLE IF NOT EXISTS inbound_worker_receipts (
     organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    inbox_id uuid NOT NULL REFERENCES meta_webhook_inbox(id) ON DELETE CASCADE,
-    message_id uuid NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-    PRIMARY KEY (organization_id, inbox_id, message_id)
+    inbox_id uuid NOT NULL,
+    message_id uuid NOT NULL,
+    PRIMARY KEY (organization_id, inbox_id, message_id),
+    FOREIGN KEY (organization_id, inbox_id)
+        REFERENCES meta_webhook_inbox (organization_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id, message_id)
+        REFERENCES messages (organization_id, id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS inbound_worker_operations (
     organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     inbox_id uuid NOT NULL,
     message_id uuid NOT NULL,
-    operation_id uuid NOT NULL REFERENCES usage_events(id) ON DELETE CASCADE,
+    operation_id uuid NOT NULL,
+    FOREIGN KEY (organization_id, operation_id)
+        REFERENCES usage_events (organization_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE,
     PRIMARY KEY (organization_id, message_id, operation_id),
     FOREIGN KEY (organization_id, inbox_id, message_id)
         REFERENCES inbound_worker_receipts (organization_id, inbox_id, message_id) ON DELETE CASCADE

@@ -2051,7 +2051,7 @@ REVOKE ALL ON FUNCTION public.booking_stay_guard()
     FROM PUBLIC,anon,authenticated,service_role,melpis_c24_booking_worker;
 
 CREATE OR REPLACE FUNCTION public.gdpr_guard_write() RETURNS trigger
-LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 DECLARE item jsonb := to_jsonb(NEW); org uuid; subject uuid; msg uuid;
 BEGIN
     IF session_user='melpis_c24_booking_worker' THEN
@@ -2066,20 +2066,20 @@ BEGIN
         org := NEW.id;
     END IF;
     IF org IS NULL AND TG_TABLE_NAME='contact_consent_log' THEN
-        SELECT organization_id INTO org FROM contacts WHERE id=NEW.contact_id;
+        SELECT organization_id INTO org FROM public.contacts WHERE id=NEW.contact_id;
     END IF;
     IF org IS NULL AND TG_TABLE_NAME='message_delivery_attempts' THEN
-        SELECT organization_id INTO org FROM messages WHERE id=NEW.message_id;
+        SELECT organization_id INTO org FROM public.messages WHERE id=NEW.message_id;
     END IF;
     IF org IS NULL THEN RETURN NEW; END IF;
     IF TG_TABLE_NAME='usage_events' AND item->>'event_type' <> 'system.provider_attempt' THEN RETURN NEW; END IF;
     PERFORM pg_advisory_xact_lock_shared(hashtextextended(org::text,606));
-    IF NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers WHERE organization_id=org) THEN RETURN NEW; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.gdpr_erasure_barriers WHERE organization_id=org) THEN RETURN NEW; END IF;
     IF TG_TABLE_NAME='contacts' THEN subject := NEW.id;
     ELSE
         subject := NULLIF(item->>'contact_id','')::uuid;
         IF subject IS NULL AND item->>'conversation_id' IS NOT NULL THEN
-            SELECT contact_id INTO subject FROM conversations
+            SELECT contact_id INTO subject FROM public.conversations
                 WHERE organization_id=org AND id=(item->>'conversation_id')::uuid;
         END IF;
     END IF;
@@ -2088,15 +2088,15 @@ BEGIN
                         CASE WHEN TG_TABLE_NAME='event_log' THEN item->>'source_id' END,
                         item#>>'{metadata,context,message_id}')::uuid;
         IF msg IS NOT NULL THEN
-            SELECT c.contact_id INTO subject FROM messages m JOIN conversations c
+            SELECT c.contact_id INTO subject FROM public.messages m JOIN public.conversations c
                 ON c.id=m.conversation_id AND c.organization_id=org
                 WHERE m.organization_id=org AND m.id=msg;
         END IF;
     END IF;
     IF subject IS NULL AND item->>'booking_id' IS NOT NULL THEN
-        SELECT contact_id INTO subject FROM bookings WHERE organization_id=org AND id=(item->>'booking_id')::uuid;
+        SELECT contact_id INTO subject FROM public.bookings WHERE organization_id=org AND id=(item->>'booking_id')::uuid;
     END IF;
-    IF EXISTS (SELECT 1 FROM gdpr_erasure_barriers b WHERE b.organization_id=org
+    IF EXISTS (SELECT 1 FROM public.gdpr_erasure_barriers b WHERE b.organization_id=org
         AND (b.scope='organization' OR b.subject_id=subject)) THEN
         RAISE EXCEPTION 'GDPR erasure barrier rejects data production' USING ERRCODE='55000';
     END IF;

@@ -191,3 +191,50 @@ async def test_competing_proposals_without_private_identity_are_both_handed_off(
     )
     assert all(result.requires_staff for result in results)
     assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1", org_id) == 0
+
+
+async def test_confirmation_outbox_requires_same_tenant(pg_pool):
+    from asyncpg import ForeignKeyViolationError
+
+    day = date.today() + timedelta(days=1)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        org_a, org_b = uuid.uuid4(), uuid.uuid4()
+        await conn.execute("INSERT INTO organizations(id,name) VALUES($1,'Synthetic A'),($2,'Synthetic B')", org_a, org_b)
+
+        async def rows(org):
+            booking, conversation, contact, inbound, outbound = (uuid.uuid4() for _ in range(5))
+            await conn.execute("INSERT INTO contacts(id,organization_id,phone_number) VALUES($1,$2,$3)", contact, org, str(contact))
+            await conn.execute("INSERT INTO conversations(id,organization_id,contact_id) VALUES($1,$2,$3)", conversation, org, contact)
+            await conn.execute("""
+                INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content)
+                VALUES ($1,$3,$4,'inbound','text','{}'),($2,$3,$4,'outbound','text','{}')
+            """, inbound, outbound, org, conversation)
+            await conn.execute("""
+                INSERT INTO bookings(id,organization_id,contact_id,id_conversazione,nome_cliente,telefono,data,ora,coperti,stato)
+                VALUES($1,$2,$3,$4,'Synthetic','',$5,'10:00',1,'in_attesa')
+            """, booking, org, contact, str(conversation), day)
+            return booking, inbound, outbound
+
+        booking_a, inbound_a, outbound_a = await rows(org_a)
+        booking_b, inbound_b, outbound_b = await rows(org_b)
+        insert = """
+            INSERT INTO booking_confirmation_outbox(organization_id,booking_id,inbound_message_id,outbound_message_id)
+            VALUES($1,$2,$3,$4)
+        """
+        for values, constraint in (
+            ((booking_b, inbound_a, outbound_a), "booking_confirmation_outbox_booking_scope"),
+            ((booking_a, inbound_b, outbound_a), "booking_confirmation_outbox_inbound_scope"),
+            ((booking_a, inbound_a, outbound_b), "booking_confirmation_outbox_outbound_scope"),
+        ):
+            with pytest.raises(ForeignKeyViolationError) as error:
+                async with conn.transaction():
+                    await conn.execute(insert, org_a, *values)
+            assert error.value.constraint_name == constraint
+
+        await conn.execute(insert, org_a, booking_a, inbound_a, outbound_a)
+        with pytest.raises(ForeignKeyViolationError):
+            async with conn.transaction():
+                await conn.execute("DELETE FROM messages WHERE id=$1", inbound_a)
+        await conn.execute("DELETE FROM booking_confirmation_outbox WHERE booking_id=$1", booking_a)
+        await conn.execute("DELETE FROM messages WHERE id=$1", inbound_a)
+        await conn.execute(insert, org_a, booking_a, None, outbound_a)
