@@ -16,6 +16,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import ssl
 import struct
 import subprocess
@@ -1042,7 +1043,8 @@ def _assert_private_file(path: Path) -> None:
             return
         if os.name == "nt":
             script = r"""
-$p = $args[0]
+$p = $env:MELPIS_C01_ACL_TARGET
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $acl = Get-Acl -LiteralPath $p
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $entries = @($acl.Access | ForEach-Object {
@@ -1050,27 +1052,45 @@ $entries = @($acl.Access | ForEach-Object {
 })
 [pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; Me=$me; Entries=$entries } | ConvertTo-Json -Compress -Depth 5
 """
+            powershell = shutil.which("pwsh")
+            if not powershell:
+                raise ValueError
+            child_env = os.environ.copy()
+            child_env["MELPIS_C01_ACL_TARGET"] = str(path)
             proc = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, str(path)],
+                [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False, timeout=15,
+                env=child_env,
             )
             value = json.loads(proc.stdout) if proc.returncode == 0 else None
-            entries = value["Entries"] if isinstance(value, dict) else None
-            expected = {value.get("Me"), "BUILTIN\\Administrators", "NT AUTHORITY\\SYSTEM"}
-            seen = set()
-            if not value or value.get("Protected") is not True or not isinstance(entries, list):
-                raise ValueError
-            for entry in entries:
-                if (entry["Type"] != "Allow" or entry["Rights"] not in ("FullControl", "268435456")
-                        or entry["Inherit"] != "None" or entry["Propagation"] != "None"):
-                    raise ValueError
-                seen.add(entry["Who"])
-            if seen != expected:
+            if not value or not _windows_private_acl_is_valid(value):
                 raise ValueError
             return
         raise ValueError
     except Exception:
         raise C01SnapshotError("c01_secret_file_not_private") from None
+
+
+def _windows_private_acl_is_valid(value: Any) -> bool:
+    """Compare Windows account names case-insensitively and require exact ACLs."""
+    entries = value.get("Entries") if isinstance(value, dict) else None
+    if isinstance(entries, dict):  # PowerShell serializes a one-element array as an object.
+        entries = [entries]
+    if (not isinstance(entries, list) or value.get("Protected") is not True
+            or not isinstance(value.get("Me"), str)):
+        return False
+    expected = {value["Me"].casefold(), "BUILTIN\\administrators".casefold(),
+                "NT AUTHORITY\\system".casefold()}
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            return False
+        if (entry.get("Type") != "Allow" or entry.get("Rights") not in ("FullControl", "268435456")
+                or entry.get("Inherit") != "None" or entry.get("Propagate") != "None"
+                or not isinstance(entry.get("Who"), str)):
+            return False
+        seen.add(entry["Who"].casefold())
+    return seen == expected
 
 
 def load_source_settings(env_file: str | Path) -> SourceSettings:
@@ -1164,7 +1184,8 @@ def _enforce_private_directory(path: Path) -> None:
         return
     if os.name == "nt":
         script = r"""
-$p = $args[0]
+$p = $env:MELPIS_C01_ACL_TARGET
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $acl = Get-Acl -LiteralPath $p
 $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 $entries = @($acl.Access | ForEach-Object {
@@ -1173,22 +1194,18 @@ $entries = @($acl.Access | ForEach-Object {
 [pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; Me=$me; Entries=$entries } | ConvertTo-Json -Compress -Depth 5
 """
         try:
+            powershell = shutil.which("pwsh")
+            if not powershell:
+                raise ValueError
+            child_env = os.environ.copy()
+            child_env["MELPIS_C01_ACL_TARGET"] = str(path)
             proc = subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script, str(path)],
+                [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False, timeout=15,
+                env=child_env,
             )
             value = json.loads(proc.stdout) if proc.returncode == 0 else None
-            entries = value["Entries"] if isinstance(value, dict) else None
-            allowed = {value.get("Me"), "BUILTIN\\Administrators", "NT AUTHORITY\\SYSTEM"}
-            if not value or value.get("Protected") is not True or not isinstance(entries, list):
-                raise ValueError
-            seen = set()
-            for entry in entries:
-                if (entry["Type"] != "Allow" or entry["Rights"] not in ("FullControl", "268435456")
-                        or entry["Inherit"] != "None" or entry["Propagation"] != "None"):
-                    raise ValueError
-                seen.add(entry["Who"])
-            if seen != allowed:
+            if not value or not _windows_private_acl_is_valid(value):
                 raise ValueError
         except Exception:
             raise C01SnapshotError("c01_backup_directory_not_private") from None

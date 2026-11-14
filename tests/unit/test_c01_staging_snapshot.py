@@ -142,6 +142,25 @@ def test_source_configuration_rejects_duplicate_or_unexpected_keys():
         parse_source_env(_env() + "\nPGOPTIONS=-c search_path=public")
 
 
+def test_windows_private_acl_is_exact_but_case_insensitive():
+    acl = {
+        "Protected": True,
+        "Me": "FAMIGLIA\\muzzo",
+        "Entries": [
+            {"Who": "Famiglia\\muzzo", "Type": "Allow", "Rights": "FullControl",
+             "Inherit": "None", "Propagate": "None"},
+            {"Who": "BUILTIN\\Administrators", "Type": "Allow", "Rights": "FullControl",
+             "Inherit": "None", "Propagate": "None"},
+            {"Who": "NT AUTHORITY\\SYSTEM", "Type": "Allow", "Rights": "FullControl",
+             "Inherit": "None", "Propagate": "None"},
+        ],
+    }
+    assert _MODULE._windows_private_acl_is_valid(acl)
+    acl["Entries"].append({"Who": "Everyone", "Type": "Allow", "Rights": "FullControl",
+                           "Inherit": "None", "Propagate": "None"})
+    assert not _MODULE._windows_private_acl_is_valid(acl)
+
+
 def test_dump_arguments_preserve_database_owner_and_acl():
     args = _database_dump_args("00000003-0000001B-1")
     assert "--create" in args
