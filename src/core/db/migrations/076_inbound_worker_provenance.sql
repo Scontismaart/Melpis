@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS inbound_worker_operations (
     message_id uuid NOT NULL,
     operation_id uuid NOT NULL,
     FOREIGN KEY (organization_id, operation_id)
-        REFERENCES usage_events (organization_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY IMMEDIATE,
+        REFERENCES usage_events (organization_id, id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
     PRIMARY KEY (organization_id, message_id, operation_id),
     FOREIGN KEY (organization_id, inbox_id, message_id)
         REFERENCES inbound_worker_receipts (organization_id, inbox_id, message_id) ON DELETE CASCADE
