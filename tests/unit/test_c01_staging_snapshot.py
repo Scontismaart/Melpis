@@ -119,6 +119,7 @@ def test_source_configuration_is_pinned_to_staging_session_pooler():
     assert settings.project_ref == "ucncxwnhcdrqonknkvau"
     assert settings.port == 5432
     assert settings.sslmode == "verify-full"
+    assert "synthetic-password-never-output" not in repr(settings)
 
 
 @pytest.mark.parametrize("override", [

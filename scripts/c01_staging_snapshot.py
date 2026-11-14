@@ -22,7 +22,7 @@ import struct
 import subprocess
 import tarfile
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -341,7 +341,7 @@ class SourceSettings:
     port: int
     database: str
     user: str
-    password: str
+    password: str = field(repr=False)
     sslmode: str
     ca_container_path: str
     application_name: str
@@ -880,8 +880,8 @@ def plan_clone_extension_normalizations(
         raise C01SnapshotError("c01_clone_extension_inventory_mismatch")
     for name in source_names & target_names:
         left, right = source[name], target[name]
-        for field in ("extversion", "schema_name", "owner"):
-            if left.get(field) != right.get(field):
+        for attribute in ("extversion", "schema_name", "owner"):
+            if left.get(attribute) != right.get(attribute):
                 raise C01SnapshotError("c01_clone_extension_attribute_mismatch")
     for name, schema in _ALLOWED_IMAGE_EXTENSION_EXTRA.items():
         if target[name].get("schema_name") != schema:
