@@ -630,7 +630,7 @@ async def _fetch_catalog_snapshot(conn: asyncpg.Connection) -> dict[str, Any]:
     relations = await conn.fetch("""
         SELECT n.nspname, c.relname, c.relkind::text AS kind,
                pg_get_userbyid(c.relowner) AS owner,
-               COALESCE(c.relacl, acldefault(CASE WHEN c.relkind='S' THEN 's' ELSE 'r' END, c.relowner))::text AS acl,
+               COALESCE(c.relacl, acldefault((CASE WHEN c.relkind='S' THEN 's' ELSE 'r' END)::"char", c.relowner))::text AS acl,
                c.relrowsecurity, c.relforcerowsecurity,
                COALESCE(c.reloptions, ARRAY[]::text[]) AS options,
                CASE WHEN c.relkind IN ('r','p','m') THEN true ELSE false END AS count_rows,
@@ -695,11 +695,33 @@ async def _fetch_catalog_snapshot(conn: asyncpg.Connection) -> dict[str, Any]:
          ORDER BY n.nspname,c.relname,t.tgname
     """)
     functions = await conn.fetch("""
-        SELECT n.nspname AS schema_name, p.proname, pg_get_function_identity_arguments(p.oid) AS args,
+        SELECT n.nspname AS schema_name, p.proname, p.prokind::text AS routine_kind,
+               pg_get_function_identity_arguments(p.oid) AS args,
                pg_get_userbyid(p.proowner) AS owner, p.prosecdef AS security_definer,
-               p.proconfig AS function_config, pg_get_functiondef(p.oid) AS definition,
-               COALESCE(p.proacl, acldefault('f', p.proowner))::text AS acl
+               p.proconfig AS function_config,
+               CASE WHEN p.prokind='a' THEN NULL ELSE pg_get_functiondef(p.oid) END AS definition,
+               COALESCE(p.proacl, acldefault('f', p.proowner))::text AS acl,
+               a.aggkind::text AS aggregate_kind, a.aggnumdirectargs AS aggregate_direct_arguments,
+               a.aggtransfn::regprocedure::text AS aggregate_transition,
+               a.aggfinalfn::regprocedure::text AS aggregate_final,
+               a.aggcombinefn::regprocedure::text AS aggregate_combine,
+               a.aggserialfn::regprocedure::text AS aggregate_serialize,
+               a.aggdeserialfn::regprocedure::text AS aggregate_deserialize,
+               a.aggmtransfn::regprocedure::text AS aggregate_moving_transition,
+               a.aggminvtransfn::regprocedure::text AS aggregate_inverse_transition,
+               a.aggmfinalfn::regprocedure::text AS aggregate_moving_final,
+               a.aggtranstype::regtype::text AS aggregate_transition_type,
+               a.aggtransspace AS aggregate_transition_space,
+               a.agginitval AS aggregate_initial_value,
+               a.aggmtransspace AS aggregate_moving_transition_space,
+               a.aggminitval AS aggregate_moving_initial_value,
+               a.aggfinalextra AS aggregate_final_extra,
+               a.aggmfinalextra AS aggregate_moving_final_extra,
+               a.aggfinalmodify::text AS aggregate_final_modify,
+               a.aggmfinalmodify::text AS aggregate_moving_final_modify,
+               a.aggsortop::regoperator::text AS aggregate_sort_operator
           FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          LEFT JOIN pg_aggregate a ON a.aggfnoid=p.oid
          WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
          ORDER BY n.nspname,p.proname,args
     """)
