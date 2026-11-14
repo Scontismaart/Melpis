@@ -4,7 +4,9 @@ This procedure is restricted to the Supabase project `ucncxwnhcdrqonknkvau`.
 It uses the Session Pooler session endpoint on port 5432 and requires
 `sslmode=verify-full` with the pinned Supabase root certificate. The source
 connection is read-only. The snapshot code keeps the repeatable-read transaction
-open while `pg_dump` imports its exported snapshot.
+open while `pg_dump` imports its exported snapshot. Both source and clone
+catalog collectors pin and record `search_path=pg_catalog` for stable object
+and type rendering.
 
 The encrypted artifact contains the PostgreSQL custom archive with database and
 object owners/ACLs, a `pg_dumpall --roles-only --no-role-passwords` snapshot, and

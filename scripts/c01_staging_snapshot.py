@@ -306,10 +306,12 @@ def local_pg17_snapshot_reader(adapter: DockerRestoreAdapter, env_file: str | Pa
                     timeout=10, command_timeout=180,
                     server_settings={"application_name": "melpis-c01-local-restore-check"},
                 )
-                version = await connection.fetchval("SELECT current_setting('server_version')")
-                if not re.fullmatch(r"17\.6\.1\.171(?:\s.*)?", version):
-                    raise C01SnapshotError("c01_restore_postgres_version_mismatch")
-                return await _fetch_catalog_snapshot(connection)
+                async with connection.transaction(isolation="repeatable_read", readonly=True):
+                    await connection.execute("SET LOCAL search_path = pg_catalog")
+                    version = await connection.fetchval("SELECT current_setting('server_version')")
+                    if not re.fullmatch(r"17\.6\.1\.171(?:\s.*)?", version):
+                        raise C01SnapshotError("c01_restore_postgres_version_mismatch")
+                    return await _fetch_catalog_snapshot(connection)
             except C01SnapshotError:
                 raise
             except Exception:
@@ -824,6 +826,7 @@ async def _fetch_catalog_snapshot(conn: asyncpg.Connection) -> dict[str, Any]:
 
     data = {
         "project_ref": _PROJECT_REF,
+        "snapshot_search_path": await conn.fetchval("SHOW search_path"),
         "database": dict(database) if database else None,
         "extensions": [dict(row) for row in extensions],
         "extension_dependencies": [dict(row) for row in extension_dependencies],
@@ -1035,6 +1038,7 @@ async def source_snapshot(settings: SourceSettings, ca_file: str | Path):
         await tx.start()
         await conn.execute("SET LOCAL statement_timeout='180s'")
         await conn.execute("SET LOCAL lock_timeout='5s'")
+        await conn.execute("SET LOCAL search_path = pg_catalog")
         snapshot_id = await conn.fetchval("SELECT pg_export_snapshot()")
         snapshot = await _fetch_catalog_snapshot(conn)
         if not snapshot_id:

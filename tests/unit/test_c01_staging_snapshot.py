@@ -60,6 +60,7 @@ def _snapshot():
     return {
         "database": {"datname": "postgres", "owner": "postgres", "acl": "{...}"},
         "project_ref": "ucncxwnhcdrqonknkvau",
+        "snapshot_search_path": "pg_catalog",
         "extensions": [{"extname": "vector", "extversion": "0.8.2", "schema_name": "extensions"}],
         "roles": [{"rolname": "authenticated", "rolbypassrls": False}],
         "memberships": [],
