@@ -25,10 +25,10 @@ SOURCE_URL = 'https://files.pythonhosted.org/packages/a2/69/efea134272b7ca3e9cf1
 SOURCE_SHA256 = 'bb7210ccbac3c75c231966fb5dd8d77797945c5ddb220ca3b54b50bf0a31a711'
 CORE_SOURCE_URL = 'https://files.pythonhosted.org/packages/7a/40/39ed45f604160f6ab4e1e4a99c9a30236e19f23c57ae8f8fa6e04ebb256d/crewai_core-1.15.4-py3-none-any.whl'
 CORE_SOURCE_SHA256 = '3af1675c6f0a5fe394edafd227d2a43ded25997c246aacbe682ee745b889a07e'
-CORE_DERIVED_SHA256 = '75112b4195665f57f19f3841f17d0dbd4d042d74230412e96dd27f224a9604a7'
+CORE_DERIVED_SHA256 = 'caccd7b45d5f0194eaadfadea94b32f3d6ae9842e16e8df6b0566ef317ff1bd4'
 # Set from the canonical ZIP_STORED build, reviewed independently of downloads.
-DERIVED_SHA256 = '94030a7648346a9abd60213cf7964cc82f6afd1d9c6d098c13a9e1642989396c'
-PROVENANCE_SHA256 = '3f1df5aa3885af30864ea39f4a9c22197b8a68d9583517519ebad8475da5bdfa'
+DERIVED_SHA256 = '38c93f17f4b36d23e5369ba4e8bdbb80eaa1d9623b65046f83ab67c970190a79'
+PROVENANCE_SHA256 = 'f3850bc42c71332d2f975ef0e903a2463b831276583b68a08b35b6ab22e69801'
 WHEEL_NAME = 'crewai-1.15.4-py3-none-any.whl'
 METADATA_NAME = 'crewai-1.15.4.dist-info/METADATA'
 RECORD_NAME = 'crewai-1.15.4.dist-info/RECORD'
@@ -39,9 +39,17 @@ OLD_CONSTRAINT = b'Requires-Dist: mcp~=1.28.1\n'
 NEW_CONSTRAINT = b'Requires-Dist: mcp<1.31,>=1.30.0\n'
 UNUSED_CLI_REQUIREMENT = b'Requires-Dist: crewai-cli==1.15.4\n'
 TELEMETRY_PACKAGES = ('opentelemetry-api', 'opentelemetry-sdk', 'opentelemetry-exporter-otlp-proto-http')
+TELEMETRY_VERSION = '1.45.2'
+TELEMETRY_ARTIFACTS = {
+    'opentelemetry-api': 'https://files.pythonhosted.org/packages/a9/2d/610db864d7513158cebb8f36cc88e67e73bd6c7aa1905ef18d89e1281c81/opentelemetry_api-1.45.2-py3-none-any.whl#sha256=2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34',
+    'opentelemetry-sdk': 'https://files.pythonhosted.org/packages/9f/a5/9a3b793ef48245f2336a16beb2324c2397dbb3f987cd68942f77cca06156/opentelemetry_sdk-1.45.2-py3-none-any.whl#sha256=ff974ea70ee4f1d51e2ec152db37c2b626c7bf82bb3f7d86114fd8704e7199c6',
+    'opentelemetry-exporter-otlp-proto-http': 'https://files.pythonhosted.org/packages/32/65/f64d7d2450217e2989714e1dee15e19bf79a77a313387abac0cac77bc10e/opentelemetry_exporter_otlp_proto_http-1.45.2-py3-none-any.whl#sha256=6e4d025138829d0ee57946930c2ccad6491ad4d92a958e9c7eea69278fe60cfc',
+}
+# The requirements use direct immutable wheels with SHA-256 fragments. The
+# versions and hashes are pinned again here so the reviewed builder fails closed.
 TELEMETRY_CONSTRAINTS = tuple(
     (f'Requires-Dist: {name}~=1.42.0\n'.encode(),
-     f'Requires-Dist: {name}<1.46,>=1.45.1\n'.encode())
+     f'Requires-Dist: {name}<1.46,>=1.45.2\n'.encode())
     for name in TELEMETRY_PACKAGES
 )
 
@@ -138,7 +146,7 @@ def make_manifest(wheel, core_wheel):
         'omitted_runtime_requirement': UNUSED_CLI_REQUIREMENT.decode().strip(),
         'telemetry_constraints': {old.decode().strip(): new.decode().strip()
                                   for old, new in TELEMETRY_CONSTRAINTS},
-        'telemetry_versions': {name: '1.45.1' for name in TELEMETRY_PACKAGES},
+        'telemetry_versions': {name: TELEMETRY_VERSION for name in TELEMETRY_PACKAGES},
         'installed_files': hashes,
         'core': {'distribution': 'crewai-core', 'version': '1.15.4',
                  'source_url': CORE_SOURCE_URL, 'source_sha256': CORE_SOURCE_SHA256,
@@ -160,8 +168,8 @@ def render_requirements(original, wheel_path, core_wheel_path):
         raise ValueError('Expected one exact reviewed MCP 1.30.0 pin')
     for name in TELEMETRY_PACKAGES:
         pins = [line for line in lines if re.match(r'^' + re.escape(name) + r'\b', line, re.I)]
-        if pins != [name + '==1.45.1']:
-            raise ValueError('Expected one exact reviewed OpenTelemetry 1.45.1 pin')
+        if pins != [name + ' @ ' + TELEMETRY_ARTIFACTS[name]]:
+            raise ValueError('Expected one exact SHA-256 reviewed OpenTelemetry 1.45.2 artifact')
     return original.replace('crewai[litellm]==1.15.4',
                             'crewai[litellm] @ ' + wheel_path.resolve().as_uri()).replace(
                                 'crewai-core==1.15.4', 'crewai-core @ ' + core_wheel_path.resolve().as_uri())
@@ -229,7 +237,7 @@ def verify_runtime(manifest_path):
         raise ValueError('Provenance manifest SHA mismatch')
     manifest = json.loads(content)
     for name, version in (('crewai', '1.15.4'), ('crewai-core', '1.15.4'), ('mcp', '1.30.0'),
-                          *((name, '1.45.1') for name in TELEMETRY_PACKAGES)):
+                          *((name, TELEMETRY_VERSION) for name in TELEMETRY_PACKAGES)):
         if metadata.version(name) != version:
             raise ValueError('Unreviewed installed dependency version: ' + name)
     verify_cli_tools_absent()
