@@ -163,11 +163,12 @@ CREATE TRIGGER gdpr_policy_immutable BEFORE UPDATE OR DELETE ON gdpr_policies
 DO $$ DECLARE t TEXT; BEGIN
     FOREACH t IN ARRAY ARRAY['gdpr_operations','gdpr_export_chunks','gdpr_operation_steps','gdpr_policies','gdpr_operation_events','gdpr_erasure_barriers'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
-        EXECUTE format('REVOKE ALL ON %I FROM PUBLIC,anon,authenticated', t);
+        EXECUTE format('REVOKE ALL ON %I FROM PUBLIC,anon,authenticated,service_role', t);
         EXECUTE format('GRANT SELECT,INSERT ON %I TO service_role', t);
     END LOOP;
     GRANT UPDATE ON gdpr_operations,gdpr_operation_steps TO service_role;
     GRANT DELETE ON gdpr_export_chunks TO service_role;
+    REVOKE ALL ON SEQUENCE gdpr_operation_events_id_seq FROM PUBLIC,anon,authenticated,service_role;
     GRANT USAGE,SELECT ON SEQUENCE gdpr_operation_events_id_seq TO service_role;
     -- Application credentials cannot approve a legal policy or rewrite evidence.
     REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON gdpr_policies FROM service_role;

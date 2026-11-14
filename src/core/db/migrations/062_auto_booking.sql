@@ -37,16 +37,35 @@ DO $$ BEGIN
     END IF;
 END $$;
 
+-- Install the scoped parent keys before creating the confirmation outbox.
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'public.bookings'::regclass AND conname = 'bookings_org_id_unique'
+    ) THEN
+        ALTER TABLE public.bookings
+            ADD CONSTRAINT bookings_org_id_unique UNIQUE (organization_id, id);
+    END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS messages_org_id_unique
+    ON public.messages (organization_id, id);
+
 CREATE TABLE IF NOT EXISTS public.booking_confirmation_outbox (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id UUID NOT NULL REFERENCES public.organizations(id),
-    booking_id UUID NOT NULL REFERENCES public.bookings(id),
-    inbound_message_id UUID NOT NULL REFERENCES public.messages(id),
-    outbound_message_id UUID NOT NULL REFERENCES public.messages(id),
+    booking_id UUID NOT NULL,
+    inbound_message_id UUID NOT NULL,
+    outbound_message_id UUID NOT NULL,
     status TEXT NOT NULL DEFAULT 'waiting_for_reply'
         CHECK (status IN ('waiting_for_reply', 'scheduled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     scheduled_at TIMESTAMPTZ,
+    CONSTRAINT booking_confirmation_outbox_booking_scope
+        FOREIGN KEY (organization_id, booking_id) REFERENCES public.bookings (organization_id, id),
+    CONSTRAINT booking_confirmation_outbox_inbound_scope
+        FOREIGN KEY (organization_id, inbound_message_id) REFERENCES public.messages (organization_id, id),
+    CONSTRAINT booking_confirmation_outbox_outbound_scope
+        FOREIGN KEY (organization_id, outbound_message_id) REFERENCES public.messages (organization_id, id),
     UNIQUE (organization_id, booking_id),
     UNIQUE (organization_id, outbound_message_id)
 );

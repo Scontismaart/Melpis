@@ -290,7 +290,7 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             # beneath 071's dependent FK/trigger. The outer rollback restores
             # the newer stay protections after the first-install failure proof.
             await c.execute('DROP VIEW IF EXISTS c24_private.worker_booking_stays_inserts; DROP VIEW IF EXISTS c24_private.booking_stays; DROP FUNCTION booking_stay_admin_purge(uuid,uuid,text,uuid,text); DROP TABLE booking_stays')
-            await c.execute('DROP TABLE booking_resource_allocations,booking_allocation_requests,booking_allocation_sets CASCADE; DROP FUNCTION booking_allocation_guard(); DROP FUNCTION booking_allocation_immutable(); ALTER TABLE bookings DROP CONSTRAINT bookings_org_id_unique')
+            await c.execute('DROP TABLE booking_resource_allocations,booking_allocation_requests,booking_allocation_sets CASCADE; DROP FUNCTION booking_allocation_guard(); DROP FUNCTION booking_allocation_immutable()')
             before=await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")
             helper='allocation_defaults_'+uuid4().hex
             await c.execute(f'CREATE ROLE {helper}; GRANT {helper} TO service_role WITH INHERIT FALSE, SET TRUE; ALTER DEFAULT PRIVILEGES GRANT TRUNCATE ON TABLES TO {helper}')
@@ -299,7 +299,7 @@ async def test_first_install_late_failure_rolls_back_schema_and_acl(allocation_d
             for table in ('booking_allocation_sets','booking_resource_allocations','booking_allocation_requests'):
                 assert await c.fetchval('SELECT to_regclass($1)',table) is None
             assert await c.fetchval("SELECT to_regprocedure('booking_allocation_guard()')") is None
-            assert not await c.fetchval("SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='bookings'::regclass AND conname='bookings_org_id_unique')")
+            assert await c.fetchval("SELECT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='bookings'::regclass AND conname='bookings_org_id_unique')")
             assert await c.fetchval("SELECT relacl::text FROM pg_class WHERE oid='bookings'::regclass")==before
         finally: await tx.rollback()
         assert await c.fetchval("SELECT to_regclass('booking_stays')") is not None
