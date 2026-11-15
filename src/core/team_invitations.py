@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from src.core.auth import bff
 from src.core.auth.dependencies import get_http_client
+from src.core.auth.signup_policy import beta_email_is_allowed
 from src.core.notifications.email_service import _get_smtp_config
 from src.core.rate_limit import get_rate_limiter
 from src.core.security.docs import is_production
@@ -116,6 +117,8 @@ async def create_invitation(
     org_uuid = uuid.UUID(str(org_id))
     actor_uuid = uuid.UUID(str(actor["user_id"]))
     email = email.strip().lower()
+    if not beta_email_is_allowed(email):
+        raise HTTPException(403, "Destinatario non autorizzato per la beta")
     limiter = await get_rate_limiter()
     if await limiter.hit(f"team-invite-org:{org_uuid}", 30, 86400):
         raise HTTPException(429, "Troppi inviti; riprova più tardi")
@@ -185,6 +188,8 @@ async def accept_invitation(pool, *, raw_token: str, auth_user_id: str, access_t
     if not _TOKEN_RE.fullmatch(raw_token):
         raise HTTPException(400, _UNUSABLE)
     email = await verified_supabase_identity(access_token, auth_user_id)
+    if not beta_email_is_allowed(email):
+        raise HTTPException(400, _UNUSABLE)
     token_hash = _hash(raw_token)
     async with pool.acquire() as conn:
         lookup = await conn.fetchrow(

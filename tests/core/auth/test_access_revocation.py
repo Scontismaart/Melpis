@@ -34,6 +34,7 @@ def signing_key(monkeypatch):
     public_jwk.update({"kid": "phase8-local-rsa", "alg": "RS256", "use": "sig"})
     monkeypatch.setenv("SUPABASE_URL", "https://phase8.example.test")
     monkeypatch.setenv("SUPABASE_JWT_AUD", "authenticated")
+    monkeypatch.setenv("APP_ENV", "development")
 
     async def local_jwks():
         return [public_jwk]
@@ -163,6 +164,24 @@ async def test_new_user_is_provisioned_on_first_me_request(
     row = await lifecycle_row(pg_pool, auth_user_id)
     assert row["provisioned_at"] is not None
     assert row["disabled_at"] is None
+
+
+async def test_staging_first_me_request_denies_user_outside_beta_roster(
+    pg_pool, auth_client, signing_key, monkeypatch
+):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.delenv("MELPIS_BETA_ALLOWED_EMAILS", raising=False)
+    auth_user_id, _ = await create_auth_user(pg_pool)
+    before_orgs = await pg_pool.fetchval("SELECT count(*) FROM organizations")
+
+    response = await request_me(auth_client, signed_access_token(signing_key, auth_user_id))
+
+    assert response.status_code == 403
+    assert await pg_pool.fetchval("SELECT count(*) FROM organizations") == before_orgs
+    assert await pg_pool.fetchval(
+        "SELECT count(*) FROM organization_memberships WHERE user_id IN "
+        "(SELECT id FROM user_profiles WHERE auth_user_id=$1)", auth_user_id,
+    ) == 0
 
 
 async def test_existing_member_can_access_without_creating_another_org(

@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict
 from src.core.auth import bff, throttle
 from src.core.auth.csrf import issue_csrf_token
 from src.core.auth.dependencies import get_repo
+from src.core.auth.signup_policy import beta_email_is_allowed
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -125,6 +126,25 @@ def _set_flow_cookie(
         secure=bff.cookie_secure(),
         samesite="lax",
     )
+
+
+def _set_signup_flow_cookies(
+    response: Response,
+    *,
+    verifier: str,
+    email_hash: str,
+    next_path: str,
+    flow_id: str,
+    capsule_id: str,
+) -> None:
+    """Set a uniform browser-binding header shape for every 202 response."""
+    _set_flow_cookie(response, "wa_signup_verifier", verifier, _SIGNUP_COOKIE_MAX_AGE)
+    _set_flow_cookie(response, "wa_signup_email", email_hash, _SIGNUP_COOKIE_MAX_AGE)
+    _set_flow_cookie(response, "wa_signup_next", next_path, _SIGNUP_COOKIE_MAX_AGE)
+    # The stored capsule's server-side expiry remains authoritative and is at
+    # most this long; a cookie that outlives it by a second is harmless.
+    _set_flow_cookie(response, "wa_signup_flow", flow_id, _SIGNUP_COOKIE_MAX_AGE)
+    _set_flow_cookie(response, "wa_signup_capsule", capsule_id, _SIGNUP_COOKIE_MAX_AGE)
 
 
 def _clear_flow_cookies(response: Response) -> None:
@@ -1055,11 +1075,34 @@ async def register(body: RegisterBody, request: Request, response: Response):
     if not isinstance(password, str) or not _valid_password(password):
         raise HTTPException(422, "Password non valida")
 
+    # Keep the public response generic while refusing to create Auth users
+    # outside the operator-maintained beta roster. Emit unusable browser
+    # binding cookies on this branch too, so response headers do not disclose
+    # roster membership. No password capsule or Supabase user is created.
+    if not beta_email_is_allowed(email):
+        verifier = secrets.token_urlsafe(48)
+        flow_id = secrets.token_urlsafe(32)
+        email_hash = _email_fingerprint(email)
+        capsule_id = secrets.token_urlsafe(32)
+        _set_signup_flow_cookies(
+            response,
+            verifier=verifier,
+            email_hash=email_hash,
+            next_path=next_path,
+            flow_id=flow_id,
+            capsule_id=capsule_id,
+        )
+        response.status_code = 202
+        return {
+            "ok": True,
+            "message": "Se l'indirizzo può essere registrato, riceverai un link per continuare.",
+        }
+
     verifier = secrets.token_urlsafe(48)
     flow_id = secrets.token_urlsafe(32)
     email_hash = _email_fingerprint(email)
     try:
-        capsule_id, capsule_ttl, _capsule_expires_at = await _save_password_capsule(
+        capsule_id, _capsule_ttl, _capsule_expires_at = await _save_password_capsule(
             password, email_hash, flow_id
         )
     except Exception as exc:  # noqa: BLE001 — fail closed without calling Supabase
@@ -1067,6 +1110,14 @@ async def register(body: RegisterBody, request: Request, response: Response):
             "signup_password_capsule_unavailable trace_id=%s error_type=%s",
             getattr(request.state, "trace_id", "unavailable"),
             type(exc).__name__,
+        )
+        _set_signup_flow_cookies(
+            response,
+            verifier=secrets.token_urlsafe(48),
+            email_hash=email_hash,
+            next_path=next_path,
+            flow_id=secrets.token_urlsafe(32),
+            capsule_id=secrets.token_urlsafe(32),
         )
         response.status_code = 202
         return {
@@ -1079,18 +1130,16 @@ async def register(body: RegisterBody, request: Request, response: Response):
     challenge = bff.pkce_challenge(verifier)
     redirect_to = f"{bff.public_app_url()}{_CALLBACK_PATH}"
 
-    # Set the same browser-binding cookies for new and already-registered
-    # addresses so the public response does not reveal Supabase's decision.
-    _set_flow_cookie(response, "wa_signup_verifier", verifier, _SIGNUP_COOKIE_MAX_AGE)
-    _set_flow_cookie(
+    # Set a stable cookie shape regardless of roster/Auth outcome. The stored
+    # capsule's server-side expiry remains authoritative.
+    _set_signup_flow_cookies(
         response,
-        "wa_signup_email",
-        email_hash,
-        _SIGNUP_COOKIE_MAX_AGE,
+        verifier=verifier,
+        email_hash=email_hash,
+        next_path=next_path,
+        flow_id=flow_id,
+        capsule_id=capsule_id,
     )
-    _set_flow_cookie(response, "wa_signup_next", next_path, _SIGNUP_COOKIE_MAX_AGE)
-    _set_flow_cookie(response, "wa_signup_flow", flow_id, capsule_ttl)
-    _set_flow_cookie(response, "wa_signup_capsule", capsule_id, capsule_ttl)
 
     try:
         status_code = await supabase_signup(
@@ -1418,6 +1467,10 @@ async def _signup_callback_post_claimed(request: Request):
             trace_id,
             type(exc).__name__,
         )
+        return _callback_redirect(_ERROR_LOCATION, clear_flow=True)
+
+    if not beta_email_is_allowed(email):
+        await _cleanup_completed_signup(pending_id, capsule_id, trace_id)
         return _callback_redirect(_ERROR_LOCATION, clear_flow=True)
 
     try:
