@@ -1,7 +1,8 @@
 # A06 data inventory and export projection
 
 This inventory is a static review of `src/whatsapp/schema.sql`,
-`src/core/db/schema.sql`, and data tables introduced through migrations 002–087. It describes SQL declarations
+`src/core/db/schema.sql`, and data tables and lifecycle state introduced
+through migrations 002–093. It describes SQL declarations
 and checked-in code; it is not confirmation of the deployed database or of
 external provider configuration. The export query allowlist is
 [`src/core/gdpr/catalog.py`](../../src/core/gdpr/catalog.py). It contains one
@@ -9,12 +10,14 @@ frozen category per table, explicit selected columns, and no `SELECT *`.
 
 ## Scope and identity keys
 
-**A06 status: technical partial.** The reviewed catalog contains 60 unique categories
-and 89 executable projections, including narrow subject views. This is not a
-legal sign-off or issue closure. The five Privacy V1.0 product decisions are founder-approved; effective
-tenant records, contractual/provider verification and C01 operational cutover remain pending, as do shared authentication-account disposition,
-subject-level review of unstructured content, verified external-provider
-erasure, backup and other-worker-copy handling, and rollout evidence.
+**A06 status: technical partial.** The reviewed export catalog contains 60 unique
+categories and 89 executable projections, including narrow subject views. This
+is not a legal sign-off or issue closure. The five Privacy V1.0 product
+decisions are founder-approved; effective tenant records and operational
+cutover are not established by this source review. Shared authentication-account
+disposition, subject-level review of unstructured content, verified external-
+provider erasure, backup and other-worker-copy handling, and rollout evidence
+remain open.
 
 - **Organization** means the tenant UUID (`organization_id`). Tenant export
   queries bind it as `$1`; derived rows join through a declared organization
@@ -97,8 +100,26 @@ verified.
 | `gdpr_erasure_barriers` | Tenant; explicitly scoped contact subject | Scope, subject ID, operation and creation time; digest/key ID | Tenant projection; contact projection requires contact scope and exact subject ID | Migration 063; digest and key ID excluded; no account projection |
 | `gdpr_export_chunks` | Tenant; operation | Encrypted serialized export chunks and digests | Excluded; recursive export artifact | Migration 063; never included in an export |
 
-The inventory rows above cover the listed application data and C2.4 lifecycle
-metadata added by migrations 074/087. The frozen catalog contains 89
+## Lifecycle and worker data added after migration 087
+
+These records are not additional categories in the frozen export catalog. The
+catalog remains at 60 categories / 89 projections; absence from a projection
+does not mean the records are outside a subject-rights review. The controls,
+lineage, and short-lived capabilities below have separate access paths and
+retention needs.
+
+| Migration / record | Scope and data | Export / erasure treatment | Retention evidence and current limit |
+|---|---|---|---|
+| 088 `google_calendar_credentials.refresh_dispatch_id` | Tenant-scoped dispatch correlation UUID on an existing credential row; the existing encrypted credential remains secret material. | No new export field; OAuth tokens and credentials stay excluded. Tenant/contact erasure flow does not prove remote Google token revocation. | Dispatch marker is operational state. Actual credential deletion/revocation and Google-side handling require the authorized account workflow and provider evidence. |
+| 089 `c24_idle_copy_cleanup_capability`, `c24_inbox_cleanup_capability`, `c24_retention_sweep_cursor`; inbox lifecycle columns | Short-lived cleanup authorization markers and a platform-wide keyset cursor, plus completion/purge timestamps on webhook inbox rows. The cursor contains scan position only; inbox rows can contain raw webhook payload before purge. | Capability/cursor rows are excluded from the export projection. Inbox payload is excluded from export; supported erasure/retention paths depend on current tenant policy and the C2.4 owner sweep. | Migration 089 provides bounded, cursor-backed C2.4 and hotel sweeps. They require the dedicated least-privilege role, tenant policy, no legal hold, and explicit flags; code presence does not prove scheduler or DSN configuration. |
+| 090 `booking_sector_admission_fences` | Tenant-scoped sector admission/control metadata. A sector label can reveal service affinity in a health-related deployment. | Not in the frozen export projection; no subject lookup is certified. Review the deployment's sector values and applicable subject/health-data scope before external claims. | Admission state is a safety control. No independent retention schedule or deployed-state verification is established here. |
+| 091 `booking_stay_owner_markers` and `booking_stays` lifecycle fields | Transaction-bound owner marker carries organization, booking, subject, request, actor, and intended action identifiers; existing stay records gain source/lifecycle state. | Marker is private and excluded from the catalog; stay content and owner source data are governed by the booking/stay request path and erasure fences. | Marker is transaction-scoped authorization evidence. Durable stay completion, hold, and purge eligibility rely on database lifecycle rules and an approved `booking_stay_content` policy; no schedule execution is certified. |
+| 092 calendar inbound source correlation | A database function attaches an inbound source to a tenant-scoped calendar operation; it adds correlation, not a new export category. | No new export projection. Google account/event copies and calendar deletion receipts remain external stages. | Correlation supports idempotency and lineage; it is not proof of calendar erasure or a retention schedule. |
+| 093 `c24_private.worker_capabilities` and `worker_context` | Capability rows include organization, source/claim/generation/booking IDs and a JSON payload. Source review found customer name and phone, booking details, and confirmation recipient/text in that payload. Context rows hold tenant and job lineage IDs, claim, generation, and lease timestamps. | Neither private table is in the export catalog. The capability payload is personal content and its current schema through migration 093 retains it after completion/expiry; keep A06 partial until bounded deletion and subject-scope treatment are evidenced. Worker context is transaction-bound and removed on successful finish; this does not establish cache/backup cleanup. | Capability authority expires within a maximum five-minute window, but expiry alone is not deletion. Migration 093 keeps a one-use hash/replay tombstone. A separate app PR proposes scrubbing completed and expired payloads while retaining tombstones; pending status must be verified before calling this implemented. |
+
+The original SQL data map above covers the application tables and C2.4 lifecycle
+metadata added through migration 087. The supplemental section above records the
+later lifecycle and worker records. The frozen catalog contains 89
 executable organization/contact/account projections across 60 categories,
 including narrow C2.4 projections; `gdpr_export_chunks` remains excluded
 because it stores encrypted recursive export artifacts. Lifecycle event and
@@ -144,6 +165,21 @@ indexing policy.
   [Privacy V1.0](../governance/privacy-data-governance-v1.0.md); compatible tenant
   records, implemented lifecycle controls and operational GO remain necessary. The DPA content is a technical template and does not constitute
   executed legal approval.
+
+## Request, export, and erasure path
+
+| Stage | Implemented path | Failure, scope, and evidence limit |
+|---|---|---|
+| Request and authorization | GDPR request routes require an authenticated organization owner and current MFA (`aal2`). A durable `request_id` is idempotent within the organization/requester; contact IDs are looked up inside the selected tenant. | Invalid or absent identity/current membership is rejected. Shared authentication-account erasure is held for transfer/identity review. This source review does not certify deployed authorization or a completed customer request. |
+| Export construction | The frozen allowlist uses explicit projections and tenant predicates. Durable export chunks are encrypted in PostgreSQL, streamed in bounded chunks, and downloaded through a short-lived one-use same-origin ticket with Redis and the export encryption key required. | Missing Redis/key/session or an invalid/expired ticket fails closed. The manifest identifies excluded/partial categories; free-text subject records and categories without verified subject keys require manual review. External copies and backups are outside the snapshot. |
+| Internal erasure | A durable operation records status and steps; supported tenant/contact flows use a database erasure barrier and scoped relational redaction/deletion after valid policy, approval, cutover, and writer-drain gates. | Missing, expired, held, unsupported, or superseded policy stops mutation. Unknown subject links, active bookings, uncertain provider attempts, shared accounts, billing/audit records, and unsupported tables can keep the operation partial or blocked. An organization is not physically deleted in one synchronous action. |
+| Provider propagation | A separately enabled stage requires a configured adapter and operation-correlated authenticated deletion receipt. | A transport error, bare HTTP success, or uncorrelated provider response is uncertain and does not prove deletion. Airtable/Softr helper paths are non-network stubs in the reviewed source. Provider-side copies remain unverified. |
+| Backups and worker copies | Export snapshot expiry removes encrypted export chunks; the C2.4 worker has separate fenced lifecycle paths. Backup and worker-local copies are tracked as separate dependencies. | The repository does not establish live backup objects, a running schedule, cache cleanup, or restore-time replay of newer erasure barriers. Do not delete backups as a shortcut or report erasure complete while required dependencies remain open. |
+
+Keep the request and operation IDs in the approved support record, without
+copying customer text, tokens, DSNs, or provider secrets. The detailed operator
+sequence and cutover holds are in the
+[A06 runbook](a06-gdpr-runbook.md).
 
 ## External providers and unresolved evidence
 
