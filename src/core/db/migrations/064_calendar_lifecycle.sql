@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- B01 technical capability only. No historical opt-in or remote activation.
 ALTER TABLE google_calendar_credentials ALTER COLUMN access_token DROP NOT NULL;
 ALTER TABLE google_calendar_credentials ALTER COLUMN refresh_token DROP NOT NULL;

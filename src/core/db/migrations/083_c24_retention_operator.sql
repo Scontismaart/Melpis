@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Dedicated, explicitly provisioned retention operator; no application role gains access.
 -- Supabase grants PUBLIC SELECT on these monitoring views by default. Retention
 -- operators must not inherit cross-tenant query telemetry; preserve owner and

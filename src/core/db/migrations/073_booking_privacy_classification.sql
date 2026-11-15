@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Proposed local-only foundation. Sensitive rollout needs explicit approval.
 CREATE TABLE IF NOT EXISTS public.booking_privacy_classifications (
     organization_id uuid PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,

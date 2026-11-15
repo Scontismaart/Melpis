@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Extend immutable conversation receipts for the private inbound lifecycle.
 -- Existing writers remain human by default; source evidence may be purged later.
 ALTER TABLE public.booking_conversation_requests

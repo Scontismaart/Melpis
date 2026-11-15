@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Allow the dedicated booking worker to attach source correlation to the
 -- authoritative Calendar queue without granting access to credentials or the
 -- external sync ledger.

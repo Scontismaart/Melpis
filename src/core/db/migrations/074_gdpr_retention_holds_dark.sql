@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Dark capability only: no policy approvals, worker grants, or retention activation.
 -- A released hold has a separate immutable release record; an overdue review
 -- remains a hold until an authorized administrator records its disposition.

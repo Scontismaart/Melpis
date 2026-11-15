@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- The scheduler can mark an elapsed booking for human review. It cannot
 -- choose a status, change capacity, read customer data, or send a message.
 DO $scheduled_booking_review$

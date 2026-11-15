@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- The private worker is dormant by default and has no direct database data
 -- privileges. Supabase's ordinary postgres role can create this NOLOGIN role
 -- with CREATEROLE; the worker obtains data only through the RPC surface added
@@ -50,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.c24_database_instance_identity (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     identity_id uuid NOT NULL DEFAULT gen_random_uuid()
 );
+ALTER TABLE public.c24_database_instance_identity ENABLE ROW LEVEL SECURITY;
 INSERT INTO public.c24_database_instance_identity(singleton)
 VALUES (true) ON CONFLICT (singleton) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.c24_database_instance_identity_immutable()

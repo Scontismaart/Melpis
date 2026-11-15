@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- DRAFT: local synthetic tests only. C05/A06 retention/lifecycle GO is pending.
 -- This file does not connect a worker, enable a policy, or change an old writer.
 DO $conversation_state_migration$

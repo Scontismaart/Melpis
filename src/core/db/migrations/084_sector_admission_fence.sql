@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Dormant, owner-only admission fence for new hair/spa tenants.
 -- This deliberately does not backfill existing bookings or permit legacy
 -- admission after registration. Activation and all schedule writes serialize.

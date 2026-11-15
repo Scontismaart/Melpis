@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- C2.4 hotel lifecycle completion. Runtime entry points remain owner/capability
 -- gated; this migration does not enable a scheduler, worker or remote policy.
 

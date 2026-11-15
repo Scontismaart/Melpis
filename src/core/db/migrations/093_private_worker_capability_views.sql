@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Private booking worker uses capability-scoped, tenant-filtered views.
 -- No table, sequence, or public-schema data privileges are granted to the
 -- worker. SECURITY DEFINER helpers are callable only by the dedicated login

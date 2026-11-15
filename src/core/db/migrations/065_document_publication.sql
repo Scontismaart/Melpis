@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- B02: backend-owned, fenced complete-index publication. No historical opt-in.
 ALTER TABLE organizations ADD COLUMN IF NOT EXISTS knowledge_epoch BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS index_verified BOOLEAN NOT NULL DEFAULT FALSE;
@@ -12,15 +15,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS documents_index_key_org ON documents(organizat
     WHERE index_key IS NOT NULL;
 -- Keep request identities after replacement/deletion; a delayed retry must not
 -- recreate a deleted source or overwrite a later revision.
+CREATE UNIQUE INDEX IF NOT EXISTS documents_org_id_unique ON documents(organization_id,id);
 CREATE TABLE IF NOT EXISTS document_index_requests(
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     request_key UUID NOT NULL,
-    document_id UUID REFERENCES documents(id) ON DELETE SET NULL,
+    document_id UUID,
     payload_hash TEXT NOT NULL,
     request_spec JSONB NOT NULL,
     published_revision BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY(organization_id,request_key)
+    PRIMARY KEY(organization_id,request_key),
+    CONSTRAINT document_index_requests_document_scope
+        FOREIGN KEY (organization_id,document_id) REFERENCES documents(organization_id,id)
+        ON DELETE SET NULL (document_id)
 );
 ALTER TABLE document_index_requests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON document_index_requests FROM PUBLIC,anon,authenticated;

@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- DRAFT: local/synthetic validation only; no worker or authority activation.
 -- A non-null marker means refresh may have reached the provider. Never expire it
 -- into a retry. A newly authorized connection replaces it under a new epoch.

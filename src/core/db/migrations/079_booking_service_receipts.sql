@@ -1,3 +1,6 @@
+SET lock_timeout = '5s';
+SET statement_timeout = '5min';
+
 -- Extend existing immutable receipts without changing legacy human inserts.
 -- A service receipt must reference the exact tenant-bound inbound operation.
 DO $migration$

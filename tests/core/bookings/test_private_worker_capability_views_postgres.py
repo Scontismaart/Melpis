@@ -904,3 +904,21 @@ async def test_093_issue_capability_rejects_missing_job_kind(pg_pool):
             await conn.fetchval("""SELECT c24_private.c24_worker_issue_capability(
                 $1,$2,$3,1,$4,$5::jsonb,$6,20)""",
                 org, message, claim, booking, payload_json, payload_hash)
+
+
+async def test_database_instance_identity_is_private_with_rls(pg_pool, private_worker_pool):
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval("""
+            SELECT relrowsecurity FROM pg_class
+            WHERE oid='public.c24_database_instance_identity'::regclass
+        """)
+        for role in ("anon", "authenticated", "service_role", "melpis_c24_booking_worker"):
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+                assert not await conn.fetchval("""
+                    SELECT has_table_privilege($1,'public.c24_database_instance_identity',$2)
+                """, role, privilege)
+
+    async with private_worker_pool.acquire() as conn:
+        identity = await conn.fetchrow("SELECT * FROM c24_private.c24_worker_readiness()")
+        assert identity["identity_id"] is not None
+        assert identity["database_oid"] is not None
