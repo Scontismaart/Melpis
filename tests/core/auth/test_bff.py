@@ -210,6 +210,7 @@ class TestMe:
     ):
         """JIT (Task18): un utente autenticato senza membership riceve
         auto-provisioning di organizzazione + ruolo owner al primo /me."""
+        monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "none@test.com")
         auth_user_id = os.urandom(16).hex()
         async with pg_pool.acquire() as conn:
             await conn.execute(

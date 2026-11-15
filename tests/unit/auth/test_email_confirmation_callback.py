@@ -1804,6 +1804,7 @@ def test_https_uses_host_prefixed_secure_flow_and_session_cookies(monkeypatch):
     monkeypatch.setenv("PUBLIC_APP_URL", "https://staging.test")
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "true")
     monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", EMAIL)
     monkeypatch.setenv("REDIS_URL", "")
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     post = AsyncMock(return_value=_response(200, {"user": {"id": USER_ID}}))
