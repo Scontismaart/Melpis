@@ -2,7 +2,7 @@
 
 This inventory is a static review of `src/whatsapp/schema.sql`,
 `src/core/db/schema.sql`, and data tables and lifecycle state introduced
-through migrations 002–093. It describes SQL declarations
+through migrations 002–094. It describes SQL declarations
 and checked-in code; it is not confirmation of the deployed database or of
 external provider configuration. The export query allowlist is
 [`src/core/gdpr/catalog.py`](../../src/core/gdpr/catalog.py). It contains one
