@@ -47,9 +47,15 @@ All 12 checks in the evidence package passed, and the synthetic rollback/concurr
 11. Two-session overlap waits for an in-flight claim and succeeds after rollback.
 12. Synthetic rollback and committed concurrency fixtures removed and verified.
 
+### Read-only Staging metadata check — 2026-11-15
+
+The Supabase project metadata identifies Staging in `eu-central-1` on PostgreSQL 17.6.1.166. A read-only PostgreSQL role-catalog query, run through the connected management query context, reported `session_user=current_user=postgres`; `postgres` is not a superuser and has `BYPASSRLS`; `service_role` has `BYPASSRLS` but no login; and `anon`/`authenticated` have neither login nor `BYPASSRLS`.
+
+This records project metadata and role attributes only. The query ran as the management `postgres` principal; it does not establish the deployed VM/API `DATABASE_URL` identity, effective role memberships, or object ownership observed by the application pool. Do not treat it as proof that application authorization was exercised under the deployed service principal. No application rows were read and no remote settings or data were changed.
+
 ### Issue #96 boundary
 
-Keep issue #96 open. The execution package proves the identified Staging target, exact migration release, history/checkpoints, scoped smoke behavior, and that Production was not used. It does not establish every wider issue criterion: current region and database role, clean-install and replay coverage for the entire 060–093 release, membership-revocation and limited-signup checks, or an explicit service-role authorization result. Do not repeat the completed cutover to fill these evidence gaps; use the applicable existing local/CI evidence or schedule only the missing scoped verification.
+Keep issue #96 open. The execution package proves the identified Staging target, exact migration release, history/checkpoints, scoped smoke behavior, and that Production was not used. The read-only metadata check confirms the Staging region and PostgreSQL version, but does not establish the deployed application database role. Full-release clean-install/replay, membership-revocation and limited-signup checks, and explicit service-role authorization under the deployed principal remain open. Do not repeat the completed cutover to fill these evidence gaps; use applicable existing local/CI evidence or schedule only the missing scoped verification.
 
 ## Preflight
 
