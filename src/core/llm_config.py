@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 from src.core.ai_providers import provider_for_model  # noqa: E402
 from src.core.cost_policy import DEFAULT_FREE_MODEL, assert_model_allowed, free_only  # noqa: E402
-from src.core.llm_client_policy import resolve_llm_client_policy  # noqa: E402
+from src.core.llm_client_policy import configured_openrouter_upstream, resolve_llm_client_policy  # noqa: E402
 from src.core.llm_routing import (  # noqa: E402
     LLMRoute,
     LLMRouteRequest,
@@ -57,7 +57,10 @@ def ai_configuration_status() -> dict[str, str]:
             return {"status": "non_configurato", "provider": provider.name, "model": model, "reason": f"{key_env} mancante"}
         if provider.requires_base_url and not os.getenv("AI_BASE_URL", "").strip():
             return {"status": "non_configurato", "provider": provider.name, "model": model, "reason": "AI_BASE_URL mancante"}
-        provider.client_params(model, key, os.getenv("AI_BASE_URL", "").strip() or None)
+        approved_upstream = configured_openrouter_upstream() if provider.name == "openrouter" else None
+        provider.client_params(
+            model, key, os.getenv("AI_BASE_URL", "").strip() or None, approved_upstream=approved_upstream,
+        )
         return {"status": "configurato", "provider": provider.name, "model": model, "reason": "verifica remota non eseguita"}
     except RuntimeError:
         return {"status": "non_configurato", "provider": "non_disponibile", "model": model, "reason": "configurazione o policy non valida"}

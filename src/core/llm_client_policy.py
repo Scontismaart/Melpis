@@ -9,6 +9,15 @@ from src.core.ai_providers import ProviderAdapter, provider_for_model, validate_
 from src.core.cost_policy import assert_model_allowed, assert_openrouter_catalog_free, free_only
 
 
+def configured_openrouter_upstream() -> str | None:
+    """Validate the upstream locally before a client or health check is created."""
+    configured = os.getenv("OPENROUTER_APPROVED_UPSTREAM", "")
+    deployed = os.getenv("APP_ENV", "").strip().lower() in {"production", "prod", "staging"}
+    if configured.strip() or deployed:
+        return validate_openrouter_upstream(configured)
+    return None
+
+
 @dataclass(frozen=True)
 class LLMClientPolicy:
     """Validated inputs needed to construct one provider client.
@@ -55,10 +64,7 @@ def resolve_llm_client_policy(model: str) -> LLMClientPolicy:
 
     approved_upstream = None
     if provider.name == "openrouter":
-        configured_upstream = os.getenv("OPENROUTER_APPROVED_UPSTREAM", "")
-        deployed = os.getenv("APP_ENV", "").strip().lower() in {"production", "prod", "staging"}
-        if configured_upstream.strip() or deployed:
-            approved_upstream = validate_openrouter_upstream(configured_upstream)
+        approved_upstream = configured_openrouter_upstream()
         if free_profile:
             assert_openrouter_catalog_free(model, api_key)
 
