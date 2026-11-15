@@ -1,5 +1,6 @@
 import uuid
-from src.core.db.scoping import TenantScopedRepository, system_scope
+
+from src.core.db.scoping import TenantScopedRepository
 
 
 class ConversationRepository(TenantScopedRepository):
@@ -21,20 +22,6 @@ class ConversationRepository(TenantScopedRepository):
                 RETURNING *
             """, uuid.uuid4(), org_id, contact_id, canale)
             return dict(row)
-
-    @system_scope("retention job globale: pulizia conversazioni orfane senza messaggi")
-    async def cleanup_empty_conversations(self) -> int:
-        async with self.pool.acquire() as conn:
-            result = await conn.execute("""
-                UPDATE conversations SET deleted_at = NOW()
-                WHERE deleted_at IS NULL
-                AND NOT EXISTS (
-                    SELECT 1 FROM messages
-                    WHERE messages.conversation_id = conversations.id
-                    AND messages.deleted_at IS NULL
-                )
-            """)
-            return int(result.split()[-1]) if result else 0
 
     async def get_conversations_by_org(self, organization_id: uuid.UUID | str) -> list[dict]:
         if isinstance(organization_id, str):
