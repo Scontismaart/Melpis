@@ -1,6 +1,55 @@
 # C01 staging cutover
 
-Status: pre-GO. The sole database target is Melpis Staging, project ref `ucncxwnhcdrqonknkvau`. Obtain explicit GO only after the gates below pass. Keep Production out of scope.
+Status: **060–093 Staging cutover completed 2026-11-15.** This execution record supersedes the pre-GO status for the migration batch below. The broader acceptance criteria in GitHub issue #96 remain open; this record does not close them. Production remains out of scope.
+
+## Completed execution record — 2026-11-15
+
+The private operator evidence package records the following result. It contains migration metadata and synthetic smoke results; no customer row contents or credentials are copied into this runbook.
+
+| Item | Recorded result |
+|---|---|
+| Target | Melpis Staging, project ref `ucncxwnhcdrqonknkvau` |
+| Approved source commit | `7634562630d705a9e8dc644260bb0174f03a25fd` |
+| Manifest digest | `8dfb5867e10510460deba6b42ab940a340a180e0620c8f11f2eb83e589340efb` (canonical JSON, sorted keys, compact UTF-8, excluding its own digest field) |
+| CLI and TLS | Supabase CLI `2.75.0`; PostgreSQL TLS `verify-full` |
+| Selection | Exactly 34 ordered migrations, `060`–`093`; role and seed options disabled |
+| Final migration history | 39 records |
+| CI | GitHub Actions run `43695636137` passed for the approved commit |
+| Production | Not used |
+
+The manifest commit matches the evidence commit and current `main`. All 34 Git blob IDs resolve to files in that commit, and each manifest SHA-256 matches the corresponding Git blob contents. The Windows checkout has `core.autocrlf=true`; raw working-tree hashes differ for CRLF-converted files, while all 34 LF-normalized hashes match the manifest.
+
+| Checkpoint | Cumulative history |
+|---|---:|
+| 060–061 | 7 |
+| 062–067 | 13 |
+| 068–075 | 21 |
+| 076–081 | 27 |
+| 082–089 | 35 |
+| 090–093 | 39 |
+
+The runner recorded two transient pre-dry-run stops for activity/lock pressure at 062–067 and 068–075. Both batches resumed after authorization; the final evidence records all six checkpoints as passed.
+
+### Final synthetic smoke results
+
+All 12 checks in the evidence package passed, and the synthetic rollback/concurrency fixtures were removed and verified:
+
+1. History count and schema integrity.
+2. RLS and ACL checkpoints.
+3. Auth profile and authenticated tenant isolation for booking.
+4. Client booking writes denied.
+5. Synthetic booking insert/update/cancel and Calendar revision.
+6. Dark Calendar sends nothing; authoritative confirmation is denied without verification.
+7. Document knowledge epoch and byte-evidence validation.
+8. GDPR barrier denies booking and document writes for a protected tenant.
+9. Worker readiness denies a non-worker session.
+10. Exclusive overlap rejected across catalog revisions.
+11. Two-session overlap waits for an in-flight claim and succeeds after rollback.
+12. Synthetic rollback and committed concurrency fixtures removed and verified.
+
+### Issue #96 boundary
+
+Keep issue #96 open. The execution package proves the identified Staging target, exact migration release, history/checkpoints, scoped smoke behavior, and that Production was not used. It does not establish every wider issue criterion: current region and database role, clean-install and replay coverage for the entire 060–093 release, membership-revocation and limited-signup checks, or an explicit service-role authorization result. Do not repeat the completed cutover to fill these evidence gaps; use the applicable existing local/CI evidence or schedule only the missing scoped verification.
 
 ## Preflight
 
