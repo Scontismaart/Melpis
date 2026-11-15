@@ -63,7 +63,15 @@ async def test_private_worker_validates_confirmed_a04_proposal(state_env, privat
 
     env = state_env
     org, message, pool, conversation = env["org"], env["message"], env["pool"], env["conv"]
-    appointment = (date.today() + timedelta(days=7)).isoformat()
+    availability = env["catalog"].catalog.availability
+    today = date.today()
+    appointment_date = next(
+        candidate
+        for candidate in (today + timedelta(days=offset) for offset in range(1, 8))
+        if availability.windows_for(candidate.weekday())
+        and candidate not in availability.closed_dates
+    )
+    appointment = appointment_date.isoformat()
     proposal_wam = 'synthetic-proposal-' + uuid4().hex
     await pool.execute('UPDATE messages SET wam_id=$3 WHERE organization_id=$1 AND id=$2', org, message, proposal_wam)
     await _persist_ingress(pool, org, proposal_wam)
