@@ -1,9 +1,10 @@
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from src.core.jobs.base import compute_advisory_lock_id, execute_with_advisory_lock
-from src.whatsapp.idempotency import purge_webhook_idempotency
 from src.core.retention_job import run_retention
+from src.whatsapp.idempotency import purge_webhook_idempotency
 
 
 def test_compute_advisory_lock_id_deterministic_and_bigint_range():
@@ -107,6 +108,7 @@ async def test_run_retention_expires_exports_without_unapproved_primary_purges(m
     monkeypatch.delenv("GDPR_RETENTION_EXECUTION_ENABLED", raising=False)
     mock_pool = MagicMock()
     mock_conn = MagicMock()
+    mock_conn.fetchval = AsyncMock(side_effect=[False, False])
     mock_conn.fetch = AsyncMock(return_value=[])
     mock_conn.execute = AsyncMock(return_value="UPDATE 0")
     tx = MagicMock()
