@@ -10,6 +10,11 @@ from fastapi import HTTPException
 from src.core import team_invitations as invitations
 
 
+@pytest.fixture(autouse=True)
+def local_environment(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+
+
 class _Context:
     def __init__(self, value):
         self.value = value
@@ -75,6 +80,8 @@ class _Pool:
 
 @pytest.mark.asyncio
 async def test_create_invitation_never_grants_membership(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "invitee@example.test")
     conn = _Connection()
     actor = {"user_id": str(uuid.uuid4()), "auth_user_id": str(uuid.uuid4())}
     limiter = AsyncMock()
@@ -96,6 +103,8 @@ async def test_create_invitation_never_grants_membership(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_accept_invitation_grants_only_after_verified_email(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "invitee@example.test")
     conn = _Connection()
     token = "A" * 43
     auth_id = str(uuid.uuid4())
@@ -117,6 +126,8 @@ async def test_accept_invitation_grants_only_after_verified_email(monkeypatch):
     (True, "invitee@example.test", 3),
 ])
 async def test_accept_rejects_replay_wrong_email_and_full_team(monkeypatch, live, email, seat_count):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "invitee@example.test")
     conn = _Connection(live=live, email=email, seat_count=seat_count)
     monkeypatch.setattr(invitations, "verified_supabase_identity", AsyncMock(return_value="invitee@example.test"))
     with pytest.raises(HTTPException):
@@ -125,6 +136,40 @@ async def test_accept_rejects_replay_wrong_email_and_full_team(monkeypatch, live
             auth_user_id=str(uuid.uuid4()), access_token="verified-session",
         )
     assert not any("INSERT INTO organization_memberships" in sql for sql, _ in conn.statements)
+
+
+@pytest.mark.asyncio
+async def test_unlisted_beta_invitee_cannot_be_created_or_accepted(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "reviewed@example.test")
+    conn = _Connection(email="invitee@example.test")
+    actor = {"user_id": str(uuid.uuid4()), "auth_user_id": str(uuid.uuid4())}
+    limiter = AsyncMock()
+    limiter.hit.return_value = False
+    monkeypatch.setattr(invitations, "get_rate_limiter", AsyncMock(return_value=limiter))
+    monkeypatch.setattr(invitations, "delivery_available", lambda: True)
+    send = AsyncMock()
+    monkeypatch.setattr(invitations, "send_invitation", send)
+
+    with pytest.raises(HTTPException) as create_error:
+        await invitations.create_invitation(
+            _Pool(conn), org_id=str(conn.org), actor=actor,
+            email="invitee@example.test", role="staff",
+        )
+    assert create_error.value.status_code == 403
+    assert conn.statements == []
+    send.assert_not_awaited()
+
+    monkeypatch.setattr(
+        invitations, "verified_supabase_identity", AsyncMock(return_value="invitee@example.test")
+    )
+    with pytest.raises(HTTPException) as accept_error:
+        await invitations.accept_invitation(
+            _Pool(conn), raw_token="A" * 43,
+            auth_user_id=str(uuid.uuid4()), access_token="verified-session",
+        )
+    assert accept_error.value.status_code == 400
+    assert conn.statements == []
 
 
 @pytest.mark.asyncio

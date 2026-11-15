@@ -50,6 +50,7 @@ class FakeRepo:
 
 @pytest.fixture(autouse=True)
 def set_env(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("API_KEY_SERVICE", API_KEY)
     monkeypatch.setenv("SUPABASE_URL", "https://myproj.supabase.co")
@@ -205,6 +206,29 @@ class TestGoogleCallback:
         # I cookie temporanei OAuth vengono consumati (Max-Age=0)
         assert any(c.startswith("wa_oauth_verifier=") and "Max-Age=0" in c for c in set_cookies)
         assert any(c.startswith("wa_oauth_next=") and "Max-Age=0" in c for c in set_cookies)
+
+    async def test_new_google_user_outside_staging_roster_is_not_provisioned(
+        self, oauth_client, monkeypatch
+    ):
+        monkeypatch.setenv("APP_ENV", "staging")
+        monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "reviewed@example.test")
+
+        async def fake_exchange(_code, _verifier):
+            return _fake_token_response()
+
+        monkeypatch.setattr(bff_module, "exchange_pkce", fake_exchange)
+        start = await self._do_start(oauth_client)
+        response = await oauth_client.get(
+            "/api/auth/google/callback",
+            params={"code": "the-code"},
+            headers={"Cookie": _cookie_header(start)},
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/accedi/?errore=google"
+        repo = _get_repo(oauth_client._transport.app)
+        assert repo.create_calls == []
+        assert not any(cookie.startswith("wa_at=") for cookie in response.headers.get_list("set-cookie"))
 
     async def test_callback_honors_safe_next_cookie(self, oauth_client, monkeypatch):
         async def fake_exchange(code, verifier):

@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, Header, HTTPException, Request
 
 from src.core.auth.denylist import is_token_revoked
+from src.core.auth.signup_policy import beta_email_is_allowed
 
 # Firme JWT emesse da Supabase Auth: i progetti con le chiavi di firma
 # asimmetriche (default 2025+) usano ES256, i piu' vecchi RS256. L'alg e'
@@ -303,6 +304,8 @@ async def get_organization_context(
     if not memberships:
         if request.url.path.startswith('/api/gdpr/'):
             raise HTTPException(status_code=403, detail='Membership GDPR non disponibile')
+        if not beta_email_is_allowed(current_user.get("email")):
+            raise HTTPException(status_code=403, detail="Accesso beta non autorizzato")
         # Auto-provisioning JIT dell'organizzazione per utenti autenticati
         try:
             email = current_user.get("email") or "La tua attività"

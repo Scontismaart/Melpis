@@ -50,6 +50,7 @@ def signup_client(monkeypatch):
     monkeypatch.setenv("PUBLIC_APP_URL", PUBLIC_APP_URL)
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
     monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", EMAIL)
     monkeypatch.setenv("REDIS_URL", "")
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     register._pending_memory.clear()
@@ -247,6 +248,75 @@ def test_signup_response_does_not_distinguish_existing_email_and_never_sets_sess
     assert _cookie_header(first, "wa_signup_verifier")
     assert _cookie_header(second, "wa_signup_verifier")
     assert not any(cookie.startswith((bff.access_cookie_name() + "=", bff.refresh_cookie_name() + "=")) for response in (first, second) for cookie in _cookie_headers(response))
+    repo.get_or_create_organization_with_owner.assert_not_awaited()
+
+
+def test_register_keeps_generic_response_but_does_not_create_unlisted_auth_user(
+    signup_client, monkeypatch
+):
+    from src.core.auth import register
+
+    client, post, _put, repo = signup_client
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", EMAIL)
+    allowed = _register(client)
+    client.cookies.clear()
+    post.reset_mock()
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "reviewed@example.test")
+
+    response = _register(client)
+
+    def cookie_signature(result):
+        return sorted(
+            (
+                cookie.split(";", 1)[0].split("=", 1)[0],
+                tuple(attribute.strip().lower() for attribute in cookie.split(";")[1:]),
+            )
+            for cookie in _cookie_headers(result)
+        )
+    assert allowed.status_code == response.status_code == 202
+    assert allowed.json() == response.json()
+    assert cookie_signature(allowed) == cookie_signature(response)
+    assert response.status_code == 202
+    assert response.json() == {
+        "ok": True,
+        "message": "Se l'indirizzo può essere registrato, riceverai un link per continuare.",
+    }
+    post.assert_not_awaited()
+    repo.get_or_create_organization_with_owner.assert_not_awaited()
+
+    client.cookies.clear()
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", EMAIL)
+    monkeypatch.setattr(
+        register, "_save_password_capsule", AsyncMock(side_effect=RuntimeError("unavailable"))
+    )
+    capsule_failure = _register(client)
+
+    assert capsule_failure.status_code == response.status_code == 202
+    assert capsule_failure.json() == response.json()
+    assert cookie_signature(capsule_failure) == cookie_signature(response)
+    post.assert_not_awaited()
+
+
+def test_signup_confirmation_rechecks_roster_before_setting_password_or_provisioning(
+    signup_client, monkeypatch
+):
+    from src.core.auth import register
+
+    client, post, put, repo = signup_client
+    monkeypatch.setattr(register.bff, "exchange_pkce", AsyncMock(return_value=_session_payload()))
+    monkeypatch.setattr(
+        register, "_get_supabase_user", AsyncMock(return_value=_confirmed_remote_user())
+    )
+    _begin_signup(client, post)
+    _stage_code(client)
+    monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "reviewed@example.test")
+
+    response = _complete_form(client, password=FINAL_PASSWORD, confirm=FINAL_PASSWORD)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == ERROR_LOCATION
+    put.assert_not_awaited()
     repo.get_or_create_organization_with_owner.assert_not_awaited()
 
 

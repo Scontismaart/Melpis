@@ -27,6 +27,7 @@ from src.core.auth.dependencies import (
     get_repo,
     require_ruolo,
 )
+from src.core.auth.signup_policy import beta_email_is_allowed
 from src.core.gdpr import token_store
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -327,8 +328,12 @@ async def google_callback(request: Request):
         auth_user_id = user.get("id")
         if not auth_user_id:
             return _google_error_redirect()
+        repo = get_repo(request)
+        memberships = await repo.get_memberships_by_auth(str(auth_user_id))
+        if not memberships and not beta_email_is_allowed(user.get("email")):
+            return _google_error_redirect()
         # The repository checks durable access even when memberships exist.
-        await get_repo(request).get_or_create_organization_with_owner(
+        await repo.get_or_create_organization_with_owner(
             str(auth_user_id), _nome_attivita_da_utente(user), TRIAL_DAYS,
         )
     except HTTPException:
