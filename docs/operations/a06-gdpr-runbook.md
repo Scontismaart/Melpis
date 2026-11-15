@@ -26,6 +26,17 @@ literal string `true` for their separate work:
 - `GDPR_RETENTION_EXECUTION_ENABLED`
 - `GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED`
 
+The cursor-backed C2.4 retention and hotel lifecycle sweep is a separate
+least-privilege worker. It is scheduled only when all three of these are
+`true`: `GDPR_RETENTION_EXECUTION_ENABLED`,
+`GDPR_C24_OWNER_RETENTION_ENABLED`, and `GDPR_C24_AUTO_RETENTION_ENABLED`.
+It also requires `GDPR_C24_OWNER_RETENTION_DSN`, a dedicated connection whose
+login is validated for the narrow `melpis_c24_retention` role. The optional
+`GDPR_C24_RETENTION_INTERVAL_SECONDS` must be between 60 and 86,400 seconds
+(default 3,600). The scheduler fails closed if the dedicated DSN is missing;
+it never falls back to the application/service-role connection. These code
+gates do not establish that a deployed schedule, role, DSN, or policy exists.
+
 No production policy rows or operational approval are documented here. Until
 those approvals and deployment checks exist, erase requests should remain
 blocked and retention should not mutate primary data. Export snapshot expiry
@@ -127,14 +138,33 @@ the controller's instructions.
 ## Retention, backups, and evidence
 
 Primary-data retention runs only when `GDPR_RETENTION_EXECUTION_ENABLED=true`
-and valid, approved per-tenant category policies exist. Current code handles
-message content and simulator responses; it does not establish a legal period.
+and valid, approved per-tenant category policies exist. The general daily job
+handles eligible message content and simulator responses and removes only the
+typed C2.4 booking proposal from its eligible source/cache records. It does not
+establish an effective legal period or perform the full C2.4 lifecycle sweep.
 `GET /api/gdpr/retention-policy` reports
 `policy_version=tenant-approval-required`, the `C05 #100` policy/cutover gate,
 and `null` for `retention_days`, `purge_after_days`, and
 `simulator_response_days`. `simulator_history_idle_hours=24` is not a legal
 retention period. `automatic_erasure_enabled` reflects the execution flag and
 does not by itself establish policy approval.
+
+| Category or copy | Code path and policy source | Failure, holds, and what is not proven |
+|---|---|---|
+| `messages_content` | General job in `src/core/retention_job.py` performs bounded redaction for eligible records using the latest valid approved per-tenant policy. The C2.4 owner sweep in `src/core/gdpr/c24_retention_controller.py` and migration 089 handles lifecycle-aware inbox/source content under the dedicated role. | No mutation without the global flag and current tenant policy. C2.4 honors tenant `legal_hold`, `erasure_allowed`, valid policy windows, and lifecycle fences. A C2.4 database error stops that sweep; logs omit driver detail. No live schedule or deployed tenant record was verified. |
+| `simulator_responses` | General job deletes eligible completed/failed rows under the tenant's approved policy. C2.4 booking proposal fields have a separate typed removal path. | Local simulator cache is a separate copy; deployment of its purge job is not proven. C2.4 booking state may constrain deletion. |
+| `booking_conversation_content` | Migration 089 and the C2.4 owner sweep expire eligible typed conversation state/proposal material under the approved category policy. | The allowed effective period comes from a valid tenant record within the approved product policy. Legal hold, erasure permission, source lineage, and fences are checked. This is not blanket deletion of all booking text or customer records. |
+| `technical_receipts` and suppression lifecycle evidence | Migration 089 sweeps completed inbox payloads, concluded request receipts, source fences, idle watermarks, and suppression/audit lifecycle rows through the private keyset cursor. | Requires the C2.4 dedicated role, valid tenant policy, no hold, and safe lifecycle state. A held/uncertain target is deferred and the bounded cursor advances; a false `batch_clear` is not a completed sweep. No external audit-retention decision or successful live run is evidenced. |
+| `booking_stay_content` | Migration 089's hotel sweep and migration 091's hotel lifecycle functions archive completed allocation state or purge eligible stay data after completion/lineage checks. | Requires current approved policy, no matching organization/subject/conversation/record hold, valid completion/allocation evidence, and safe terminal state. Unknown or changed external booking state is deferred. Schedule and tenant policy are unverified. |
+| Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload that includes booking/customer and confirmation details. A separate app change proposes transactional scrubbing after successful completion and bounded cleanup of expired unconsumed payloads while retaining replay tombstones. | Expiry limits authority but does not itself delete content. The proposed cleanup is not evidence of deployed cleanup until its PR/migration is merged, applied, and scheduled. Do not treat capability tombstones as zero-cost billing evidence. |
+| Encrypted export snapshots | The general retention worker expires export operations and removes encrypted chunks after the 15-minute snapshot lifetime, independently of the primary-data-retention flag. | The job must be deployed and monitored. A failed purge leaves data for retry; no live schedule or provider/backup deletion is established. |
+| Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
+
+For C2.4, a false/ineligible target result is a deferral, not a success receipt.
+Database/authorization errors stop the run and do not silently invoke the
+application DSN. The scheduler records only the error class, then raises a
+failed-job signal. Preserve the cursor and retry after an authorized repair;
+do not weaken holds or lifecycle checks to force the cursor clear.
 
 Backups and worker-local simulator caches are separate copies. Erasure records
 identify them as retained/pending; A06 does not purge existing backup objects
