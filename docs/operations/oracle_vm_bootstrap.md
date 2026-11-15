@@ -248,6 +248,18 @@ credentials in the monitor URL. Monitor `/api/health/ai` separately so an
 unconfigured provider cannot be mistaken for a healthy assistant. Uptime checks do not replace Sentry, logs, or
 the end-to-end webhook/worker checks.
 
+### C02 offline review — 2026-11-15
+
+The repository checks validate Compose/Caddy syntax and the API health routes, but they do not establish host monitoring or worker recovery. Keep these items as C02 deployment gates:
+
+- The API exposes `/api/health/live`, `/api/health/ready` (also the `/api/health` alias), and `/api/health/ai`. Compose currently health-checks only the `/api/health` alias. The external uptime instructions check readiness and AI, but do not continuously check liveness. Add liveness to the host monitor and retain the separate readiness and AI checks.
+- `worker-inbound`, `worker-retry`, and `supervisor` have no Compose healthcheck. `restart: unless-stopped` restarts an exited process; it does not restart a container solely because it is marked unhealthy. Until worker health endpoints are designed, monitor container state, establish an observable inbox/claim progress signal, and prove that an alert is received. Do not infer worker health from the API healthcheck.
+- The API starts in-process inbound, retry, and governance loops by default in production. Compose also starts dedicated inbound and retry containers. `MELPIS_BACKGROUND_JOBS_ENABLED=false` is rejected in production, and Staging requires an explicit value. The repository does not establish the intended production worker topology or its resource budget. Decide and document that topology before starting the host; do not bypass the production guard or assume the duplicate-capable paths are harmless without a host exercise.
+- API and worker containers inheriting `x-api` use Docker's bounded `json-file` rotation (10 MB, three files). Compose does not set this policy for Caddy, web, or Valkey; verify the host daemon's rotation or add explicit limits before launch. The security-audit logger falls back to standard output when its file path is not writable in the read-only API container. Verify on the host that logs are available with the expected rotation and that an alert can be delivered; keep sensitive message content out of operational logs.
+- The rollback instructions already preserve the prior immutable image references and prohibit `docker compose down -v`. Reuse them. During deployment, verify a process exit/restart, a stuck/unhealthy worker alert, and recovery from the retained image digest without deleting volumes or replaying uncertain external work.
+
+No code change is justified by this offline review. The health-check, worker-topology, alert, and recovery gaps require decisions or evidence from the selected host; existing Compose security controls, log rotation, startup preflight, and API probes remain reusable.
+
 For an application rollback, retain the prior immutable image digest references
 and a private copy of the prior root-managed env file. Change only
 `MELPIS_API_IMAGE_REF` and `MELPIS_WEB_IMAGE_REF` back to the prior digest

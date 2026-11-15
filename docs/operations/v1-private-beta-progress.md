@@ -1,12 +1,27 @@
 # Melpis V1 private beta progress register
 
-**Intake snapshot date:** 2026-10-24; current cycle update: 2026-10-26
+**Intake snapshot date:** 2026-10-24; historical cycle update: 2026-10-26; current evidence refresh: 2026-11-15
 **Repository:** [Scontismaart/Melpis](https://github.com/Scontismaart/Melpis)
 **Purpose:** evidence-based readiness register for the private beta. This records GitHub state and the roadmap snapshot; it does not certify remote infrastructure, providers, or production.
 
+## Current evidence refresh — 2026-11-15
+
+This addendum updates only evidence that changed after the 2026-10-26 snapshot below. The dated sections remain historical; their old `main` SHA and CI totals are not current.
+
+| Area | Current evidence | Status and remaining boundary |
+|---|---|---|
+| Source and CI | Remote `main` is `7634562630d705a9e8dc644260bb0174f03a25fd`, merge of PR #176. CI run [43695636137](https://github.com/Scontismaart/Melpis/actions/runs/43695636137) passed, including the test and static deployment-check steps; multi-architecture images were published. | Current code/CI evidence only. The repository workflows do not record a service deployment. |
+| C01 Staging cutover | Private evidence records commit `7634562630d705a9e8dc644260bb0174f03a25fd`, manifest digest `8dfb5867e10510460deba6b42ab940a340a180e0620c8f11f2eb83e589340efb`, CLI 2.75.0, TLS `verify-full`, 34 migrations, 39 history records, six passed checkpoints, 12 synthetic smoke checks, and `production_used=false`. All 34 Git blob IDs resolve at that commit; each normalized SQL SHA-256 matches its blob contents. | The migration batch is complete per the execution evidence. Issue #96 remains open because its broader region/role, full clean-install/replay, membership-revocation, limited-signup, and application service-role criteria are not all established by this package. See the updated [C01 runbook](c01-staging-cutover.md). |
+| C02 and deployment | Current CI validates production Compose/Caddy and publishes image digests. Compose pins digest references, exposes only Caddy, and limits containers. API/worker containers set bounded log rotation; Caddy/web/Valkey rely on the host Docker log defaults. | C02 issue #97 remains open: no host deployment, capacity/SLO result, continuously received worker/provider alert, two-channel email delivery, scheduled off-host backup/restore receipt, or host rollback exercise is established. Offline health-check and worker-topology gates are recorded in [the VM runbook](oracle_vm_bootstrap.md). |
+| B02 documents | Current CI includes the frontend DOM suite. Existing knowledge-dashboard tests cover failure, retry/idempotency, publication, tenant switch/revocation, and failed reindex behavior. | Reuse these tests; no new dashboard test or feature is justified. Deployed dashboard/backend acceptance remains open under #93. Original PDF retention remains outside V1 scope. |
+| A03 provider accounting | Current-main tests cover accounting, metered fallback, and fenced recovery; the AI-Q1 corpus remains a synthetic benchmark. | No provider reconciliation receipt or authorized immutable evidence store is configured. Issues #88 and #121 remain open; do not repeat the offline benchmark or claim real-provider recovery. |
+| A06/C05 privacy | C2.4 privacy and guarded lifecycle work is integrated through PRs #167–169. The product policy is recorded in `docs/governance/privacy-v1-implementation-matrix.md`; the A06 runbook keeps destructive execution gated. | Issues #91 and #100 remain open. Effective tenant policy, complete purge/visibility timing, external erasure receipts, provider/region contracts, and legal review remain operational or contractual evidence. Passing local tests do not establish them. |
+
+The C01 runbook and this register are updated from the retained evidence package; no database was re-queried. The final evidence package and manifest remain in the operator-controlled local evidence directory and are not copied into Git.
+
 ## 1. Executive snapshot
 
-**Current integration snapshot: 2026-10-26.** Main is
+**Historical integration snapshot: 2026-10-26.** Main at that snapshot was
 `06388f4f0c88a937d125ce227d2d54d13a2d8979`, normally merged from PR #142 at
 reviewed head `64628bbea25da248c9b8ef1a7a977e17f54776f0`. This follows the
 previous 2026-10-25 main checkpoint `800c56c0b631b81b7bbefe0f51c843dd13d498d1`
@@ -16,14 +31,14 @@ registry-manifest evidence are recorded in the
 does not certify staging or authorize beta activation.
 
 1. **Post-merge CI:** [40374919190](https://github.com/Scontismaart/Melpis/actions/runs/40374919190)
-   succeeded on current main: **3,972 passed, 36 skipped, 126 warnings**. The
+   succeeded on then-current main: **3,972 passed, 36 skipped, 126 warnings**. The
    pre-merge run [40370667199](https://github.com/Scontismaart/Melpis/actions/runs/40370667199)
    had the same counts. Scanner fixtures and the actual main-history scan
    passed; the Linux disposable regression suite passed all 13 cases. Audit,
    frontend, four architecture publications, and both multiarch manifests
    succeeded. No separate Migration check run appeared; the main CI exercised
    its disposable database migration/regression chain.
-2. **GHCR:** current-main API index digest
+2. **GHCR:** then-current API index digest
    `sha256:3ecc28eaa4c6c769e9ca9ca38760e88d2a6c88308ec31e55f641ab001ec40ee8`
    and web index digest
    `sha256:1d499faa7232a9b28dc784d09647aa62b4101bd39e4126b68116c6bc3c3bf82d`.
