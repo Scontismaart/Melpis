@@ -63,6 +63,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "enumerates expired snapshot IDs with SKIP LOCKED LIMIT 100; each mutation binds its stored tenant",
     "src/core/retention_job.py::_retention_policies":
         "enumerates immutable policy metadata only; all primary-data mutations bind a policy tenant and require explicit approval and execution gate",
+    "src/core/retention_job.py::_scrub_expired_worker_capability_payloads":
+        "bounded security cleanup of expired one-use capabilities; only digest and immutable replay lineage remain",
     "src/core/db/quota_provenance.py::require_quota_trust_epoch":
         "reads the fixed NULL-organization protocol marker only; no caller-controlled row selector",
     "src/core/db/repositories/message_repo.py::claim_inbound_messages":
