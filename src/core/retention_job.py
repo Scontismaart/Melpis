@@ -43,11 +43,33 @@ async def _retention_policies(pool):
         )
 
 
+@system_scope('bounded purge of expired private booking capability payloads; retain only lineage and digest')
+async def _scrub_expired_worker_capability_payloads(pool):
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT session_user='postgres' AND current_user='postgres'"
+        )
+        available = await conn.fetchval(
+            "SELECT to_regprocedure('c24_private.c24_worker_scrub_expired_capabilities(integer)') IS NOT NULL"
+        )
+        if owner is not True or available is not True:
+            logger.warning('gdpr_retention worker_capability_payload_scrub=unavailable')
+            return None
+        return await conn.fetchval(
+            'SELECT c24_private.c24_worker_scrub_expired_capabilities($1)', 100,
+        )
+
+
 async def run_retention(pool):
+    worker_payloads_scrubbed = await _scrub_expired_worker_capability_payloads(pool)
     expired = await _expired_exports(pool)
     counts = {'exports_expired': expired, 'messages_redacted': 0, 'simulator_purged': 0}
     if os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') != 'true':
-        logger.info('gdpr_retention primary_data=disabled exports_expired=%d', expired)
+        logger.info(
+            'gdpr_retention primary_data=disabled exports_expired=%d '
+            'worker_capability_payloads_scrubbed=%s',
+            expired, worker_payloads_scrubbed,
+        )
         return counts
     for policy in await _retention_policies(pool):
         if (not policy['valid'] or policy['legal_hold'] or not policy['erasure_allowed']
@@ -173,5 +195,9 @@ async def run_retention(pool):
                          ORDER BY completed_at LIMIT 500 FOR UPDATE SKIP LOCKED)''', org, days, c24_allowed,
                 )
                 counts['simulator_purged'] += int(result.split()[-1])
-    logger.info('gdpr_retention exports_expired=%d messages_redacted=%d simulator_purged=%d', *counts.values())
+    logger.info(
+        'gdpr_retention exports_expired=%d messages_redacted=%d simulator_purged=%d '
+        'worker_capability_payloads_scrubbed=%s',
+        *counts.values(), worker_payloads_scrubbed,
+    )
     return counts

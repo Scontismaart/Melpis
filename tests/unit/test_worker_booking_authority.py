@@ -1,5 +1,6 @@
 import asyncio
 import gc
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -14,6 +15,86 @@ from src.core.bookings.worker_authority import (
     _renew_claim,
     service_receipt_v2,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['heartbeat', 'application_commit'])
+async def test_a05_capability_payload_is_cleared_after_issuance_failure(monkeypatch, failure):
+    from src.core.bookings import worker_authority
+
+    class Context:
+        def __init__(self, value, fail_exit=False):
+            self.value = value
+            self.fail_exit = fail_exit
+
+        async def __aenter__(self):
+            return self.value
+
+        async def __aexit__(self, exc_type, *_args):
+            if self.fail_exit and exc_type is None:
+                raise RuntimeError('application commit failed')
+            return False
+
+    class Connection:
+        def __init__(self, fail_commit=False):
+            self.fail_commit = fail_commit
+
+        def transaction(self, **_kwargs):
+            return Context(self, fail_exit=self.fail_commit)
+
+    class Pool:
+        def __init__(self, fail_commit=False):
+            self.connection = Connection(fail_commit=fail_commit)
+
+        def acquire(self):
+            return Context(self.connection)
+
+    @asynccontextmanager
+    async def keep_claim_live(_pool, _claim):
+        yield object()
+
+    organization_id, message_id, claim_id = uuid4(), uuid4(), uuid4()
+    capability = type('Capability', (), {'_payload': {'customer': 'synthetic'}})()
+    monkeypatch.setattr(worker_authority, 'private_booking_worker_enabled', lambda: True)
+    monkeypatch.setattr(worker_authority, '_require_private_identity', AsyncMock())
+    monkeypatch.setattr(worker_authority, '_require_capability_issuer', AsyncMock())
+    monkeypatch.setattr(
+        worker_authority,
+        '_begin_database_job',
+        AsyncMock(return_value={
+            'organization_id': organization_id,
+            'status': 'claimed',
+            'claim_message_id': message_id,
+            'claim_id': claim_id,
+            'generation': 1,
+        }),
+    )
+    monkeypatch.setattr(worker_authority, '_keep_claim_live', keep_claim_live)
+    if failure == 'heartbeat':
+        monkeypatch.setattr(
+            worker_authority,
+            '_check_heartbeat',
+            lambda _heartbeat: (_ for _ in ()).throw(RuntimeError('heartbeat failed')),
+        )
+        application_pool = Pool()
+        expected_error = 'heartbeat failed'
+    else:
+        monkeypatch.setattr(worker_authority, '_check_heartbeat', lambda _heartbeat: None)
+        application_pool = Pool(fail_commit=True)
+        expected_error = 'application commit failed'
+    monkeypatch.setattr(WorkerBookingAuthority, '_proof_a05', AsyncMock(return_value=object()))
+    monkeypatch.setattr(
+        WorkerBookingAuthority,
+        '_issue_database_capability',
+        AsyncMock(return_value=capability),
+    )
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        await WorkerBookingAuthority().process_a05_booking(
+            Pool(), organization_id, message_id, '{}', application_pool=application_pool,
+        )
+
+    assert capability._payload is None
 
 
 class Connection:

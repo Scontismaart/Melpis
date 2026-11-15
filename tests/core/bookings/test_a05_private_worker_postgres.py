@@ -20,7 +20,7 @@ from tests.core.test_quota_reservation_lifecycle import (
     _auth_member, _inbound_message, _inbound_operation, _organization,
 )
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.migration_limit(93)]
+pytestmark = [pytest.mark.asyncio, pytest.mark.migration_limit(94)]
 CATALOGS = json.loads((Path(__file__).parent / 'fixtures/catalogs_v2.json').read_text(encoding='utf-8'))
 
 
@@ -125,9 +125,7 @@ async def test_a04_committed_webhook_a05_private_writer_is_atomic_and_replay_saf
             FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2''', org, rows[0]['id'])
         outbox_revision = await conn.fetchval('''SELECT booking_revision FROM booking_confirmation_outbox
             WHERE organization_id=$1 AND booking_id=$2''', org, rows[0]['id'])
-        issued_payload = await conn.fetchrow('''SELECT payload->'booking'->>'calendar_revision' AS booking_revision,
-                payload->'allocation'->'set'->>'booking_calendar_revision' AS allocation_revision,
-                payload->'effects'->'confirmation_outbox'->>'booking_revision' AS outbox_revision
+        issued_payload = await conn.fetchrow('''SELECT payload,payload_hash,completed_at
             FROM c24_private.worker_capabilities WHERE organization_id=$1 AND booking_id=$2
             ORDER BY issued_at DESC LIMIT 1''', org, rows[0]['id'])
         billed = await conn.fetchval("""SELECT metadata->>'state' FROM usage_events
@@ -135,11 +133,72 @@ async def test_a04_committed_webhook_a05_private_writer_is_atomic_and_replay_saf
             ORDER BY created_at DESC LIMIT 1""", org)
     assert len(rows) == 1 and rows[0]['stato'] == 'confermata'
     assert rows[0]['calendar_revision'] == allocation_set['booking_calendar_revision'] == outbox_revision == 1
-    assert dict(issued_payload) == {'booking_revision':'1','allocation_revision':'1','outbox_revision':'1'}
+    assert issued_payload['payload'] is None
+    assert len(issued_payload['payload_hash']) == 64
+    assert issued_payload['completed_at'] is not None
     assert rows[0]['source_message_id'] == str(message['id']) and rows[0]['ora'].strftime('%H:%M') == '19:00'
     assert dict(receipt) == {'actor_kind':'inbound_worker','action':'allocate','outcome':'allocated'}
     assert allocations == outbox == 1
     assert billed == 'committed'
+
+
+async def test_expired_unused_worker_capability_payload_is_scrubbed_but_tombstone_remains(pg_pool):
+    expired_id, active_id = uuid4(), uuid4()
+    organization_id, booking_id = uuid4(), uuid4()
+    expired_payload = {'customer': 'synthetic-private-detail'}
+    active_payload = {'customer': 'synthetic-active-detail'}
+    expired_hash = 'a' * 64
+    active_hash = 'b' * 64
+    await pg_pool.execute('''
+        INSERT INTO c24_private.worker_capabilities
+            (capability_id,organization_id,message_id,claim_id,generation,booking_id,
+             payload,payload_hash,issued_at,expires_at)
+        VALUES
+            ($1,$3,$5,$7,1,$4,$9::jsonb,$11,now()-interval '10 minutes',
+             now()-interval '5 minutes'),
+            ($2,$3,$6,$8,1,$4,$10::jsonb,$12,now(),now()+interval '5 minutes')
+    ''', expired_id, active_id, organization_id, booking_id, uuid4(), uuid4(), uuid4(), uuid4(),
+        json.dumps(expired_payload), json.dumps(active_payload), expired_hash, active_hash)
+
+    scrubbed = await pg_pool.fetchval(
+        'SELECT c24_private.c24_worker_scrub_expired_capabilities($1)', 100,
+    )
+    expired = await pg_pool.fetchrow('''SELECT payload,payload_hash,completed_at,consumed_at
+        FROM c24_private.worker_capabilities WHERE capability_id=$1''', expired_id)
+    active = await pg_pool.fetchrow('''SELECT payload,payload_hash
+        FROM c24_private.worker_capabilities WHERE capability_id=$1''', active_id)
+
+    assert scrubbed == 1
+    assert expired['payload'] is None
+    assert expired['payload_hash'] == expired_hash
+    assert expired['completed_at'] is None and expired['consumed_at'] is None
+    active_payload_value = active['payload']
+    if isinstance(active_payload_value, str):
+        active_payload_value = json.loads(active_payload_value)
+    assert active_payload_value == active_payload
+    assert active['payload_hash'] == active_hash
+
+
+async def test_migration_backfills_payloads_for_preexisting_completed_capabilities(pg_pool):
+    capability_id, organization_id = uuid4(), uuid4()
+    payload_hash = 'c' * 64
+    await pg_pool.execute('''
+        INSERT INTO c24_private.worker_capabilities
+            (capability_id,organization_id,message_id,claim_id,generation,booking_id,
+             payload,payload_hash,issued_at,expires_at,completed_at)
+        VALUES ($1,$2,$3,$4,1,$5,$6::jsonb,$7,now()-interval '10 minutes',
+                now()-interval '5 minutes',now()-interval '6 minutes')
+    ''', capability_id, organization_id, uuid4(), uuid4(), uuid4(),
+        json.dumps({'customer': 'synthetic-legacy-detail'}), payload_hash)
+
+    migration = Path(__file__).parents[3] / 'src/core/db/migrations/094_worker_capability_payload_retention.sql'
+    await pg_pool.execute(migration.read_text(encoding='utf-8'))
+    row = await pg_pool.fetchrow('''SELECT payload,payload_hash,completed_at
+        FROM c24_private.worker_capabilities WHERE capability_id=$1''', capability_id)
+
+    assert row['payload'] is None
+    assert row['payload_hash'] == payload_hash
+    assert row['completed_at'] is not None
 
 
 async def test_private_worker_after_insert_guard_rolls_back_tampered_final_booking(

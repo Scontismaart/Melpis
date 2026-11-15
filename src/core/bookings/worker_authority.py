@@ -196,6 +196,27 @@ class WorkerBookingAuthority:
         self._issued = WeakSet()
         self._allocation = BookingAllocationRepository(None)
         self._cursor = None
+        self._last_capability_scrub = 0.0
+
+    async def _scrub_expired_capability_payloads(self, application_pool):
+        now = asyncio.get_running_loop().time()
+        if now - self._last_capability_scrub < 60:
+            return
+        self._last_capability_scrub = now
+        try:
+            async with application_pool.acquire() as app_conn:
+                scrubbed = await app_conn.fetchval(
+                    "SELECT c24_private.c24_worker_scrub_expired_capabilities($1)",
+                    100,
+                )
+        except Exception as exc:  # noqa: BLE001 — retry the bounded cleanup on the next worker pass
+            logger.error(
+                'Private booking capability payload scrub failed error_type=%s',
+                type(exc).__name__,
+            )
+            return
+        if scrubbed:
+            logger.info('Private booking expired capability payloads scrubbed=%d', scrubbed)
 
     async def _confirmed_jobs(self, pool, limit):
         async with pool.acquire() as conn:
@@ -217,6 +238,7 @@ class WorkerBookingAuthority:
             raise WorkerProofDenied('Private booking capability issuer unavailable')
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ValueError('Invalid booking worker batch size')
+        await self._scrub_expired_capability_payloads(application_pool)
         jobs = await self._confirmed_jobs(pool, limit)
         if not jobs:
             self._cursor = None
@@ -294,26 +316,31 @@ class WorkerBookingAuthority:
         claim = _Claim(_trusted_uuid(org), _trusted_uuid(job['claim_message_id']),
                        _trusted_uuid(job['claim_id']), job['generation'])
         async with _keep_claim_live(pool, claim) as heartbeat:
-            async with application_pool.acquire() as app_conn, app_conn.transaction(isolation='read_committed'):
-                await _require_capability_issuer(app_conn)
-                candidate = await app_conn.fetchrow("""SELECT revision,catalog_revision
-                    FROM booking_conversation_states
-                    WHERE organization_id=$1 AND conversation_id=$2 FOR SHARE""", org, conversation)
-                if not candidate:
-                    raise WorkerProofDenied('Confirmed proposal unavailable')
-                proof = await self._proof(
-                    app_conn, claim, conversation, candidate['revision'], candidate['catalog_revision'],
-                    trusted_application=True,
-                )
-                capability = await self._issue_database_capability(
-                    app_conn, claim, proof, 'confirmation', confirmation_message_id=confirmation,
-                )
-            _check_heartbeat(heartbeat)
-            await _renew_claim(pool, claim)
-            _check_heartbeat(heartbeat)
-            async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
-                await _require_private_identity(conn)
-                return await self.create_booking(conn, capability)
+            capability = None
+            try:
+                async with application_pool.acquire() as app_conn, app_conn.transaction(isolation='read_committed'):
+                    await _require_capability_issuer(app_conn)
+                    candidate = await app_conn.fetchrow("""SELECT revision,catalog_revision
+                        FROM booking_conversation_states
+                        WHERE organization_id=$1 AND conversation_id=$2 FOR SHARE""", org, conversation)
+                    if not candidate:
+                        raise WorkerProofDenied('Confirmed proposal unavailable')
+                    proof = await self._proof(
+                        app_conn, claim, conversation, candidate['revision'], candidate['catalog_revision'],
+                        trusted_application=True,
+                    )
+                    capability = await self._issue_database_capability(
+                        app_conn, claim, proof, 'confirmation', confirmation_message_id=confirmation,
+                    )
+                _check_heartbeat(heartbeat)
+                await _renew_claim(pool, claim)
+                _check_heartbeat(heartbeat)
+                async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+                    await _require_private_identity(conn)
+                    return await self.create_booking(conn, capability)
+            finally:
+                if capability is not None:
+                    capability._payload = None
 
     async def process_a05_booking(self, pool, organization_id, message_id, canonical_response,
                                  *, application_pool=None):
@@ -335,18 +362,23 @@ class WorkerBookingAuthority:
         claim = _Claim(_trusted_uuid(org), _trusted_uuid(job['claim_message_id']),
                        _trusted_uuid(job['claim_id']), job['generation'])
         async with _keep_claim_live(pool, claim) as heartbeat:
-            async with application_pool.acquire() as app_conn, app_conn.transaction(isolation='read_committed'):
-                await _require_capability_issuer(app_conn)
-                proof = await self._proof_a05(
-                    app_conn, claim, canonical_response, trusted_application=True,
-                )
-                capability = await self._issue_database_capability(app_conn, claim, proof, 'a05')
-            _check_heartbeat(heartbeat)
-            await _renew_claim(pool, claim)
-            _check_heartbeat(heartbeat)
-            async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
-                await _require_private_identity(conn)
-                return await self.create_booking(conn, capability)
+            capability = None
+            try:
+                async with application_pool.acquire() as app_conn, app_conn.transaction(isolation='read_committed'):
+                    await _require_capability_issuer(app_conn)
+                    proof = await self._proof_a05(
+                        app_conn, claim, canonical_response, trusted_application=True,
+                    )
+                    capability = await self._issue_database_capability(app_conn, claim, proof, 'a05')
+                _check_heartbeat(heartbeat)
+                await _renew_claim(pool, claim)
+                _check_heartbeat(heartbeat)
+                async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+                    await _require_private_identity(conn)
+                    return await self.create_booking(conn, capability)
+            finally:
+                if capability is not None:
+                    capability._payload = None
 
     async def _proof_a05(self, conn, claim, supplied_response=None, *, trusted_application=False):
         """Revalidate A04, tenant intent, and the fixed restaurant/table policy."""
