@@ -6,8 +6,17 @@ before a provider key or endpoint is used.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+
+def validate_openrouter_upstream(value: str) -> str:
+    """Accept one provider or endpoint slug from reviewed server configuration."""
+    upstream = value.strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?", upstream):
+        raise RuntimeError("OPENROUTER_APPROVED_UPSTREAM deve indicare un solo upstream approvato")
+    return upstream
 
 
 @dataclass(frozen=True)
@@ -19,7 +28,9 @@ class ProviderAdapter:
     requires_base_url: bool = False
     deny_training: bool = False
 
-    def client_params(self, model: str, api_key: str, base_url: str | None) -> dict[str, object]:
+    def client_params(
+        self, model: str, api_key: str, base_url: str | None, *, approved_upstream: str | None = None
+    ) -> dict[str, object]:
         params: dict[str, object] = {
             "model": model,
             "api_key": api_key,
@@ -43,14 +54,15 @@ class ProviderAdapter:
                 raise RuntimeError("AI_BASE_URL remota deve usare HTTPS")
             params["base_url"] = endpoint
         if self.deny_training:
+            provider_options = {
+                "data_collection": "deny",
+                "zdr": True,
+                "allow_fallbacks": False,
+            }
+            if approved_upstream is not None:
+                provider_options["only"] = [validate_openrouter_upstream(approved_upstream)]
             params["additional_params"] = {
-                "extra_body": {"provider": {
-                    "data_collection": "deny",
-                    "zdr": True,
-                    # Do not let upstream routing escape the explicitly
-                    # selected model/provider policy (including :free).
-                    "allow_fallbacks": False,
-                }},
+                "extra_body": {"provider": provider_options},
             }
         return params
 

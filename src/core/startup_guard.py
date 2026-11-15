@@ -84,8 +84,11 @@ def _assert_free_groq_profile() -> None:
     if provider == "groq":
         _require_safe_value("GROQ_API_KEY", prefix="gsk_", min_length=16)
     else:
+        from src.core.ai_providers import validate_openrouter_upstream
+
         _require_safe_value("OPENROUTER_API_KEY", min_length=16)
         _require_safe_value("AI_MODEL", prefix="openrouter/")
+        validate_openrouter_upstream(_require_safe_value("OPENROUTER_APPROVED_UPSTREAM"))
     if os.getenv("AI_BASE_URL", "").strip() or os.getenv("AI_API_KEY", "").strip():
         raise RuntimeError("AVVIO BLOCCATO: endpoint/chiave AI custom non autorizzati nel profilo EUR 0")
 

@@ -76,6 +76,7 @@ def test_effective_http_body_contains_provider_policy_and_attempt_correlation(
     policy = LLMClientPolicy(
         provider=PROVIDERS[provider_name], model=model,
         api_key="offline-test-key", base_url=None,
+        approved_upstream="reviewed-upstream/region" if provider_name == "openrouter" else None,
     )
     llm = ObservedChatLLM(
         policy=policy,
@@ -94,6 +95,7 @@ def test_effective_http_body_contains_provider_policy_and_attempt_correlation(
             "data_collection": "deny",
             "zdr": True,
             "allow_fallbacks": False,
+            "only": ["reviewed-upstream/region"],
         }
     else:
         assert "provider" not in body
