@@ -24,9 +24,9 @@ def booking_request():
 
 
 @pytest.mark.parametrize('dpa', [False, None, 'false', 'true', '', 0, 1, 1.0, [], {}, ['true'], True])
-def test_sensitive_dpa_requires_literal_true(booking_request, dpa):
+def test_sensitive_note_is_removed_regardless_of_dpa(booking_request, dpa):
     result = DataMinimizationPolicy().apply(booking_request, 'studio_medico_dentista', dpa)
-    assert result.note == (NOTE if dpa is True else '')
+    assert result.note == ''
     assert booking_request.note == NOTE
 
 
@@ -68,12 +68,12 @@ def boundary(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['shadow', 'authoritative'])
 @pytest.mark.parametrize('vertical', ['studio_medico_dentista', 'studio_medico'])
-@pytest.mark.parametrize('dpa,expected', [(True, NOTE), (False, ''), ('true', ''), ('false', ''), (1, ''), (0, ''), (None, ''), ({}, ''), ([], '')])
-async def test_resolved_config_controls_actual_adapter_payload(boundary, booking_request, mode, vertical, dpa, expected):
+@pytest.mark.parametrize('dpa', [True, False, 'true', 'false', 1, 0, None, {}, []])
+async def test_legacy_config_cannot_allow_medical_notes(boundary, booking_request, mode, vertical, dpa):
     repo, adapter, router = boundary
     repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode, 'medical_dpa_signed': dpa}}
     await router.dispatch_create_booking(ORG, booking_request, verticale=vertical, medical_dpa_signed=True)
-    assert adapter.create_booking.await_args.args[1].note == expected
+    assert adapter.create_booking.await_args.args[1].note == ''
     assert booking_request.note == NOTE
     repo.get_credentials.assert_awaited_once_with(ORG)
 

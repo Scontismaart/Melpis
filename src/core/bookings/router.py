@@ -3,9 +3,8 @@
 Componenti principali:
 - BookingMode: Enum a 4 stati (authoritative, shadow, mirror, local_only).
 - DataMinimizationPolicy: Invariante 6 GDPR. Sanitizzazione fail-closed delle note sanitarie:
-  se l'attività è studio_medico (o se il verticale è sconosciuto/None per fallimento tecnico)
-  e medical_dpa_signed è False, i dati clinici vengono rimossi a monte prima di raggiungere
-  qualsiasi adapter esterno.
+  per settori sanitari o sconosciuti le note libere vengono rimosse prima
+  del dispatch a qualsiasi adapter esterno.
 - BookingAdapterRouter: Dispatcher e gestore del pattern Send-Then-Mark.
 """
 from __future__ import annotations
@@ -51,9 +50,8 @@ class DataMinimizationPolicy:
 
     Invariante 6 (Fail-Closed):
     - Se l'organizzazione appartiene a un settore medico o se il verticale
-      non è determinabile con certezza (verticale is None per errori di rete o DB),
-      e non risulta sottoscritto un accordo formale sul trattamento dati (medical_dpa_signed != True),
-      le note libere vengono SBANCATE a monte prima di essere inoltrate all'esterno.
+      non è determinabile con certezza, le note libere vengono rimosse prima
+      di essere inoltrate all'esterno. Il settore sanitario V1 è amministrativo.
     - Se il verticale è chiaramente non-medico (es. ristorante, parrucchiere, hotel),
       le note operative sono preservate integralmente.
     """
@@ -81,16 +79,11 @@ class DataMinimizationPolicy:
         verticale: str | None,
         medical_dpa_signed: bool = False,
     ) -> CreateBookingRequest:
-        """Restituisce una copia sanitizzata della richiesta se applicabile la minimizzazione."""
+        """Rimuove le note dei settori riservati anche con il flag DPA legacy."""
         normalized = verticale.strip().lower() if isinstance(verticale, str) else None
         is_medical = normalized not in self.NON_MEDICAL_VERTICALS
 
-        # Invariante 6 (Whitelist rigorosa): autorizzazione concessa SOLO se medical_dpa_signed
-        # è tassativamente True (bool). Qualsiasi valore diverso (None, False, stringa non vuota, 0)
-        # attiva la minimizzazione fail-closed.
-        has_signed_dpa = (medical_dpa_signed is True)
-
-        if is_medical and not has_signed_dpa:
+        if is_medical:
             # Minimizzazione attiva: azzera le note per evitare leak di sintomi o terapie
             logger.info(
                 "GDPR Data Minimization applicata a req %s",
@@ -311,10 +304,9 @@ class BookingAdapterRouter:
 
         # 0. Risoluzione adapter e modalità se non forniti esplicitamente
         if adapter is None or mode is None:
-            resolved_adapter, resolved_mode, config = await self.resolve_adapter(org_uuid)
+            resolved_adapter, resolved_mode, _ = await self.resolve_adapter(org_uuid)
             adapter = adapter or resolved_adapter
             mode = mode or resolved_mode
-            medical_dpa_signed = config.get("medical_dpa_signed") is True
 
         if mode == BookingMode.LOCAL_ONLY:
             return BookingResult(

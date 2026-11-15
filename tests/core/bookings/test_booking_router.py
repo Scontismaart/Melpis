@@ -9,7 +9,7 @@ Copre i requisiti architetturali:
    - local_only: solo DB locale, nessun adapter esterno
 3. Data Minimization Fail-Closed (Invariante 6):
    - verticale="studio_medico" + medical_dpa_signed=False -> note sanitarie sbiancate/minimizzate
-   - verticale="studio_medico" + medical_dpa_signed=True  -> note preservate
+   - verticale="studio_medico" + medical_dpa_signed=True  -> note minimizzate
    - verticale=None (incerto / query fallita) -> FAIL-CLOSED: note minimizzate per sicurezza
    - verticale="ristorante" / "parrucchiere" -> note preservate
 4. Send-Then-Mark & Idempotency:
@@ -138,16 +138,15 @@ class TestDataMinimization:
         assert "dolore" not in minimized_req.note
         assert minimized_req.note == ""
 
-    def test_medical_vertical_with_dpa_preserves_note(self, sample_create_req):
-        """Studio medico CON DPA firmato -> le note sono autorizzate e preservate."""
+    def test_medical_vertical_with_dpa_flag_minimizes_note(self, sample_create_req):
+        """Il flag legacy non autorizza l'invio delle note di uno studio medico."""
         policy = DataMinimizationPolicy()
         minimized_req = policy.apply(
             req=sample_create_req,
             verticale="studio_medico",
             medical_dpa_signed=True,
         )
-        assert minimized_req.note == sample_create_req.note
-        assert "anticoagulanti" in minimized_req.note
+        assert minimized_req.note == ""
 
     def test_unknown_vertical_fails_closed_minimizing(self, sample_create_req):
         """FAIL-CLOSED: Se il verticale è None (incerto o errore fetch), minimizza per sicurezza."""
