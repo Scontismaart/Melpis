@@ -53,7 +53,7 @@ async def test_booking_credentials_authorization_and_tenant_scope(pg_pool, sampl
         assert await pg_pool.fetchval('SELECT count(*) FROM external_booking_credentials WHERE organization_id=$1', org_a) == 1
         row = await pg_pool.fetchrow('SELECT * FROM external_booking_credentials WHERE organization_id=$1', org_a)
         config = json.loads(row['config']) if isinstance(row['config'], str) else row['config']
-        assert config['medical_dpa_signed'] is True
+        assert 'medical_dpa_signed' not in config
         assert config['mode'] == 'authoritative'
         assert SECRET not in row['credentials_encrypted']
         assert (await repository.get_credentials(org_a))['credentials']['api_key'] == SECRET
@@ -61,7 +61,7 @@ async def test_booking_credentials_authorization_and_tenant_scope(pg_pool, sampl
 
         status = await client.get(URL + '/status')
         assert status.status_code == 200
-        assert status.json()['medical_dpa_signed'] is True
+        assert 'medical_dpa_signed' not in status.json()
         assert SECRET not in status.text
         assert row['credentials_encrypted'] not in status.text
         assert 'credentials_encrypted' not in status.text
@@ -72,5 +72,5 @@ async def test_booking_credentials_authorization_and_tenant_scope(pg_pool, sampl
         assert patched.status_code == 200
         after = await repository.get_credentials(org_a)
         assert after['config']['mode'] == 'shadow'
-        assert after['config']['medical_dpa_signed'] is True
+        assert 'medical_dpa_signed' not in after['config']
         assert dict(await pg_pool.fetchrow('SELECT * FROM external_booking_credentials WHERE organization_id=$1', org_b)) == before_b

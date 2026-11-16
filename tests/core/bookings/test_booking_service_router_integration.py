@@ -259,7 +259,7 @@ async def test_protected_medical_classification_overrides_mutable_nonmedical_pro
 
 
 @pytest.mark.asyncio
-async def test_attested_nonmedical_classification_preserves_operational_note(
+async def test_attested_nonmedical_classification_preserves_internal_note_and_strips_provider_note(
     mock_booking_repo,
 ):
     classification = {
@@ -290,6 +290,7 @@ async def test_attested_nonmedical_classification_preserves_operational_note(
     org_repo.get_org_business_profile = AsyncMock(
         return_value={"verticale": "ristorante"}
     )
+    mock_booking_repo.pool = _ClassificationPool(classification)
     service = BookingService(
         repo=mock_booking_repo, org_repo=org_repo, booking_router=real_router
     )
@@ -306,7 +307,7 @@ async def test_attested_nonmedical_classification_preserves_operational_note(
     )
 
     assert mock_booking_repo.create_booking.await_args.kwargs["note"] == "Please use the side entrance."
-    assert mock_adapter.create_booking.await_args.args[1].note == "Please use the side entrance."
+    assert mock_adapter.create_booking.await_args.args[1].note == ""
 
 
 @pytest.mark.asyncio

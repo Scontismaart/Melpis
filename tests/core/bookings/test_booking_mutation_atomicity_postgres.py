@@ -222,7 +222,9 @@ async def test_concurrent_changed_command_same_key_has_one_winner_and_no_duplica
     env = await create_environment(pg_pool)
     booking = await env.booking()
     request = env.request(booking)
-    first, second = edit(), replace(edit(), note='other command')
+    # Unattested free text is removed before the command hash is built, so use
+    # a different structured field to exercise conflicting reuse of the key.
+    first, second = edit(), replace(edit(), nome_cliente='Other Synthetic')
     results = await asyncio.gather(
         apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=first),
         apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=second),
@@ -230,8 +232,10 @@ async def test_concurrent_changed_command_same_key_has_one_winner_and_no_duplica
     assert sum(isinstance(result, dict) for result in results) == 1
     assert sum(isinstance(result, AllocationConflict) for result in results) == 1
     winner = first if isinstance(results[0], dict) else second
-    assert await pg_pool.fetchval(
-        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == winner.note
+    row = await pg_pool.fetchrow(
+        'SELECT nome_cliente,note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
+    assert row['nome_cliente'] == winner.nome_cliente
+    assert row['note'] == ''
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2',
         env.org, request.request_id) == 1

@@ -974,6 +974,7 @@ async def test_bookingservice_router_apaleo_dispatch_flow():
 
     # Mock del repo interno di BookingService
     mock_booking_repo = MagicMock()
+    mock_booking_repo.pool = None
     mock_booking_repo.list_bookings = AsyncMock(return_value=[])
     mock_booking_repo.get_booking_settings = AsyncMock(
         return_value={"capienze_orarie": {"15:00": 10}}
