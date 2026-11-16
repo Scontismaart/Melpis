@@ -225,3 +225,56 @@ async def test_hotel_erasure_cursor_defers_a_retention_hold(pg_pool, retention_o
         "SELECT count(*) FROM booking_stays WHERE organization_id=$1 AND booking_id=$2",
         env.org, booking,
     ) == 1
+
+
+async def test_sweep_clears_retained_content_of_eligible_soft_deleted_message(
+    state_env, retention_operator,
+):
+    pool, org, source = state_env["pool"], state_env["org"], state_env["message"]
+    await commit_source(state_env, source, "2026-11-12", {"service_id": "standard"}, 1700000000)
+    await pool.execute(
+        """UPDATE messages SET status='handled', handling_type='ai_handled', deleted_at=clock_timestamp()
+           WHERE organization_id=$1 AND id=$2""",
+        org, source,
+    )
+    await approve_messages(pool, org)
+    await pool.execute(
+        """UPDATE event_log SET testo_originale='synthetic text', risposta_ai='synthetic reply'
+           WHERE organization_id=$1 AND source_id=$2""",
+        org, source,
+    )
+    assert not await pool.fetchval("SELECT public.c24_purge_source($1,$2)", org, source)
+    await age_message(pool, org, source, 91)
+    hold_id = uuid4()
+    await pool.execute(
+        """INSERT INTO gdpr_retention_holds (organization_id,hold_id,category,scope,scope_id,
+             reason_code,authority_reference,approved_by,approved_at,review_by)
+           VALUES ($1,$2,'messages_content','record',$3,'litigation','test:soft-delete','qa',
+             now()-interval '1 hour',now()+interval '1 day')""",
+        org, hold_id, source,
+    )
+    assert not await pool.fetchval("SELECT public.c24_purge_source($1,$2)", org, source)
+    await pool.execute(
+        """INSERT INTO gdpr_retention_hold_events (organization_id,hold_id,event_id,kind,
+             authority_reference,approved_by,occurred_at)
+           VALUES ($1,$2,$3,'released','test:soft-delete','qa',clock_timestamp())""",
+        org, hold_id, uuid4(),
+    )
+    assert await run_c24_retention_sweep(retention_operator) == {"enabled": True, "batch_clear": True}
+    assert await pool.fetchval(
+        """SELECT content_purged_at IS NOT NULL AND content='{}'::jsonb AND content_text IS NULL
+                  AND ai_reply_cache IS NULL AND deleted_at IS NOT NULL
+           FROM messages WHERE organization_id=$1 AND id=$2""",
+        org, source,
+    )
+    assert await pool.fetchval(
+        """SELECT testo_originale='' AND risposta_ai=''
+           FROM event_log WHERE organization_id=$1 AND source_id=$2""",
+        org, source,
+    )
+    assert not await pool.fetchval("SELECT public.c24_purge_source($1,$2)", org, source)
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match="cannot be restored"):
+        await pool.execute(
+            "UPDATE messages SET content_text='synthetic replay' WHERE organization_id=$1 AND id=$2",
+            org, source,
+        )
