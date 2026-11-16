@@ -9,6 +9,7 @@ Verifica:
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date, time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -24,6 +25,15 @@ ORG_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 class _ClassificationConn:
     def __init__(self, row):
         self.row = row
+
+    @asynccontextmanager
+    async def transaction(self):
+        yield self
+
+    async def execute(self, query, *_args):
+        if "pg_advisory_xact_lock_shared" in query:
+            return "SELECT 1"
+        raise AssertionError(f"Unexpected statement: {query}")
 
     async def fetchval(self, query, *_args):
         if "to_regclass('public.booking_privacy_classification_reader')" in query:
