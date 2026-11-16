@@ -73,20 +73,12 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "trusted retry worker resolves one message by primary key, then uses its stored organization_id downstream",
     "src/core/db/repositories/message_repo.py::reap_stale_claims":
         "trusted scheduled worker reaps claims across organizations",
-    "src/core/db/repositories/message_repo.py::delete_expired_messages":
-        "trusted retention worker expires messages across organizations",
-    "src/core/db/repositories/message_repo.py::purge_soft_deleted_messages":
-        "trusted retention worker purges messages across organizations",
-    "src/core/db/repositories/message_repo.py::purge_simulation_requests":
-        "trusted retention worker expires simulation records across organizations",
     "src/core/db/repositories/message_repo.py::claim_delivery_attempts":
         "trusted retry worker claims globally queued attempts through their message parent",
     "src/core/db/repositories/message_repo.py::insert_delivery_attempt":
         "trusted retry worker inserts an attempt using an existing message parent",
     "src/core/db/repositories/message_repo.py::update_delivery_attempt":
         "trusted retry worker updates an attempt through its message parent",
-    "src/core/db/repositories/conversation_repo.py::cleanup_empty_conversations":
-        "trusted retention worker cleans empty conversations across organizations",
     "src/core/db/repositories/organization_repo.py::get_memberships_by_auth":
         "server-validated principal lookup enumerates only that user's memberships",
     "src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner":
@@ -141,7 +133,6 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/db/repositories/organization_repo.py::get_org_by_phone_number_id", "b92af521898b894d1bd12f9675852502de316ca4377020173b8bbd3da20acfe2"): "pre-auth tenant resolution by provider phone-number identity",
     ("src/core/db/repositories/organization_repo.py::get_org_by_waba_id", "5ae1bafbb425db6399573777d3f9fbe9d1d49e98a9c52bdc850265e2a22baf2c"): "pre-auth tenant resolution by provider WABA identity",
     ("src/core/db/repositories/organization_repo.py::get_orgs_by_waba_id", "08dbcdc809f291ac5696cc84a315bac35613a455368122b65dee1c939bc1ba28"): "pre-auth webhook fan-out by provider WABA identity",
-    ("src/core/db/repositories/conversation_repo.py::cleanup_empty_conversations", "010fe930de511feda8a9870ddc1f79abf061f5172c61d1d8069e48d5e11d67f1"): "scheduled retention cleanup of empty conversations across tenants",
     ("src/core/db/repositories/message_repo.py::claim_inbound_messages", "4568dfab7495caee116ce882890de8cf2df5ffc5550a1c32243fb21790e46e8e"): "trusted worker atomically claims the global inbound queue",
     ("src/core/db/repositories/message_repo.py::claim_delivery_attempts", "a4e36173608f1673980cbc9361e85a122926e74faf7af0d6156e00aa4f2b66ab"): "trusted worker claims global retry queue rows joined to their message parent while locking attempts only",
     ("src/core/db/repositories/message_repo.py::claim_delivery_attempts", "8dfb5b50fd1234602121c89eac6b7a96ff310337c003ebb4370d3f5467af8106"): "trusted worker marks only claimed parent-linked retry rows processing",
@@ -151,9 +142,6 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/db/repositories/message_repo.py::reap_stale_claims", "ca6613b0fa56e333c5abed058b4da2b202367c76ee6f80a617455ed9eeb24e53"): "scheduled worker reaps stale message claims across tenants",
     ("src/core/db/repositories/message_repo.py::reap_stale_claims", "1ff3aa85ac5cb9ea545f420bd0d23143d16a56a237e8a8b6e735428305433e87"): "scheduled worker releases expired message claims across tenants",
     ("src/core/db/repositories/message_repo.py::reap_stale_claims", "a79cb5a46919dc706b5e58d826658adaac1a0f68c690deb5ae3bb065d20a7001"): "scheduled retry worker reaps parent-linked delivery attempts across tenants",
-    ("src/core/db/repositories/message_repo.py::delete_expired_messages", "6cd0eca8b451c7811b6bd5155cf0df79ea1efb4d0c6cf77732ec3886f865b275"): "scheduled retention worker expires messages across tenants",
-    ("src/core/db/repositories/message_repo.py::purge_soft_deleted_messages", "cefaf30a03b9e93f1108a3b617f065c8c3c52cd2d35ed40845295817e3bf02da"): "scheduled retention worker purges soft-deleted messages across tenants",
-    ("src/core/db/repositories/message_repo.py::purge_simulation_requests", "344f2b7345d48ff8602807867ac5f921e171089c5f169b4a46e171e204b39c80"): "scheduled retention worker purges expired simulation requests across tenants",
     ("src/core/db/repositories/billing_repo.py::drain_governance_outbox", "6e7739b56f19833341fa065f30ac955c665065930ccac86fb0610141a9bd9f1c"): "trusted governance worker enumerates its durable organization queue",
     ("src/instagram/repository.py::get_org_by_instagram_user_id", "cde7bca5abefaa42d6944ad8df14ff31708bdae92ff87826e5ca62bf169c14e2"): "pre-auth tenant resolution by provider Instagram identity",
     ("src/core/scheduler.py::_calendar_sync_job", "5e19f185ac041a63375f34617ac2d54a90b71987c48020e75637aaa948657ffc"): "trusted scheduler enumerates organization_id keys with calendar sync enabled; bookings remain tenant-bound",

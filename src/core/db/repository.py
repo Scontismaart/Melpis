@@ -402,9 +402,6 @@ class CoreRepository(TenantScopedRepository):
     async def get_simulation_requests_by_org(self, organization_id) -> list[dict]:
         return await self._msg_repo.get_simulation_requests_by_org(organization_id)
 
-    async def purge_simulation_requests(self, retention_days: int = 30) -> int:
-        return await self._msg_repo.purge_simulation_requests(retention_days)
-
     async def get_organization_owners(self, org_id: str) -> list[dict]:
         return await self._org_repo.get_organization_owners(org_id)
 

@@ -25,13 +25,10 @@ or inserts tenant policy rows. Unknown simulator schedules are not automatically
 executed. The public endpoint distinguishes product maxima from uncertified
 effective tenant schedules; an environment flag alone is not operational GO.
 
-Legacy methods `MessageRepository.delete_expired_messages`,
-`purge_soft_deleted_messages` and `purge_simulation_requests` remain separate
-global mutation helpers exposed by repository wrappers. Static caller inspection
-found no current scheduling caller beyond those wrappers. They do not implement
-the new policy protocol and must be retired or routed through the approved
-tenant-scoped process before cutover; their existence is not retention enforcement.
-Likewise `gdpr_policies.retention_days` cannot represent twelve calendar months or
+The repository no longer exposes the legacy global message expiry, soft-delete
+purge, simulation purge, or empty-conversation cleanup methods. Scheduled primary
+retention remains subject to the current approved tenant policies.
+The `gdpr_policies.retention_days` field cannot represent twelve calendar months or
 document a complete bounded legal hold. Those are schema/lifecycle implementation
 tasks, not new founder preference decisions.
 
