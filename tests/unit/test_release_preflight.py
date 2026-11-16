@@ -398,10 +398,20 @@ def test_release_preflight_blocks_unknown_caddy_site_mode():
 
 def test_release_preflight_accepts_explicit_openrouter_free_profile():
     config = sandbox_config()
-    config.update({"AI_PROVIDER": "openrouter", "AI_MODEL": "openrouter/vendor/model:free", "OPENROUTER_API_KEY": "offline-unit-safe-value"})
+    config.update({
+        "AI_PROVIDER": "openrouter",
+        "AI_MODEL": "openrouter/vendor/model:free",
+        "OPENROUTER_API_KEY": "offline-unit-safe-value",
+        "OPENROUTER_APPROVED_UPSTREAM": "reviewed-upstream",
+    })
     for name in tuple(config):
         if name.startswith("OPENROUTER_MODEL"):
             config.pop(name)
     assert validate(config) == []
+    config["OPENROUTER_APPROVED_UPSTREAM"] = "upstream,other"
+    assert any("OPENROUTER_APPROVED_UPSTREAM" in error for error in validate(config))
+    config.pop("OPENROUTER_APPROVED_UPSTREAM")
+    assert "OPENROUTER_APPROVED_UPSTREAM: missing or placeholder" in validate(config)
+    config["OPENROUTER_APPROVED_UPSTREAM"] = "reviewed-upstream"
     config["AI_MODEL_FALLBACKS"] = "openrouter/vendor/paid"
     assert "AI_MODEL_FALLBACKS: model outside free allowlist" in validate(config)
