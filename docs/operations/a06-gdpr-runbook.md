@@ -175,13 +175,19 @@ the controller's instructions.
 
 Primary-data retention runs only when `GDPR_RETENTION_EXECUTION_ENABLED=true`
 and valid, approved per-tenant category policies exist. The general daily job
-handles supported message content and removes only typed C2.4 booking proposal
-fields from eligible source/cache records. SQL096 adds a bounded, hold-aware
-purge for eligible soft-deleted message rows after policy and lineage checks;
-it is merged into source, but no remote application or live schedule is proven.
+returns before its ordinary content worker when the newer C2.4 schema is
+present, and removes only typed C2.4 booking proposal fields from eligible
+source/cache records. SQL096 adds a bounded, hold-aware purge for eligible
+terminal C2.4 messages only when receipt and subject lineage are present,
+along with the policy and lifecycle checks; `deleted_at` need not be set. It
+is merged into source, but remote application is unverified and no live
+schedule is proven. Ordinary or legacy messages
+without those C2.4 fields have no verified 60/90-day cleanup path in this
+snapshot; overall message-retention coverage remains open.
 The product policy does not assign a simulator-response period or authorize a
-general simulator-response purge. The job also does not perform the full C2.4
-lifecycle sweep.
+general simulator-response purge. The general job also does not perform the
+dedicated C2.4 lifecycle sweep; SQL096 replaces and extends the SQL089
+`c24_retention_sweep()` path.
 `GET /api/gdpr/retention-policy` reports
 `policy_version=tenant-approval-required`, the `C05 #100` policy/cutover gate,
 and `null` for `retention_days`, `purge_after_days`, and
@@ -191,10 +197,11 @@ does not by itself establish policy approval.
 
 | Category or copy | Code path and policy source | Failure, holds, and what is not proven |
 |---|---|---|
-| `messages_content` | General job in `src/core/retention_job.py` performs bounded redaction for supported eligible records using a valid approved per-tenant policy. SQL096 adds a bounded hold-aware purge for eligible soft-deleted message rows after policy and lineage checks. The C2.4 owner sweep in `src/core/gdpr/c24_retention_controller.py` and migration 089 handles lifecycle-aware inbox/source content under the dedicated role. | No mutation without the global flag and current tenant policy. C2.4 honors tenant `legal_hold`, `erasure_allowed`, valid policy windows, and lifecycle fences. A C2.4 database error stops that sweep; logs omit driver detail. SQL096 has not been applied remotely; no live schedule or deployed tenant record was verified. |
+| `messages_content` | With the newer C2.4 schema present, the generic job exits before its ordinary content worker. SQL096 adds a bounded hold-aware purge for eligible terminal C2.4 messages that have verified `c24_received_at` and original-subject lineage; `deleted_at` need not be set. SQL096 replaces and extends the SQL089 `c24_retention_sweep()` path, which handles supported lifecycle-aware inbox/source content under the dedicated role. | No mutation without the global flag and current tenant policy. C2.4 honors tenant `legal_hold`, `erasure_allowed`, valid policy windows, and lifecycle fences. Ordinary/legacy messages without C2.4 lineage have no verified 60/90-day cleanup path in this snapshot. A C2.4 database error stops that sweep; logs omit driver detail. Remote application is unverified; no live schedule or deployed tenant record was verified. |
 | `simulator_responses` | No general retention path is authorized by the product policy; `simulator_response_days` is null. C2.4 booking proposal fields have a separate typed removal path. | A 24-hour simulator-history setting is not a legal retention period. Local simulator cache is a separate copy; no approved period or deployed purge schedule is proven. |
 | `booking_conversation_content` | Migration 089 and the C2.4 owner sweep expire eligible typed conversation state/proposal material under the approved category policy. | The allowed effective period comes from a valid tenant record within the approved product policy. Legal hold, erasure permission, source lineage, and fences are checked. This is not blanket deletion of all booking text or customer records. |
-| `technical_receipts` and suppression lifecycle evidence | Migration 089 sweeps supported completed inbox payloads, concluded request receipts, source fences, idle watermarks, and suppression/audit lifecycle rows under the 90-day technical-receipt policy through the private keyset cursor. | Requires the C2.4 dedicated role, valid tenant policy, no hold, and safe lifecycle state. A held/uncertain target is deferred and the bounded cursor advances; a false `batch_clear` is not a completed sweep. Other webhook/idempotency rows are not covered by this claim. No external audit-retention decision or successful live run is evidenced. |
+| `technical_receipts` request records | The SQL089 sweep, replaced and extended by SQL096, handles concluded `booking_conversation_requests` under the 90-day technical-receipt policy using `c24_concluded_at` and the private keyset cursor. | Requires the C2.4 dedicated role, valid tenant policy, no hold, and safe lifecycle state. A held/uncertain target is deferred and the bounded cursor advances; a false `batch_clear` is not a completed sweep. Other webhook/idempotency rows are not covered by this claim. No successful live run is evidenced. |
+| C2.4 replay and suppression metadata | The SQL089 sweep, replaced and extended by SQL096, applies the tenant technical-receipt window to `c24_source_fences.fenced_at`, `c24_idle_watermarks.expired_at`, and suppression audit `occurred_at` through its lifecycle sweep. | The approved policy anchor is request conclusion. A reviewed mapping from these event timestamps to that anchor is not established; keep the retention-policy mapping OPEN. Other audit-retention decisions and successful live runs are also unverified. |
 | `booking_stay_content` | Migration 089's hotel sweep and migration 091's hotel lifecycle functions archive completed allocation state or purge eligible stay content after completion/lineage checks. | The 12-month period applies to eligible content only. It does not set a period for outbox, audit, or replay fences/tombstones; the reviewed source has no cleanup path for the stay purge fences and tombstones. Current approved policy, no matching hold, valid completion/allocation evidence, and safe terminal state are required. Schedule and tenant policy are unverified. |
 | Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload containing booking/customer and confirmation details. Merged PR #179 (`f5f5040`) adds migration 094 and transactional scrubbing: successful completion clears the payload; a PostgreSQL-only bounded cleanup nulls expired unconsumed payloads while retaining hashes and replay tombstones. Migration check [run #43741180457](https://github.com/Scontismaart/Melpis/actions/runs/43741180457) applied all migrations in order through 094 in a disposable database. | Expiry limits authority but does not itself delete content. CI/source evidence does not prove Staging or Production application or a scheduled run. No live schedule, backup/cache cleanup, or subject-scope behavior is certified. Do not treat capability tombstones as zero-cost billing evidence. |
 | Encrypted export snapshots | The general retention worker expires export operations and removes encrypted chunks after the 15-minute snapshot lifetime, independently of the primary-data-retention flag. | The job must be deployed and monitored. A failed purge leaves data for retry; no live schedule or provider/backup deletion is established. |
