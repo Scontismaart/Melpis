@@ -416,26 +416,6 @@ class MessageRepository(TenantScopedRepository):
             """, str(timeout_minutes))
             return [dict(r) for r in dead] + [dict(r) for r in msgs] + [dict(r) for r in attempts]
 
-    @system_scope("retention/reaper globale: manutenzione cross-tenant programmata")
-    async def delete_expired_messages(self, retention_days: int = 60) -> int:
-        async with self.pool.acquire() as conn:
-            result = await conn.execute("""
-                UPDATE messages SET deleted_at = NOW()
-                WHERE deleted_at IS NULL
-                AND created_at < NOW() - ($1 || ' days')::INTERVAL
-            """, str(retention_days))
-            return int(result.split()[-1]) if result else 0
-
-    @system_scope("retention/reaper globale: manutenzione cross-tenant programmata")
-    async def purge_soft_deleted_messages(self, grace_days: int = 30) -> int:
-        async with self.pool.acquire() as conn:
-            result = await conn.execute("""
-                DELETE FROM messages
-                WHERE deleted_at IS NOT NULL
-                AND deleted_at < NOW() - ($1 || ' days')::INTERVAL
-            """, str(grace_days))
-            return int(result.split()[-1]) if result else 0
-
     async def get_outbound_dedup(self, organization_id, message_id) -> dict | None:
         async with self.scoped_conn(organization_id) as conn:
             row = await conn.fetchrow("""
@@ -594,15 +574,3 @@ class MessageRepository(TenantScopedRepository):
                 org_id,
             )
             return [dict(row) for row in rows]
-
-    @system_scope("retention reaper globale: scadenza risposte cache del simulatore")
-    async def purge_simulation_requests(self, retention_days: int = 30) -> int:
-        async with self.pool.acquire() as conn:
-            result = await conn.execute(
-                """
-                DELETE FROM simulation_requests
-                WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
-                """,
-                str(retention_days),
-            )
-            return int(result.split()[-1]) if result else 0

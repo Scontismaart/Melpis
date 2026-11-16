@@ -221,7 +221,7 @@ class GoogleCalendarService:
         start = local_instant(booking["data"], booking["ora"], tz)
         body = {"id": event_id_for(claim["organization_id"], booking["id"]),
                 "summary": f"{booking['nome_cliente']} — {booking['coperti']} coperti",
-                "description": f"Booking ID: {booking['id']}\nNote: {booking.get('note') or ''}",
+                "description": f"Booking ID: {booking['id']}",
                 "start": {"dateTime": start.isoformat(), "timeZone": tz},
                 "end": {"dateTime": (start + timedelta(minutes=60)).isoformat(), "timeZone": tz},
                 "extendedProperties": {"private": {"organization_id": str(claim["organization_id"]),

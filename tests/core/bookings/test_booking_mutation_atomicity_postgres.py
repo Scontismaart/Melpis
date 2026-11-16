@@ -67,6 +67,9 @@ async def test_all_writes_roll_back_after_outbox(pg_pool, monkeypatch):
 
 async def test_replay_matches_complete_command_and_legacy_cannot_replay(pg_pool):
     env = await create_environment(pg_pool)
+    await pg_pool.execute('''INSERT INTO booking_privacy_classifications
+        (organization_id,sector,operational_notes_allowed,revision,evidence_reference)
+        VALUES($1,'ristorante',true,1,'synthetic-test-evidence')''', env.org)
     booking = await env.booking()
     request = env.request(booking)
     first = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
@@ -81,6 +84,48 @@ async def test_replay_matches_complete_command_and_legacy_cannot_replay(pg_pool)
         await env.apply(request)
     assert await pg_pool.fetchval('SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'changed'
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+
+
+async def test_unattested_note_is_removed_before_booking_write_and_receipt_hash(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    request = env.request(booking)
+    first = await apply_booking_mutation(
+        pg_pool, env.org, env.auth, request,
+        mutation=replace(edit(), note='unattested free text'),
+    )
+    replay = await apply_booking_mutation(
+        pg_pool, env.org, env.auth, request,
+        mutation=replace(edit(), note='different raw free text'),
+    )
+
+    assert first['outcome'] == 'allocated'
+    assert replay['replayed'] is True
+    assert await pg_pool.fetchval(
+        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking
+    ) == ''
+
+
+async def test_protected_medical_classification_rejects_note_with_nonmedical_profile(pg_pool):
+    env = await create_environment(pg_pool, 'ristorante')
+    await pg_pool.execute('''INSERT INTO booking_privacy_classifications
+        (organization_id,sector,operational_notes_allowed,revision,evidence_reference)
+        VALUES($1,'medical_disabled',true,1,'synthetic-medical-classification')''', env.org)
+    booking = await env.booking()
+    request = env.request(booking)
+
+    with pytest.raises(BookingMutationRejected):
+        await apply_booking_mutation(
+            pg_pool, env.org, env.auth, request, mutation=edit(),
+        )
+
+    assert await pg_pool.fetchval(
+        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking
+    ) == ''
+    assert await pg_pool.fetchval(
+        'SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2',
+        env.org, request.request_id,
+    ) == 0
 
 
 async def test_unauthorized_no_mutation(pg_pool):
@@ -199,7 +244,9 @@ async def test_concurrent_changed_command_same_key_has_one_winner_and_no_duplica
     env = await create_environment(pg_pool)
     booking = await env.booking()
     request = env.request(booking)
-    first, second = edit(), replace(edit(), note='other command')
+    # Unattested free text is removed before the command hash is built, so use
+    # a different structured field to exercise conflicting reuse of the key.
+    first, second = edit(), replace(edit(), nome_cliente='Other Synthetic')
     results = await asyncio.gather(
         apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=first),
         apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=second),
@@ -207,8 +254,10 @@ async def test_concurrent_changed_command_same_key_has_one_winner_and_no_duplica
     assert sum(isinstance(result, dict) for result in results) == 1
     assert sum(isinstance(result, AllocationConflict) for result in results) == 1
     winner = first if isinstance(results[0], dict) else second
-    assert await pg_pool.fetchval(
-        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == winner.note
+    row = await pg_pool.fetchrow(
+        'SELECT nome_cliente,note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
+    assert row['nome_cliente'] == winner.nome_cliente
+    assert row['note'] == ''
     assert await pg_pool.fetchval(
         'SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2',
         env.org, request.request_id) == 1

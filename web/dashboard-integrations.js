@@ -1333,7 +1333,7 @@ async function caricaStatoBooking() {
       if (subEl) subEl.textContent = `Modalità ${d.mode || "authoritative"} · Attivo`;
       if (metaProviderEl) metaProviderEl.textContent = provName;
       if (metaModeEl) metaModeEl.textContent = PMS_MODE_LABELS[d.mode] || d.mode;
-      if (metaDpaEl) metaDpaEl.textContent = d.medical_dpa_signed ? "Firmato (Art. 9 GDPR)" : "Non attivo (Note filtrate)";
+      if (metaDpaEl) metaDpaEl.textContent = "Note sanitarie non abilitate nella beta V1";
 
       if (metaSyncEl) {
         if (d.last_sync) {
@@ -1600,7 +1600,6 @@ document.getElementById("booking-config-form")?.addEventListener("submit", async
   const actionContext = captureIntegrationContext();
   const provider = document.getElementById("booking-provider-select")?.value || "internal";
   const mode = document.getElementById("booking-mode-select")?.value || "local_only";
-  const medicalDpa = Boolean(document.getElementById("booking-medical-dpa-check")?.checked);
   const submitBtn = document.getElementById("booking-form-submit-btn");
   const feedbackEl = document.getElementById("booking-form-feedback");
 
@@ -1611,7 +1610,7 @@ document.getElementById("booking-config-form")?.addEventListener("submit", async
   }
 
   let credentials = {};
-  let config = { medical_dpa_signed: medicalDpa };
+  let config = {};
 
   if (provider === "calcom") {
     const apiKey = document.getElementById("calcom-api-key")?.value.trim();
@@ -1663,7 +1662,6 @@ document.getElementById("booking-config-form")?.addEventListener("submit", async
     credentials = { property_id: propertyId, api_key: apiKey };
   } else if (provider === "internal") {
     credentials = {};
-    config.medical_dpa_signed = false;
   }
 
   const credentialInputIds = ["calcom-api-key", "simplybook-api-key", "apaleo-client-secret", "beds24-invite-code", "zak-api-key"];

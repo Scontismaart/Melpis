@@ -5,8 +5,17 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-from src.core.ai_providers import ProviderAdapter, provider_for_model
+from src.core.ai_providers import ProviderAdapter, provider_for_model, validate_openrouter_upstream
 from src.core.cost_policy import assert_model_allowed, assert_openrouter_catalog_free, free_only
+
+
+def configured_openrouter_upstream() -> str | None:
+    """Validate the upstream locally before a client or health check is created."""
+    configured = os.getenv("OPENROUTER_APPROVED_UPSTREAM", "")
+    deployed = os.getenv("APP_ENV", "").strip().lower() in {"production", "prod", "staging"}
+    if configured.strip() or deployed:
+        return validate_openrouter_upstream(configured)
+    return None
 
 
 @dataclass(frozen=True)
@@ -22,10 +31,13 @@ class LLMClientPolicy:
     model: str
     api_key: str = field(repr=False)
     base_url: str | None = field(repr=False)
+    approved_upstream: str | None = None
 
     def client_params(self) -> dict[str, object]:
         """Return the provider's constructor arguments, including its secret key."""
-        return self.provider.client_params(self.model, self.api_key, self.base_url)
+        return self.provider.client_params(
+            self.model, self.api_key, self.base_url, approved_upstream=self.approved_upstream,
+        )
 
 
 def resolve_llm_client_policy(model: str) -> LLMClientPolicy:
@@ -50,10 +62,17 @@ def resolve_llm_client_policy(model: str) -> LLMClientPolicy:
             f"la chiave API per il provider '{provider.name}'."
         )
 
-    if free_profile and provider.name == "openrouter":
-        assert_openrouter_catalog_free(model, api_key)
+    approved_upstream = None
+    if provider.name == "openrouter":
+        approved_upstream = configured_openrouter_upstream()
+        if free_profile:
+            assert_openrouter_catalog_free(model, api_key)
 
     # Validate endpoint rules here, before returning a policy that could be
     # mistaken for permission to construct a client.
-    provider.client_params(model, api_key, base_url)
-    return LLMClientPolicy(provider=provider, model=model, api_key=api_key, base_url=base_url)
+    policy = LLMClientPolicy(
+        provider=provider, model=model, api_key=api_key, base_url=base_url,
+        approved_upstream=approved_upstream,
+    )
+    policy.client_params()
+    return policy

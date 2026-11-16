@@ -17,7 +17,7 @@ The private operator evidence package records the following result. It contains 
 | CI | GitHub Actions run `43695636137` passed for the approved commit |
 | Production | Not used |
 
-The manifest commit matches the evidence commit and current `main`. All 34 Git blob IDs resolve to files in that commit, and each manifest SHA-256 matches the corresponding Git blob contents. The Windows checkout has `core.autocrlf=true`; raw working-tree hashes differ for CRLF-converted files, while all 34 LF-normalized hashes match the manifest.
+The manifest and evidence refer to the approved source snapshot `7634562630d705a9e8dc644260bb0174f03a25fd`, which was `main` at the time of the cutover. Later commits have advanced `main`; this historical evidence remains bound to the approved snapshot. All 34 Git blob IDs resolve to files in that commit, and each manifest SHA-256 matches the corresponding Git blob contents. The Windows checkout has `core.autocrlf=true`; raw working-tree hashes differ for CRLF-converted files, while all 34 LF-normalized hashes match the manifest.
 
 | Checkpoint | Cumulative history |
 |---|---:|

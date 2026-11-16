@@ -215,7 +215,8 @@ async def test_booking_replay_returns_existing_org_scoped_row_before_capacity_ch
         coperti=4,
     )
 
-    assert result is existing
+    assert result == {**existing, "note": ""}
+    assert result is not existing
     repo.get_booking_for_message.assert_awaited_once_with("org-1", "message-1")
     service._google_slot_occupato.assert_not_called()
     service.verifica_disponibilita.assert_not_called()

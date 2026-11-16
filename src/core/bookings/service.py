@@ -68,6 +68,48 @@ class BookingService:
         # never vetoes an internally authorized booking.
         return False
 
+    async def _resolve_profile_verticale(self, org_id):
+        """Read the stored sector used for routing; note permission needs a separate attestation."""
+        if not self.org_repo or not org_id:
+            return None
+        try:
+            profile = await self.org_repo.get_org_business_profile(org_id)
+        except Exception as exc:
+            logger.warning(
+                "booking_vertical=unavailable error_type=%s", type(exc).__name__
+            )
+            return None
+        if not isinstance(profile, dict):
+            return None
+        verticale = profile.get("verticale")
+        return verticale if isinstance(verticale, str) and verticale.strip() else None
+
+    async def _minimize_booking_rows(self, bookings, org_id):
+        if not bookings:
+            return bookings
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
+        from src.core.bookings.router import DataMinimizationPolicy
+
+        async with booking_note_policy_guard(self.repo, org_id) as note_verticale:
+            safe_bookings = []
+            for booking in bookings:
+                try:
+                    safe_booking = dict(booking)
+                except (TypeError, ValueError) as exc:
+                    logger.error("booking_note_minimization=failed error_type=%s", type(exc).__name__)
+                    raise ValueError("Booking data unavailable") from None
+                safe_booking["note"] = DataMinimizationPolicy.minimize_note(
+                    safe_booking.get("note", ""), note_verticale
+                )
+                safe_bookings.append(safe_booking)
+            return safe_bookings
+
+    async def _minimize_existing_booking(self, booking, org_id):
+        if not booking:
+            return booking
+        safe_bookings = await self._minimize_booking_rows([booking], org_id)
+        return safe_bookings[0]
+
     # ── Disponibilità ──────────────────────────────────────────
 
     async def _coperti_prenotati(self, org_id, data, ora, exclude_booking_id=None):
@@ -174,7 +216,7 @@ class BookingService:
         if source_message_id and lookup:
             existing = await lookup(org_id, source_message_id)
             if isinstance(existing, dict) and existing.get("id"):
-                return existing
+                return await self._minimize_existing_booking(existing, org_id)
         values = self._validated_booking_values(
             nome_cliente, telefono, data, ora, coperti, note
         )
@@ -184,6 +226,9 @@ class BookingService:
         ora = values["ora"]
         coperti = values["coperti"]
         note = values["note"]
+        resolved_verticale = await self._resolve_profile_verticale(org_id)
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
+        from src.core.bookings.router import DataMinimizationPolicy
         # Eventi esterni su Google Calendar (creati fuori dal sistema) bloccano
         # lo slot come quelli interni. Check pre-lock: chiamata di rete fuori
         # dalla sezione critica. Fail-open documentato in _google_slot_occupato.
@@ -200,7 +245,7 @@ class BookingService:
             if source_message_id and lookup:
                 existing = await lookup(org_id, source_message_id)
                 if isinstance(existing, dict) and existing.get("id"):
-                    return existing
+                    return await self._minimize_existing_booking(existing, org_id)
             disp = await self.verifica_disponibilita(org_id, data, ora, coperti)
             if coperti > disp.coperti_liberi:
                 raise SlotPienoError(
@@ -210,15 +255,19 @@ class BookingService:
             richiede_dep = await self._valuta_richiede_deposito(
                 org_id, coperti=coperti, tipo_evento=tipo_evento, ora=ora, data=data
             )
-            booking = await self.repo.create_booking(
-                organization_id=org_id, nome_cliente=nome_cliente,
-                telefono=telefono, data=data, ora=ora, coperti=coperti,
-                note=note, tipo_evento=tipo_evento, stato="in_attesa", origine=origine,
-                richiede_deposito=richiede_dep,
-                richiede_intervento=richiede_intervento,
-                id_conversazione=id_conversazione or None,
-                source_message_id=source_message_id,
-            )
+            async with booking_note_policy_guard(
+                self.repo, org_id
+            ) as note_verticale:
+                minimized_note = DataMinimizationPolicy.minimize_note(note, note_verticale)
+                booking = await self.repo.create_booking(
+                    organization_id=org_id, nome_cliente=nome_cliente,
+                    telefono=telefono, data=data, ora=ora, coperti=coperti,
+                    note=minimized_note, tipo_evento=tipo_evento, stato="in_attesa", origine=origine,
+                    richiede_deposito=richiede_dep,
+                    richiede_intervento=richiede_intervento,
+                    id_conversazione=id_conversazione or None,
+                    source_message_id=source_message_id,
+                )
         if self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(booking, org_id)
@@ -238,15 +287,6 @@ class BookingService:
                     t_val = time_cls(int(h), int(m))
                 else:
                     t_val = ora
-                resolved_verticale = verticale
-                if resolved_verticale is None and self.org_repo:
-                    try:
-                        prof = await self.org_repo.get_org_business_profile(org_id)
-                        if prof:
-                            resolved_verticale = prof.get("verticale")
-                    except Exception as e:
-                        logger.warning("Recupero profilo per verticale fallito (fail-closed applicato): %s", e)
-
                 if source_message_id:
                     idemp_key = f"ext-book:{org_id}:{source_message_id}"
                 else:
@@ -347,6 +387,8 @@ class BookingService:
             "coperti": changes.get("coperti", current.get("coperti")),
             "note": changes.get("note", current.get("note", "")),
         }
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
+        from src.core.bookings.router import DataMinimizationPolicy
         values = self._validated_booking_values(**values)
         schedule_changed = any(
             values[key] != self._format_booking_value(key, current.get(key))
@@ -380,9 +422,15 @@ class BookingService:
                         f"slot pieno per {values['coperti']} coperti alle {values['ora']}",
                         alternative=disp.alternative,
                     )
-            updated = await self.repo.update_booking_details(
-                org_id, booking_id, stato=new_status, expected=latest, **values
-            )
+            async with booking_note_policy_guard(
+                self.repo, org_id
+            ) as note_verticale:
+                values["note"] = DataMinimizationPolicy.minimize_note(
+                    values["note"], note_verticale
+                )
+                updated = await self.repo.update_booking_details(
+                    org_id, booking_id, stato=new_status, expected=latest, **values
+                )
         if not updated:
             raise ValueError(f"booking {booking_id} non trovato")
         if schedule_changed and self.whatsapp:

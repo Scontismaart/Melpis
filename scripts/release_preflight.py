@@ -12,6 +12,7 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from src.core.ai_providers import validate_openrouter_upstream
 from src.core.release_config import network_config_errors
 from src.core.calendar.production_readiness import calendar_production_readiness_errors
 
@@ -149,6 +150,13 @@ def validate(config):
     elif provider == "openrouter":
         _require(config, errors, "OPENROUTER_API_KEY", min_length=16)
         _require(config, errors, "AI_MODEL", prefix="openrouter/")
+        _require(config, errors, "OPENROUTER_APPROVED_UPSTREAM")
+        upstream = str(config.get("OPENROUTER_APPROVED_UPSTREAM") or "").strip()
+        if upstream and not _is_placeholder(upstream):
+            try:
+                validate_openrouter_upstream(upstream)
+            except RuntimeError as exc:
+                errors.append(str(exc))
     else:
         errors.append("AI_PROVIDER: unsupported free-only provider")
     if str(config.get("AI_BASE_URL") or "").strip() or str(config.get("AI_API_KEY") or "").strip():

@@ -1,7 +1,141 @@
 """Minimize restricted inbound payloads before storage and AI processing."""
 
 import json
+import logging
 import uuid
+from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
+SAFE_OPERATIONAL_NOTE_SECTORS = frozenset(
+    {"ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "hotel"}
+)
+
+
+def minimize_booking_note(note, verticale):
+    """Keep free text only for a known-safe sector supplied by an attestation."""
+    normalized = verticale.strip().lower() if isinstance(verticale, str) else None
+    if normalized in SAFE_OPERATIONAL_NOTE_SECTORS and isinstance(note, str):
+        return note
+    return ""
+
+
+def attested_booking_note_verticale(profile_verticale, classification):
+    """Return a sector only when the protected classification explicitly permits notes."""
+    if not isinstance(profile_verticale, str):
+        return None
+    try:
+        classification = dict(classification)
+    except (TypeError, ValueError):
+        return None
+    sector = classification.get("sector")
+    if not isinstance(sector, str):
+        return None
+    normalized_profile = profile_verticale.strip().lower()
+    normalized_sector = sector.strip().lower()
+    if (
+        not normalized_profile
+        or normalized_profile != normalized_sector
+        or classification.get("evidence_valid") is not True
+        or classification.get("operational_notes_allowed") is not True
+    ):
+        return None
+    return normalized_sector
+
+
+async def resolve_booking_note_verticale(repo, organization_id):
+    """Read the profile and protected note attestation from PostgreSQL; fail closed."""
+    try:
+        async with booking_note_policy_guard(repo, organization_id) as note_verticale:
+            return note_verticale
+    except Exception as exc:
+        logger.warning(
+            "booking_note_classification=unavailable error_type=%s",
+            type(exc).__name__,
+        )
+        return None
+
+
+@asynccontextmanager
+async def booking_note_policy_guard(repo, organization_id):
+    """Hold the classification lock while reading policy and using its result.
+
+    Classification edits take the exclusive transaction-level advisory lock in
+    migration 073. This shared transaction lock protects the gap between a
+    policy read and the repository call that uses the decision. Reuse the
+    repository's locked connection when a booking mutation already owns one.
+    """
+    pool = getattr(repo, "pool", None)
+    try:
+        org_id = uuid.UUID(str(organization_id))
+    except (TypeError, ValueError, AttributeError):
+        yield None
+        return
+    if pool is None:
+        yield None
+        return
+
+    connection_factory = getattr(type(repo), "_connection", None)
+    if callable(connection_factory):
+        connection_context = connection_factory(repo)
+    else:
+        connection_context = pool.acquire()
+
+    async with connection_context as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,815))",
+                str(org_id),
+            )
+            try:
+                note_verticale = await booking_note_verticale_from_connection(conn, org_id)
+            except Exception as exc:
+                logger.warning(
+                    "booking_note_classification=unavailable error_type=%s",
+                    type(exc).__name__,
+                )
+                note_verticale = None
+            yield note_verticale
+
+
+async def booking_note_verticale_from_connection(conn, organization_id):
+    """Resolve a permitted sector; the caller's transaction keeps the org row stable."""
+    row = await booking_note_classification_from_connection(conn, organization_id)
+    if row is None:
+        return None
+    return attested_booking_note_verticale(row.get("profile_verticale"), row)
+
+
+async def booking_note_classification_from_connection(conn, organization_id):
+    """Read profile and protected classification without treating agreement as permission."""
+    try:
+        org_id = uuid.UUID(str(organization_id))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    view_exists = await conn.fetchval(
+        "SELECT to_regclass('public.booking_privacy_classification_reader')"
+    )
+    if not view_exists:
+        return None
+    row = await conn.fetchrow(
+        """SELECT o.business_profile->>'verticale' AS profile_verticale,
+                  c.sector, c.operational_notes_allowed, c.evidence_valid
+             FROM public.organizations AS o
+             LEFT JOIN public.booking_privacy_classification_reader AS c
+               ON c.organization_id = o.id
+            WHERE o.id = $1
+            FOR SHARE OF o""",
+        org_id,
+    )
+    if not row:
+        return None
+    try:
+        # asyncpg.Record exposes keys() as an iterator, so copying the mapping
+        # is the supported conversion; inspecting the concrete keys type
+        # incorrectly rejects every real database row.
+        row = dict(row)
+    except (TypeError, ValueError, KeyError):
+        return None
+    return row
 
 MEDICAL_RESTRICTED = frozenset(
     {

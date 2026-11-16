@@ -98,6 +98,9 @@ async def _typed_legacy_mutation(request, service, user, *, allowed_operations, 
         booking = await repo.get_booking(user["organization_id"], allocation.booking_id)
         if booking is None:
             raise AllocationUnavailable("Booking receipt unavailable")
+        booking = await service._minimize_existing_booking(
+            booking, user["organization_id"]
+        )
         return {**booking, "c24": result}, result["replayed"]
     except AllocationConflict:
         raise HTTPException(409, "Booking request conflicts with current state") from None
@@ -174,7 +177,8 @@ async def update_settings(body: dict, request: Request,
 async def list_bookings(request: Request, data: str | None = None,
                         user: dict = Depends(require_ruolo("owner", "manager", "staff"))):
     service = _get_booking_service(request)
-    return await service.repo.list_bookings(user["organization_id"], data)
+    bookings = await service.repo.list_bookings(user["organization_id"], data)
+    return await service._minimize_booking_rows(bookings, user["organization_id"])
 
 
 @router.post("/{booking_id}/calendar-sync/retry")
@@ -224,6 +228,7 @@ async def create_booking(body: dict, request: Request,
         })
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     await _audit_booking(request, user, "prenotazione.creata_manualmente", b)
     return b
 
@@ -235,7 +240,7 @@ async def get_booking(booking_id: str, request: Request,
     b = await service.repo.get_booking(user["organization_id"], booking_id)
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
-    return b
+    return await service._minimize_existing_booking(b, user["organization_id"])
 
 
 @router.get("/{booking_id}/c24-context")
@@ -327,6 +332,9 @@ async def update_booking(booking_id: str, body: dict,
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    updated = await service._minimize_existing_booking(
+        updated, user["organization_id"]
+    )
     await _audit_booking(request, user, "prenotazione.modificata", updated)
     return updated
 
@@ -351,6 +359,7 @@ async def confirm_booking(booking_id: str, request: Request, body: dict | None =
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     await _audit_booking(request, user, "prenotazione.confermata", b)
     return b
 
@@ -381,6 +390,7 @@ async def reject_booking(
             raise HTTPException(status_code=404, detail=str(e))
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     if not replayed:
         await _audit_booking(request, user, "prenotazione.rifiutata", b)
     return b
@@ -410,6 +420,7 @@ async def cancel_booking(
             raise HTTPException(409, "Managed booking requires an idempotency key and both allocation revisions") from None
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     if not replayed:
         await _audit_booking(request, user, "prenotazione.annullata", b)
     return b
@@ -442,7 +453,11 @@ async def _mark_managed_booking(service, user, booking_id, key, allocation_revis
             repo.pool, user["organization_id"], user["auth_user_id"], command,
             mutation=BookingMutation(operation, "", "", ""),
         )
-        return await repo.get_booking(user["organization_id"], command.booking_id), result["replayed"]
+        booking = await repo.get_booking(user["organization_id"], command.booking_id)
+        booking = await service._minimize_existing_booking(
+            booking, user["organization_id"]
+        )
+        return booking, result["replayed"]
     except AllocationConflict:
         raise HTTPException(409, "Booking request conflicts with current state") from None
     except AllocationDenied:
@@ -477,6 +492,9 @@ async def mark_no_show(
             raise HTTPException(409, "Managed booking requires an idempotency key and both allocation revisions") from None
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+    booking = await service._minimize_existing_booking(
+        booking, user["organization_id"]
+    )
     if not replayed:
         await _audit_booking(request, user, "prenotazione.no_show", booking)
     return booking
@@ -504,5 +522,6 @@ async def mark_completed(booking_id: str, request: Request, body: dict | None = 
         raise HTTPException(status_code=409, detail=str(e))
     if not b:
         raise HTTPException(status_code=404, detail="Booking not found")
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     await _audit_booking(request, user, "prenotazione.completata", b)
     return b

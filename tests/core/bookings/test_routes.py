@@ -2,7 +2,7 @@ import os
 import uuid
 import pytest
 import httpx
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from fastapi import Depends, HTTPException
 
 API_KEY = "test-api-key-12345"
@@ -116,6 +116,65 @@ async def test_get_booking(async_client, sample_org):
     })
     assert resp.status_code == 200
     assert resp.json()["id"] == b_id
+
+
+async def test_legacy_booking_note_requires_attestation_on_reads(
+    async_client, sample_org, repo, tomorrow
+):
+    booking = await repo.create_booking(
+        organization_id=sample_org["id"],
+        nome_cliente="Synthetic Guest",
+        data=tomorrow,
+        ora="18:00",
+        coperti=2,
+        note="synthetic legacy private note",
+    )
+    headers = {
+        "X-API-Key": API_KEY,
+        "X-Organization-Id": str(sample_org["id"]),
+    }
+
+    detail = await async_client.get(f"/api/bookings/{booking['id']}", headers=headers)
+    listed = await async_client.get("/api/bookings", headers=headers)
+
+    assert detail.status_code == 200
+    assert detail.json()["note"] == ""
+    assert listed.status_code == 200
+    listed_booking = next(row for row in listed.json() if row["id"] == str(booking["id"]))
+    assert listed_booking["note"] == ""
+    stored = await repo.get_booking(sample_org["id"], booking["id"])
+    assert stored["note"] == "synthetic legacy private note"
+
+
+async def test_create_response_rechecks_note_policy(
+    async_client, sample_org, repo, booking_service, tomorrow, monkeypatch
+):
+    booking = await repo.create_booking(
+        organization_id=sample_org["id"],
+        nome_cliente="Synthetic Guest",
+        data=tomorrow,
+        ora="18:00",
+        coperti=2,
+        note="synthetic stale note",
+    )
+    monkeypatch.setattr(
+        booking_service, "create_booking", AsyncMock(return_value=booking)
+    )
+
+    response = await async_client.post("/api/bookings", json={
+        "nome_cliente": "Synthetic Guest",
+        "telefono": "",
+        "data": tomorrow.isoformat(),
+        "ora": "18:00",
+        "coperti": 2,
+        "note": "synthetic stale note",
+    }, headers={
+        "X-API-Key": API_KEY,
+        "X-Organization-Id": str(sample_org["id"]),
+    })
+
+    assert response.status_code == 200
+    assert response.json()["note"] == ""
 
 
 async def test_get_booking_not_found(async_client, sample_org):

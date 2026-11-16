@@ -68,9 +68,6 @@ class Repository(TenantScopedRepository):
     async def record_processing_failure(self, message_id, organization_id, handling_type):
         return await self._msg_repo.record_processing_failure(message_id, organization_id, handling_type)
 
-    async def purge_simulation_requests(self, retention_days: int = 30) -> int:
-        return await self._msg_repo.purge_simulation_requests(retention_days)
-
     def __getattr__(self, name: str):
         if name in (
             "_org_repo", "_contact_repo", "_conv_repo", "_msg_repo",
@@ -246,15 +243,6 @@ class Repository(TenantScopedRepository):
         return await self._msg_repo.reap_stale_claims(
             timeout_minutes=timeout_minutes, dead_letter_threshold=dead_letter_threshold
         )
-
-    async def delete_expired_messages(self, retention_days: int = 60) -> int:
-        return await self._msg_repo.delete_expired_messages(retention_days=retention_days)
-
-    async def purge_soft_deleted_messages(self, grace_days: int = 30) -> int:
-        return await self._msg_repo.purge_soft_deleted_messages(grace_days=grace_days)
-
-    async def cleanup_empty_conversations(self) -> int:
-        return await self._conv_repo.cleanup_empty_conversations()
 
     async def get_outbound_dedup(self, organization_id, message_id) -> dict | None:
         return await self._msg_repo.get_outbound_dedup(organization_id, message_id)
