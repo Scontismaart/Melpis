@@ -3,6 +3,7 @@
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 SAFE_OPERATIONAL_NOTE_SECTORS = frozenset(
@@ -43,16 +44,9 @@ def attested_booking_note_verticale(profile_verticale, classification):
 
 async def resolve_booking_note_verticale(repo, organization_id):
     """Read the profile and protected note attestation from PostgreSQL; fail closed."""
-    pool = getattr(repo, "pool", None)
-    if pool is None or organization_id is None:
-        return None
     try:
-        org_id = uuid.UUID(str(organization_id))
-    except (TypeError, ValueError, AttributeError):
-        return None
-    try:
-        async with pool.acquire() as conn:
-            return await booking_note_verticale_from_connection(conn, org_id)
+        async with booking_note_policy_guard(repo, organization_id) as note_verticale:
+            return note_verticale
     except Exception as exc:
         logger.warning(
             "booking_note_classification=unavailable error_type=%s",
@@ -61,8 +55,50 @@ async def resolve_booking_note_verticale(repo, organization_id):
         return None
 
 
+@asynccontextmanager
+async def booking_note_policy_guard(repo, organization_id):
+    """Hold the classification lock while reading policy and using its result.
+
+    Classification edits take the exclusive transaction-level advisory lock in
+    migration 073. This shared transaction lock protects the gap between a
+    policy read and the repository call that uses the decision. Reuse the
+    repository's locked connection when a booking mutation already owns one.
+    """
+    pool = getattr(repo, "pool", None)
+    try:
+        org_id = uuid.UUID(str(organization_id))
+    except (TypeError, ValueError, AttributeError):
+        yield None
+        return
+    if pool is None:
+        yield None
+        return
+
+    connection_factory = getattr(type(repo), "_connection", None)
+    if callable(connection_factory):
+        connection_context = connection_factory(repo)
+    else:
+        connection_context = pool.acquire()
+
+    async with connection_context as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,815))",
+                str(org_id),
+            )
+            try:
+                note_verticale = await booking_note_verticale_from_connection(conn, org_id)
+            except Exception as exc:
+                logger.warning(
+                    "booking_note_classification=unavailable error_type=%s",
+                    type(exc).__name__,
+                )
+                note_verticale = None
+            yield note_verticale
+
+
 async def booking_note_verticale_from_connection(conn, organization_id):
-    """Resolve an explicitly permitted note sector on the current connection."""
+    """Resolve a permitted sector; the caller's transaction keeps the org row stable."""
     try:
         org_id = uuid.UUID(str(organization_id))
     except (TypeError, ValueError, AttributeError):
@@ -78,7 +114,8 @@ async def booking_note_verticale_from_connection(conn, organization_id):
              FROM public.organizations AS o
              LEFT JOIN public.booking_privacy_classification_reader AS c
                ON c.organization_id = o.id
-            WHERE o.id = $1""",
+            WHERE o.id = $1
+            FOR SHARE OF o""",
         org_id,
     )
     if not row:

@@ -1,4 +1,5 @@
 """Privacy and idempotency at the external booking boundary."""
+import asyncio
 from datetime import date, time
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -16,6 +17,21 @@ NOTE = 'Please use the side entrance.'
 class _ClassificationConn:
     def __init__(self, repo):
         self.repo = repo
+
+    def transaction(self):
+        class _Transaction:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *_args):
+                return False
+
+        return _Transaction()
+
+    async def execute(self, query, *_args):
+        if "pg_advisory_xact_lock_shared" in query:
+            return "SELECT 1"
+        raise AssertionError(f"Unexpected query: {query}")
 
     async def fetchval(self, query, *_args):
         if "to_regclass('public.booking_privacy_classification_reader')" in query:
@@ -128,7 +144,7 @@ async def test_legacy_config_cannot_allow_medical_notes(boundary, booking_reques
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode', ['shadow', 'authoritative'])
 @pytest.mark.parametrize('dpa', [False, 'false'])
-async def test_resolved_nonmedical_dispatch_preserves_note(boundary, booking_request, mode, dpa):
+async def test_external_dispatch_drops_note_even_with_valid_classification(boundary, booking_request, mode, dpa):
     repo, adapter, router = boundary
     repo.booking_privacy_classification = {
         'profile_verticale': 'ristorante',
@@ -138,9 +154,47 @@ async def test_resolved_nonmedical_dispatch_preserves_note(boundary, booking_req
     }
     repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode, 'medical_dpa_signed': dpa}}
     await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
-    assert adapter.create_booking.await_args.args[1].note == NOTE
+    assert adapter.create_booking.await_args.args[1].note == ''
     assert booking_request.note == NOTE
     repo.get_credentials.assert_awaited_once_with(ORG)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['shadow', 'authoritative'])
+async def test_cancelled_external_create_is_recorded_uncertain(boundary, booking_request, mode):
+    repo, adapter, router = boundary
+    repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode}}
+    adapter.create_booking.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
+
+    assert adapter.create_booking.await_args.args[1].note == ''
+    repo.record_sync_failure.assert_awaited_once_with(
+        ORG,
+        booking_request.idempotency_key,
+        'external_outcome_unverified',
+        sync_status='uncertain',
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['shadow', 'authoritative'])
+async def test_cancelled_success_receipt_is_recorded_uncertain(boundary, booking_request, mode):
+    repo, adapter, router = boundary
+    repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode}}
+    repo.record_sync_success.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
+
+    adapter.create_booking.assert_awaited_once()
+    repo.record_sync_failure.assert_awaited_once_with(
+        ORG,
+        booking_request.idempotency_key,
+        'external_outcome_unverified',
+        sync_status='uncertain',
+    )
 
 
 @pytest.mark.asyncio

@@ -67,6 +67,9 @@ async def test_all_writes_roll_back_after_outbox(pg_pool, monkeypatch):
 
 async def test_replay_matches_complete_command_and_legacy_cannot_replay(pg_pool):
     env = await create_environment(pg_pool)
+    await pg_pool.execute('''INSERT INTO booking_privacy_classifications
+        (organization_id,sector,operational_notes_allowed,revision,evidence_reference)
+        VALUES($1,'ristorante',true,1,'synthetic-test-evidence')''', env.org)
     booking = await env.booking()
     request = env.request(booking)
     first = await apply_booking_mutation(pg_pool, env.org, env.auth, request, mutation=edit())
@@ -81,6 +84,26 @@ async def test_replay_matches_complete_command_and_legacy_cannot_replay(pg_pool)
         await env.apply(request)
     assert await pg_pool.fetchval('SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 'changed'
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+
+
+async def test_unattested_note_is_removed_before_booking_write_and_receipt_hash(pg_pool):
+    env = await create_environment(pg_pool)
+    booking = await env.booking()
+    request = env.request(booking)
+    first = await apply_booking_mutation(
+        pg_pool, env.org, env.auth, request,
+        mutation=replace(edit(), note='unattested free text'),
+    )
+    replay = await apply_booking_mutation(
+        pg_pool, env.org, env.auth, request,
+        mutation=replace(edit(), note='different raw free text'),
+    )
+
+    assert first['outcome'] == 'allocated'
+    assert replay['replayed'] is True
+    assert await pg_pool.fetchval(
+        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking
+    ) == ''
 
 
 async def test_unauthorized_no_mutation(pg_pool):

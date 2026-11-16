@@ -228,6 +228,7 @@ async def create_booking(body: dict, request: Request,
         })
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    b = await service._minimize_existing_booking(b, user["organization_id"])
     await _audit_booking(request, user, "prenotazione.creata_manualmente", b)
     return b
 

@@ -103,6 +103,16 @@ class _DBConnection:
         self.fetchval = AsyncMock(side_effect=self._fetchval)
         self.is_closed = MagicMock(return_value=False)
 
+    def transaction(self):
+        class _Transaction:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *_args):
+                return False
+
+        return _Transaction()
+
     async def _fetchrow(self, query, *_args):
         if "FROM bookings" in query:
             return self.booking
@@ -352,14 +362,13 @@ async def test_optional_create_requires_get_404_then_dispatches_one_insert_and_v
         "privacy_sector",
         "privacy_notes_allowed",
         "privacy_evidence_valid",
-        "expected_note",
     ),
     [
-        ("studio_medico_dentista", "medical_disabled", False, True, ""),
-        ("ristorante", "ristorante", True, True, "synthetic sensitive note"),
-        ("ristorante", "medical_disabled", False, True, ""),
-        ("ristorante", None, None, None, ""),
-        (None, None, None, None, ""),
+        ("studio_medico_dentista", "medical_disabled", False, True),
+        ("ristorante", "ristorante", True, True),
+        ("ristorante", "medical_disabled", False, True),
+        ("ristorante", None, None, None),
+        (None, None, None, None),
     ],
 )
 async def test_calendar_dispatch_minimizes_notes_from_server_owned_tenant_profile(
@@ -367,7 +376,6 @@ async def test_calendar_dispatch_minimizes_notes_from_server_owned_tenant_profil
     privacy_sector,
     privacy_notes_allowed,
     privacy_evidence_valid,
-    expected_note,
 ):
     claim = _claim()
     booking = {
@@ -397,9 +405,8 @@ async def test_calendar_dispatch_minimizes_notes_from_server_owned_tenant_profil
 
     assert service.provider.post_count == 1
     event = service.provider.event_store[EVENT_ID]
-    assert f"Note: {expected_note}" in event["description"]
-    if expected_note == "":
-        assert "synthetic sensitive note" not in event["description"]
+    assert "synthetic sensitive note" not in event["description"]
+    assert "Note:" not in event["description"]
 
 
 @pytest.mark.asyncio
@@ -489,6 +496,47 @@ async def test_timeout_after_insert_persists_uncertainty_and_recovery_does_not_p
     assert [call[0] for call in service.provider.calls[-1:]] == ["GET"]
     assert service.queue.failures == []
     assert service.queue.verified_rows == [(claim, EVENT_ID, "etag-created")]
+
+
+@pytest.mark.asyncio
+async def test_recovery_scrubs_legacy_note_from_owned_calendar_event():
+    claim = _claim(recovery=True)
+    service = _Service(claim)
+    old_event = _owned_event(claim, etag='"etag-before-scrub"')
+    old_event["description"] = "Note: synthetic sensitive note"
+    old_event["extendedProperties"]["private"]["payload_hash"] = event_hash(old_event)
+    claim["calendar_payload_hash"] = old_event["extendedProperties"]["private"]["payload_hash"]
+    service.provider.event_store[EVENT_ID] = old_event
+
+    await CalendarLifecycle(service).run(claim)
+
+    assert [call[0] for call in service.provider.calls] == ["GET", "PUT", "GET"]
+    update = service.provider.calls[1]
+    assert update[1] == EVENT_ID
+    assert update[2] == {"If-Match": '"etag-before-scrub"'}
+    event = service.provider.event_store[EVENT_ID]
+    assert "synthetic sensitive note" not in event["description"]
+    assert "Note:" not in event["description"]
+    assert service.queue.dispatched_hashes == [service.body["extendedProperties"]["private"]["payload_hash"]]
+    assert claim["calendar_payload_hash"] == service.body["extendedProperties"]["private"]["payload_hash"]
+    assert service.queue.verified_rows == [(claim, EVENT_ID, "etag-updated")]
+
+
+@pytest.mark.asyncio
+async def test_recovery_retries_owned_calendar_delete_with_event_etag():
+    claim = _claim("delete", recovery=True)
+    service = _Service(claim)
+    service.provider.event_store[EVENT_ID] = _owned_event(
+        claim, etag='"etag-delete-retry"'
+    )
+
+    await CalendarLifecycle(service).run(claim)
+
+    assert [call[0] for call in service.provider.calls] == ["GET", "DELETE", "GET"]
+    assert service.provider.calls[1][2] == {"If-Match": '"etag-delete-retry"'}
+    assert service.queue.dispatched_hashes == ["delete"]
+    assert service.queue.verified_rows == [(claim, None, None)]
+    assert service.queue.failures == []
 
 
 @pytest.mark.asyncio

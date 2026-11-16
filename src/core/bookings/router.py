@@ -9,6 +9,7 @@ Componenti principali:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from enum import Enum
@@ -286,6 +287,49 @@ class BookingAdapterRouter:
 
         return InternalBookingAdapter(), BookingMode.LOCAL_ONLY, config
 
+    async def _create_with_privacy_guard(
+        self, adapter, org_uuid, req, medical_dpa_signed=False
+    ):
+        """Keep optional free text inside Melpis until provider terms are verified."""
+        minimized_req = self.data_minimizer.apply(
+            req,
+            verticale=None,
+            medical_dpa_signed=medical_dpa_signed,
+        )
+        try:
+            return await adapter.create_booking(org_uuid, minimized_req)
+        except asyncio.CancelledError:
+            # The provider may have accepted the request before cancellation.
+            # Persist uncertainty so a retry cannot issue a second booking.
+            await self._record_external_uncertain(org_uuid, req)
+            raise
+
+    async def _record_external_uncertain(self, org_uuid, req):
+        try:
+            await asyncio.shield(self.repo.record_sync_failure(
+                org_uuid,
+                req.idempotency_key,
+                "external_outcome_unverified",
+                sync_status="uncertain",
+            ))
+        except Exception as mark_error:
+            logger.error(
+                "External receipt update failed org=%s error_type=%s",
+                org_uuid,
+                type(mark_error).__name__,
+            )
+
+    async def _record_external_success(self, org_uuid, req, external_booking_id):
+        try:
+            return await self.repo.record_sync_success(
+                org_uuid, req.idempotency_key, external_booking_id
+            )
+        except asyncio.CancelledError:
+            # Cancellation can arrive after the provider returned but before
+            # its durable receipt committed. Preserve a no-replay outcome.
+            await self._record_external_uncertain(org_uuid, req)
+            raise
+
     async def dispatch_create_booking(
         self,
         org_id: uuid.UUID | str,
@@ -369,25 +413,19 @@ class BookingAdapterRouter:
                     error_message="Esito esterno da riconciliare",
                 )
 
-        # 2. Data Minimization Fail-Closed a monte
-        from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
-
-        note_verticale = await resolve_booking_note_verticale(self.repo, org_uuid)
-        minimized_req = self.data_minimizer.apply(
-            req,
-            verticale=note_verticale,
-            medical_dpa_signed=medical_dpa_signed,
-        )
-
+        # 2. Free-text notes stay inside Melpis until the selected provider's
+        # account, terms, and retention controls have been verified.
         # 3. Invocazione in modalità SHADOW
         if mode == BookingMode.SHADOW:
             shadow_uncertain = False
             try:
-                shadow_res = await adapter.create_booking(org_uuid, minimized_req)
+                shadow_res = await self._create_with_privacy_guard(
+                    adapter, org_uuid, req, medical_dpa_signed
+                )
                 if not shadow_res or not shadow_res.success or not shadow_res.external_booking_id:
                     raise RuntimeError("External booking outcome unverified")
-                marked = await self.repo.record_sync_success(
-                    org_uuid, req.idempotency_key, shadow_res.external_booking_id,
+                marked = await self._record_external_success(
+                    org_uuid, req, shadow_res.external_booking_id,
                 )
                 if not marked:
                     raise RuntimeError("External booking receipt unavailable")
@@ -408,12 +446,16 @@ class BookingAdapterRouter:
 
         # 5. Invocazione in modalità AUTHORITATIVE o MIRROR
         try:
-            res = await adapter.create_booking(org_uuid, minimized_req)
+            res = await self._create_with_privacy_guard(
+                adapter, org_uuid, req, medical_dpa_signed
+            )
             # The adapter contract does not prove whether a failure result
             # happened before the mutating request reached the provider.
             if not res.success or not res.external_booking_id:
                 raise RuntimeError("External booking outcome unverified")
-            marked = await self.repo.record_sync_success(org_uuid, req.idempotency_key, res.external_booking_id)
+            marked = await self._record_external_success(
+                org_uuid, req, res.external_booking_id
+            )
             if not marked:
                 raise RuntimeError("External booking receipt unavailable")
             return res

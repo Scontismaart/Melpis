@@ -87,24 +87,22 @@ class BookingService:
     async def _minimize_booking_rows(self, bookings, org_id):
         if not bookings:
             return bookings
-        from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
         from src.core.bookings.router import DataMinimizationPolicy
 
-        note_verticale = await resolve_booking_note_verticale(
-            self.org_repo or self.repo, org_id
-        )
-        safe_bookings = []
-        for booking in bookings:
-            try:
-                safe_booking = dict(booking)
-            except (TypeError, ValueError) as exc:
-                logger.error("booking_note_minimization=failed error_type=%s", type(exc).__name__)
-                raise ValueError("Booking data unavailable") from None
-            safe_booking["note"] = DataMinimizationPolicy.minimize_note(
-                safe_booking.get("note", ""), note_verticale
-            )
-            safe_bookings.append(safe_booking)
-        return safe_bookings
+        async with booking_note_policy_guard(self.repo, org_id) as note_verticale:
+            safe_bookings = []
+            for booking in bookings:
+                try:
+                    safe_booking = dict(booking)
+                except (TypeError, ValueError) as exc:
+                    logger.error("booking_note_minimization=failed error_type=%s", type(exc).__name__)
+                    raise ValueError("Booking data unavailable") from None
+                safe_booking["note"] = DataMinimizationPolicy.minimize_note(
+                    safe_booking.get("note", ""), note_verticale
+                )
+                safe_bookings.append(safe_booking)
+            return safe_bookings
 
     async def _minimize_existing_booking(self, booking, org_id):
         if not booking:
@@ -229,13 +227,8 @@ class BookingService:
         coperti = values["coperti"]
         note = values["note"]
         resolved_verticale = await self._resolve_profile_verticale(org_id)
-        from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
         from src.core.bookings.router import DataMinimizationPolicy
-
-        note_verticale = await resolve_booking_note_verticale(
-            self.org_repo or self.repo, org_id
-        )
-        note = DataMinimizationPolicy.minimize_note(note, note_verticale)
         # Eventi esterni su Google Calendar (creati fuori dal sistema) bloccano
         # lo slot come quelli interni. Check pre-lock: chiamata di rete fuori
         # dalla sezione critica. Fail-open documentato in _google_slot_occupato.
@@ -262,15 +255,19 @@ class BookingService:
             richiede_dep = await self._valuta_richiede_deposito(
                 org_id, coperti=coperti, tipo_evento=tipo_evento, ora=ora, data=data
             )
-            booking = await self.repo.create_booking(
-                organization_id=org_id, nome_cliente=nome_cliente,
-                telefono=telefono, data=data, ora=ora, coperti=coperti,
-                note=note, tipo_evento=tipo_evento, stato="in_attesa", origine=origine,
-                richiede_deposito=richiede_dep,
-                richiede_intervento=richiede_intervento,
-                id_conversazione=id_conversazione or None,
-                source_message_id=source_message_id,
-            )
+            async with booking_note_policy_guard(
+                self.repo, org_id
+            ) as note_verticale:
+                minimized_note = DataMinimizationPolicy.minimize_note(note, note_verticale)
+                booking = await self.repo.create_booking(
+                    organization_id=org_id, nome_cliente=nome_cliente,
+                    telefono=telefono, data=data, ora=ora, coperti=coperti,
+                    note=minimized_note, tipo_evento=tipo_evento, stato="in_attesa", origine=origine,
+                    richiede_deposito=richiede_dep,
+                    richiede_intervento=richiede_intervento,
+                    id_conversazione=id_conversazione or None,
+                    source_message_id=source_message_id,
+                )
         if self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(booking, org_id)
@@ -390,15 +387,8 @@ class BookingService:
             "coperti": changes.get("coperti", current.get("coperti")),
             "note": changes.get("note", current.get("note", "")),
         }
-        from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
+        from src.core.bookings.privacy_boundary import booking_note_policy_guard
         from src.core.bookings.router import DataMinimizationPolicy
-
-        note_verticale = await resolve_booking_note_verticale(
-            self.org_repo or self.repo, org_id
-        )
-        values["note"] = DataMinimizationPolicy.minimize_note(
-            values["note"], note_verticale
-        )
         values = self._validated_booking_values(**values)
         schedule_changed = any(
             values[key] != self._format_booking_value(key, current.get(key))
@@ -432,9 +422,15 @@ class BookingService:
                         f"slot pieno per {values['coperti']} coperti alle {values['ora']}",
                         alternative=disp.alternative,
                     )
-            updated = await self.repo.update_booking_details(
-                org_id, booking_id, stato=new_status, expected=latest, **values
-            )
+            async with booking_note_policy_guard(
+                self.repo, org_id
+            ) as note_verticale:
+                values["note"] = DataMinimizationPolicy.minimize_note(
+                    values["note"], note_verticale
+                )
+                updated = await self.repo.update_booking_details(
+                    org_id, booking_id, stato=new_status, expected=latest, **values
+                )
         if not updated:
             raise ValueError(f"booking {booking_id} non trovato")
         if schedule_changed and self.whatsapp:

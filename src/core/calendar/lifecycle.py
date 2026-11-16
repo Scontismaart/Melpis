@@ -69,35 +69,18 @@ class CalendarLifecycle:
             return
         async with s.repo.pool.acquire() as conn:
             booking = await conn.fetchrow("""SELECT b.*,
-                    f.organization_id IS NOT NULL AS c24_sector_fenced,
-                    o.business_profile->>'verticale' AS tenant_verticale,
-                    c.sector AS privacy_sector,
-                    c.operational_notes_allowed AS privacy_notes_allowed,
-                    c.evidence_valid AS privacy_evidence_valid
+                    f.organization_id IS NOT NULL AS c24_sector_fenced
                 FROM bookings b
-                JOIN organizations o ON o.id=b.organization_id
-                LEFT JOIN public.booking_privacy_classification_reader c
-                  ON c.organization_id=b.organization_id
                 LEFT JOIN booking_sector_admission_fences f
                   ON f.organization_id=$1 AND f.organization_id=b.organization_id
                 WHERE b.organization_id=$1 AND b.id=$2""",
                 claim["organization_id"], claim["internal_booking_id"])
         if booking:
-            from src.core.bookings.privacy_boundary import attested_booking_note_verticale
-            from src.core.bookings.router import DataMinimizationPolicy
-
             booking = dict(booking)
-            note_verticale = attested_booking_note_verticale(
-                booking.get("tenant_verticale"),
-                {
-                    "sector": booking.get("privacy_sector"),
-                    "operational_notes_allowed": booking.get("privacy_notes_allowed"),
-                    "evidence_valid": booking.get("privacy_evidence_valid"),
-                },
-            )
-            booking["note"] = DataMinimizationPolicy.minimize_note(
-                booking.get("note", ""), note_verticale
-            )
+            # Calendar is an external processor. Optional free text remains
+            # internal until provider-account retention and deletion controls
+            # are verified, regardless of internal note classification.
+            booking["note"] = ""
         if booking and booking.get("c24_sector_fenced") and (
             booking.get("calendar_confirm_pending") or claim["calendar_claimed_action"] == "authoritative"
         ):
@@ -117,15 +100,76 @@ class CalendarLifecycle:
         if event is not None and not s.owned(event, claim):
             await self.queue.fail(claim, "event_ownership_conflict", uncertain=claim["recovery"], blocked=not claim["recovery"])
             return
+        body = await s.event_body(dict(booking), claim) if booking and action != "delete" else None
+        digest = body["extendedProperties"]["private"]["payload_hash"] if body else None
         if claim["recovery"]:
-            if action == "delete" and (event is None or event.get("status") == "cancelled"):
+            if action == "delete":
+                if event is None or event.get("status") == "cancelled":
+                    await self.queue.verified(claim, None, None)
+                    return
+                if event.get("status") != "confirmed":
+                    await self.queue.fail(claim, "event_status_unverified", uncertain=True)
+                    return
+                if not event.get("etag"):
+                    await self.queue.fail(claim, "event_etag_missing", uncertain=True, blocked=True)
+                    return
+                request = provider.events().delete(
+                    calendarId=claim["calendar_id"], eventId=event["id"]
+                )
+                request.headers["If-Match"] = event["etag"]
+                if not await self.queue.dispatch(claim, "delete"):
+                    await self.queue.fail(claim, "recovery_delete_not_claimed", uncertain=True)
+                    return
+                claim["dispatched"] = True
+                try:
+                    await s.execute(request)
+                except HttpError as exc:
+                    if exc.resp.status not in (404, 409, 412):
+                        raise
+                observed = await s.read_event(provider, claim)
+                if observed and observed.get("status") != "cancelled":
+                    await self.queue.fail(claim, "delete_unverified", uncertain=True)
+                    return
                 await self.queue.verified(claim, None, None)
                 return
-            if not event or not s.matches(event, claim, claim["calendar_payload_hash"]):
+            if not event or not body or not digest:
                 # 404 does not prove that the old request will never arrive.
                 await self.queue.fail(claim, "outcome_unverified", uncertain=True)
                 return
-            if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event):
+            if event.get("status") == "cancelled":
+                await self.queue.fail(claim, "event_cancelled", blocked=True)
+                return
+            if event.get("status") != "confirmed":
+                await self.queue.fail(claim, "event_status_unverified", uncertain=True)
+                return
+            if not s.matches(event, claim, digest):
+                revision = booking.get("calendar_revision")
+                if revision is not None and revision != claim["calendar_claimed_revision"]:
+                    await self.queue.fail(claim, "superseded_recovery", uncertain=True)
+                    return
+                if not event.get("etag"):
+                    await self.queue.fail(claim, "event_etag_missing", uncertain=True, blocked=True)
+                    return
+                if not await self.queue.dispatch(claim, digest):
+                    await self.queue.fail(claim, "recovery_update_not_claimed", uncertain=True)
+                    return
+                claim["calendar_payload_hash"] = digest
+                claim["dispatched"] = True
+                request = provider.events().update(
+                    calendarId=claim["calendar_id"], eventId=event["id"], body=body
+                )
+                request.headers["If-Match"] = event["etag"]
+                try:
+                    await s.execute(request)
+                except HttpError as exc:
+                    if exc.resp.status not in (409, 412):
+                        raise
+                event = await s.read_event(provider, claim)
+            if not event or not s.matches(event, claim, digest):
+                await self.queue.fail(claim, "recovery_update_unverified", uncertain=True)
+                return
+            claim["calendar_payload_hash"] = digest
+            if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event, body):
                 return
             await self.queue.verified(claim, event["id"], event["etag"], self.finalize)
             return
@@ -148,8 +192,9 @@ class CalendarLifecycle:
                 return
             await self.queue.verified(claim, None, None)
             return
-        body = await s.event_body(dict(booking), claim)
-        digest = body["extendedProperties"]["private"]["payload_hash"]
+        if not body or not digest:
+            await self.queue.fail(claim, "booking_unavailable", blocked=True)
+            return
         claim["calendar_payload_hash"] = digest
         if action == "authoritative" and not await self.verify_slot(provider, claim, connection, event, body):
             return
