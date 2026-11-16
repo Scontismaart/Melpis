@@ -43,8 +43,8 @@ DEFAULT_TARGETS = sorted(
 # It can never exempt another SQL literal in the same function. The hash is
 # surfaced by the checker when a new exact exception needs review.
 ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
-    ("src/core/bookings/privacy_boundary.py::booking_note_verticale_from_connection", "fecf5dbd08454a6dc999049ef2bd54b0151abd3128e5cb5a0bfddc4384b8f77d"):
-        "exact tenant lookup filters organizations.id=$1 and joins the protected reader on organization_id; FOR SHARE OF o stabilizes the profile during the decision",
+    ("src/core/bookings/privacy_boundary.py::booking_note_classification_from_connection", "fecf5dbd08454a6dc999049ef2bd54b0151abd3128e5cb5a0bfddc4384b8f77d"):
+        "exact tenant lookup filters organizations.id=$1 and joins the protected reader on organization_id; the caller holds the shared classification lock and FOR SHARE of organizations stabilizes the profile during the decision",
     ("src/core/gdpr/exporter.py::prepare", "d0d8e62096589fe82dc9a337a61b98164148449106aa71f93d09e1929b927089"):
         "bounded row wrapper over frozen catalogue only; runtime catalogue_query proves classified sources and every tenant bind; all variants and rejected mutations tested",
     ("src/core/gdpr/deletion.py::advance", "f9a258519e3fa406f40097d69d11998cfd74a40e5319170972e11d64c84a1b56"):
