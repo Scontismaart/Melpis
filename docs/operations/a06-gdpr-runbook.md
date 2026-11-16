@@ -129,6 +129,42 @@ inventory review; adapters cannot confirm it. Only a verified,
    worker-cache handling, backup treatment, legal decision, or review remains
    unresolved.
 
+## Review of partial subject exports
+
+The frozen subject export intentionally excludes unstructured content when a
+reliable subject boundary cannot be proven. The following is a proposed
+operator procedure, not an enabled application feature or evidence that a
+manual review has occurred. Until the controller adopts the workflow and names
+an authorized reviewer and secure delivery route, keep the export marked
+partial or held.
+
+1. Authenticate the requester through the owner-and-MFA route and verify the
+   requested subject belongs to the requested organization. Use the export
+   operation ID and manifest as the scope record; never search by a contact
+   string across tenants.
+2. List the excluded/partial categories from the manifest. Identify only the
+   specific records whose relationship can be reviewed without expanding the
+   organization scope. Do not query arbitrary tables or change the frozen
+   export snapshot in place.
+3. Assign a reviewer authorized by the controller and restricted to the
+   necessary tenant and categories. Review only the excluded material needed
+   to answer the request. Redact other people's identifiers, credentials,
+   unrelated special-category data, and content outside the request scope.
+4. If the subject cannot be separated reliably, the record has unknown
+   lineage, or a hold/third-party right may apply, stop and refer it to the
+   controller or qualified reviewer. Leave that category partial/held; do not
+   infer ownership or erase the source to make the export appear complete.
+5. If the controller authorizes a supplementary extract, store it through the
+   approved encrypted case-delivery channel. Record only the operation ID,
+   category, reviewer, review date, redaction decision, disposition, and a
+   non-sensitive artifact reference/hash. Keep source text and tokens out of
+   issue comments, CI output, and ordinary logs.
+6. Deliver the original manifest and the separately identified supplement
+   together. Do not mark the application operation complete by ad hoc SQL.
+   Resolve the status only through a verified workflow that records every
+   requested category and outstanding provider/backup step; otherwise the
+   result remains partial.
+
 The barrier prevents later guarded data production for an erased contact or
 organization. It is durable and is not cleared by a timeout. Before allowing
 traffic to resume after an erasure event, verify all relevant writers honor
