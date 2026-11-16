@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.core.auth.dependencies import get_current_user, get_organization_context
 from src.core.bookings.booking_mutation_contract import BookingMutation, NewBookingLineage
+from src.core.bookings.service import BookingService
 from src.core.bookings.routes import router
 from src.core.db.repositories.booking_repo import BookingRepository, ManagedBookingMutationRequired
 from src.core.db.repositories.message_repo import MessageRepository
@@ -40,7 +41,7 @@ def app_for(env):
         return dict(identity)
     app = FastAPI()
     app.include_router(router)
-    app.state.booking_service = SimpleNamespace(repo=BookingRepository(env.pool))
+    app.state.booking_service = BookingService(repo=BookingRepository(env.pool))
     app.dependency_overrides[get_current_user] = verified
     app.dependency_overrides[get_organization_context] = verified
     return app, identity
@@ -148,7 +149,6 @@ async def test_concurrent_fenced_creates_do_not_duplicate_resource(pg_pool, monk
 
 
 async def test_non_opted_in_manual_route_keeps_legacy_contract(pg_pool, monkeypatch):
-    from src.core.bookings.service import BookingService
     env = await create_environment(pg_pool, 'parrucchiere')
     app, identity = app_for(env)
     app.state.booking_service = BookingService(repo=BookingRepository(pg_pool))

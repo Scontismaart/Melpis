@@ -92,7 +92,7 @@ async def owner_revoke(pool, org):
 
 
 @pytest.mark.asyncio
-async def test_owner_route_revokes_dpa_during_mode_change(realpg_pool, sample_org):
+async def test_owner_route_does_not_persist_client_dpa_during_mode_change(realpg_pool, sample_org):
     pool, org = realpg_pool, sample_org['id']
     await setup(pool, org)
     gate = GatePool(pool)
@@ -107,7 +107,7 @@ async def test_owner_route_revokes_dpa_during_mode_change(realpg_pool, sample_or
         final = await row(pool, org)
         assert result['config']['mode'] == 'mirror'
         assert config(final) == {**config(owner_row), 'mode': 'mirror'}
-        assert config(final)['medical_dpa_signed'] is False
+        assert 'medical_dpa_signed' not in config(final)
         for key in ('organization_id', 'provider', 'credentials_encrypted', 'is_active'):
             assert final[key] == owner_row[key]
     finally:
@@ -118,12 +118,12 @@ async def test_owner_route_revokes_dpa_during_mode_change(realpg_pool, sample_or
 
 
 @pytest.mark.asyncio
-async def test_mode_then_owner_revocation(realpg_pool, sample_org):
+async def test_mode_then_owner_route_drops_client_dpa_field(realpg_pool, sample_org):
     pool, org = realpg_pool, sample_org['id']
     repo = await setup(pool, org)
     assert (await repo.update_mode(org, 'mirror'))['config']['mode'] == 'mirror'
     await owner_revoke(pool, org)
-    assert config(await row(pool, org))['medical_dpa_signed'] is False
+    assert 'medical_dpa_signed' not in config(await row(pool, org))
 
 
 @pytest.mark.asyncio

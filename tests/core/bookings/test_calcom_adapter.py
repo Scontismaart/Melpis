@@ -736,8 +736,8 @@ async def test_router_dispatch_create_booking_with_calcom():
 
 
 @pytest.mark.asyncio
-async def test_router_dispatch_calcom_preserves_notes_with_signed_dpa():
-    """Con medical_dpa_signed=True, DataMinimizationPolicy preserva le note legittime verso Cal.com."""
+async def test_router_dispatch_calcom_strips_medical_notes_with_dpa_flag():
+    """Il flag DPA legacy non autorizza l'invio di note verso Cal.com."""
     captured_body = {}
 
     def handler(request: httpx.Request):
@@ -780,7 +780,7 @@ async def test_router_dispatch_calcom_preserves_notes_with_signed_dpa():
     )
 
     assert res.success is True
-    assert captured_body.get("notes") == "Consulenza post-operatoria autorizzata"
+    assert not captured_body.get("notes")
 
 
 # ── 12. Gestione Email Fallback e Data Quality Invariants ────

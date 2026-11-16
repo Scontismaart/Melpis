@@ -14,6 +14,14 @@ from src.core.db.repositories.booking_repo import BookingRepository
 pytestmark = pytest.mark.asyncio
 
 
+async def fail_closed_booking_view(booking, _organization_id):
+    if not booking:
+        return booking
+    safe_booking = dict(booking)
+    safe_booking["note"] = ""
+    return safe_booking
+
+
 @pytest.fixture
 async def env(monkeypatch):
     identity = {'organization_id': str(uuid4()), 'auth_user_id': str(uuid4()),
@@ -26,7 +34,8 @@ async def env(monkeypatch):
     repo.get_booking = AsyncMock(return_value={'id': str(uuid4()), 'stato': 'in_attesa'})
     service = SimpleNamespace(repo=repo, create_booking=AsyncMock(), update_booking=AsyncMock(),
                               confirm=AsyncMock(), mark_completed=AsyncMock(), cancel=AsyncMock(),
-                              reject=AsyncMock(), mark_no_show=AsyncMock())
+                              reject=AsyncMock(), mark_no_show=AsyncMock(),
+                              _minimize_existing_booking=fail_closed_booking_view)
     app.state.booking_service = service
     app.dependency_overrides[get_current_user] = verified
     app.dependency_overrides[get_organization_context] = verified

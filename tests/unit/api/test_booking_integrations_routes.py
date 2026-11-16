@@ -115,7 +115,7 @@ def test_post_booking_integration_simplybook_success(client):
                 "api_key": "super_secret_api_key_12345",
             },
             "mode": "authoritative",
-            "config": {"medical_dpa_signed": False},
+            "config": {"medical_dpa_signed": True, "timeout_seconds": 8},
         })
 
         assert resp.status_code == 200
@@ -128,6 +128,9 @@ def test_post_booking_integration_simplybook_success(client):
         assert "credentials" not in data
         assert "api_key" not in data
         assert "company_login" not in data
+        saved_config = conn.fetchrow.await_args.args[4]
+        assert '"medical_dpa_signed"' not in saved_config
+        assert '"timeout_seconds": 8' in saved_config
     finally:
         app.dependency_overrides.clear()
 
@@ -266,7 +269,7 @@ def test_get_booking_status_configured_without_leaking_secrets(client):
         assert data["is_configured"] is True
         assert data["provider"] == "simplybook"
         assert data["mode"] == "authoritative"
-        assert data["medical_dpa_signed"] is True
+        assert "medical_dpa_signed" not in data
         assert data["last_sync"]["status"] == "synced"
         assert data["last_sync"]["external_booking_id"] == "SB-12345"
 

@@ -2501,14 +2501,10 @@
                   </div>
                 </div>
 
-                <!-- 4. DPA Sanitario (GDPR Invariante 6) -->
-                <div class="settings-field-group is-bdb1d25f47ea" id="booking-dpa-group">
-                  <label class="is-58db64abc44a">
-                    <input type="checkbox" id="booking-medical-dpa-check" class="is-273c6fc681ac">
-                    <span>DPA Sanitario firmato (Art. 9 GDPR)</span>
-                  </label>
+                <!-- 4. Perimetro sanitario V1: nessuna autodichiarazione abilita note sanitarie. -->
+                <div class="settings-field-group is-bdb1d25f47ea" id="booking-healthcare-policy">
                   <span class="settings-help-sm is-d75fb4de2808">
-                    Attiva solo se è stato sottoscritto un Data Processing Agreement per dati sanitari. Se disattivato, per le attività sanitarie le note cliente vengono sbiancate prima dell'invio esterno (Data Minimization fail-closed).
+                    Nella beta V1, le note libere vengono rimosse prima della persistenza e delle sincronizzazioni esterne per i settori sanitari o non verificati.
                   </span>
                 </div>
 

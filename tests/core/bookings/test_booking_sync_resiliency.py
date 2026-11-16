@@ -180,6 +180,7 @@ class TestDeterministicKey:
             stato="confermata", sync_status="synced"))
 
         booking_repo = MagicMock()
+        booking_repo.pool = None
         booking_repo.create_booking = AsyncMock(side_effect=lambda **kw: {
             "id": uuid.uuid4(), "organization_id": kw["organization_id"],
             "nome_cliente": kw["nome_cliente"], "telefono": kw["telefono"],

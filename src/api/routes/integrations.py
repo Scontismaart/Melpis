@@ -328,7 +328,7 @@ class ConfigureBookingIntegrationRequest(BaseModel):
     provider: str = Field(description="Identificativo del gestionale: simplybook, zak, fake, internal")
     credentials: dict[str, Any] = Field(default_factory=dict, description="Envelope credenziali cifrate at-rest")
     mode: str = Field(default="authoritative", description="Modalità operativa: authoritative, shadow, mirror, local_only")
-    config: dict[str, Any] = Field(default_factory=dict, description="Parametri di configurazione (es. medical_dpa_signed, timeout_seconds)")
+    config: dict[str, Any] = Field(default_factory=dict, description="Parametri non sensibili di configurazione (es. timeout_seconds)")
     is_active: bool = True
 
 
@@ -378,7 +378,11 @@ async def configura_integrazione_booking(
         )
 
     ext_repo = get_external_booking_repo(request)
-    full_config = {**req.config, "mode": mode.value}
+    full_config = {
+        key: value for key, value in req.config.items()
+        if key != "medical_dpa_signed"
+    }
+    full_config["mode"] = mode.value
 
     res = await ext_repo.save_credentials(
         organization_id=org_id,
@@ -425,14 +429,11 @@ async def stato_integrazione_booking(
             "is_active": False,
             "circuit_breaker": {"state": "CLOSED", "failure_count": 0},
             "last_sync": None,
-            "medical_dpa_signed": False,
         }
 
     config = creds_row.get("config") or {}
     mode = config.get("mode", "authoritative")
     provider = creds_row.get("provider")
-    medical_dpa_signed = (config.get("medical_dpa_signed") is True)
-
     last_sync_record = await ext_repo.get_latest_sync(org_id)
     last_sync = None
     if last_sync_record:
@@ -451,7 +452,6 @@ async def stato_integrazione_booking(
         "provider": provider,
         "mode": mode,
         "is_active": creds_row.get("is_active", True),
-        "medical_dpa_signed": medical_dpa_signed,
         "circuit_breaker": {
             "state": "CLOSED",
             "threshold": config.get("circuit_breaker_threshold", 5),
