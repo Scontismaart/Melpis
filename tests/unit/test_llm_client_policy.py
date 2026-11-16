@@ -50,6 +50,8 @@ def test_policy_checks_openrouter_zdr_catalog_in_free_only(monkeypatch):
     monkeypatch.setenv("LLM_COST_POLICY", "free_only")
     monkeypatch.setenv("AI_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.delenv("OPENROUTER_APPROVED_UPSTREAM", raising=False)
     monkeypatch.delenv("AI_BASE_URL", raising=False)
     checks = []
     monkeypatch.setattr(
@@ -66,6 +68,31 @@ def test_policy_checks_openrouter_zdr_catalog_in_free_only(monkeypatch):
         "zdr": True,
         "allow_fallbacks": False,
     }
+
+
+@pytest.mark.parametrize("upstream", ["", "one,two", "https://example.test", "one two"])
+def test_deployed_openrouter_fails_closed_before_catalog_query(monkeypatch, upstream):
+    from src.core.llm_config import ai_configuration_status
+
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("LLM_COST_POLICY", "free_only")
+    monkeypatch.setenv("AI_PROVIDER", "openrouter")
+    monkeypatch.setenv("AI_MODEL", "openrouter/vendor/model:free")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test-key")
+    monkeypatch.setenv("OPENROUTER_APPROVED_UPSTREAM", upstream)
+    monkeypatch.delenv("AI_BASE_URL", raising=False)
+
+    def unexpected_catalog_query(*args):
+        pytest.fail("Invalid provider configuration must fail before network use")
+
+    monkeypatch.setattr(
+        "src.core.llm_client_policy.assert_openrouter_catalog_free", unexpected_catalog_query,
+    )
+    with pytest.raises(RuntimeError, match="OPENROUTER_APPROVED_UPSTREAM"):
+        resolve_llm_client_policy("openrouter/vendor/model:free")
+    assert ai_configuration_status()["status"] == "non_configurato"
+    monkeypatch.setenv("OPENROUTER_APPROVED_UPSTREAM", "reviewed-upstream")
+    assert ai_configuration_status()["status"] == "configurato"
 
 
 def test_policy_keeps_standard_explicit_api_key_precedence(monkeypatch):
