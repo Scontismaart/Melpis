@@ -99,6 +99,14 @@ async def booking_note_policy_guard(repo, organization_id):
 
 async def booking_note_verticale_from_connection(conn, organization_id):
     """Resolve a permitted sector; the caller's transaction keeps the org row stable."""
+    row = await booking_note_classification_from_connection(conn, organization_id)
+    if row is None:
+        return None
+    return attested_booking_note_verticale(row.get("profile_verticale"), row)
+
+
+async def booking_note_classification_from_connection(conn, organization_id):
+    """Read profile and protected classification without treating agreement as permission."""
     try:
         org_id = uuid.UUID(str(organization_id))
     except (TypeError, ValueError, AttributeError):
@@ -127,7 +135,7 @@ async def booking_note_verticale_from_connection(conn, organization_id):
         row = dict(row)
     except (TypeError, ValueError, KeyError):
         return None
-    return attested_booking_note_verticale(row.get("profile_verticale"), row)
+    return row
 
 MEDICAL_RESTRICTED = frozenset(
     {

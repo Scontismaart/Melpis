@@ -116,11 +116,19 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         if not orgrow:
             raise AllocationDenied('Organization unavailable')
         from src.core.bookings.privacy_boundary import (
-            booking_note_verticale_from_connection,
+            attested_booking_note_verticale,
+            booking_note_classification_from_connection,
+            medical_restricted,
             minimize_booking_note,
         )
 
-        note_verticale = await booking_note_verticale_from_connection(conn, org)
+        classification = await booking_note_classification_from_connection(conn, org)
+        note_verticale = attested_booking_note_verticale(
+            classification.get("profile_verticale") if classification else None,
+            classification,
+        )
+        if medical_restricted(orgrow["business_profile"], classification) and mutation.note.strip():
+            raise BookingMutationRejected('Medical booking notes are not accepted')
         minimized_note = minimize_booking_note(mutation.note, note_verticale)
         mutation_hash = replace(mutation, note=minimized_note).digest(new_booking)
         await conn.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(org))
@@ -210,8 +218,6 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         catalog, sector, authority = await engine._catalog(conn, org, orgrow, settings)
         if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority not in {'internal', 'internal_calendar_sync'}:
             raise AllocationUnavailable('Catalog authority unavailable')
-        if sector in MEDICAL_RESTRICTED and mutation.note.strip():
-            raise BookingMutationRejected('Medical booking notes are not accepted')
         if mutation.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import time
             from src.core.bookings.catalog_contracts import CivilNightDuration

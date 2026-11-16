@@ -106,6 +106,28 @@ async def test_unattested_note_is_removed_before_booking_write_and_receipt_hash(
     ) == ''
 
 
+async def test_protected_medical_classification_rejects_note_with_nonmedical_profile(pg_pool):
+    env = await create_environment(pg_pool, 'ristorante')
+    await pg_pool.execute('''INSERT INTO booking_privacy_classifications
+        (organization_id,sector,operational_notes_allowed,revision,evidence_reference)
+        VALUES($1,'medical_disabled',true,1,'synthetic-medical-classification')''', env.org)
+    booking = await env.booking()
+    request = env.request(booking)
+
+    with pytest.raises(BookingMutationRejected):
+        await apply_booking_mutation(
+            pg_pool, env.org, env.auth, request, mutation=edit(),
+        )
+
+    assert await pg_pool.fetchval(
+        'SELECT note FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking
+    ) == ''
+    assert await pg_pool.fetchval(
+        'SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND request_id=$2',
+        env.org, request.request_id,
+    ) == 0
+
+
 async def test_unauthorized_no_mutation(pg_pool):
     env = await create_environment(pg_pool)
     booking = await env.booking()
