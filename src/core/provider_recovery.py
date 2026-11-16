@@ -8,6 +8,7 @@ from errors/logs.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -17,13 +18,18 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 
-from src.core.provider_accounting import RawProviderUsage
 from src.core.openrouter_recovery_models import recovery_model_matches
-from src.core.provider_evidence import safe_provider_generation_id, safe_provider_request_id
+from src.core.provider_accounting import RawProviderUsage
+from src.core.provider_evidence import (
+    safe_provider_generation_id,
+    safe_provider_request_id,
+)
 
 _ISSUER = object()
 _MAX_BODY = 32 * 1024
 _GENERATION_ENDPOINT = "https://openrouter.ai/api/v1/generation"
+_GENERATION_LOOKUP_RETRY_DELAYS = (0.5, 1.0, 2.0)
+_GENERATION_LOOKUP_TIMEOUT_SECONDS = 12.0
 
 
 class ProviderReconciliationUnavailable(Exception):
@@ -154,32 +160,53 @@ def is_verified_openrouter_generation(value) -> bool:
 
 
 async def fetch_openrouter_generation(api_key: str, generation_id: str) -> bytes:
-    """Read one OpenRouter generation with fixed origin, bounded response, no redirects."""
+    """Read one OpenRouter generation, retrying only brief metadata-index 404s."""
     if (type(api_key) is not str or len(api_key) < 16
             or not safe_provider_generation_id(generation_id)):
         raise ProviderReconciliationUnavailable
     try:
-        async with httpx.AsyncClient(
-            trust_env=False, follow_redirects=False, verify=True,
-            timeout=httpx.Timeout(8.0, connect=3.0),
-        ) as client:
-            async with client.stream(
-                "GET", _GENERATION_ENDPOINT, params={"id": generation_id},
-                headers={"Authorization": f"Bearer {api_key}", "Accept-Encoding": "identity"},
-            ) as response:
-                if response.status_code != 200:
+        # OpenRouter may index a completed generation a few seconds after the
+        # completion response. A 404 is retried for a short fixed window only;
+        # every other status and all transport errors remain immediate failures.
+        async with (
+            asyncio.timeout(_GENERATION_LOOKUP_TIMEOUT_SECONDS),
+            httpx.AsyncClient(
+                trust_env=False, follow_redirects=False, verify=True,
+                timeout=httpx.Timeout(8.0, connect=3.0),
+            ) as client,
+        ):
+            for attempt in range(len(_GENERATION_LOOKUP_RETRY_DELAYS) + 1):
+                async with client.stream(
+                    "GET", _GENERATION_ENDPOINT, params={"id": generation_id},
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Accept-Encoding": "identity",
+                    },
+                ) as response:
+                    if response.status_code != 404:
+                        if response.status_code != 200:
+                            raise ProviderReconciliationUnavailable
+                        if (
+                            response.headers.get("content-encoding", "identity").lower()
+                            not in {"", "identity"}
+                        ):
+                            raise ProviderReconciliationUnavailable
+                        length = response.headers.get("content-length")
+                        if length is not None and (
+                            not length.isdigit() or int(length) > _MAX_BODY
+                        ):
+                            raise ProviderReconciliationUnavailable
+                        chunks = bytearray()
+                        async for chunk in response.aiter_raw():
+                            if len(chunks) + len(chunk) > _MAX_BODY:
+                                raise ProviderReconciliationUnavailable
+                            chunks.extend(chunk)
+                        return bytes(chunks)
+
+                if attempt >= len(_GENERATION_LOOKUP_RETRY_DELAYS):
                     raise ProviderReconciliationUnavailable
-                if response.headers.get("content-encoding", "identity").lower() not in {"", "identity"}:
-                    raise ProviderReconciliationUnavailable
-                length = response.headers.get("content-length")
-                if length is not None and (not length.isdigit() or int(length) > _MAX_BODY):
-                    raise ProviderReconciliationUnavailable
-                chunks = bytearray()
-                async for chunk in response.aiter_raw():
-                    if len(chunks) + len(chunk) > _MAX_BODY:
-                        raise ProviderReconciliationUnavailable
-                    chunks.extend(chunk)
-                return bytes(chunks)
+                await asyncio.sleep(_GENERATION_LOOKUP_RETRY_DELAYS[attempt])
+            raise ProviderReconciliationUnavailable
     except ProviderReconciliationUnavailable:
         raise
     except Exception:

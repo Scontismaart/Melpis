@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import uuid
@@ -13,7 +14,6 @@ from src.core.openrouter_recovery_models import (
     reviewed_recovery_binding,
 )
 from src.core.provider_accounting import provider_model_matches
-
 
 _REQUESTED_RECOVERY_MODEL = "openrouter/xingchen-agi/xing4.0-29b-a4b:free"
 _DATED_RECOVERY_MODEL = "xingchen-agi/xing4.0-29b-a4b-20261015:free"
@@ -69,6 +69,7 @@ class _StreamingResponse:
 class _Client:
     calls = []
     response = None
+    response_sequence = None
     options = None
 
     def __init__(self, **options):
@@ -82,12 +83,15 @@ class _Client:
 
     def stream(self, method, url, *, params, headers):
         type(self).calls.append((method, url, params, headers))
+        if type(self).response_sequence is not None:
+            return type(self).response_sequence.pop(0)
         return type(self).response
 
 
 @pytest.mark.asyncio
 async def test_openrouter_generation_fetch_uses_fixed_authenticated_get(monkeypatch):
     _Client.calls = []
+    _Client.response_sequence = None
     body = b'{"data":{"id":"gen-test-safe-001"}}'
     _Client.response = _StreamingResponse(
         body, headers={"content-length": str(len(body))},
@@ -102,6 +106,8 @@ async def test_openrouter_generation_fetch_uses_fixed_authenticated_get(monkeypa
     assert _Client.options["trust_env"] is False
     assert _Client.options["follow_redirects"] is False
     assert _Client.options["verify"] is True
+    assert _Client.options["timeout"].connect == 3.0
+    assert _Client.options["timeout"].read == 8.0
     assert _Client.calls == [(
         "GET", "https://openrouter.ai/api/v1/generation",
         {"id": "gen-test-safe-001"},
@@ -111,18 +117,130 @@ async def test_openrouter_generation_fetch_uses_fixed_authenticated_get(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_openrouter_generation_fetch_rejects_unavailable_or_oversized_response(monkeypatch):
-    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
-    _Client.response = _StreamingResponse(b"ignored", status=404)
-    with pytest.raises(recovery.ProviderReconciliationUnavailable):
-        await recovery.fetch_openrouter_generation(
-            "synthetic-test-key-not-a-secret", "gen-test-safe-002",
-        )
+async def test_openrouter_generation_fetch_retries_404_until_metadata_is_visible(monkeypatch):
+    _Client.calls = []
+    _Client.response_sequence = [
+        _StreamingResponse(b"ignored", status=404),
+        _StreamingResponse(b"ignored", status=404),
+        _StreamingResponse(b'{"data":{"id":"gen-test-safe-002"}}', status=200),
+    ]
+    sleeps = []
 
-    _Client.response = _StreamingResponse(b"x" * (recovery._MAX_BODY + 1))
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(recovery.asyncio, "sleep", record_sleep)
+
+    payload = await recovery.fetch_openrouter_generation(
+        "synthetic-test-key-not-a-secret", "gen-test-safe-002",
+    )
+
+    assert json.loads(payload) == {"data": {"id": "gen-test-safe-002"}}
+    assert len(_Client.calls) == 3
+    assert sleeps == [0.5, 1.0]
+    assert all(call == _Client.calls[0] for call in _Client.calls)
+
+
+@pytest.mark.asyncio
+async def test_openrouter_generation_fetch_keeps_persistent_404_unavailable(monkeypatch):
+    _Client.calls = []
+    _Client.response_sequence = [
+        _StreamingResponse(b"ignored", status=404)
+        for _ in range(len(recovery._GENERATION_LOOKUP_RETRY_DELAYS) + 1)
+    ]
+    sleeps = []
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(recovery.asyncio, "sleep", record_sleep)
+
     with pytest.raises(recovery.ProviderReconciliationUnavailable):
         await recovery.fetch_openrouter_generation(
             "synthetic-test-key-not-a-secret", "gen-test-safe-003",
+        )
+
+    assert len(_Client.calls) == len(recovery._GENERATION_LOOKUP_RETRY_DELAYS) + 1
+    assert sleeps == list(recovery._GENERATION_LOOKUP_RETRY_DELAYS)
+
+
+@pytest.mark.asyncio
+async def test_openrouter_generation_fetch_enforces_global_retry_deadline(monkeypatch):
+    _Client.calls = []
+    _Client.response_sequence = [
+        _StreamingResponse(b"ignored", status=404),
+        _StreamingResponse(b'{"data":{"id":"gen-test-safe-004"}}', status=200),
+    ]
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(recovery, "_GENERATION_LOOKUP_RETRY_DELAYS", (1.0,))
+    monkeypatch.setattr(recovery, "_GENERATION_LOOKUP_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(recovery.ProviderReconciliationUnavailable):
+        await recovery.fetch_openrouter_generation(
+            "synthetic-test-key-not-a-secret", "gen-test-safe-004",
+        )
+
+    assert len(_Client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_openrouter_generation_fetch_propagates_task_cancellation(monkeypatch):
+    _Client.calls = []
+    _Client.response_sequence = [_StreamingResponse(b"ignored", status=404)]
+    waiting_for_backoff = asyncio.Event()
+
+    async def wait_until_cancelled(_delay):
+        waiting_for_backoff.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(recovery.asyncio, "sleep", wait_until_cancelled)
+    task = asyncio.create_task(recovery.fetch_openrouter_generation(
+        "synthetic-test-key-not-a-secret", "gen-test-safe-005",
+    ))
+
+    await waiting_for_backoff.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(_Client.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 402, 403, 429, 500, 503])
+async def test_openrouter_generation_fetch_does_not_retry_other_http_errors(
+    monkeypatch, status,
+):
+    _Client.calls = []
+    _Client.response_sequence = [_StreamingResponse(b"ignored", status=status)]
+    sleeps = []
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(recovery.asyncio, "sleep", record_sleep)
+
+    with pytest.raises(recovery.ProviderReconciliationUnavailable):
+        await recovery.fetch_openrouter_generation(
+            "synthetic-test-key-not-a-secret", "gen-test-safe-006",
+        )
+
+    assert len(_Client.calls) == 1
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_openrouter_generation_fetch_rejects_oversized_response(monkeypatch):
+    _Client.response_sequence = None
+    _Client.response = _StreamingResponse(b"x" * (recovery._MAX_BODY + 1))
+    monkeypatch.setattr(recovery.httpx, "AsyncClient", _Client)
+    with pytest.raises(recovery.ProviderReconciliationUnavailable):
+        await recovery.fetch_openrouter_generation(
+            "synthetic-test-key-not-a-secret", "gen-test-safe-005",
         )
 
 
