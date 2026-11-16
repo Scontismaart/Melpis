@@ -68,11 +68,36 @@ class CalendarLifecycle:
             await self.queue.fail(claim, "context_changed", uncertain=claim["recovery"], blocked=not claim["recovery"])
             return
         async with s.repo.pool.acquire() as conn:
-            booking = await conn.fetchrow("""SELECT b.*, f.organization_id IS NOT NULL AS c24_sector_fenced
-                FROM bookings b LEFT JOIN booking_sector_admission_fences f
+            booking = await conn.fetchrow("""SELECT b.*,
+                    f.organization_id IS NOT NULL AS c24_sector_fenced,
+                    o.business_profile->>'verticale' AS tenant_verticale,
+                    c.sector AS privacy_sector,
+                    c.operational_notes_allowed AS privacy_notes_allowed,
+                    c.evidence_valid AS privacy_evidence_valid
+                FROM bookings b
+                JOIN organizations o ON o.id=b.organization_id
+                LEFT JOIN public.booking_privacy_classification_reader c
+                  ON c.organization_id=b.organization_id
+                LEFT JOIN booking_sector_admission_fences f
                   ON f.organization_id=$1 AND f.organization_id=b.organization_id
                 WHERE b.organization_id=$1 AND b.id=$2""",
                 claim["organization_id"], claim["internal_booking_id"])
+        if booking:
+            from src.core.bookings.privacy_boundary import attested_booking_note_verticale
+            from src.core.bookings.router import DataMinimizationPolicy
+
+            booking = dict(booking)
+            note_verticale = attested_booking_note_verticale(
+                booking.get("tenant_verticale"),
+                {
+                    "sector": booking.get("privacy_sector"),
+                    "operational_notes_allowed": booking.get("privacy_notes_allowed"),
+                    "evidence_valid": booking.get("privacy_evidence_valid"),
+                },
+            )
+            booking["note"] = DataMinimizationPolicy.minimize_note(
+                booking.get("note", ""), note_verticale
+            )
         if booking and booking.get("c24_sector_fenced") and (
             booking.get("calendar_confirm_pending") or claim["calendar_claimed_action"] == "authoritative"
         ):

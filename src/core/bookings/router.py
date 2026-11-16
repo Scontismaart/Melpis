@@ -29,6 +29,10 @@ from src.core.bookings.ports.base import (
     CancelBookingRequest,
     CreateBookingRequest,
 )
+from src.core.bookings.privacy_boundary import (
+    SAFE_OPERATIONAL_NOTE_SECTORS,
+    minimize_booking_note,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +56,8 @@ class DataMinimizationPolicy:
     - Se l'organizzazione appartiene a un settore medico o se il verticale
       non è determinabile con certezza, le note libere vengono rimosse prima
       di essere inoltrate all'esterno. Il settore sanitario V1 è amministrativo.
-    - Se il verticale è chiaramente non-medico (es. ristorante, parrucchiere, hotel),
-      le note operative sono preservate integralmente.
+    - Le note dei settori non-medici sono preservate solo se il settore coincide
+      con la classificazione protetta e l'attestazione consente note operative.
     """
 
     SENSITIVE_VERTICALS = frozenset({
@@ -69,9 +73,12 @@ class DataMinimizationPolicy:
 
     # Only recognized non-medical sectors may preserve operational notes by
     # default. Unknown/malformed values must not become a medical bypass.
-    NON_MEDICAL_VERTICALS = frozenset({
-        "ristorante", "parrucchiere", "centro_estetico", "hotel_bnb", "hotel",
-    })
+    NON_MEDICAL_VERTICALS = SAFE_OPERATIONAL_NOTE_SECTORS
+
+    @classmethod
+    def minimize_note(cls, note: str, verticale: str | None) -> str:
+        """Keep free text only when called with an attested, known-safe sector."""
+        return minimize_booking_note(note, verticale)
 
     def apply(
         self,
@@ -80,16 +87,14 @@ class DataMinimizationPolicy:
         medical_dpa_signed: bool = False,
     ) -> CreateBookingRequest:
         """Rimuove le note dei settori riservati anche con il flag DPA legacy."""
-        normalized = verticale.strip().lower() if isinstance(verticale, str) else None
-        is_medical = normalized not in self.NON_MEDICAL_VERTICALS
-
-        if is_medical:
+        minimized_note = self.minimize_note(req.note, verticale)
+        if minimized_note != req.note:
             # Minimizzazione attiva: azzera le note per evitare leak di sintomi o terapie
             logger.info(
                 "GDPR Data Minimization applicata a req %s",
                 req.idempotency_key,
             )
-            return req.model_copy(update={"note": ""})
+            return req.model_copy(update={"note": minimized_note})
 
         return req
 
@@ -365,8 +370,13 @@ class BookingAdapterRouter:
                 )
 
         # 2. Data Minimization Fail-Closed a monte
+        from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
+
+        note_verticale = await resolve_booking_note_verticale(self.repo, org_uuid)
         minimized_req = self.data_minimizer.apply(
-            req, verticale=verticale, medical_dpa_signed=medical_dpa_signed
+            req,
+            verticale=note_verticale,
+            medical_dpa_signed=medical_dpa_signed,
         )
 
         # 3. Invocazione in modalità SHADOW

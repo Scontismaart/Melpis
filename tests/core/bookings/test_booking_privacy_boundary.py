@@ -13,6 +13,51 @@ OTHER_ORG = UUID('22222222-2222-2222-2222-222222222222')
 NOTE = 'Please use the side entrance.'
 
 
+class _ClassificationConn:
+    def __init__(self, repo):
+        self.repo = repo
+
+    async def fetchval(self, query, *_args):
+        if "to_regclass('public.booking_privacy_classification_reader')" in query:
+            return "booking_privacy_classification_reader"
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetchrow(self, query, *_args):
+        if "FROM public.organizations AS o" in query:
+            return self.repo.booking_privacy_classification
+        raise AssertionError(f"Unexpected query: {query}")
+
+
+class _ClassificationPool:
+    def __init__(self, repo):
+        self.repo = repo
+
+    def acquire(self):
+        repo = self.repo
+
+        class _Acquire:
+            async def __aenter__(self):
+                return _ClassificationConn(repo)
+
+            async def __aexit__(self, *_args):
+                return False
+
+        return _Acquire()
+
+
+class _AsyncpgRecordShape:
+    """Small asyncpg.Record stand-in: keys() returns an iterator."""
+
+    def __init__(self, **values):
+        self._values = values
+
+    def keys(self):
+        return iter(self._values)
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+
 @pytest.fixture
 def booking_request():
     return CreateBookingRequest(
@@ -53,6 +98,8 @@ def test_known_nonmedical_verticals_preserve_notes(booking_request, vertical):
 @pytest.fixture
 def boundary(monkeypatch):
     repo = MagicMock()
+    repo.booking_privacy_classification = None
+    repo.pool = _ClassificationPool(repo)
     repo.get_credentials = AsyncMock()
     repo.claim_sync_slot = AsyncMock(return_value=({'sync_status': 'pending'}, True))
     repo.record_sync_success = AsyncMock()
@@ -83,11 +130,83 @@ async def test_legacy_config_cannot_allow_medical_notes(boundary, booking_reques
 @pytest.mark.parametrize('dpa', [False, 'false'])
 async def test_resolved_nonmedical_dispatch_preserves_note(boundary, booking_request, mode, dpa):
     repo, adapter, router = boundary
+    repo.booking_privacy_classification = {
+        'profile_verticale': 'ristorante',
+        'sector': 'ristorante',
+        'operational_notes_allowed': True,
+        'evidence_valid': True,
+    }
     repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': mode, 'medical_dpa_signed': dpa}}
     await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
     assert adapter.create_booking.await_args.args[1].note == NOTE
     assert booking_request.note == NOTE
     repo.get_credentials.assert_awaited_once_with(ORG)
+
+
+@pytest.mark.asyncio
+async def test_unattested_nonmedical_profile_does_not_preserve_note(boundary, booking_request):
+    repo, adapter, router = boundary
+    repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': 'authoritative'}}
+
+    await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
+
+    assert adapter.create_booking.await_args.args[1].note == ''
+
+
+@pytest.mark.asyncio
+async def test_protected_medical_classification_overrides_restaurant_profile(boundary, booking_request):
+    repo, adapter, router = boundary
+    repo.booking_privacy_classification = {
+        'profile_verticale': 'ristorante',
+        'sector': 'medical_disabled',
+        'operational_notes_allowed': False,
+        'evidence_valid': True,
+    }
+    repo.get_credentials.return_value = {'provider': 'fake', 'config': {'mode': 'authoritative'}}
+
+    await router.dispatch_create_booking(ORG, booking_request, verticale='ristorante')
+
+    assert adapter.create_booking.await_args.args[1].note == ''
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'classification',
+    [
+        None,
+        {'profile_verticale': 'ristorante', 'sector': 'ristorante',
+         'operational_notes_allowed': False, 'evidence_valid': True},
+        {'profile_verticale': 'ristorante', 'sector': 'ristorante',
+         'operational_notes_allowed': True, 'evidence_valid': False},
+        {'profile_verticale': 'ristorante', 'sector': 'hotel',
+         'operational_notes_allowed': True, 'evidence_valid': True},
+    ],
+)
+async def test_note_attestation_requires_matching_profile_and_permission(classification):
+    from src.core.bookings.privacy_boundary import attested_booking_note_verticale
+
+    if classification is None:
+        assert attested_booking_note_verticale('ristorante', classification) is None
+    else:
+        assert attested_booking_note_verticale(
+            classification['profile_verticale'], classification
+        ) is None
+
+
+@pytest.mark.asyncio
+async def test_database_record_with_iterator_keys_preserves_attested_note():
+    from src.core.bookings.privacy_boundary import resolve_booking_note_verticale
+
+    repo = MagicMock()
+    repo.booking_privacy_classification = _AsyncpgRecordShape(
+        profile_verticale='ristorante',
+        sector='ristorante',
+        operational_notes_allowed=True,
+        evidence_valid=True,
+    )
+    repo.pool = _ClassificationPool(repo)
+
+    assert await resolve_booking_note_verticale(repo, ORG) == 'ristorante'
 
 
 @pytest.mark.asyncio

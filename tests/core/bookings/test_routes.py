@@ -118,6 +118,34 @@ async def test_get_booking(async_client, sample_org):
     assert resp.json()["id"] == b_id
 
 
+async def test_legacy_booking_note_requires_attestation_on_reads(
+    async_client, sample_org, repo, tomorrow
+):
+    booking = await repo.create_booking(
+        organization_id=sample_org["id"],
+        nome_cliente="Synthetic Guest",
+        data=tomorrow,
+        ora="18:00",
+        coperti=2,
+        note="synthetic legacy private note",
+    )
+    headers = {
+        "X-API-Key": API_KEY,
+        "X-Organization-Id": str(sample_org["id"]),
+    }
+
+    detail = await async_client.get(f"/api/bookings/{booking['id']}", headers=headers)
+    listed = await async_client.get("/api/bookings", headers=headers)
+
+    assert detail.status_code == 200
+    assert detail.json()["note"] == ""
+    assert listed.status_code == 200
+    listed_booking = next(row for row in listed.json() if row["id"] == str(booking["id"]))
+    assert listed_booking["note"] == ""
+    stored = await repo.get_booking(sample_org["id"], booking["id"])
+    assert stored["note"] == "synthetic legacy private note"
+
+
 async def test_get_booking_not_found(async_client, sample_org):
     resp = await async_client.get("/api/bookings/00000000-0000-0000-0000-000000000000", headers={
         "X-API-Key": API_KEY,

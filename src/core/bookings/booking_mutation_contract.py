@@ -1,5 +1,5 @@
 """Tenant-scoped atomic booking mutations shared by fenced owner and worker paths."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import UUID
 
@@ -102,14 +102,27 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         raise ValueError('Mutation and lineage do not match')
     if new_booking is not None and new_booking.source_message_id is not None and mutation.operation != 'create_stay':
         raise ValueError('Source proof requires a stay command')
-    mutation_hash = mutation.digest(new_booking)
     org, auth = _uuid(organization_id), _uuid(auth_user_id)
     engine = BookingAllocationRepository(pool)
     expected = {'allocate': 'allocated', 'replace': 'replaced', 'cancel': 'cancelled'}
     async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+        # Match the privacy-classification lock order used by the database
+        # booking trigger so an attestation cannot change mid-mutation.
+        await conn.execute(
+            'SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,815))',
+            str(org),
+        )
         orgrow = await conn.fetchrow('SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE', org)
         if not orgrow:
             raise AllocationDenied('Organization unavailable')
+        from src.core.bookings.privacy_boundary import (
+            booking_note_verticale_from_connection,
+            minimize_booking_note,
+        )
+
+        note_verticale = await booking_note_verticale_from_connection(conn, org)
+        minimized_note = minimize_booking_note(mutation.note, note_verticale)
+        mutation_hash = replace(mutation, note=minimized_note).digest(new_booking)
         await conn.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(org))
         if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2)
             OR EXISTS(SELECT 1 FROM booking_stay_tombstones WHERE organization_id=$1 AND request_id=$3)''', org, request.booking_id, request.request_id):
@@ -197,7 +210,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
         catalog, sector, authority = await engine._catalog(conn, org, orgrow, settings)
         if catalog.sector != sector or catalog.timezone != orgrow['timezone'] or authority not in {'internal', 'internal_calendar_sync'}:
             raise AllocationUnavailable('Catalog authority unavailable')
-        if sector == 'studio_medico_dentista' and mutation.note:
+        if sector == 'studio_medico_dentista' and minimized_note:
             raise BookingMutationRejected('Medical booking notes are not accepted')
         if mutation.operation in {'create_stay', 'reschedule_stay'}:
             from datetime import time
@@ -257,7 +270,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'in_attesa')""", request.booking_id, org,
                 subject, str(conversation) if conversation else None,
                 mutation.nome_cliente, mutation.telefono, date.fromisoformat(mutation.data),
-                time.fromisoformat(mutation.ora), mutation.coperti, mutation.note)
+                time.fromisoformat(mutation.ora), mutation.coperti, minimized_note)
             if is_stay:
                 await conn.execute('SELECT public.mark_booking_stay_owner_source($1,$2,$3,$4,$5)',
                                    org, request.booking_id, subject, request.request_id, actor)
@@ -451,7 +464,7 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
                 contact_preimage = await engine._seal_contact_preimage(conn, org, request)
             await conn.execute("""UPDATE bookings SET nome_cliente=$3,telefono=$4,note=$5,updated_at=NOW()
                 WHERE organization_id=$1 AND id=$2""", org, request.booking_id,
-                mutation.nome_cliente, mutation.telefono, mutation.note)
+                mutation.nome_cliente, mutation.telefono, minimized_note)
         result = await engine._apply_on_connection(conn, org, auth, request, mutation_hash=mutation_hash,
                                                    contact_preimage=contact_preimage)
         if result['replayed'] or result['outcome'] != expected[request.action]:

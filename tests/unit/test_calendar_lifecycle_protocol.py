@@ -346,6 +346,63 @@ async def test_optional_create_requires_get_404_then_dispatches_one_insert_and_v
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "tenant_verticale",
+        "privacy_sector",
+        "privacy_notes_allowed",
+        "privacy_evidence_valid",
+        "expected_note",
+    ),
+    [
+        ("studio_medico_dentista", "medical_disabled", False, True, ""),
+        ("ristorante", "ristorante", True, True, "synthetic sensitive note"),
+        ("ristorante", "medical_disabled", False, True, ""),
+        ("ristorante", None, None, None, ""),
+        (None, None, None, None, ""),
+    ],
+)
+async def test_calendar_dispatch_minimizes_notes_from_server_owned_tenant_profile(
+    tenant_verticale,
+    privacy_sector,
+    privacy_notes_allowed,
+    privacy_evidence_valid,
+    expected_note,
+):
+    claim = _claim()
+    booking = {
+        "id": BOOKING_ID,
+        "organization_id": ORG_ID,
+        "data": "2026-01-15",
+        "ora": "10:00:00",
+        "nome_cliente": "Synthetic Guest",
+        "coperti": 2,
+        "note": "synthetic sensitive note",
+        "tenant_verticale": tenant_verticale,
+        "privacy_sector": privacy_sector,
+        "privacy_notes_allowed": privacy_notes_allowed,
+        "privacy_evidence_valid": privacy_evidence_valid,
+        "c24_sector_fenced": False,
+    }
+    service = _Service(claim, booking=booking)
+
+    async def build_event(safe_booking, current_claim):
+        return await GoogleCalendarService.event_body(
+            service, safe_booking, current_claim
+        )
+
+    service.event_body = AsyncMock(side_effect=build_event)
+
+    await CalendarLifecycle(service).run(claim)
+
+    assert service.provider.post_count == 1
+    event = service.provider.event_store[EVENT_ID]
+    assert f"Note: {expected_note}" in event["description"]
+    if expected_note == "":
+        assert "synthetic sensitive note" not in event["description"]
+
+
+@pytest.mark.asyncio
 async def test_optional_update_uses_exact_event_etag_and_verifies_updated_body():
     claim = _claim()
     service = _Service(claim)

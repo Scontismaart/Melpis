@@ -54,6 +54,7 @@ ORG_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
+    repo.pool = None
     repo.get_credentials = AsyncMock()
     repo.record_sync_prepare = AsyncMock()
     repo.record_sync_success = AsyncMock()

@@ -21,9 +21,43 @@ from src.core.bookings.service import BookingService
 ORG_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
 
+class _ClassificationConn:
+    def __init__(self, row):
+        self.row = row
+
+    async def fetchval(self, query, *_args):
+        if "to_regclass('public.booking_privacy_classification_reader')" in query:
+            return "booking_privacy_classification_reader"
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetchrow(self, query, *_args):
+        if "FROM public.organizations AS o" in query:
+            return self.row
+        raise AssertionError(f"Unexpected query: {query}")
+
+
+class _ClassificationPool:
+    def __init__(self, row):
+        self.row = row
+
+    def acquire(self):
+        row = self.row
+
+        class _Acquire:
+            async def __aenter__(self):
+                return _ClassificationConn(row)
+
+            async def __aexit__(self, *_args):
+                return False
+
+        return _Acquire()
+
+
 @pytest.fixture
 def mock_booking_repo():
     repo = MagicMock()
+    repo.pool = None
+    repo.org_repo = None
     repo.get_booking_for_message = AsyncMock(return_value=None)
     repo.mark_booking_requires_intervention = AsyncMock()
     repo.list_bookings = AsyncMock(return_value=[])
@@ -125,6 +159,7 @@ async def test_create_booking_escalates_to_human_on_external_failure(
 async def test_create_booking_data_minimization_integration(mock_booking_repo):
     """Verifica che il router applicato dal service minimizzi le note sanitarie a monte."""
     external_repo = MagicMock()
+    external_repo.pool = None
     external_repo.claim_sync_slot = AsyncMock(return_value=({'sync_status': 'pending'}, True))
     external_repo.record_sync_success = AsyncMock(return_value={'sync_status': 'synced'})
     real_router = BookingAdapterRouter(repo=external_repo)
@@ -141,7 +176,14 @@ async def test_create_booking_data_minimization_integration(mock_booking_repo):
         return_value=(mock_adapter, BookingMode.AUTHORITATIVE, {"medical_dpa_signed": False})
     )
 
-    service = BookingService(repo=mock_booking_repo, booking_router=real_router)
+    org_repo = MagicMock()
+    org_repo.pool = None
+    org_repo.get_org_business_profile = AsyncMock(
+        return_value={"verticale": "studio_medico"}
+    )
+    service = BookingService(
+        repo=mock_booking_repo, org_repo=org_repo, booking_router=real_router
+    )
 
     await service.create_booking(
         org_id=ORG_ID,
@@ -151,14 +193,150 @@ async def test_create_booking_data_minimization_integration(mock_booking_repo):
         ora="10:00",
         coperti=1,
         note="Forte aritmia cardiaca, allergico a penicillina",
-        verticale="studio_medico",
+        # A caller-supplied sector cannot override the tenant's persisted profile.
+        verticale="ristorante",
     )
+
+    persisted = mock_booking_repo.create_booking.await_args.kwargs
+    assert persisted["note"] == ""
 
     # Verifica la richiesta arrivata all'adapter esterno: le note DEVONO essere vuote
     call_args = mock_adapter.create_booking.await_args
     req_sent: CreateBookingRequest = call_args[0][1]
     assert req_sent.note == ""
     assert "aritmia" not in req_sent.note
+
+
+@pytest.mark.asyncio
+async def test_protected_medical_classification_overrides_mutable_nonmedical_profile(
+    mock_booking_repo,
+):
+    classification = {
+        "profile_verticale": "ristorante",
+        "sector": "medical_disabled",
+        "operational_notes_allowed": False,
+        "evidence_valid": True,
+    }
+    external_repo = MagicMock()
+    external_repo.pool = _ClassificationPool(classification)
+    external_repo.claim_sync_slot = AsyncMock(return_value=({"sync_status": "pending"}, True))
+    external_repo.record_sync_success = AsyncMock(return_value={"sync_status": "synced"})
+    real_router = BookingAdapterRouter(repo=external_repo)
+    mock_adapter = MagicMock()
+    mock_adapter.create_booking = AsyncMock(
+        return_value=BookingResult(
+            success=True,
+            external_booking_id="ext-med-classified-1",
+            stato="confermata",
+            sync_status="synced",
+        )
+    )
+    real_router.resolve_adapter = AsyncMock(
+        return_value=(mock_adapter, BookingMode.AUTHORITATIVE, {})
+    )
+    org_repo = MagicMock()
+    org_repo.pool = _ClassificationPool(classification)
+    org_repo.get_org_business_profile = AsyncMock(
+        return_value={"verticale": "ristorante"}
+    )
+    service = BookingService(
+        repo=mock_booking_repo, org_repo=org_repo, booking_router=real_router
+    )
+
+    await service.create_booking(
+        org_id=ORG_ID,
+        nome_cliente="Synthetic Patient",
+        telefono="393339988776",
+        data="2026-09-12",
+        ora="10:00",
+        coperti=1,
+        note="synthetic clinical detail",
+        verticale="ristorante",
+    )
+
+    assert mock_booking_repo.create_booking.await_args.kwargs["note"] == ""
+    assert mock_adapter.create_booking.await_args.args[1].note == ""
+
+
+@pytest.mark.asyncio
+async def test_attested_nonmedical_classification_preserves_operational_note(
+    mock_booking_repo,
+):
+    classification = {
+        "profile_verticale": "ristorante",
+        "sector": "ristorante",
+        "operational_notes_allowed": True,
+        "evidence_valid": True,
+    }
+    external_repo = MagicMock()
+    external_repo.pool = _ClassificationPool(classification)
+    external_repo.claim_sync_slot = AsyncMock(return_value=({"sync_status": "pending"}, True))
+    external_repo.record_sync_success = AsyncMock(return_value={"sync_status": "synced"})
+    real_router = BookingAdapterRouter(repo=external_repo)
+    mock_adapter = MagicMock()
+    mock_adapter.create_booking = AsyncMock(
+        return_value=BookingResult(
+            success=True,
+            external_booking_id="ext-restaurant-1",
+            stato="confermata",
+            sync_status="synced",
+        )
+    )
+    real_router.resolve_adapter = AsyncMock(
+        return_value=(mock_adapter, BookingMode.AUTHORITATIVE, {})
+    )
+    org_repo = MagicMock()
+    org_repo.pool = _ClassificationPool(classification)
+    org_repo.get_org_business_profile = AsyncMock(
+        return_value={"verticale": "ristorante"}
+    )
+    service = BookingService(
+        repo=mock_booking_repo, org_repo=org_repo, booking_router=real_router
+    )
+
+    await service.create_booking(
+        org_id=ORG_ID,
+        nome_cliente="Synthetic Guest",
+        telefono="393339988776",
+        data="2026-09-12",
+        ora="10:00",
+        coperti=1,
+        note="Please use the side entrance.",
+        verticale="ristorante",
+    )
+
+    assert mock_booking_repo.create_booking.await_args.kwargs["note"] == "Please use the side entrance."
+    assert mock_adapter.create_booking.await_args.args[1].note == "Please use the side entrance."
+
+
+@pytest.mark.asyncio
+async def test_update_booking_minimizes_notes_before_persistence(mock_booking_repo):
+    existing = {
+        "id": uuid.uuid4(),
+        "organization_id": ORG_ID,
+        "nome_cliente": "Synthetic Patient",
+        "telefono": "",
+        "data": "2026-09-12",
+        "ora": "10:00",
+        "coperti": 1,
+        "note": "",
+        "stato": "in_attesa",
+        "updated_at": "2026-09-01T00:00:00Z",
+    }
+    mock_booking_repo.get_booking = AsyncMock(return_value=existing)
+    mock_booking_repo.update_booking_details = AsyncMock(return_value=existing)
+    org_repo = MagicMock()
+    org_repo.pool = None
+    org_repo.get_org_business_profile = AsyncMock(
+        return_value={"verticale": "studio_medico_dentista"}
+    )
+    service = BookingService(repo=mock_booking_repo, org_repo=org_repo)
+
+    await service.update_booking(
+        ORG_ID, existing["id"], note="synthetic diagnosis and medication"
+    )
+
+    assert mock_booking_repo.update_booking_details.await_args.kwargs["note"] == ""
 
 
 @pytest.mark.asyncio
