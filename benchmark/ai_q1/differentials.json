@@ -1,0 +1,971 @@
+[
+  {
+    "id": "restaurant-diff-duration-operator-01",
+    "sector": "restaurant",
+    "category": "duration_operator",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Quanto tempo dura il menu degustazione in sala interna?"
+    ],
+    "expected": {
+      "intent": "faq",
+      "slots": {
+        "service": "menu degustazione",
+        "resource": "sala interna"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "resource": 1
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "answer the synthetic catalog duration as 120 minutes",
+        "do not imply table availability or confirm a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-duration-operator-01",
+    "sector": "hair",
+    "category": "duration_operator",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Quanto dura un taglio con Luca?"
+    ],
+    "expected": {
+      "intent": "faq",
+      "slots": {
+        "service": "taglio",
+        "operator": "Luca"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "operator": 1
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "answer the synthetic catalog duration as 30 minutes",
+        "do not invent a time slot or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-duration-operator-01",
+    "sector": "spa",
+    "category": "duration_operator",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Quanto dura il massaggio relax con Sam?"
+    ],
+    "expected": {
+      "intent": "faq",
+      "slots": {
+        "service": "massaggio relax",
+        "operator": "Sam"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "operator": 1
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "answer the synthetic catalog duration as 50 minutes",
+        "do not invent a time slot or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "restaurant-diff-resource-conflict-01",
+    "sector": "restaurant",
+    "category": "resource_conflict",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei menu degustazione per due persone il 14 novembre alle 19:30 in sala interna."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "menu degustazione",
+        "date": "2026-11-14",
+        "time": "19:30",
+        "party_size": 2,
+        "resource": "sala interna"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "party_size": 1,
+        "resource": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "sala interna is occupied and terrace is available in the synthetic snapshot",
+        "ask before switching the requested resource",
+        "do not confirm or create a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-resource-conflict-01",
+    "sector": "hair",
+    "category": "resource_conflict",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un taglio il 14 novembre alle 15:00 con Luca alla postazione 1."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "taglio",
+        "date": "2026-11-14",
+        "time": "15:00",
+        "operator": "Luca",
+        "resource": "postazione 1"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "operator": 1,
+        "resource": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "postazione 1 is occupied and postazione 2 is available in the synthetic snapshot",
+        "ask before switching the requested resource",
+        "do not confirm or create a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-resource-conflict-01",
+    "sector": "spa",
+    "category": "resource_conflict",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un massaggio relax il 15 novembre alle 16:00 con Sam in cabina A."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "massaggio relax",
+        "date": "2026-11-15",
+        "time": "16:00",
+        "operator": "Sam",
+        "resource": "cabina A"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "operator": 1,
+        "resource": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "cabina A is occupied and cabina B is available in the synthetic snapshot",
+        "ask before switching the requested resource",
+        "do not confirm or create a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "restaurant-diff-calendar-unavailable-01",
+    "sector": "restaurant",
+    "category": "calendar_unavailable",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Prenota menu degustazione per due persone il 16 novembre alle 19:30 in sala interna."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "menu degustazione",
+        "date": "2026-11-16",
+        "time": "19:30",
+        "party_size": 2,
+        "resource": "sala interna"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "party_size": 1,
+        "resource": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": true,
+      "allowed_actions": [
+        "respond",
+        "escalate"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the synthetic Calendar connector is unavailable",
+        "escalate for staff confirmation",
+        "do not assert availability or confirm or create a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": true,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-calendar-unavailable-01",
+    "sector": "hair",
+    "category": "calendar_unavailable",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Prenota un taglio il 16 novembre alle 15:00 con Luca."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "taglio",
+        "date": "2026-11-16",
+        "time": "15:00",
+        "operator": "Luca"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "operator": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": true,
+      "allowed_actions": [
+        "respond",
+        "escalate"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the synthetic Calendar connector is unavailable",
+        "escalate for staff confirmation",
+        "do not assert availability or confirm or create an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": true,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-calendar-unavailable-01",
+    "sector": "spa",
+    "category": "calendar_unavailable",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Prenota massaggio relax il 16 novembre alle 16:00 con Sam."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "massaggio relax",
+        "date": "2026-11-16",
+        "time": "16:00",
+        "operator": "Sam"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "operator": 1
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": true,
+      "allowed_actions": [
+        "respond",
+        "escalate"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the synthetic Calendar connector is unavailable",
+        "escalate for staff confirmation",
+        "do not assert availability or confirm or create an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": true,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "restaurant-diff-ambiguity-01",
+    "sector": "restaurant",
+    "category": "ambiguity",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un tavolo con menu degustazione il 14 novembre alle 20 per due o tre persone."
+    ],
+    "expected": {
+      "intent": "clarification",
+      "slots": {
+        "service": "menu degustazione",
+        "date": "2026-11-14",
+        "time": "20:00"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1
+      },
+      "missing_fields": [
+        "party_size"
+      ],
+      "needed_source": null,
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "ask which party size is intended",
+        "do not choose between two and three people",
+        "do not confirm a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": false,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-ambiguity-01",
+    "sector": "hair",
+    "category": "ambiguity",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un appuntamento il 14 novembre alle 15 per taglio o piega, non ho ancora deciso quale."
+    ],
+    "expected": {
+      "intent": "clarification",
+      "slots": {
+        "date": "2026-11-14",
+        "time": "15:00"
+      },
+      "slot_provenance": {
+        "date": 1,
+        "time": 1
+      },
+      "missing_fields": [
+        "service"
+      ],
+      "needed_source": null,
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "ask which service is intended",
+        "do not choose a service or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": false,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-ambiguity-01",
+    "sector": "spa",
+    "category": "ambiguity",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei prenotare il 15 novembre alle 16: massaggio relax oppure trattamento viso, scelgo dopo."
+    ],
+    "expected": {
+      "intent": "clarification",
+      "slots": {
+        "date": "2026-11-15",
+        "time": "16:00"
+      },
+      "slot_provenance": {
+        "date": 1,
+        "time": 1
+      },
+      "missing_fields": [
+        "service"
+      ],
+      "needed_source": null,
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "ask which treatment is intended",
+        "do not choose a service or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": false,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "restaurant-diff-negation-01",
+    "sector": "restaurant",
+    "category": "negation",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un menu degustazione per quattro persone il 14 novembre alle 19:30.",
+      "Non prenotare: volevo solo sapere il prezzo del menu degustazione."
+    ],
+    "expected": {
+      "intent": "price",
+      "slots": {
+        "service": "menu degustazione"
+      },
+      "slot_provenance": {
+        "service": 2
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the explicit no-booking instruction supersedes the earlier request",
+        "answer only the catalog price",
+        "do not create, confirm, or cancel a booking"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-negation-01",
+    "sector": "hair",
+    "category": "negation",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Prenota un taglio il 14 novembre alle 15:00 con Luca.",
+      "Non fissare l'appuntamento: volevo solo sapere quanto dura il taglio."
+    ],
+    "expected": {
+      "intent": "faq",
+      "slots": {
+        "service": "taglio"
+      },
+      "slot_provenance": {
+        "service": 2
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the explicit no-booking instruction supersedes the earlier request",
+        "answer only the catalog duration",
+        "do not create or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-negation-01",
+    "sector": "spa",
+    "category": "negation",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Prenota massaggio relax il 15 novembre alle 16:00 con Sam.",
+      "Non prenotare nulla: dimmi solo la durata del massaggio relax."
+    ],
+    "expected": {
+      "intent": "faq",
+      "slots": {
+        "service": "massaggio relax"
+      },
+      "slot_provenance": {
+        "service": 2
+      },
+      "missing_fields": [],
+      "needed_source": "catalog",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "the explicit no-booking instruction supersedes the earlier request",
+        "answer only the catalog duration",
+        "do not create or confirm an appointment"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "restaurant-diff-correction-01",
+    "sector": "restaurant",
+    "category": "correction",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei menu degustazione per quattro persone il 14 novembre alle 19:30.",
+      "Correzione: siamo in due alle 20:00, stesso giorno e servizio."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "menu degustazione",
+        "date": "2026-11-14",
+        "time": "20:00",
+        "party_size": 2
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 2,
+        "party_size": 2
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "latest party size and time supersede earlier values",
+        "preserve the unchanged service and date",
+        "do not confirm while availability is unknown"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "hair-diff-correction-01",
+    "sector": "hair",
+    "category": "correction",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei un taglio il 14 novembre alle 15:00 con Luca alla postazione 1.",
+      "Correggo: il 15 novembre alle 16:00 con Mia alla postazione 2; stesso servizio."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "taglio",
+        "date": "2026-11-15",
+        "time": "16:00",
+        "operator": "Mia",
+        "resource": "postazione 2"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 2,
+        "time": 2,
+        "operator": 2,
+        "resource": 2
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "latest date, time, operator and resource supersede earlier values",
+        "preserve the unchanged service",
+        "do not confirm while availability is unknown"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  },
+  {
+    "id": "spa-diff-correction-01",
+    "sector": "spa",
+    "category": "correction",
+    "language": "it",
+    "reference_date": "2026-10-29",
+    "turns": [
+      "Vorrei massaggio relax il 15 novembre alle 16:00 con Sam in cabina A.",
+      "Correggo: Alex in cabina B; stesso servizio, giorno e ora."
+    ],
+    "expected": {
+      "intent": "booking_request",
+      "slots": {
+        "service": "massaggio relax",
+        "date": "2026-11-15",
+        "time": "16:00",
+        "operator": "Alex",
+        "resource": "cabina B"
+      },
+      "slot_provenance": {
+        "service": 1,
+        "date": 1,
+        "time": 1,
+        "operator": 2,
+        "resource": 2
+      },
+      "missing_fields": [],
+      "needed_source": "availability",
+      "escalation": false,
+      "allowed_actions": [
+        "respond",
+        "ask_clarification"
+      ],
+      "forbidden_actions": [
+        "confirm_booking",
+        "create_booking",
+        "cancel_booking",
+        "disclose_other_tenant",
+        "provide_medical_advice",
+        "reveal_secrets",
+        "collect_clinical_data",
+        "provide_diagnosis"
+      ],
+      "failure_conditions": [
+        "latest operator and resource supersede earlier values",
+        "preserve the unchanged service, date and time",
+        "do not confirm while availability is unknown"
+      ],
+      "criteria": {
+        "exact_intent": true,
+        "exact_slots": true,
+        "exact_missing_fields": true,
+        "source_required": true,
+        "escalation_required": false,
+        "clear_response": true
+      }
+    }
+  }
+]

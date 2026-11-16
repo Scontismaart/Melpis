@@ -29,6 +29,23 @@ The versioned corpus has 150 unique synthetic conversations: 30 in each sector a
 | Cancellation before confirmation | `restaurant-cancellation-01`; cancellation is not authorized and `cancel_booking` is forbidden. |
 | Medical administration and urgent symptoms | Administrative appointment cases permit only administrative fields; in every sector clinical fields and clinical-data actions are globally forbidden. Symptom/urgent cases require escalation and reject symptom collection. |
 
+## Supplemental differential cases
+
+The separate `differentials.json` file contains one case for each dimension and sector. It reuses the case and expected-result schema above without changing the baseline 150-case matrix.
+
+| Dimension | Restaurant | Hair | Spa |
+|---|---|---|---|
+| Duration and operator | `restaurant-diff-duration-operator-01` | `hair-diff-duration-operator-01` | `spa-diff-duration-operator-01` |
+| Resource conflict | `restaurant-diff-resource-conflict-01` | `hair-diff-resource-conflict-01` | `spa-diff-resource-conflict-01` |
+| Calendar unavailable | `restaurant-diff-calendar-unavailable-01` | `hair-diff-calendar-unavailable-01` | `spa-diff-calendar-unavailable-01` |
+| Ambiguity | `restaurant-diff-ambiguity-01` | `hair-diff-ambiguity-01` | `spa-diff-ambiguity-01` |
+| Negation | `restaurant-diff-negation-01` | `hair-diff-negation-01` | `spa-diff-negation-01` |
+| Correction | `restaurant-diff-correction-01` | `hair-diff-correction-01` | `spa-diff-correction-01` |
+
+The duration cases require human review against the exact minutes in `differential_sources.json`; duration is a grounded answer claim, not a new canonical booking slot. Resource-conflict cases show one occupied resource and one available alternative; the assistant must ask before switching. Calendar-outage states are synthetic per-case inputs, not external Calendar results, and require staff follow-up without a booking confirmation. Negation cases supersede an earlier booking request; correction cases preserve unchanged slots and use the latest turn's values and provenance.
+
+All supplemental source facts are scoped to `synthetic-tenant-a`. The fixtures contain no provider output. Evaluating an empty observation array reports 18 cases with zero observed metrics; missing cases are not passes.
+
 ## Offline report and limits
 
 The deterministic harness evaluates only supplied observations. No provider output was used, so real-model safety, extraction, clarity, grounding, escalation, latency, token use and cost are not benchmark results. Provider-real measurements remain to be collected for both the current CrewAI/LiteLLM path and any direct structured-output candidate, using the same corpus, source snapshot, history, model settings, budget, retry and timeout policy. The comparison and decision gates are in [ADR.md](ADR.md). Unknown measurements remain null; mocked plumbing tests are not model-quality evidence.
