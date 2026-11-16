@@ -207,6 +207,53 @@ does not by itself establish policy approval.
 | Encrypted export snapshots | The general retention worker expires export operations and removes encrypted chunks after the 15-minute snapshot lifetime, independently of the primary-data-retention flag. | The job must be deployed and monitored. A failed purge leaves data for retry; no live schedule or provider/backup deletion is established. |
 | Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
 
+### Proposed legacy-message provenance review (read-only)
+
+This is a review protocol only. It neither authorizes retention or erasure nor
+closes the legacy coverage gap. No verified application route currently
+provides a complete legacy-message provenance inventory. Until the controller
+adopts this workflow, names an authorized reviewer, and approves a restricted
+evidence channel, no manual review is considered complete. Do not improvise a
+service-role query or use the retention worker as an inventory endpoint.
+
+1. Open a review for one organization from an authenticated owner-and-MFA
+   request. Bind every inventory request and evidence reference to that
+   organization. Never search by phone, provider identifier, or content across
+   tenants.
+2. Before assessing retention eligibility, confirm the effective
+   `messages_content` policy for that organization in the authorized policy
+   registry: current version, validity window, retention period, erasure
+   permission, and hold state. If policy is absent, expired, held, or
+   inconsistent, record the review as blocked and stop. The legacy
+   `organizations.message_retention_days` value, code defaults, sample
+   policies, and `simulator_history_idle_hours` are not substitutes.
+3. Use only a separately approved, read-only, tenant-scoped inventory that
+   exposes the minimum evidence needed to link a source message to its
+   contemporaneous trusted ingress receipt. Do not include message bodies,
+   arbitrary JSON, credentials, or other tenants' data in the review package.
+4. Mark provenance as verified only when existing trusted evidence binds the
+   same organization, message, conversation, original subject, and receipt
+   timestamp. Migration 070 deliberately leaves historical
+   `c24_original_subject_id` unset; migration 074 stamps `c24_received_at` on
+   new writes and does not reconstruct the historical timestamp. A current
+   conversation/contact link or `messages.created_at` does not establish the
+   missing original-subject attribution or C2.4 receipt anchor. A phone-number
+   match, message ordering, cache, or text similarity does not establish those
+   historical facts. Do not fill or backfill the missing C2.4 fields.
+5. If any link is missing, contradictory, or depends on inference, document
+   provenance as unknown and leave retention coverage open. Do not assign a
+   guessed date, mark the record expired, or claim eligibility.
+6. Store only the case ID, organization ID, opaque record reference, evidence
+   artifact reference/hash, effective policy version, reviewer, review date,
+   and the provenance outcome in the approved restricted channel. Keep content,
+   phone numbers, raw receipts, and tokens out of logs, issue comments, and
+   ordinary notes. A hash is a reference, not proof of completeness.
+7. This review performs no update, deletion, hold change, policy write, purge
+   invocation, or completion marking. Any later retention remediation requires
+   a separate approved implementation and security review using the dedicated,
+   tenant-bound retention authority. Until that path and its deployment are
+   verified, overall message-retention coverage remains open.
+
 For C2.4, a false/ineligible target result is a deferral, not a success receipt.
 Database/authorization errors stop the run and do not silently invoke the
 application DSN. The scheduler records only the error class, then raises a
