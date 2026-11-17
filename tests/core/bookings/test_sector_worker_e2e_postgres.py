@@ -2,8 +2,9 @@
 import asyncio
 import copy
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -28,8 +29,22 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     auth = await _auth_member(pool, org, role='owner')
     actor = await pool.fetchval('SELECT id FROM user_profiles WHERE auth_user_id=$1', auth)
     publisher = BookingCatalogRepository(BookingRepository(pool))
+    catalog = copy.deepcopy(CATALOGS[sector])
+    if sector == 'centro_estetico':
+        catalog['resources'] = [
+            {'resource_id': 'operator', 'kind': 'operator', 'capacity': 1, 'exclusive': True},
+            {'resource_id': 'cabin', 'kind': 'space', 'capacity': 1, 'exclusive': True},
+            {'resource_id': 'laser', 'kind': 'equipment', 'capacity': 1, 'exclusive': True},
+        ]
+        catalog['services'][0]['duration'].update(
+            minutes=47, buffer_before=7, buffer_after=13,
+        )
+        catalog['services'][0]['resources'] = [
+            {'resource_id': resource_id, 'quantity': 1}
+            for resource_id in ('operator', 'cabin', 'laser')
+        ]
     await publisher.write(org, actor, auth, action='draft_saved', expected_revision=0, request_id=uuid4(),
-                          catalog=copy.deepcopy(CATALOGS[sector]))
+                          catalog=catalog)
     published = await publisher.write(org, actor, auth, action='published', expected_revision=1, request_id=uuid4())
     scoped = validate_catalog_json(json.dumps(published['published']), organization_id=org)
     await pool.execute('SELECT public.booking_sector_activate_empty($1,$2)', org, sector)
@@ -100,7 +115,20 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     assert booking is not None
     assert await authority.process_next_batch(private_worker_pool, application_pool=pool) == 0
     assert await pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2', org, booking) == 'confermata'
-    assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2', org, booking) == 1
+    claims = await pool.fetch('''SELECT resource_id,resource_kind,quantity,starts_at,ends_at
+        FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2 ORDER BY resource_id''', org, booking)
+    if sector == 'centro_estetico':
+        assert [(row['resource_id'], row['resource_kind'], row['quantity']) for row in claims] == [
+            ('cabin', 'space', 1), ('laser', 'equipment', 1), ('operator', 'operator', 1),
+        ]
+        local_zone = ZoneInfo('Europe/Rome')
+        expected_start = datetime.combine(appointment, time(9, 53), tzinfo=local_zone).astimezone(timezone.utc)
+        expected_end = datetime.combine(appointment, time(11, 0), tzinfo=local_zone).astimezone(timezone.utc)
+        assert {(row['starts_at'], row['ends_at']) for row in claims} == {
+            (expected_start, expected_end),
+        }
+    else:
+        assert len(claims) == 1
     assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', org, booking) == 1
     with pytest.raises(Exception, match='guarded admission'):
         await pool.execute("INSERT INTO bookings(id,organization_id,nome_cliente,telefono,data,ora,coperti,stato) VALUES($1,$2,'Synthetic','',$3,'10:00',1,'in_attesa')", uuid4(), org, appointment)
