@@ -278,3 +278,50 @@ async def test_sweep_clears_retained_content_of_eligible_soft_deleted_message(
             "UPDATE messages SET content_text='synthetic replay' WHERE organization_id=$1 AND id=$2",
             org, source,
         )
+
+
+async def test_suppression_retention_defers_sweep_and_explicit_targets(state_env, retention_operator):
+    from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
+
+    env=state_env; pool=env['pool']; org=env['org']; conv=env['conv']
+    contact=await pool.fetchval('SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2',org,conv)
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'technical_receipts','test',true,90,false,'test:receipt','qa',
+        clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""",org)
+    await pool.execute("""INSERT INTO c24_idle_watermarks(organization_id,conversation_id,subject_id,
+        generation,cutoff,provider_timestamp,expired_at) VALUES($1,$2,$3,1,
+        clock_timestamp()-interval '91 days',1700000000,clock_timestamp()-interval '91 days')""",org,conv,contact)
+    audit=await pool.fetchval("""INSERT INTO c24_suppression_lifecycle_audit(organization_id,subject_id,
+        conversation_id,record_kind,record_digest,action,occurred_at) VALUES($1,$2,$3,
+        'idle_watermark',repeat('a',32),'retention',clock_timestamp()-interval '91 days') RETURNING audit_id""",org,contact,conv)
+    target=await run_c24_retention_targets(retention_operator,suppression_targets=[(org,conv)],
+        suppression_audit_targets=[(org,audit)])
+    assert target['suppressions_cleaned']==0 and target['suppression_audit_rows_expired']==0
+    assert await run_c24_retention_sweep(retention_operator)=={'enabled':True,'batch_clear':False}
+    assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM c24_idle_watermarks WHERE organization_id=$1 AND conversation_id=$2)',org,conv)
+    assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM c24_suppression_lifecycle_audit WHERE organization_id=$1 AND audit_id=$2)',org,audit)
+    # More than a batch of distinct deferred audit rows must advance the cursor;
+    # after wrap, another tenant's eligible work is reached.
+    for n in range(125):
+        await pool.execute("""INSERT INTO c24_suppression_lifecycle_audit(organization_id,subject_id,
+            conversation_id,record_kind,record_digest,action,occurred_at) VALUES($1,$2,$3,
+            'idle_watermark',md5($4::text),'retention',clock_timestamp()-interval '91 days')""",org,contact,conv,str(n))
+    # Begin at the start of audit phase: 126 rows exceed a 100 target batch.
+    await pool.execute("""UPDATE c24_retention_sweep_cursor SET phase=6,
+        last_organization_id='00000000-0000-0000-0000-000000000000',
+        last_record_id='00000000-0000-0000-0000-000000000000' WHERE scan_name='retention'""")
+    assert await run_c24_retention_sweep(retention_operator)=={'enabled':True,'batch_clear':False}
+    cursor=await pool.fetchrow("SELECT phase,last_organization_id,last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='retention'")
+    assert cursor['phase']==6 and cursor['last_organization_id']==org
+    pending=await pool.fetchval("SELECT count(*) FROM c24_suppression_lifecycle_audit WHERE organization_id=$1 AND audit_id>$2",org,cursor['last_record_id'])
+    assert pending==26
+    other=(await _organization(pool))['id']
+    await approve_messages(pool,other)
+    inbox=await completed_inbox(pool,other)
+    # Drain the remaining 26 records, then wrap back to earlier phases.
+    assert await run_c24_retention_sweep(retention_operator)=={'enabled':True,'batch_clear':False}
+    assert not await pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE organization_id=$1 AND id=$2",other,inbox)
+    await run_c24_retention_sweep(retention_operator)
+    assert await pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE organization_id=$1 AND id=$2",other,inbox)
+    assert await pool.fetchval('SELECT count(*) FROM c24_suppression_lifecycle_audit WHERE organization_id=$1',org)==126
