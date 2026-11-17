@@ -1,0 +1,69 @@
+{
+  "tenant_id": "synthetic-tenant-a",
+  "fixture_kind": "fictional benchmark input; not a provider observation",
+  "catalog": {
+    "restaurant": {
+      "menu degustazione": {
+        "price_eur": 42,
+        "duration_minutes": 120,
+        "resources": ["sala interna", "terrazza"]
+      }
+    },
+    "hair": {
+      "taglio": {
+        "price_eur": 25,
+        "duration_minutes": 30,
+        "operators": ["Luca", "Mia"],
+        "resources": ["postazione 1", "postazione 2"]
+      },
+      "piega": {"price_eur": 18, "duration_minutes": 45}
+    },
+    "spa": {
+      "massaggio relax": {
+        "price_eur": 50,
+        "duration_minutes": 50,
+        "operators": ["Sam", "Alex"],
+        "resources": ["cabina A", "cabina B"]
+      },
+      "trattamento viso": {"price_eur": 45, "duration_minutes": 45}
+    }
+  },
+  "availability": {
+    "resource_conflicts": {
+      "restaurant-diff-resource-conflict-01": {
+        "connector_status": "available",
+        "requested_resource": {"name": "sala interna", "status": "occupied"},
+        "alternative_resource": {"name": "terrazza", "status": "available"},
+        "switch_requires_customer_confirmation": true
+      },
+      "hair-diff-resource-conflict-01": {
+        "connector_status": "available",
+        "requested_operator": {"name": "Luca", "status": "available"},
+        "requested_resource": {"name": "postazione 1", "status": "occupied"},
+        "alternative_resource": {"name": "postazione 2", "status": "available"},
+        "switch_requires_customer_confirmation": true
+      },
+      "spa-diff-resource-conflict-01": {
+        "connector_status": "available",
+        "requested_operator": {"name": "Sam", "status": "available"},
+        "requested_resource": {"name": "cabina A", "status": "occupied"},
+        "alternative_resource": {"name": "cabina B", "status": "available"},
+        "switch_requires_customer_confirmation": true
+      }
+    },
+    "calendar_unavailable": {
+      "restaurant-diff-calendar-unavailable-01": {
+        "connector_status": "unavailable",
+        "synthetic_reason": "timeout"
+      },
+      "hair-diff-calendar-unavailable-01": {
+        "connector_status": "unavailable",
+        "synthetic_reason": "timeout"
+      },
+      "spa-diff-calendar-unavailable-01": {
+        "connector_status": "unavailable",
+        "synthetic_reason": "timeout"
+      }
+    }
+  }
+}

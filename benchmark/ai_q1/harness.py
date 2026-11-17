@@ -4,6 +4,8 @@ from pathlib import Path
 
 MAX_BYTES = 2_000_000
 CATEGORIES = {'faq','price','hours','booking','multiturn','change','incomplete','cancellation','ambiguity','language','complaint','urgent','injection','cross_tenant','medical_scope'}
+SUPPLEMENTAL_SECTORS = {'restaurant', 'hair', 'spa'}
+SUPPLEMENTAL_CATEGORIES = {'duration_operator', 'resource_conflict', 'calendar_unavailable', 'ambiguity', 'negation', 'correction'}
 SECTORS = {'restaurant','hair','spa','hotel','medical_admin'}
 OBS_KEYS = {'id','intent','slots','slot_provenance','missing_fields','sources_used','escalation','actions','unsupported_claim','clear_response','latency_ms','cost_usd','asked_fields','collected_fields'}
 ADMIN_FIELDS = {'service', 'date', 'time', 'departure_date', 'party_size'}
@@ -53,19 +55,31 @@ def strict_json_equal(left, right):
     return left == right
 
 
-def validate_cases(cases):
-    if not isinstance(cases, list) or len(cases) != 150:
-        raise ValueError('expected 150 cases')
-    counts = {(s, c): 0 for s in SECTORS for c in CATEGORIES}
+def validate_cases(cases, *, require_full_matrix=True):
+    if not isinstance(cases, list) or not cases:
+        raise ValueError('expected a non-empty case list')
+    if require_full_matrix:
+        if len(cases) != 150:
+            raise ValueError('expected 150 cases')
+        coverage = {(s, c): 0 for s in SECTORS for c in CATEGORIES}
+        allowed_sectors, allowed_categories, expected_per_cell = SECTORS, CATEGORIES, 2
+    else:
+        if len(cases) != 18:
+            raise ValueError('expected 18 supplemental cases')
+        coverage = {(s, c): 0 for s in SUPPLEMENTAL_SECTORS for c in SUPPLEMENTAL_CATEGORIES}
+        allowed_sectors, allowed_categories, expected_per_cell = (
+            SUPPLEMENTAL_SECTORS, SUPPLEMENTAL_CATEGORIES, 1,
+        )
     ids = set()
     for case in cases:
         keys(case, CASE_KEYS); exp = case['expected']; keys(exp, EXPECTED_KEYS); keys(exp['criteria'], CRITERIA_KEYS)
         if any(not isinstance(case[k], str) or not case[k] for k in ('id','sector','category','language','reference_date')):
             raise ValueError('invalid case metadata')
         pair = (case['sector'], case['category'])
-        if pair not in counts or case['id'] in ids:
+        if case['sector'] not in allowed_sectors or case['category'] not in allowed_categories or pair not in coverage or case['id'] in ids:
             raise ValueError('invalid sector/category or duplicate id')
-        ids.add(case['id']); counts[pair] += 1
+        ids.add(case['id'])
+        coverage[pair] += 1
         if not isinstance(case['turns'], list) or not case['turns'] or any(not isinstance(t, str) or not t for t in case['turns']):
             raise ValueError('invalid turns')
         if not isinstance(exp['intent'], str) or not exp['intent'] or not isinstance(exp['slots'], dict) or not isinstance(exp['slot_provenance'], dict) or set(exp['slots']) != set(exp['slot_provenance']):
@@ -84,7 +98,7 @@ def validate_cases(cases):
             raise ValueError('conflicting actions')
         if any(type(value) is not bool for value in exp['criteria'].values()):
             raise ValueError('invalid criteria')
-    if set(counts.values()) != {2}:
+    if set(coverage.values()) != {expected_per_cell}:
         raise ValueError('coverage mismatch')
     return cases
 
@@ -114,8 +128,8 @@ def validate_observation(obs):
             raise ValueError('invalid measurement')
 
 
-def evaluate(cases, observations):
-    validate_cases(cases)
+def evaluate(cases, observations, *, require_full_matrix=True):
+    validate_cases(cases, require_full_matrix=require_full_matrix)
     if not isinstance(observations, list) or len(observations) > len(cases):
         raise ValueError('invalid observations')
     by_id = {c['id']: c for c in cases}; seen = set(); rows = []
@@ -153,6 +167,8 @@ def evaluate(cases, observations):
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) != 3:
-        raise SystemExit('usage: python harness.py conversations.json observations.json')
-    print(json.dumps(evaluate(load(sys.argv[1]), load(sys.argv[2])), indent=2))
+    if len(sys.argv) not in {3, 4} or (len(sys.argv) == 4 and sys.argv[3] != '--supplemental'):
+        raise SystemExit('usage: python harness.py conversations.json observations.json [--supplemental]')
+    require_full_matrix = len(sys.argv) == 3
+    print(json.dumps(evaluate(load(sys.argv[1]), load(sys.argv[2]),
+                              require_full_matrix=require_full_matrix), indent=2))

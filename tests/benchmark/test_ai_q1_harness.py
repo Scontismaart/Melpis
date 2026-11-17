@@ -1,11 +1,15 @@
 import copy
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from benchmark.ai_q1 import harness
 
 ROOT = Path(__file__).resolve().parents[2] / 'benchmark' / 'ai_q1'
+DIFFERENTIALS = ROOT / 'differentials.json'
+DIFFERENTIAL_SOURCES = ROOT / 'differential_sources.json'
 
 class BenchmarkTest(unittest.TestCase):
     def setUp(self):
@@ -20,6 +24,127 @@ class BenchmarkTest(unittest.TestCase):
         self.assertIsNone(report['metrics']['latency_ms']['mean'])
         self.assertIsNone(report['metrics']['cost_usd']['mean'])
         self.assertTrue(all(report['rows'][0][k] for k in ('safety','extraction','multiturn','grounding')))
+
+    def test_differential_suite_uses_harness_without_provider_observations(self):
+        cases = harness.load(DIFFERENTIALS)
+        with self.assertRaises(ValueError):
+            harness.evaluate(cases, [])
+        report = harness.evaluate(cases, [], require_full_matrix=False)
+        self.assertEqual(report['cases_total'], 18)
+        self.assertEqual(report['cases_observed'], 0)
+        self.assertEqual({case['sector'] for case in cases}, {'restaurant', 'hair', 'spa'})
+        self.assertEqual(
+            {case['category'] for case in cases},
+            {'duration_operator', 'resource_conflict', 'calendar_unavailable',
+             'ambiguity', 'negation', 'correction'},
+        )
+        for sector in ('restaurant', 'hair', 'spa'):
+            self.assertEqual(
+                {case['category'] for case in cases if case['sector'] == sector},
+                {'duration_operator', 'resource_conflict', 'calendar_unavailable',
+                 'ambiguity', 'negation', 'correction'},
+            )
+        self.assertEqual(report['metrics']['latency_ms']['observed'], 0)
+        self.assertIsNone(report['metrics']['latency_ms']['mean'])
+        self.assertEqual(report['metrics']['cost_usd']['observed'], 0)
+        self.assertIsNone(report['metrics']['cost_usd']['mean'])
+        for metric in ('safety', 'extraction', 'multiturn', 'response_quality', 'grounding', 'escalation'):
+            self.assertEqual(report['metrics'][metric]['observed'], 0)
+            self.assertIsNone(report['metrics'][metric]['rate'])
+
+    def test_differential_suite_rejects_missing_or_repeated_dimension(self):
+        cases = harness.load(DIFFERENTIALS)
+        with self.assertRaises(ValueError):
+            harness.evaluate(cases[:-1], [], require_full_matrix=False)
+        repeated = copy.deepcopy(cases)
+        repeated[0]['category'] = 'resource_conflict'
+        with self.assertRaises(ValueError):
+            harness.evaluate(repeated, [], require_full_matrix=False)
+
+    def test_differential_cli_reports_no_unobserved_cases_as_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            observations = Path(directory) / 'empty-observations.json'
+            observations.write_text('[]', encoding='utf-8')
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'harness.py'), str(DIFFERENTIALS),
+                 str(observations), '--supplemental'],
+                check=True, capture_output=True, text=True,
+            )
+        report = json.loads(result.stdout)
+        self.assertEqual((report['cases_total'], report['cases_observed']), (18, 0))
+        self.assertEqual(report['metrics']['extraction']['observed'], 0)
+        self.assertIsNone(report['metrics']['extraction']['rate'])
+
+    def test_differential_calendar_and_resource_cases_fail_closed(self):
+        cases = harness.load(DIFFERENTIALS)
+        sources = harness.load(DIFFERENTIAL_SOURCES)
+        baseline_sources = harness.load(ROOT / 'sources.json')
+        self.assertIn('fictional benchmark input', sources['fixture_kind'])
+        self.assertEqual(sources['tenant_id'], baseline_sources['tenant_id'])
+        self.assertEqual(sources['tenant_id'], 'synthetic-tenant-a')
+        for case in cases:
+            expected = case['expected']
+            if case['category'] == 'resource_conflict':
+                state = sources['availability']['resource_conflicts'][case['id']]
+                self.assertEqual(state['connector_status'], 'available')
+                self.assertTrue(state['switch_requires_customer_confirmation'])
+                self.assertIn('confirm_booking', expected['forbidden_actions'])
+                self.assertIn('create_booking', expected['forbidden_actions'])
+                self.assertTrue(any('switch' in failure for failure in expected['failure_conditions']))
+            elif case['category'] == 'calendar_unavailable':
+                state = sources['availability']['calendar_unavailable'][case['id']]
+                self.assertEqual(state['connector_status'], 'unavailable')
+                self.assertTrue(expected['escalation'])
+                self.assertIn('escalate', expected['allowed_actions'])
+                self.assertIn('confirm_booking', expected['forbidden_actions'])
+                self.assertIn('create_booking', expected['forbidden_actions'])
+
+    def test_differential_duration_and_operator_claims_match_synthetic_catalog(self):
+        cases = {case['id']: case for case in harness.load(DIFFERENTIALS)}
+        catalog = harness.load(DIFFERENTIAL_SOURCES)['catalog']
+        durations = {
+            'restaurant-diff-duration-operator-01': (
+                catalog['restaurant']['menu degustazione']['duration_minutes'], 120,
+            ),
+            'hair-diff-duration-operator-01': (
+                catalog['hair']['taglio']['duration_minutes'], 30,
+            ),
+            'spa-diff-duration-operator-01': (
+                catalog['spa']['massaggio relax']['duration_minutes'], 50,
+            ),
+        }
+        for case_id, (actual, expected_minutes) in durations.items():
+            case = cases[case_id]
+            self.assertEqual(actual, expected_minutes)
+            self.assertEqual(case['expected']['needed_source'], 'catalog')
+            self.assertTrue(any(f'{expected_minutes} minutes' in item
+                                for item in case['expected']['failure_conditions']))
+        self.assertIn('Luca', catalog['hair']['taglio']['operators'])
+        self.assertIn('Sam', catalog['spa']['massaggio relax']['operators'])
+
+    def test_differential_negations_and_corrections_keep_provenance(self):
+        cases = harness.load(DIFFERENTIALS)
+        by_id = {case['id']: case for case in cases}
+        for sector in ('restaurant', 'hair', 'spa'):
+            negative = by_id[f'{sector}-diff-negation-01']['expected']
+            self.assertNotIn('date', negative['slots'])
+            self.assertNotIn('time', negative['slots'])
+            self.assertIn('create_booking', negative['forbidden_actions'])
+            correction = by_id[f'{sector}-diff-correction-01']['expected']
+            self.assertIn(2, correction['slot_provenance'].values())
+            self.assertTrue(correction['criteria']['exact_slots'])
+        restaurant = by_id['restaurant-diff-correction-01']['expected']
+        self.assertEqual(
+            (restaurant['slots']['date'], restaurant['slots']['time'], restaurant['slots']['party_size']),
+            ('2026-11-14', '20:00', 2),
+        )
+        hair = by_id['hair-diff-correction-01']['expected']
+        self.assertEqual(
+            (hair['slots']['date'], hair['slots']['time'], hair['slots']['operator'], hair['slots']['resource']),
+            ('2026-11-15', '16:00', 'Mia', 'postazione 2'),
+        )
+        spa = by_id['spa-diff-correction-01']['expected']
+        self.assertEqual((spa['slots']['operator'], spa['slots']['resource']), ('Alex', 'cabina B'))
 
     def test_negative_actions_grounding_and_extraction(self):
         self.obs.update(actions=['confirm_booking'], slots={'invented':'value'}, slot_provenance={'invented':1}, sources_used=[])
