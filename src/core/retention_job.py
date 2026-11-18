@@ -103,6 +103,23 @@ async def run_retention(pool):
                     or not retention_days_allowed(policy['category'], current['retention_days'])):
                 continue
             days = current['retention_days']
+            if policy['category'] in {'messages_content', 'booking_conversation_content'}:
+                reason = (
+                    'legacy_message_provenance_required'
+                    if schema == 'absent' and policy['category'] == 'messages_content'
+                    else 'booking_message_provenance_required'
+                    if policy['category'] == 'booking_conversation_content'
+                    else 'c24_retention_controller_required'
+                )
+                logger.warning(
+                    'gdpr_retention primary_data=blocked reason=%s organization_id=%s',
+                    reason, org,
+                )
+                # The generic worker has no verified per-message receipt and
+                # lineage for this schema. Do not substitute historical
+                # messages.created_at or a provider timestamp for that evidence.
+                # Export expiry above remains independent and already ran.
+                continue
             c24_policy = await conn.fetchrow('''SELECT erasure_allowed,legal_hold,retention_days,
                     valid_until>NOW() AS valid FROM gdpr_policies
                 WHERE organization_id=$1 AND category='booking_conversation_content'
@@ -110,48 +127,7 @@ async def run_retention(pool):
             c24_allowed = bool(c24_policy and c24_policy['valid']
                                and c24_policy['erasure_allowed'] and not c24_policy['legal_hold']
                                and retention_days_allowed('booking_conversation_content', c24_policy['retention_days']))
-            if schema == 'ready' and policy['category'] == 'booking_conversation_content':
-                # Only the typed proposal is expired here. The final response,
-                # commercial receipt and counter are governed independently.
-                # Removing a source proposal invokes SQL070's bounded trigger,
-                # atomically purging derived snapshots/receipts and fencing replay.
-                await conn.execute('''WITH expired AS (
-                    SELECT id FROM messages WHERE organization_id=$1
-                      AND created_at<NOW()-make_interval(days=>$2)
-                      AND ai_reply_cache ? 'booking_state_proposal'
-                      AND status IN ('handled','sent','delivered','read','failed')
-                    ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED)
-                    UPDATE messages SET ai_reply_cache=ai_reply_cache-'booking_state_proposal'
-                    WHERE organization_id=$1 AND id IN (SELECT id FROM expired)''', org, days)
-                await conn.execute('''WITH expired AS (
-                    SELECT organization_id,auth_user_id,request_id FROM simulation_requests
-                    WHERE organization_id=$1 AND response ? 'booking_state_proposal'
-                      AND status='completed' AND completed_at<NOW()-make_interval(days=>$2)
-                    ORDER BY completed_at,request_id LIMIT 500 FOR UPDATE SKIP LOCKED)
-                    UPDATE simulation_requests SET response=response-'booking_state_proposal'
-                    WHERE organization_id=$1 AND (organization_id,auth_user_id,request_id)
-                      IN (SELECT organization_id,auth_user_id,request_id FROM expired)''', org, days)
-            elif schema == 'absent' and policy['category'] == 'messages_content':
-                rows = await conn.fetch(
-                    '''SELECT id FROM messages WHERE organization_id=$1
-                       AND created_at<NOW()-make_interval(days=>$2)
-                       AND status IN ('handled','sent','delivered','read','failed')
-                       AND deleted_at IS NULL AND billed_at IS NULL
-                       ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED''', org, days,
-                )
-                ids = [r['id'] for r in rows]
-                if ids:
-                    await conn.execute(
-                        '''UPDATE messages SET content='{}',content_text=NULL,ai_reply_cache=NULL,
-                               error_details=NULL,error_title=NULL,deleted_at=NOW()
-                           WHERE organization_id=$1 AND id=ANY($2::uuid[])''', org, ids,
-                    )
-                    await conn.execute(
-                        '''UPDATE event_log SET testo_originale='',risposta_ai='',dettagli='{}'
-                           WHERE organization_id=$1 AND source_id=ANY($2::uuid[])''', org, ids,
-                    )
-                counts['messages_redacted'] += len(ids)
-            elif schema == 'absent' and policy['category'] == 'simulator_responses':
+            if schema == 'absent' and policy['category'] == 'simulator_responses':
                 result = await conn.execute(
                     '''DELETE FROM simulation_requests WHERE organization_id=$1
                        AND (organization_id,auth_user_id,request_id) IN (
@@ -161,29 +137,6 @@ async def run_retention(pool):
                          ORDER BY completed_at LIMIT 500 FOR UPDATE SKIP LOCKED)''', org, days,
                 )
                 counts['simulator_purged'] += int(result.split()[-1])
-            elif policy['category'] == 'messages_content':
-                rows = await conn.fetch(
-                    '''SELECT id FROM messages WHERE organization_id=$1
-                       AND created_at<NOW()-make_interval(days=>$2)
-                       AND status IN ('handled','sent','delivered','read','failed')
-                       AND deleted_at IS NULL AND billed_at IS NULL
-                       AND ($3 OR (NOT COALESCE(ai_reply_cache ? 'booking_state_proposal',false)
-                         AND NOT EXISTS(SELECT 1 FROM booking_conversation_states s
-                             WHERE s.organization_id=$1 AND s.conversation_id=messages.conversation_id)))
-                       ORDER BY created_at,id LIMIT 500 FOR UPDATE SKIP LOCKED''', org, days, c24_allowed,
-                )
-                ids = [r['id'] for r in rows]
-                if ids:
-                    await conn.execute(
-                        '''UPDATE messages SET content='{}',content_text=NULL,ai_reply_cache=NULL,
-                               error_details=NULL,error_title=NULL,deleted_at=NOW()
-                           WHERE organization_id=$1 AND id=ANY($2::uuid[])''', org, ids,
-                    )
-                    await conn.execute(
-                        '''UPDATE event_log SET testo_originale='',risposta_ai='',dettagli='{}'
-                           WHERE organization_id=$1 AND source_id=ANY($2::uuid[])''', org, ids,
-                    )
-                counts['messages_redacted'] += len(ids)
             elif policy['category'] == 'simulator_responses':
                 result = await conn.execute(
                     '''DELETE FROM simulation_requests WHERE organization_id=$1
