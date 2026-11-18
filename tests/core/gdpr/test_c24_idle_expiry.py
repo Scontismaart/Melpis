@@ -363,7 +363,10 @@ async def test_receipt_erasure_policy_hold_and_release(state_env, monkeypatch):
     from tests.core.gdpr.test_conversation_lifecycle_c24 import populated, subject, approve_conversation
     from tests.core.gdpr.test_deletion_a06 import approve_policies
     monkeypatch.setenv("ENCRYPTION_KEY", __import__("base64").urlsafe_b64encode(bytes(range(32))).decode("ascii"))
-    env=state_env; pool=env['pool']; org=env['org']; request=await populated(env)
+    env=state_env; pool=env['pool']; org=env['org']
+    definition=await pool.fetchval("SELECT pg_get_functiondef('public.c24_cleanup_suppression(uuid,uuid)'::regprocedure)")
+    assert 'Fail closed until retention timestamps are mapped' in definition
+    request=await populated(env)
     contact=await subject(env)
     await pool.execute("""INSERT INTO c24_idle_watermarks
       (organization_id,conversation_id,subject_id,generation,cutoff,provider_timestamp,expired_at)
@@ -476,50 +479,12 @@ async def test_suppression_fence_retention_requires_purged_source_and_removed_re
     assert await pool.fetchval('SELECT c24_purge_source($1,$2)',org,source)
     assert not await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
     assert await pool.fetchval('SELECT c24_cleanup_receipt($1,$2)',org,request)
-    await pool.execute('''CREATE FUNCTION public.test_reject_suppression_audit() RETURNS trigger
-        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic audit failure'; END $$''')
-    await pool.execute('''CREATE TRIGGER reject_suppression_audit BEFORE INSERT ON c24_suppression_lifecycle_audit
-        FOR EACH ROW EXECUTE FUNCTION public.test_reject_suppression_audit()''')
-    with pytest.raises(asyncpg.RaiseError,match='synthetic audit failure'):
-        await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
+    # A receipt removed under its approved policy does not establish the
+    # retention anchor for the separate fence or audit records.
+    assert not await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
+    assert not await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
     assert await pool.fetchval('SELECT EXISTS(SELECT 1 FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2)',org,request)
     assert not await pool.fetchval("SELECT EXISTS(SELECT 1 FROM c24_suppression_lifecycle_audit WHERE organization_id=$1 AND action='retention')",org)
-    await pool.execute('DROP TRIGGER reject_suppression_audit ON c24_suppression_lifecycle_audit')
-    await pool.execute('DROP FUNCTION public.test_reject_suppression_audit()')
-    assert await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
-    assert not await pool.fetchval('SELECT c24_cleanup_suppression($1,$2)',org,env['conv'])
-    assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM c24_source_fences WHERE organization_id=$1 AND request_id=$2)',org,request)
-    audit=await pool.fetchrow("SELECT audit_id,record_kind,record_digest,action FROM c24_suppression_lifecycle_audit WHERE organization_id=$1 AND action='retention'",org)
-    assert audit['record_kind']=='source_fence' and len(audit['record_digest'])==32
-    assert not await pool.fetchval('SELECT c24_cleanup_suppression_audit($1,$2)',org,audit['audit_id'])
-    audit_category=next(c for c in CATEGORIES if c.name=='c24_suppression_lifecycle_audit')
-    subject_id=await pool.fetchval('SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2',org,env['conv'])
-    async with pool.acquire() as conn, conn.transaction():
-        await conn.execute('SET LOCAL ROLE service_role')
-        exported=await conn.fetchrow(audit_category.contact_query,org,subject_id)
-        assert exported['record_kind']=='source_fence'
-        assert 'source_record_id' not in exported and 'operation_id' not in exported
-
-    async with pool.acquire() as conn, conn.transaction():
-        await conn.execute('ALTER TABLE c24_suppression_lifecycle_audit DISABLE TRIGGER c24_suppression_lifecycle_audit_immutable')
-        await conn.execute("UPDATE c24_suppression_lifecycle_audit SET occurred_at=clock_timestamp()-interval '91 days' WHERE organization_id=$1 AND audit_id=$2",org,audit['audit_id'])
-        await conn.execute('ALTER TABLE c24_suppression_lifecycle_audit ENABLE TRIGGER c24_suppression_lifecycle_audit_immutable')
-    subject=await pool.fetchval('SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2',org,env['conv'])
-    for scope, scope_id in [('organization',None),('subject',subject),('conversation',env['conv']),
-                            ('record',audit['audit_id']),('record',request),('record',env['conv'])]:
-        hold=uuid4()
-        await pool.execute('''INSERT INTO gdpr_retention_holds(organization_id,hold_id,category,scope,scope_id,
-            reason_code,authority_reference,approved_by,approved_at,review_by)
-            VALUES($1,$2,'technical_receipts',$3,$4,'litigation','case:suppression-audit','qa',
-              clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day')''',org,hold,scope,scope_id)
-        assert not await pool.fetchval('SELECT c24_cleanup_suppression_audit($1,$2)',org,audit['audit_id'])
-        await pool.execute('''INSERT INTO gdpr_retention_hold_events(organization_id,hold_id,event_id,kind,
-            authority_reference,approved_by,occurred_at)
-            VALUES($1,$2,$3,'released','case:release','qa',clock_timestamp())''',org,hold,uuid4())
-    assert await pool.fetchval('SELECT c24_cleanup_suppression_audit($1,$2)',org,audit['audit_id'])
-    assert not await pool.fetchval('SELECT EXISTS(SELECT 1 FROM c24_suppression_lifecycle_audit WHERE organization_id=$1 AND audit_id=$2)',org,audit['audit_id'])
-
-    # The source row is a permanent provider-ID tombstone; stale replay stays denied.
     with pytest.raises(PermissionError):
         await apply(env,source,request=request)
 
