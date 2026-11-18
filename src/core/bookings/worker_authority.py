@@ -13,7 +13,7 @@ from uuid import UUID, uuid4, uuid5
 from weakref import WeakSet
 
 from src.core.billing.quota_reservations import QuotaConflict, QuotaOperation, _period
-from src.core.bookings.allocation_contracts import AllocationRequest
+from src.core.bookings.allocation_contracts import AllocationRequest, derive_allocation
 from src.core.bookings.auto_policy import (
     parse_and_validate_auto_booking,
     validate_auto_booking_configuration,
@@ -25,12 +25,16 @@ from src.core.bookings.conversation_state import (
     state_digest,
 )
 from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
-from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
+from src.core.db.repositories.booking_allocation_repo import (
+    BookingAllocationRepository,
+    WorkerSlotUnavailable,
+)
 from src.core.db.repositories.booking_catalog_repo import decode
 from src.core.db.repositories.booking_conversation_repo import (
     BookingConversationRepository,
 )
 from src.core.db.repositories.booking_repo import BookingRepository
+from src.core.gdpr.guard import check_contact_intake
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +250,7 @@ class WorkerBookingAuthority:
         created = 0
         for job_id in jobs:
             try:
-                await self.process_confirmation(
+                booking_id = await self.process_confirmation(
                     pool, None, None, job_id, application_pool=application_pool,
                 )
             except WorkerProofDenied:
@@ -257,7 +261,8 @@ class WorkerBookingAuthority:
                 logger.error('Private booking job failed message_id=%s error_type=%s',
                              job_id, type(exc).__name__)
             else:
-                created += 1
+                if booking_id is not None:
+                    created += 1
             self._cursor = job_id
         return created
 
@@ -315,9 +320,9 @@ class WorkerBookingAuthority:
             raise WorkerProofDenied('Booking conversation does not match persisted job')
         claim = _Claim(_trusted_uuid(org), _trusted_uuid(job['claim_message_id']),
                        _trusted_uuid(job['claim_id']), job['generation'])
-        async with _keep_claim_live(pool, claim) as heartbeat:
-            capability = None
-            try:
+        capability = None
+        try:
+            async with _keep_claim_live(pool, claim) as heartbeat:
                 async with application_pool.acquire() as app_conn, app_conn.transaction(isolation='read_committed'):
                     await _require_capability_issuer(app_conn)
                     candidate = await app_conn.fetchrow("""SELECT revision,catalog_revision
@@ -333,14 +338,105 @@ class WorkerBookingAuthority:
                         app_conn, claim, proof, 'confirmation', confirmation_message_id=confirmation,
                     )
                 _check_heartbeat(heartbeat)
-                await _renew_claim(pool, claim)
-                _check_heartbeat(heartbeat)
+            # Renewal locks claim before capability. Drain the heartbeat and
+            # renew once before consume and handoff lock in the opposite order.
+            await _renew_claim(pool, claim)
+            try:
                 async with pool.acquire() as conn, conn.transaction(isolation='read_committed'):
                     await _require_private_identity(conn)
                     return await self.create_booking(conn, capability)
-            finally:
-                if capability is not None:
-                    capability._payload = None
+            except WorkerSlotUnavailable:
+                async with application_pool.acquire() as conn, conn.transaction(isolation='read_committed'):
+                    await self._handoff_unavailable(conn, claim, proof, capability._database_id)
+                return None
+        finally:
+            if capability is not None:
+                capability._payload = None
+
+    async def _handoff_unavailable(self, conn, claim, prior, capability_id):
+        org, conversation, message, subject = prior[:4]
+        await _require_capability_issuer(conn)
+        # Match the private consume function's capability-before-claim order.
+        # Its rollback left the exact token unconsumed and otherwise reusable.
+        if not await conn.fetchval('''SELECT true FROM c24_private.worker_capabilities
+            WHERE organization_id=$1 AND message_id=$2 AND claim_id=$3 AND generation=$4
+              AND capability_id=$5 AND consumed_at IS NULL AND completed_at IS NULL
+              AND payload IS NOT NULL AND expires_at>clock_timestamp() FOR UPDATE''',
+            org, message, claim.claim_id, claim.generation, capability_id,
+        ):
+            raise WorkerProofDenied('Handoff capability unavailable')
+        current = await self._proof(conn, claim, conversation, prior[7], prior[9], trusted_application=True)
+        if current != prior:
+            raise WorkerProofDenied('Verified evidence changed before handoff')
+        phone = await conn.fetchval(
+            'SELECT phone_number FROM contacts WHERE organization_id=$1 AND id=$2', org, subject,
+        )
+        if not phone:
+            raise WorkerProofDenied('Current booking subject unavailable')
+        await check_contact_intake(conn, org, phone)
+        organization = await conn.fetchrow('SELECT id,timezone,business_profile FROM organizations WHERE id=$1', org)
+        settings = await conn.fetchrow('SELECT * FROM booking_settings WHERE organization_id=$1', org)
+        catalog, sector, authority = await self._allocation._catalog(conn, org, organization, settings)
+        if (sector not in {'ristorante', 'parrucchiere', 'centro_estetico'} or authority != 'internal'
+                or catalog.revision != prior[9] or catalog.sector != sector):
+            raise WorkerProofDenied('Handoff catalog unavailable')
+        slot = prior[12]
+        request_id, booking_id, _ = service_receipt_v2(org, message, 'create', prior[6])
+        request = AllocationRequest(
+            request_id=request_id, booking_id=booking_id, action='allocate',
+            expected_allocation_revision=0, expected_catalog_revision=prior[9],
+            service_id=prior[13], appointment_date=slot.date, appointment_time=slot.time,
+            party_size=slot.party_size if slot.capacity is not None else None,
+        )
+        if slot.capacity is not None:
+            await conn.fetchval('SELECT pg_advisory_xact_lock(hashtext($1))',
+                                f'{org}|{slot.date.isoformat()}|{slot.time.hour}')
+        bounds = derive_allocation(request, catalog)
+        await self._allocation._take_locks(conn, org, request, (), bounds[2])
+        if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM bookings
+            WHERE organization_id=$1 AND (id=$2 OR source_message_id=$3))''', org, booking_id, str(message)):
+            raise WorkerProofDenied('Booking source already completed')
+
+        unavailable = False
+        if slot.capacity is not None:
+            used = await conn.fetchval("""SELECT COALESCE(SUM(coperti),0) FROM bookings
+                WHERE organization_id=$1 AND data=$2 AND EXTRACT(HOUR FROM ora)=$3
+                  AND stato IN ('in_attesa','confermata','da_verificare','completata')""",
+                org, slot.date, slot.time.hour,
+            )
+            unavailable = used + slot.party_size > slot.capacity
+        if not unavailable:
+            unavailable = (await self._allocation._availability(
+                conn, org, catalog, bounds, bounds[2], booking_id, (), None, None,
+            )) == 'unavailable'
+        if not unavailable:
+            raise WorkerProofDenied('Slot unavailability no longer verified')
+
+        # Recheck expiry after all lock waits and revoke the success token
+        # within the same transaction as the claim and ticket transition.
+        revoked = await conn.fetchval('''UPDATE c24_private.worker_capabilities
+            SET payload=NULL,expires_at=clock_timestamp()
+            WHERE organization_id=$1 AND message_id=$2 AND claim_id=$3 AND generation=$4
+              AND capability_id=$5 AND consumed_at IS NULL AND completed_at IS NULL
+              AND payload IS NOT NULL AND expires_at>clock_timestamp()
+            RETURNING true''', org, message, claim.claim_id, claim.generation, capability_id)
+        if not revoked:
+            raise WorkerProofDenied('Handoff capability expired before transition')
+        marked = await conn.fetchval('''UPDATE booking_worker_claims SET handoff_queued=true
+            WHERE organization_id=$1 AND message_id=$2 AND conversation_id=$3
+              AND claim_id=$4 AND generation=$5 AND lease_until>clock_timestamp()
+              AND NOT handoff_queued RETURNING true''',
+            org, message, conversation, claim.claim_id, claim.generation,
+        )
+        if not marked:
+            raise WorkerProofDenied('Live booking claim unavailable for handoff')
+        escalated = await conn.fetchval("""UPDATE conversations
+            SET ticket_status='PENDING_STAFF',pending_staff_at=NOW(),
+                updated_at=NOW(),version=version+1
+            WHERE organization_id=$1 AND id=$2 AND ticket_status='AI_ACTIVE'
+              AND status='active' AND deleted_at IS NULL RETURNING true""", org, conversation)
+        if not escalated:
+            raise WorkerProofDenied('Current conversation unavailable for handoff')
 
     async def process_a05_booking(self, pool, organization_id, message_id, canonical_response,
                                  *, application_pool=None):
@@ -539,8 +635,10 @@ class WorkerBookingAuthority:
             expected_allocation_revision=0, expected_catalog_revision=proof[9],
             service_id=service_id, **temporal,
         )
-        from src.core.bookings.allocation_contracts import derive_allocation
-        from src.core.db.repositories.booking_allocation_repo import _booking_fingerprint, _digest
+        from src.core.db.repositories.booking_allocation_repo import (
+            _booking_fingerprint,
+            _digest,
+        )
         organization = await conn.fetchrow('''SELECT id,timezone,business_profile FROM organizations
             WHERE id=$1 FOR SHARE''', org)
         settings = await conn.fetchrow('SELECT * FROM booking_settings WHERE organization_id=$1 FOR SHARE', org)
@@ -1044,6 +1142,8 @@ class WorkerBookingAuthority:
                     org, slot.date, slot.time.hour,
                 )
                 if used + slot.party_size > slot.capacity:
+                    if capability._kind == 'c24':
+                        raise WorkerSlotUnavailable()
                     raise WorkerProofDenied('Slot capacity unavailable')
             # Bind the single booking identifier to this transaction capability
             # for every sector. The database wrapper also records a fenced
@@ -1059,7 +1159,6 @@ class WorkerBookingAuthority:
                                         org, subject)
             if not name or not phone:
                 raise WorkerProofDenied('Verified customer details unavailable')
-            from src.core.gdpr.guard import check_contact_intake
             await check_contact_intake(conn, org, phone)
             google_pending = authority == 'google_authoritative'
             await conn.execute("""INSERT INTO worker_booking_inserts
@@ -1082,6 +1181,7 @@ class WorkerBookingAuthority:
                     org, booking_id, subject, conversation, message, slot.date, slot.departure)
             result = await self._allocation._apply_worker_on_connection(
                 conn, org, message, inbox, operation, semantic_hash, request,
+                handoff_on_unavailable=capability._kind == 'c24',
             )
             if result['replayed'] or result['outcome'] != 'allocated':
                 raise WorkerProofDenied('Slot allocation unavailable')
