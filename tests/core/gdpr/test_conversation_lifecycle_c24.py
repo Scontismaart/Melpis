@@ -74,18 +74,19 @@ async def test_contact_erasure_covers_canonical_copy_after_source_hard_delete(st
     assert await _used(env['pool'], env['org']) == 1
 
 
-async def test_expiring_only_simulation_proposal_invalidates_state(state_env, monkeypatch):
-    from src.core.retention_job import run_retention
+async def test_old_simulation_proposal_preserves_state_without_retention_controller(state_env, monkeypatch):
     env = state_env
     await populated(env)
     await approve_conversation(env['pool'], env['org'])
     monkeypatch.setenv('GDPR_RETENTION_EXECUTION_ENABLED', 'true')
     await env['pool'].execute("UPDATE simulation_requests SET completed_at=NOW()-interval '40 days' WHERE organization_id=$1", env['org'])
     await run_retention(env['pool'])
-    assert await counts(env) == (0, 0)
+    assert await counts(env) == (1, 1)
     assert await env['pool'].fetchval('SELECT ai_reply_cache IS NOT NULL FROM messages WHERE organization_id=$1 AND id=$2', env['org'], env['message'])
-    with pytest.raises(PermissionError):
-        await apply(env, env['message'])
+    assert await env['pool'].fetchval(
+        "SELECT response ? 'booking_state_proposal' FROM simulation_requests WHERE organization_id=$1",
+        env['org'],
+    )
     assert await _used(env['pool'], env['org']) == 1
 
 
@@ -249,7 +250,7 @@ async def test_export_projections_bind_original_subject_and_exclude_account(stat
             assert str(request).encode() in raw
 
 
-async def test_approved_message_retention_invalidates_entire_state(state_env, monkeypatch):
+async def test_approved_policy_cannot_age_messages_without_verified_receipt(state_env, monkeypatch):
     env = state_env
     await populated(env)
     later = await second_source(env, 1700000001)
@@ -265,9 +266,9 @@ async def test_approved_message_retention_invalidates_entire_state(state_env, mo
     assert not await env['pool'].fetchval('SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1', env['message'])
     await approve_conversation(env['pool'], env['org'])
     result = await run_retention(env['pool'])
-    assert result['messages_redacted'] >= 1
-    assert await env['pool'].fetchval('SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1', env['message'])
-    assert await counts(env) == (0, 0)
+    assert result['messages_redacted'] == 0
+    assert not await env['pool'].fetchval('SELECT deleted_at IS NOT NULL FROM messages WHERE id=$1', env['message'])
+    assert await counts(env) == (1, 2)
     assert await _used(env['pool'], env['org']) == 2
 
 
@@ -395,10 +396,10 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
     assert proof['external_copies_certified'] is False
 
 
-async def test_conversation_retention_requires_policy_and_expires_all_derived_copies(state_env, monkeypatch):
+async def test_conversation_policy_alone_does_not_expire_unverified_derived_copies(state_env, monkeypatch):
     from tests.core.test_quota_reservation_lifecycle import _inbound_operation
     env = state_env
-    request = await populated(env)
+    await populated(env)
     operation_id = _inbound_operation(env['org'], env['message'], text='2026-11-12').id
     await env['pool'].execute("UPDATE messages SET created_at=now()-interval '40 days', status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
     await env['pool'].execute("UPDATE simulation_requests SET completed_at=now()-interval '40 days' WHERE organization_id=$1 AND request_id=$2", env['org'], operation_id)
@@ -408,12 +409,10 @@ async def test_conversation_retention_requires_policy_and_expires_all_derived_co
     assert await env['pool'].fetchval("SELECT ai_reply_cache ? 'booking_state_proposal' FROM messages WHERE id=$1", env['message'])
     await approve_conversation(env['pool'], env['org'])
     await run_retention(env['pool'])
-    assert await counts(env) == (0, 0)
-    assert not await env['pool'].fetchval("SELECT ai_reply_cache ? 'booking_state_proposal' FROM messages WHERE id=$1", env['message'])
-    assert not await env['pool'].fetchval("SELECT response ? 'booking_state_proposal' FROM simulation_requests WHERE organization_id=$1 AND request_id=$2", env['org'], operation_id)
+    assert await counts(env) == (1, 1)
+    assert await env['pool'].fetchval("SELECT ai_reply_cache ? 'booking_state_proposal' FROM messages WHERE id=$1", env['message'])
+    assert await env['pool'].fetchval("SELECT response ? 'booking_state_proposal' FROM simulation_requests WHERE organization_id=$1 AND request_id=$2", env['org'], operation_id)
     assert await _used(env['pool'], env['org']) == 1
-    with pytest.raises(PermissionError):
-        await apply(env, env['message'], request=request)
 
 
 @pytest.mark.parametrize('policy_state', ['held', 'expired'])
