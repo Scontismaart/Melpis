@@ -6,17 +6,24 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import pytest
 
 from src.core.bookings.catalog_contracts import validate_catalog_json
 from src.core.bookings.worker_authority import WorkerBookingAuthority
 from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository
-from src.core.db.repositories.booking_conversation_repo import BookingConversationRepository
+from src.core.db.repositories.booking_conversation_repo import (
+    BookingConversationRepository,
+)
 from src.core.db.repositories.booking_repo import BookingRepository
 from tests.core.bookings.test_allocation_engine_postgres import CATALOGS, wait_blocked
 from tests.core.bookings.test_conversation_state_postgres import commit_source
 from tests.core.bookings.test_worker_authority_postgres import _persist_ingress
-from tests.core.test_quota_reservation_lifecycle import _auth_member, _inbound_message, _organization
+from tests.core.test_quota_reservation_lifecycle import (
+    _auth_member,
+    _inbound_message,
+    _organization,
+)
 
 
 @pytest.mark.asyncio
@@ -132,3 +139,109 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2', org, booking) == 1
     with pytest.raises(Exception, match='guarded admission'):
         await pool.execute("INSERT INTO bookings(id,organization_id,nome_cliente,telefono,data,ora,coperti,stato) VALUES($1,$2,'Synthetic','',$3,'10:00',1,'in_attesa')", uuid4(), org, appointment)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico'])
+async def test_two_confirmed_sector_workers_compete_for_same_resource(
+    pg_pool, private_worker_pool, monkeypatch, sector,
+):
+    pool = pg_pool
+    org = (await _organization(pool))['id']
+    await pool.execute("UPDATE organizations SET timezone='Europe/Rome',business_profile=$2::jsonb WHERE id=$1",
+                       org, json.dumps({'verticale': sector}))
+    auth = await _auth_member(pool, org, role='owner')
+    actor = await pool.fetchval('SELECT id FROM user_profiles WHERE auth_user_id=$1', auth)
+    publisher = BookingCatalogRepository(BookingRepository(pool))
+    await publisher.write(org, actor, auth, action='draft_saved', expected_revision=0,
+                          request_id=uuid4(), catalog=copy.deepcopy(CATALOGS[sector]))
+    published = await publisher.write(org, actor, auth, action='published', expected_revision=1, request_id=uuid4())
+    scoped = validate_catalog_json(json.dumps(published['published']), organization_id=org)
+    await pool.execute('SELECT public.booking_sector_activate_empty($1,$2)', org, sector)
+    policy = {'a05': {'authority': 'internal'}, 'c24_sector_auto':
+              {'enabled': True, 'version': 1, 'sector': sector, 'authority': 'internal'}}
+    await pool.execute('UPDATE booking_settings SET config=config || $2::jsonb WHERE organization_id=$1', org, json.dumps(policy))
+    appointment = date.today() + timedelta(days=7)
+    while appointment.weekday() == 6:
+        appointment += timedelta(days=1)
+    monkeypatch.setenv('C24_PRIVATE_BOOKING_WORKER_ENABLED', 'true')
+    replies = []
+    for _ in range(2):
+        message = await _inbound_message(pool, org, canale='whatsapp')
+        conversation = await pool.fetchval('SELECT conversation_id FROM messages WHERE id=$1', message)
+        env = {'pool': pool, 'org': org, 'auth': auth, 'actor': actor, 'catalog': scoped,
+               'conv': conversation, 'message': message, 'repo': BookingConversationRepository(pool)}
+        wam = 'race-proposal-' + uuid4().hex
+        await pool.execute('UPDATE messages SET wam_id=$3 WHERE organization_id=$1 AND id=$2', org, message, wam)
+        await _persist_ingress(pool, org, wam)
+        await commit_source(env, message, f'Mi chiamo Mario Rossi, vorrei un appuntamento il {appointment} alle 10:00',
+            {'service_id': 'standard', 'customer_name': True, 'appointment_date': appointment.isoformat(),
+             'appointment_time': '10:00'}, 1700000000, provider_id=wam)
+        await env['repo'].apply_worker_source(org, conversation, message)
+        prompt = await pool.fetchval("SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND handling_type='c24_confirmation_prompt'", org, conversation)
+        assert prompt is not None
+        await pool.execute("UPDATE messages SET status='sent',wam_id=$3,sent_at=clock_timestamp()-interval '2 minutes' WHERE organization_id=$1 AND id=$2", org, prompt, 'race-prompt-' + uuid4().hex)
+        reply, reply_wam = uuid4(), 'race-confirmation-' + uuid4().hex
+        stamp = await pool.fetchval("SELECT floor(extract(epoch from clock_timestamp()-interval '1 minute'))::bigint")
+        text = f'CONFIRM {prompt}'
+        payload = {'id': reply_wam, 'type': 'text', 'timestamp': str(stamp), 'text': {'body': text}}
+        await pool.execute("""INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,content,status,content_text,wam_id)
+            VALUES($1,$2,$3,'inbound','text',$4::jsonb,'processing',$5,$6)""",
+            reply, org, conversation, json.dumps(payload), text, reply_wam)
+        await _persist_ingress(pool, org, reply_wam)
+        assert (await env['repo'].apply_worker_source(org, conversation, reply))['details_confirmed_current']
+        replies.append((conversation, reply))
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    second_entered = asyncio.Event()
+    original_marker = WorkerBookingAuthority._mark_sector_admission
+    original_create = WorkerBookingAuthority.create_booking
+    worker_pid = None
+    second_pid = None
+    second = None
+
+    async def record_second(authority, conn, capability):
+        nonlocal second_pid
+        if asyncio.current_task() is second:
+            second_pid = conn.get_server_pid()
+            second_entered.set()
+        return await original_create(authority, conn, capability)
+
+    async def hold_first(authority, conn, *args):
+        nonlocal worker_pid
+        await original_marker(authority, conn, *args)
+        if worker_pid is None:
+            worker_pid = conn.get_server_pid()
+            entered.set()
+            await release.wait()
+
+    monkeypatch.setattr(WorkerBookingAuthority, '_mark_sector_admission', hold_first)
+    monkeypatch.setattr(WorkerBookingAuthority, 'create_booking', record_second)
+    first = asyncio.create_task(WorkerBookingAuthority().process_confirmation(
+        private_worker_pool, org, *replies[0], application_pool=pool))
+    try:
+        await asyncio.wait_for(entered.wait(), 30)
+        second = asyncio.create_task(WorkerBookingAuthority().process_confirmation(
+            private_worker_pool, org, *replies[1], application_pool=pool))
+        await asyncio.wait_for(second_entered.wait(), 30)
+        async def second_blocked_by_first():
+            while not await pool.fetchval('SELECT $1=ANY(pg_blocking_pids($2))', worker_pid, second_pid):
+                if second.done():
+                    raise AssertionError(f'second worker ended before blocking: {second.exception()!r}')
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(second_blocked_by_first(), 10)
+    except BaseException:
+        release.set()
+        for task in (first, second):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(*(task for task in (first, second) if task is not None),
+                             return_exceptions=True)
+        raise
+    release.set()
+    results = await asyncio.wait_for(asyncio.gather(first, second, return_exceptions=True), 15)
+    assert sum(not isinstance(result, Exception) for result in results) == 1, repr(results)
+    assert sum(isinstance(result, asyncpg.InsufficientPrivilegeError) for result in results) == 1, repr(results)
+    assert await pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', org) == 1
+    assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', org) == 1
+    assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 1
