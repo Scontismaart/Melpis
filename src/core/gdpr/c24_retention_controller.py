@@ -154,8 +154,9 @@ async def _run_manifest(path: Path):
 async def run_c24_retention_sweep(pool):
     """Run one cursor-backed batch of at most 100 database-selected targets.
 
-    A false ``batch_clear`` means at least one target was deferred. The cursor
-    still advances so a held or uncertain record cannot starve other tenants.
+    A false ``batch_clear`` reports deferred work, including suppression
+    metadata outside the mutation batch. Target deferrals move the cursor
+    forward. The fixed horizon keeps newly due work for the next scan.
     """
     if not _enabled() or os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") != "true":
         return {"enabled": False, "batch_clear": False}
