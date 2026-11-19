@@ -263,9 +263,10 @@ For C2.4, a false/ineligible target result is a deferral, not a success receipt.
 
 For verified source-fence expiry, the trusted recovery operator authenticates a
 complete cumulative `c24-restore-v3` checkpoint, including its independently pinned
-SHA-256, minimum sequence, backup identity and exact receipt-prune tuples. The
-operator seals it in the existing protected independent recovery store with
-`retain_receipt_prune_checkpoint` and reads it back in a read-committed owner
+SHA-256, minimum sequence, backup identity and exact receipt-prune tuples. Once
+the designated protected independent recovery store is approved and verified,
+the operator seals the checkpoint there with `retain_receipt_prune_checkpoint`
+and reads it back in a read-committed owner
 transaction with `bind_retained_receipt_prune_checkpoint`. Source-fence and derived
 audit expiry require these immutable bindings. The SQL lifecycle still rechecks
 receipt conclusion, current policy, holds, tenant and source lineage at deletion.
