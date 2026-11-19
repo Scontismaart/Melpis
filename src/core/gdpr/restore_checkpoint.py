@@ -383,8 +383,7 @@ async def _verify_replayed_receipt_prunes(conn, org, prunes):
                 WHERE organization_id=$1 AND (request_id=$5 OR source_message_id=$2))
             AND NOT EXISTS(SELECT FROM c24_suppression_lifecycle_audit
                 WHERE organization_id=$1 AND action='retention' AND (source_record_id=$5 OR c24_source_message_id=$2))
-            AND NOT EXISTS(SELECT FROM simulation_requests WHERE c24_source_message_id=$2
-                AND response IS NOT NULL AND response<>'{}'::jsonb)""",
+            AND public.c24_receipt_source_copies_absent($1,$2)""",
             org, source, conversation, subject, request,
         ):
             raise RestoreBlocked('Newer receipt expiry checkpoint has not been replayed')

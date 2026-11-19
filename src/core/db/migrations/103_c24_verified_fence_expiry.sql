@@ -39,6 +39,22 @@ $$;
 REVOKE ALL ON FUNCTION public.c24_receipt_prune_digest(uuid,uuid,uuid,uuid,uuid)
  FROM PUBLIC,anon,authenticated,service_role,melpis_c24_retention;
 
+-- A lifecycle owner can check globally unique source identity for historical
+-- misattribution. The result is a boolean, with no foreign-tenant data returned.
+CREATE OR REPLACE FUNCTION public.c24_receipt_source_copies_absent(p_org uuid,p_source uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+BEGIN
+ IF current_user IS DISTINCT FROM pg_get_userbyid((SELECT relowner FROM pg_class
+    WHERE oid='public.c24_receipt_prune_checkpoint_bindings'::regclass)) THEN
+  RAISE EXCEPTION 'Receipt integrity check requires the lifecycle owner' USING ERRCODE='42501';
+ END IF;
+ RETURN EXISTS(SELECT 1 FROM public.messages m WHERE m.organization_id=p_org AND m.id=p_source)
+  AND NOT EXISTS(SELECT 1 FROM public.simulation_requests s WHERE s.c24_source_message_id=p_source
+    AND s.response IS NOT NULL AND s.response<>'{}'::jsonb);
+END $$;
+REVOKE ALL ON FUNCTION public.c24_receipt_source_copies_absent(uuid,uuid)
+ FROM PUBLIC,anon,authenticated,service_role,melpis_c24_retention;
+
 CREATE OR REPLACE FUNCTION public.c24_bind_receipt_prune_checkpoint(
  p_org uuid,p_request uuid,p_source uuid,p_conversation uuid,p_subject uuid,
  p_checkpoint text,p_sequence bigint
@@ -152,9 +168,7 @@ BEGIN
     WHERE r.organization_id=f.organization_id AND r.request_id=f.request_id)
    -- Source IDs are globally unique. Historical misattribution can block
    -- expiry, but no copy outside the verified scope is ever modified here.
-   AND NOT EXISTS(SELECT 1 FROM public.simulation_requests s
-    WHERE s.c24_source_message_id=f.source_message_id
-     AND s.response IS NOT NULL AND s.response<>'{}'::jsonb)
+   AND public.c24_receipt_source_copies_absent(f.organization_id,f.source_message_id)
    AND NOT EXISTS(SELECT 1 FROM public.gdpr_retention_holds h WHERE h.organization_id=p_org
     AND h.category='technical_receipts' AND (h.scope='organization'
       OR (h.scope='subject' AND h.scope_id=f.subject_id)

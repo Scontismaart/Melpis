@@ -176,6 +176,11 @@ async def test_verified_fence_and_derived_audit_follow_receipt_deadline(state_en
     assert await pool.fetchval("SELECT c24_cleanup_receipt($1,$2)", org, request)
     assert not await pool.fetchval(cleanup, org, conversation)
     assert await pool.fetchval("SELECT c24_purge_source($1,$2)", org, source)
+    assert await pool.fetchval("SELECT c24_receipt_source_copies_absent($1,$2)", org, source)
+    assert not await pool.fetchval("SELECT c24_receipt_source_copies_absent($1,$2)", uuid4(), source)
+    assert not await pool.fetchval(
+        "SELECT has_function_privilege('service_role','c24_receipt_source_copies_absent(uuid,uuid)','EXECUTE')"
+    )
     assert not await pool.fetchval(cleanup, org, conversation)
     person = await subject(env)
     checkpoint, key, digest = signed_prune_checkpoint(org, [(request, source, conversation, person)])
