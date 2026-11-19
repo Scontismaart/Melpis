@@ -1,4 +1,5 @@
 """Bounded automated retention on a disposable PostgreSQL database."""
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -280,6 +281,7 @@ async def test_sweep_clears_retained_content_of_eligible_soft_deleted_message(
         )
 
 
+@pytest.mark.migration_limit(97)
 async def test_suppression_retention_defers_sweep_and_explicit_targets(state_env, retention_operator):
     from src.core.gdpr.c24_retention_controller import run_c24_retention_targets
 
@@ -325,3 +327,103 @@ async def test_suppression_retention_defers_sweep_and_explicit_targets(state_env
     await run_c24_retention_sweep(retention_operator)
     assert await pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE organization_id=$1 AND id=$2",other,inbox)
     assert await pool.fetchval('SELECT count(*) FROM c24_suppression_lifecycle_audit WHERE organization_id=$1',org)==126
+
+
+async def test_sweep_progresses_past_newly_due_inbox_and_deferred_suppression(
+    state_env, retention_operator,
+):
+    env = state_env
+    pool, org, source, conversation = (
+        env["pool"], env["org"], env["message"], env["conv"],
+    )
+    incoming = (await _organization(pool))["id"]
+    await approve_messages(pool, org)
+    await approve_messages(pool, incoming, days=1)
+    await commit_source(env, source, "2026-11-12", {"service_id": "standard"}, 1700000000)
+    await apply(env, source)
+    await pool.execute(
+        "UPDATE messages SET status='handled', handling_type='ai_handled' WHERE organization_id=$1 AND id=$2",
+        org, source,
+    )
+    await age_message(pool, org, source, 91)
+
+    contact = await pool.fetchval(
+        "SELECT contact_id FROM conversations WHERE organization_id=$1 AND id=$2",
+        org, conversation,
+    )
+    await pool.execute(
+        """INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+          retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+          VALUES($1,'technical_receipts','test',true,90,false,'test:sweep','qa',
+          clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""", org,
+    )
+    await pool.execute(
+        """INSERT INTO c24_suppression_lifecycle_audit(organization_id,subject_id,
+           conversation_id,record_kind,record_digest,action,occurred_at)
+           SELECT $1,$2,$3,'idle_watermark',md5(n::text),'retention',
+             clock_timestamp()-interval '91 days' FROM generate_series(1,126) n""",
+        org, contact, conversation,
+    )
+    # Simulate envelopes becoming due since the scan started yesterday.
+    # The synthetic administrator controls time solely to avoid waiting a full
+    # retention window. Restore the guard before the dedicated operator runs.
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            """UPDATE c24_retention_sweep_cursor SET scan_cutoff_at=clock_timestamp()-interval '1 day'
+               WHERE scan_name='retention'""",
+        )
+        await conn.execute("ALTER TABLE meta_webhook_inbox DISABLE TRIGGER c24_inbox_lifecycle_guard")
+        await conn.execute(
+            """INSERT INTO meta_webhook_inbox(id,organization_id,channel,event_key,payload,
+              trace_id,status,c24_completed_at)
+              SELECT gen_random_uuid(),$1,'whatsapp','sweep-progress-'||n,
+               '{"synthetic":"content"}'::jsonb,'qa','completed',
+               clock_timestamp()-CASE WHEN n<=101 THEN interval '3 days' ELSE interval '36 hours' END
+              FROM generate_series(1,211) n""", incoming,
+        )
+        await conn.execute("ALTER TABLE meta_webhook_inbox ENABLE TRIGGER c24_inbox_lifecycle_guard")
+
+    assert await run_c24_retention_sweep(retention_operator) == {
+        "enabled": True, "batch_clear": False,
+    }
+    cursor_query = """
+        SELECT phase,last_organization_id,last_record_id,scan_cutoff_at
+        FROM c24_retention_sweep_cursor WHERE scan_name='retention'
+    """
+    cursor = await pool.fetchrow(cursor_query)
+    assert cursor["phase"] == 1 and cursor["last_organization_id"] == incoming
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "src/core/db/migrations/098_c24_retention_sweep_progress.sql"
+    )
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(migration.read_text(encoding="utf-8"))
+    assert await pool.fetchrow(cursor_query) == cursor
+    assert await run_c24_retention_sweep(retention_operator) == {
+        "enabled": True, "batch_clear": False,
+    }
+    # The second batch reaches the other tenant's message while 110 envelopes
+    # that became due after the scan started wait for the next horizon.
+    assert await pool.fetchval(
+        "SELECT content_purged_at IS NOT NULL FROM messages WHERE organization_id=$1 AND id=$2",
+        org, source,
+    )
+    assert await pool.fetchval(
+        """SELECT count(*) FROM meta_webhook_inbox WHERE organization_id=$1
+           AND c24_payload_purged_at IS NULL""", incoming,
+    ) == 110
+    assert await pool.fetchval(
+        "SELECT count(*) FROM c24_suppression_lifecycle_audit WHERE organization_id=$1", org,
+    ) == 126
+    assert await run_c24_retention_sweep(retention_operator) == {
+        "enabled": True, "batch_clear": False,
+    }
+    assert await pool.fetchval(
+        """SELECT count(*) FROM meta_webhook_inbox WHERE organization_id=$1
+           AND c24_payload_purged_at IS NULL""", incoming,
+    ) == 10
+    await run_c24_retention_sweep(retention_operator)
+    assert not await pool.fetchval(
+        """SELECT EXISTS(SELECT 1 FROM meta_webhook_inbox WHERE organization_id=$1
+           AND c24_payload_purged_at IS NULL)""", incoming,
+    )
