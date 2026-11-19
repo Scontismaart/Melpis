@@ -171,7 +171,10 @@ test("Create form keeps required HTML validation in front of the POST", async (t
 
 test("Create submits the exact form payload and adds no idempotency header", async (t) => {
   let submitted;
-  const h = fixture({ overrides: { "POST /api/bookings": (request) => { submitted = request; return json(pending({ id: "created-qa" }), 201); } } });
+  const h = fixture({ overrides: {
+    "/api/bookings/c24-status": () => json({ fenced: false, enabled: true }),
+    "POST /api/bookings": (request) => { submitted = request; return json(pending({ id: "created-qa" }), 201); },
+  } });
   t.after(() => h.dispose()); await openBookings(h);
   h.document.getElementById("booking-new-trigger").click(); fillForm(h);
   h.document.getElementById("booking-form").dispatchEvent(new h.window.Event("submit", { bubbles: true, cancelable: true }));
@@ -182,6 +185,7 @@ test("Create submits the exact form payload and adds no idempotency header", asy
   });
   assert.equal(Object.keys(submitted.options.headers || {}).some((key) => /idempotency/i.test(key)), false);
   assert.equal(h.document.getElementById("booking-status-text").textContent, "Prenotazione aggiunta.");
+  assert.equal(h.requests.some((request) => request.pathname.endsWith("/c24-context")), false);
 });
 
 test("Create failure keeps the dialog open and reports failure without false success", async (t) => {
@@ -244,6 +248,144 @@ test("Detail edit submits PUT to the selected booking ID with the form payload",
   assert.equal(edited.method, "PUT");
   assert.equal(JSON.parse(edited.options.body).nome_cliente, "Aggiornato QA");
   assert.equal(h.document.getElementById("booking-status-text").textContent, "Modifica salvata.");
+});
+
+for (const operation of ["edit", "cancel"]) {
+  for (const kind of ["managed", "unmanaged", "unknown-404", "unavailable"]) {
+    test(`Unfenced owner ${operation}: ${kind} context determines the mutation path`, async (t) => {
+      const id = "00000000-0000-4000-8000-000000000001";
+      const path = `/api/bookings/${id}`;
+      const target = operation === "edit" ? path : `${path}/cancel`;
+      const method = operation === "edit" ? "PUT" : "POST";
+      const context = {
+        allocation: { booking_id: id, service_id: "table", appointment_date: BOOKING_DATE,
+          appointment_time: "20:00", party_size: 2, expected_allocation_revision: 1,
+          expected_catalog_revision: 3 },
+        state: "active", sector: "ristorante",
+      };
+      const h = fixture({ bookings: [pending({ id })], overrides: {
+        "/api/bookings/c24-status": () => json({ fenced: false, enabled: true }),
+        [`${path}/c24-context`]: () => {
+          if (kind === "managed") return json(context);
+          if (kind === "unmanaged") return json({ detail: "Managed booking not found" }, 404);
+          if (kind === "unknown-404") return json({ detail: "Not found" }, 404);
+          return json({ detail: "Unavailable" }, 503);
+        },
+        [`${method} ${target}`]: () => json(pending({ id })),
+      } });
+      t.after(() => h.dispose()); await openBookings(h);
+      h.document.querySelector(`[data-open-booking-id="${id}"]`).click();
+      h.document.getElementById(`booking-${operation}-btn`).click();
+      if (operation === "edit") {
+        h.document.getElementById("booking-time").value = "21:00";
+        h.document.getElementById("booking-form").dispatchEvent(new h.window.Event("submit", { bubbles: true, cancelable: true }));
+      } else {
+        await h.settle();
+        h.document.getElementById("confirm-ok-btn").click();
+      }
+      await settleRequests(h);
+      assert.equal(requests(h, "GET", `${path}/c24-context`).length, 1);
+      const mutations = requests(h, method, target);
+      if (kind === "unavailable" || kind === "unknown-404") {
+        assert.equal(mutations.length, 0);
+      } else {
+        assert.equal(mutations.length, 1);
+        const sent = mutations[0];
+        if (kind === "managed") {
+          assert.ok(sent.options.headers["Idempotency-Key"]);
+          assert.equal(sent.options.headers["X-Booking-Allocation-Revision"], "1");
+          if (operation === "edit") assert.equal(JSON.parse(sent.options.body).c24.mutation.operation, "reschedule");
+        } else {
+          assert.equal(sent.options.headers?.["Idempotency-Key"], undefined);
+          if (operation === "edit") assert.equal(JSON.parse(sent.options.body).ora, "21:00");
+        }
+      }
+    });
+  }
+}
+
+test("Reload preserves an unresolved managed edit through legacy create, disabled edit and safe retry", async (t) => {
+  const id = "00000000-0000-4000-8000-000000000002";
+  const path = `/api/bookings/${id}`;
+  const context = { allocation: { booking_id: id, service_id: "table", appointment_date: BOOKING_DATE,
+    appointment_time: "20:00", party_size: 2, expected_allocation_revision: 1, expected_catalog_revision: 3 },
+    state: "active", sector: "ristorante" };
+  function session(enabled, ambiguous) {
+    return fixture({ bookings: [pending({ id })], overrides: {
+      "/api/bookings/c24-status": () => json({ fenced: false, enabled }),
+      [`${path}/c24-context`]: () => json(context),
+      [`PUT ${path}`]: () => ambiguous ? json({ detail: "Timeout" }, 503) : json(pending({ id })),
+      "POST /api/bookings": () => json(pending()),
+    } });
+  }
+  async function edit(h) {
+    h.document.querySelector(`[data-open-booking-id="${id}"]`).click();
+    h.document.getElementById("booking-edit-btn").click();
+    h.document.getElementById("booking-time").value = "21:00";
+    h.document.getElementById("booking-form").dispatchEvent(new h.window.Event("submit", { bubbles: true, cancelable: true }));
+    await settleRequests(h);
+  }
+  const original = session(true, true); t.after(() => original.dispose());
+  await openBookings(original); await edit(original);
+  const first = requests(original, "PUT", path)[0];
+  assert.ok(first.options.headers["Idempotency-Key"]);
+  const storageKey = original.window.sessionStorage.key(0);
+  const stored = original.window.sessionStorage.getItem(storageKey);
+  assert.ok(stored);
+
+  const reloaded = session(true, false); t.after(() => reloaded.dispose());
+  await openBookings(reloaded);
+  reloaded.window.sessionStorage.setItem(storageKey, stored);
+  reloaded.document.getElementById("booking-new-trigger").click(); fillForm(reloaded);
+  reloaded.document.getElementById("booking-form").dispatchEvent(new reloaded.window.Event("submit", { bubbles: true, cancelable: true }));
+  await settleRequests(reloaded);
+  assert.equal(requests(reloaded, "POST", "/api/bookings").length, 0);
+  assert.equal(reloaded.window.sessionStorage.getItem(storageKey), stored);
+
+  const disabled = session(false, false); t.after(() => disabled.dispose());
+  await openBookings(disabled);
+  disabled.window.sessionStorage.setItem(storageKey, stored);
+  await edit(disabled);
+  assert.equal(requests(disabled, "PUT", path).length, 0);
+  assert.equal(disabled.window.sessionStorage.getItem(storageKey), stored);
+
+  const retry = session(true, false); t.after(() => retry.dispose());
+  await openBookings(retry);
+  retry.window.sessionStorage.setItem(storageKey, stored);
+  await edit(retry);
+  const repeated = requests(retry, "PUT", path)[0];
+  assert.equal(repeated.options.headers["Idempotency-Key"], first.options.headers["Idempotency-Key"]);
+  await retry.waitFor(() => retry.window.sessionStorage.getItem(storageKey) === null,
+    "successful retry did not clear the persisted key");
+});
+
+test("Reload with feature disabled preserves an unresolved managed cancellation", async (t) => {
+  const id = "00000000-0000-4000-8000-000000000003";
+  const path = `/api/bookings/${id}`;
+  const context = { allocation: { booking_id: id, service_id: "table", appointment_date: BOOKING_DATE,
+    appointment_time: "20:00", party_size: 2, expected_allocation_revision: 1, expected_catalog_revision: 3 },
+    state: "active", sector: "ristorante" };
+  async function cancel(h) {
+    h.document.querySelector(`[data-open-booking-id="${id}"]`).click();
+    h.document.getElementById("booking-cancel-btn").click(); await h.settle();
+    h.document.getElementById("confirm-ok-btn").click(); await settleRequests(h);
+  }
+  function session(enabled) {
+    return fixture({ bookings: [pending({ id })], overrides: {
+      "/api/bookings/c24-status": () => json({ fenced: false, enabled }),
+      [`${path}/c24-context`]: () => json(context),
+      [`POST ${path}/cancel`]: () => json({ detail: "Timeout" }, 503),
+    } });
+  }
+  const original = session(true); t.after(() => original.dispose()); await openBookings(original); await cancel(original);
+  assert.equal(requests(original, "POST", `${path}/cancel`).length, 1);
+  const key = original.window.sessionStorage.key(0), stored = original.window.sessionStorage.getItem(key);
+  assert.ok(stored);
+  const disabled = session(false); t.after(() => disabled.dispose()); await openBookings(disabled);
+  disabled.window.sessionStorage.setItem(key, stored);
+  await cancel(disabled);
+  assert.equal(requests(disabled, "POST", `${path}/cancel`).length, 0);
+  assert.equal(disabled.window.sessionStorage.getItem(key), stored);
 });
 
 test("Confirm uses the fixed action endpoint and closes detail after success", async (t) => {

@@ -3,11 +3,13 @@ import asyncio
 import copy
 import json
 from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import asyncpg
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from src.core.bookings import worker_authority
 from src.core.bookings.allocation_contracts import AllocationRequest
@@ -25,6 +27,11 @@ from src.core.db.repositories.booking_conversation_repo import (
 from src.core.db.repositories.booking_repo import BookingRepository
 from tests.core.bookings.test_allocation_engine_postgres import CATALOGS, wait_blocked
 from tests.core.bookings.test_conversation_state_postgres import commit_source
+from tests.core.bookings.test_fenced_manual_routes_postgres import (
+    app_for,
+    envelope,
+    headers,
+)
 from tests.core.bookings.test_worker_authority_postgres import _persist_ingress
 from tests.core.test_quota_reservation_lifecycle import (
     _auth_member,
@@ -182,7 +189,7 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
             },
         }}
         await pool.execute('''UPDATE booking_settings SET config=config || $2::jsonb,
-            capienze_orarie='{"10:00":2}'::jsonb WHERE organization_id=$1''', org, json.dumps(policy))
+            capienze_orarie='{"10:00":2,"11:00":2}'::jsonb WHERE organization_id=$1''', org, json.dumps(policy))
     else:
         await pool.execute('SELECT public.booking_sector_activate_empty($1,$2)', org, sector)
         policy = {'a05': {'authority': 'internal'}, 'c24_sector_auto':
@@ -418,6 +425,19 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
     winner_conversation = replies[0][0]
     timestamp = await pool.fetchval('''SELECT provider_timestamp FROM booking_conversation_states
         WHERE organization_id=$1 AND conversation_id=$2''', org, winner_conversation)
+    monkeypatch.setenv('BOOKING_TYPED_OWNER_MUTATIONS_ENABLED', 'true')
+    staff_app, identity = app_for(SimpleNamespace(pool=pool, org=org, auth=auth, actor=actor))
+    async with AsyncClient(transport=ASGITransport(app=staff_app), base_url='http://test') as client:
+        status = await client.get('/api/bookings/c24-status')
+        assert status.json() == {'enabled': True, 'fenced': sector != 'ristorante'}
+        path = f'/api/bookings/{winner}/c24-context'
+        identity['ruolo'] = 'manager'
+        assert (await client.get(path)).status_code == 403
+        identity['ruolo'] = 'owner'
+        foreign_org = (await _organization(pool))['id']
+        identity['organization_id'] = str(foreign_org)
+        assert (await client.get(path)).status_code == 404
+        identity['organization_id'] = str(org)
     for offset, (intent, text, fields) in enumerate((
         ('modify', 'Vorrei spostare la prenotazione alle 11:00', {'appointment_time': '11:00'}),
         ('cancel', 'Vorrei cancellare la prenotazione', {}),
@@ -443,6 +463,46 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
         assert await pool.fetchval("""SELECT count(*) FROM messages WHERE organization_id=$1 AND conversation_id=$2
             AND handling_type='c24_confirmation_prompt'""", org, winner_conversation) == 1
         assert await pool.fetchrow('SELECT stato,ora FROM bookings WHERE organization_id=$1 AND id=$2',
-                                   org, winner) == ('confermata', time(10))
-        assert await pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1', org) == 1
-        assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 1
+                                   org, winner) == (('confermata', time(10)) if intent == 'modify'
+                                                    else ('in_attesa', time(11)))
+        assert await pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1', org) == offset
+        assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == offset
+
+        # An authenticated owner independently accepts the customer's request
+        # through the normal staff API, with current revisions and replay key.
+        async with AsyncClient(transport=ASGITransport(app=staff_app), base_url='http://test') as client:
+            context = await client.get(f'/api/bookings/{winner}/c24-context')
+            assert context.status_code == 200, context.text
+            current = context.json()['allocation']
+            command = dict(request_id=uuid4(), booking_id=winner,
+                           expected_catalog_revision=current['expected_catalog_revision'],
+                           expected_allocation_revision=current['expected_allocation_revision'])
+            if intent == 'modify':
+                changed = AllocationRequest(**command, action='replace', service_id=current['service_id'],
+                    appointment_date=appointment, appointment_time=time(11),
+                    party_size=current['party_size'] if sector == 'ristorante' else None)
+                mutation = BookingMutation('reschedule', '', '', '', appointment.isoformat(), '11:00',
+                                           current['party_size'], notice=True)
+                for _ in range(2):
+                    response = await client.put(f'/api/bookings/{winner}', json=envelope(changed, mutation),
+                                                headers=headers(changed))
+                    assert response.status_code == 200, response.text
+                assert await pool.fetchrow('SELECT stato,ora FROM bookings WHERE organization_id=$1 AND id=$2',
+                                           org, winner) == ('in_attesa', time(11))
+            else:
+                cancellation = AllocationRequest(**command, action='cancel')
+                for _ in range(2):
+                    response = await client.post(f'/api/bookings/{winner}/cancel', headers=headers(cancellation))
+                    assert response.status_code == 200, response.text
+                assert await pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2',
+                                           org, winner) == 'cancellata'
+        assert await pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', org) == 1
+        assert await pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1',
+                                   org) == offset + 1
+        assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1',
+                                   org) == (1 if intent == 'modify' else 0)
+        assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 2
+        assert await pool.fetchval("""SELECT count(*) FROM booking_confirmation_outbox o
+            JOIN messages m ON m.organization_id=o.organization_id AND m.id=o.outbound_message_id
+            WHERE o.organization_id=$1 AND o.booking_id=$2 AND m.handling_type='booking_reconfirmation'""",
+            org, winner) == 1

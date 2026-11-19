@@ -133,8 +133,12 @@
         if (note) { note.hidden = fenced && c24Catalog.sector === "studio_medico_dentista"; if (note.hidden) note.value = ""; }
       }
 
-      async function managedContext(token, bookingId) {
+      async function managedContext(token, bookingId, allowUnmanaged = false) {
         const response = await apiFetch(`${API_BASE}/api/bookings/${encodeURIComponent(bookingId)}/c24-context`);
+        if (current(token) && allowUnmanaged && response.status === 404) {
+          const error = await response.json();
+          if (current(token) && error?.detail === "Managed booking not found") return null;
+        }
         if (!current(token) || !response.ok) throw new Error("Stato della prenotazione non disponibile. Ricarica.");
         const state = await response.json();
         if (!current(token) || !state?.allocation || state.allocation.booking_id !== String(bookingId)
@@ -188,9 +192,12 @@
           return previous;
         }
         const state = await loadC24Status(token);
-        if (!state.fenced) return null;
-        const context = await managedContext(token, booking.id);
         const saved = readPersistedMutation(key);
+        if (saved && (!state.enabled || getSession()?.ruolo !== "owner"
+          || saved.booking_id !== String(booking.id))) throw new Error("Completa prima la richiesta precedente.");
+        if (!state.fenced && (!state.enabled || getSession()?.ruolo !== "owner")) return null;
+        const context = await managedContext(token, booking.id, !state.fenced && !saved);
+        if (!context) return null;
         if (!saved && context.state !== "active") throw new Error("Allocazione non attiva. Ricarica la prenotazione.");
         const id = saved?.request_id || root.crypto.randomUUID();
         const release = ["cancel", "reject", "mark-no-show"].includes(action);
@@ -220,9 +227,11 @@
           return previous;
         }
         const state = await loadC24Status(token);
-        if (!state.fenced) return null;
         const saved = readPersistedMutation(key);
-        if (saved && (saved.booking_id !== (editingId || saved.booking_id))) throw new Error("Completa prima la richiesta precedente.");
+        if (saved && (!state.enabled || getSession()?.ruolo !== "owner"
+          || (editingId ? saved.booking_id !== String(editingId) || saved.expected_allocation_revision < 1
+            : !state.fenced || saved.expected_allocation_revision !== 0))) throw new Error("Completa prima la richiesta precedente.");
+        if (!state.fenced && (!editingId || !state.enabled || getSession()?.ruolo !== "owner")) return null;
         const requestId = saved?.request_id || root.crypto.randomUUID();
         let allocation, mutation, lineage = null;
         if (!editingId) {
@@ -245,7 +254,8 @@
           if (c24Catalog.sector === "studio_medico_dentista") mutation.note = "";
           lineage = { contact_id: null, conversation_id: null, source_message_id: null };
         } else {
-          const context = await managedContext(token, editingId);
+          const context = await managedContext(token, editingId, !state.fenced && !saved);
+          if (!context) return null;
           if (context.state !== "active" || !bookingEditingSnapshot) throw new Error("Allocazione non disponibile. Ricarica.");
           const previousBooking = bookingEditingSnapshot;
           const hotel = context.sector === "hotel_bnb";
@@ -271,7 +281,7 @@
           } else {
             if (hotel) throw new Error("Modifica dei contatti del soggiorno non disponibile: contatta lo staff tecnico.");
             mutation = { operation: "edit_contact", nome_cliente: payload.nome_cliente, telefono: payload.telefono,
-              note: c24Catalog.sector === "studio_medico_dentista" ? "" : payload.note };
+              note: context.sector === "studio_medico_dentista" ? "" : payload.note };
           }
         }
         const pending = { signature, headers: managedHeaders(allocation),

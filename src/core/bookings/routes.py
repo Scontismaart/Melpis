@@ -250,11 +250,13 @@ async def booking_c24_context(booking_id: str, request: Request,
     from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository, CatalogUnavailable
 
     service = _get_booking_service(request)
-    if not owner_mutations_enabled() or not await _sector_fenced(service, user['organization_id']):
+    if not owner_mutations_enabled():
         raise HTTPException(404, "Not found")
+    fenced = await _sector_fenced(service, user['organization_id'])
     try:
         org, target = UUID(str(user['organization_id'])), UUID(booking_id)
-        catalog_state = await BookingCatalogRepository(service.repo).read(org)
+        if not isinstance(service.repo, BookingRepository) or service.repo.pool is None:
+            raise HTTPException(503, "Booking context unavailable")
         async with service.repo.pool.acquire() as conn:
             row = await conn.fetchrow('''SELECT b.data,b.ora,b.coperti,b.stato,
                 a.allocation_revision,a.state,a.catalog_revision,a.service_id,a.temporal_kind,
@@ -266,9 +268,12 @@ async def booking_c24_context(booking_id: str, request: Request,
                 raise HTTPException(404, "Managed booking not found")
             claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity
                 FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2''', org, target)
+        catalog_state = await BookingCatalogRepository(service.repo).read(org)
         catalog = catalog_state['published']
         if not catalog or row['catalog_revision'] != catalog_state['published_revision']:
             raise HTTPException(409, "Published catalog changed; reconciliation required")
+        if not fenced and catalog['sector'] != 'ristorante':
+            raise HTTPException(409, "Managed booking requires active sector admission")
         selected = next((item for item in catalog['services'] if item['service_id'] == row['service_id']), None)
         if not selected:
             raise HTTPException(409, "Managed service unavailable")
