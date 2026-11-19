@@ -15,8 +15,11 @@ from src.core.bookings.booking_mutation_contract import (
 )
 from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint
 from tests.core.bookings.test_booking_stay_lifecycle_postgres import _purge_retention
-from tests.core.bookings.test_hotel_allocation_archive_postgres import _archive, _complete_with_old_evidence
 from tests.core.bookings.test_booking_stays_postgres import hotel_setup
+from tests.core.bookings.test_hotel_allocation_archive_postgres import (
+    _archive,
+    _complete_with_old_evidence,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -25,7 +28,7 @@ _KEY = b"synthetic-stay-restore-key-32bytes"
 _BACKUP = "synthetic-stay-backup"
 
 
-def _signed_checkpoint(org, stay_purges, *, version="c24-restore-v2", sequence=7):
+def _signed_checkpoint(org, stay_purges, *, version="c24-restore-v3", sequence=7):
     payload = {
         "version": version,
         "organization_id": str(org),
@@ -34,8 +37,10 @@ def _signed_checkpoint(org, stay_purges, *, version="c24-restore-v2", sequence=7
         "complete": True,
         "erasures": [],
     }
-    if version == "c24-restore-v2":
+    if version in {"c24-restore-v2", "c24-restore-v3"}:
         payload["stay_purges"] = stay_purges
+    if version == "c24-restore-v3":
+        payload["receipt_prunes"] = []
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     return {
         "payload": payload,
@@ -68,6 +73,7 @@ async def _purged_stay(pg_pool):
 
 
 async def _verify(env, checkpoint):
+    raw = json.dumps(checkpoint["payload"], sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     async with env.pool.acquire() as conn, conn.transaction():
         return await verify_restore_checkpoint(
             conn,
@@ -76,10 +82,11 @@ async def _verify(env, checkpoint):
             verification_key=_KEY,
             backup_id=_BACKUP,
             minimum_sequence=7,
+            checkpoint_sha256=hashlib.sha256(raw).hexdigest(),
         )
 
 
-async def test_signed_v2_restore_journal_matches_actual_stay_fences_and_tombstones(pg_pool):
+async def test_signed_v3_restore_journal_matches_actual_stay_fences_and_tombstones(pg_pool):
     env, _, purge = await _purged_stay(pg_pool)
 
     proof = await _verify(env, _signed_checkpoint(env.org, [purge]))
@@ -87,9 +94,11 @@ async def test_signed_v2_restore_journal_matches_actual_stay_fences_and_tombston
     assert proof["scope"] == "primary_c24_only"
     assert proof["traffic_authorized"] is False
     assert proof["external_copies_certified"] is False
+    with pytest.raises(RestoreBlocked, match="Authenticated receipt expiry checkpoint required"):
+        await _verify(env, _signed_checkpoint(env.org, [purge], version="c24-restore-v2"))
 
 
-async def test_signed_v2_restore_rejects_missing_fence_or_tombstone(pg_pool):
+async def test_signed_v3_restore_rejects_missing_fence_or_tombstone(pg_pool):
     env, booking, purge = await _purged_stay(pg_pool)
     checkpoint = _signed_checkpoint(env.org, [purge])
 
@@ -102,7 +111,7 @@ async def test_signed_v2_restore_rejects_missing_fence_or_tombstone(pg_pool):
         await _verify(env, checkpoint)
 
 
-async def test_signed_v2_restore_rejects_missing_or_wrong_tombstone_and_tampering(pg_pool):
+async def test_signed_v3_restore_rejects_missing_or_wrong_tombstone_and_tampering(pg_pool):
     env, booking, purge = await _purged_stay(pg_pool)
 
     # Even a freshly signed journal cannot name a different request receipt.

@@ -24,9 +24,18 @@ from src.core.gdpr.deletion import Deletion
 from src.core.gdpr.operations import Operations
 from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked,
+    bind_retained_receipt_prune_checkpoint,
+    retain_receipt_prune_checkpoint,
+    verify_restore_checkpoint,
     verify_restore_journal_replay,
 )
 from src.core.gdpr.restore_journal import JournalCheckpoint
+from tests.core.gdpr.test_c24_purged_source_replay import (
+    historical_fence,
+    signed_prune_checkpoint,
+    upgrade_fence_retention,
+)
+from tests.core.gdpr.test_c24_retention_sweep import approve_messages
 from tests.core.gdpr.test_conversation_lifecycle_c24 import (
     approve_conversation,
     approve_policies,
@@ -83,17 +92,19 @@ def restore_target():
     return container, dsn, parsed.username, match.group(0)
 
 
-@pytest.mark.asyncio
-async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch):
-    # Initialize the destructive test fixture only after verifying the opt-in
-    # and the dedicated disposable DB target.
-    container, dsn, principal, source_db = restore_target
+async def _verify_restore_target(container):
     assert (await _docker("inspect", "--format", "{{.Name}}", container)).strip().decode() == "/" + container
     if container in _VECTOR_IMAGES:
         image = (await _docker("inspect", "--format", "{{.Config.Image}}", container)).strip().decode()
         binding = (await _docker("port", container, "5432/tcp")).strip().decode()
         assert image == _VECTOR_IMAGES[container]
         assert binding == f"127.0.0.1:{_CONTAINERS[container]}"
+
+
+@pytest.mark.asyncio
+async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch):
+    container, dsn, principal, source_db = restore_target
+    await _verify_restore_target(container)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     env = state_env
     await populated(env)
@@ -134,10 +145,10 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     signature = signer.sign(b"melpis.restore.erasure-journal.v1\0" + journal)
     tip = JournalCheckpoint(1, sha256(journal).hexdigest())
     checkpoint_key = secrets.token_bytes(32)
-    checkpoint_payload = {"version": "c24-restore-v2", "organization_id": str(org),
+    checkpoint_payload = {"version": "c24-restore-v3", "organization_id": str(org),
                           "backup_id": "synthetic-backup", "sequence": 1, "complete": True,
                           "erasures": [{"operation_id": str(operation), "scope": "contact",
-                                        "subject_id": str(person)}], "stay_purges": []}
+                                        "subject_id": str(person)}], "stay_purges": [], "receipt_prunes": []}
     checkpoint_raw = json.dumps(checkpoint_payload, sort_keys=True, separators=(",", ":"),
                                 allow_nan=False).encode()
     checkpoint = {"payload": checkpoint_payload,
@@ -158,7 +169,7 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
                     conn, org, journal, signature, installation_id=installation,
                     trusted_public_key=signer.public_key(), backup_checkpoint=anchor, independent_tip=tip,
                     stay_checkpoint=checkpoint, checkpoint_verification_key=checkpoint_key,
-                    backup_id="synthetic-backup", minimum_sequence=1,
+                    backup_id="synthetic-backup", minimum_sequence=1, checkpoint_sha256=sha256(checkpoint_raw).hexdigest(),
                 )
         with pytest.raises(RestoreBlocked, match="has not been replayed"):
             await verify()
@@ -171,3 +182,106 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
         assert (await verify())["verified_erasures"] == 1
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.migration_limit(97)
+async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(restore_target, state_env, tmp_path):
+    container, dsn, principal, source_db = restore_target
+    await _verify_restore_target(container)
+    env = state_env
+    pool, org, conversation, source = (env[key] for key in ("pool", "org", "conv", "message"))
+    request, conclusion = await historical_fence(env)
+    await upgrade_fence_retention(pool)
+    await approve_messages(pool, org)
+    await approve_technical_receipts(pool, org)
+    plaintext = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
+                              "--no-owner", "--no-privileges", "--format=plain")
+    cipher = Fernet(Fernet.generate_key())
+    encrypted_snapshot = cipher.encrypt(plaintext)
+    digest = sha256(plaintext).digest()
+    del plaintext
+
+    person = await subject(env)
+    checkpoint, key, receipt_checkpoint_sha = signed_prune_checkpoint(org, [(request, source, conversation, person)])
+    # Simulate the independent encrypted recovery store before any fence
+    # deletion, then load the authenticated record back from that store.
+    journal_key = Fernet.generate_key()
+    journal_path = tmp_path / "receipt-checkpoint.enc"
+    journal_trust = dict(verification_key=key, backup_id="synthetic-retention-backup",
+                         minimum_sequence=1, checkpoint_sha256=receipt_checkpoint_sha, encryption_key=journal_key)
+    assert retain_receipt_prune_checkpoint(journal_path, org, checkpoint, **journal_trust) == receipt_checkpoint_sha
+    with pytest.raises(RestoreBlocked, match="Unable to retain encrypted"):
+        retain_receipt_prune_checkpoint(journal_path, org, checkpoint, **journal_trust)
+    checkpoint = json.loads(Fernet(journal_key).decrypt(journal_path.read_bytes()))
+
+    async def expire(target):
+        assert await target.fetchval("SELECT c24_purge_source($1,$2)", org, source)
+        assert await target.fetchval("SELECT c24_cleanup_receipt($1,$2)", org, request)
+        assert not await target.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
+        async with target.acquire() as conn, conn.transaction():
+            assert await bind_retained_receipt_prune_checkpoint(conn, org, journal_path, **journal_trust) == 1
+        assert await target.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
+        audit, recorded_conclusion = await target.fetchrow(
+            """SELECT audit_id,c24_concluded_at FROM c24_suppression_lifecycle_audit
+               WHERE organization_id=$1 AND source_record_id=$2""",
+            org, request,
+        )
+        assert recorded_conclusion == conclusion
+        assert await target.fetchval("SELECT c24_cleanup_suppression_audit($1,$2)", org, audit)
+
+    async def reconciled(target):
+        return await target.fetchval(
+            """SELECT m.content_purged_at IS NOT NULL AND m.ai_reply_cache IS NULL
+                 AND NOT EXISTS(SELECT FROM simulation_requests s WHERE s.organization_id=m.organization_id
+                    AND s.c24_source_message_id=m.id AND s.response IS NOT NULL AND s.response<>'{}'::jsonb)
+                 AND NOT EXISTS(SELECT FROM booking_conversation_requests r
+                    WHERE r.organization_id=m.organization_id AND r.request_id=$3)
+                 AND NOT EXISTS(SELECT FROM c24_source_fences f
+                    WHERE f.organization_id=m.organization_id AND f.request_id=$3)
+                 AND NOT EXISTS(SELECT FROM c24_suppression_lifecycle_audit a
+                    WHERE a.organization_id=m.organization_id AND a.source_record_id=$3)
+               FROM messages m WHERE m.organization_id=$1 AND m.id=$2""",
+            org, source, request,
+        )
+
+    await expire(pool)
+    assert await reconciled(pool)
+    async def verify(target, evidence, pinned_sha):
+        async with target.acquire() as conn, conn.transaction():
+            return await verify_restore_checkpoint(
+                conn, org, evidence, verification_key=key,
+                backup_id="synthetic-retention-backup", minimum_sequence=1, checkpoint_sha256=pinned_sha,
+            )
+
+    before = await verify(pool, checkpoint, receipt_checkpoint_sha)
+    assert before["traffic_authorized"] is False
+    omitted, _, omitted_sha = signed_prune_checkpoint(org, [], key=key, sequence=2)
+    with pytest.raises(RestoreBlocked, match="commitments do not match"):
+        await verify(pool, omitted, omitted_sha)
+    restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
+    await _docker("exec", container, "createdb", "-U", principal, restored_db)
+    restored_sql = cipher.decrypt(encrypted_snapshot)
+    assert sha256(restored_sql).digest() == digest
+    await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                  "-U", principal, "-d", restored_db, input_bytes=restored_sql)
+    del restored_sql
+    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=3)
+    try:
+        assert not await reconciled(restored)
+        with pytest.raises(RestoreBlocked, match="Receipt expiry commitments do not match"):
+            await verify(restored, checkpoint, receipt_checkpoint_sha)
+        legacy = dict(checkpoint["payload"], version="c24-restore-v2")
+        del legacy["receipt_prunes"]
+        canonical = json.dumps(legacy, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        legacy_checkpoint = {"payload": legacy, "signature": hmac.new(key, canonical, sha256).hexdigest()}
+        with pytest.raises(RestoreBlocked, match="Authenticated receipt expiry checkpoint required"):
+            await verify(restored, legacy_checkpoint, None)
+        await expire(restored)
+        assert await reconciled(restored)
+        assert await verify(restored, checkpoint, receipt_checkpoint_sha) == before
+        assert not await restored.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
+        with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match="delivery identity is immutable"):
+            await restored.execute("UPDATE messages SET wam_id=NULL WHERE organization_id=$1 AND id=$2", org, source)
+    finally:
+        await restored.close()
