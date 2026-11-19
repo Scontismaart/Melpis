@@ -1,6 +1,7 @@
 """Bounded automated retention on a disposable PostgreSQL database."""
+import asyncio
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -52,6 +53,14 @@ async def completed_inbox(pool, org, *, age_days=91):
     return inbox
 
 
+async def shorten_sweep_deadline(pool, function_name):
+    # Exercise the production deadline branches against the same database
+    # body using a shorter interval only inside this disposable fixture.
+    definition = await pool.fetchval('SELECT pg_get_functiondef($1::text::regprocedure)', function_name)
+    assert definition.count("interval '12 seconds'") == 1
+    await pool.execute(definition.replace("interval '12 seconds'", "interval '2 seconds'"))
+
+
 async def test_automatic_sweep_expires_state_without_consuming_receipt_or_usage(state_env, retention_operator):
     env=state_env; request=uuid4()
     await commit_source(env,env['message'],'2026-11-12',{'service_id':'standard'},1700000000)
@@ -81,6 +90,95 @@ async def test_sweep_defers_held_tenant_without_starving_another(pg_pool, retent
     with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError,match='cannot be restored'):
         await pg_pool.execute("UPDATE meta_webhook_inbox SET payload='{\"synthetic\":\"replay\"}'::jsonb WHERE organization_id=$1 AND id=$2",eligible,clean)
     assert not await pg_pool.fetchval('SELECT public.c24_purge_inbox($1,$2)',held,clean)
+
+
+@pytest.mark.parametrize('lock_kind', ['tenant', 'row'])
+async def test_sweep_advances_past_contended_target(pg_pool, retention_operator, lock_kind):
+    blocked_org, clean_org = sorted([(await _organization(pg_pool))['id'], (await _organization(pg_pool))['id']])
+    for org in (blocked_org, clean_org):
+        await approve_messages(pg_pool, org)
+    blocked = await completed_inbox(pg_pool, blocked_org)
+    clean = await completed_inbox(pg_pool, clean_org)
+
+    async with pg_pool.acquire() as blocker, blocker.transaction():
+        if lock_kind == 'tenant':
+            await blocker.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(blocked_org))
+        else:
+            await blocker.fetchval('SELECT id FROM meta_webhook_inbox WHERE organization_id=$1 AND id=$2 FOR UPDATE', blocked_org, blocked)
+        result = await asyncio.wait_for(run_c24_retention_sweep(retention_operator), timeout=5)
+        assert result == {'enabled': True, 'batch_clear': False}
+        assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NULL FROM meta_webhook_inbox WHERE id=$1", blocked)
+        assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", clean)
+        cursor = await pg_pool.fetchrow("SELECT phase,last_organization_id,last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='retention'")
+        assert tuple(cursor) == (1, clean_org, clean)
+
+    assert await run_c24_retention_sweep(retention_operator) == {'enabled': True, 'batch_clear': True}
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", blocked)
+
+
+async def test_sweep_yields_and_resumes_under_sustained_contention(pg_pool, retention_operator):
+    org = (await _organization(pg_pool))['id']
+    await approve_messages(pg_pool, org)
+    inboxes = sorted([await completed_inbox(pg_pool, org) for _ in range(20)])
+    await shorten_sweep_deadline(pg_pool, 'public.c24_retention_sweep()')
+    async with pg_pool.acquire() as blocker, blocker.transaction():
+        await blocker.fetch('SELECT id FROM meta_webhook_inbox WHERE organization_id=$1 FOR UPDATE', org)
+        assert await asyncio.wait_for(run_c24_retention_sweep(retention_operator), timeout=5) == {
+            'enabled': True, 'batch_clear': False,
+        }
+        cursor = await pg_pool.fetchrow("SELECT phase,last_organization_id,last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='retention'")
+        assert cursor['phase'] == 1 and cursor['last_organization_id'] == org
+        assert cursor['last_record_id'] in inboxes[:-1]
+        assert await pg_pool.fetchval("SELECT count(*) FROM meta_webhook_inbox WHERE organization_id=$1 AND c24_payload_purged_at IS NOT NULL", org) == 0
+
+    assert await run_c24_retention_sweep(retention_operator) == {'enabled': True, 'batch_clear': True}
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", inboxes[-1])
+    assert await run_c24_retention_sweep(retention_operator) == {'enabled': True, 'batch_clear': True}
+    assert await pg_pool.fetchval("SELECT count(*) FROM meta_webhook_inbox WHERE organization_id=$1 AND c24_payload_purged_at IS NOT NULL", org) == len(inboxes)
+
+
+@pytest.mark.parametrize('condition', [asyncpg.DeadlockDetectedError, asyncpg.InsufficientPrivilegeError, asyncpg.CheckViolationError, asyncpg.QueryCanceledError])
+async def test_sweep_defers_only_expected_target_failures(pg_pool, retention_operator, condition):
+    first_org, second_org = sorted([(await _organization(pg_pool))['id'], (await _organization(pg_pool))['id']])
+    for org in (first_org, second_org):
+        await approve_messages(pg_pool, org)
+    first = await completed_inbox(pg_pool, first_org)
+    second = await completed_inbox(pg_pool, second_org)
+    # Raise a specific SQLSTATE inside a synthetic target transaction to test
+    # classification, independently of PostgreSQL's deadlock victim selection.
+    await pg_pool.execute(f"""CREATE FUNCTION test_sweep_failure() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'synthetic target classification' USING ERRCODE='{condition.sqlstate}'; END $$;
+        CREATE TRIGGER test_sweep_failure BEFORE UPDATE ON meta_webhook_inbox
+        FOR EACH ROW WHEN (OLD.id='{second}'::uuid) EXECUTE FUNCTION test_sweep_failure();""")
+    if condition is asyncpg.DeadlockDetectedError:
+        assert await run_c24_retention_sweep(retention_operator) == {'enabled': True, 'batch_clear': False}
+        assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", first)
+        assert await pg_pool.fetchval("SELECT last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='retention'") == second
+    else:
+        with pytest.raises(condition, match='synthetic target classification'):
+            await run_c24_retention_sweep(retention_operator)
+        assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NULL FROM meta_webhook_inbox WHERE id=$1", first)
+        assert await pg_pool.fetchval("SELECT phase FROM c24_retention_sweep_cursor WHERE scan_name='retention'") == 0
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NULL FROM meta_webhook_inbox WHERE id=$1", second)
+
+
+@pytest.mark.parametrize('caller_timeout, expected_cap', [('25ms', '25ms'), ('0', '250ms')])
+async def test_sweep_respects_and_restores_caller_lock_timeout(pg_pool, retention_operator, caller_timeout, expected_cap):
+    org = (await _organization(pg_pool))['id']
+    await approve_messages(pg_pool, org)
+    inbox = await completed_inbox(pg_pool, org)
+    await pg_pool.execute(f"""CREATE FUNCTION test_sweep_timeout() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            IF current_setting('lock_timeout')<>'{expected_cap}' THEN RAISE EXCEPTION 'unexpected cap'; END IF;
+            RETURN NEW;
+        END $$;
+        CREATE TRIGGER test_sweep_timeout BEFORE UPDATE ON meta_webhook_inbox
+        FOR EACH ROW WHEN (OLD.id='{inbox}'::uuid) EXECUTE FUNCTION test_sweep_timeout();""")
+    async with retention_operator.acquire() as conn, conn.transaction():
+        await conn.execute('SET LOCAL ROLE melpis_c24_retention')
+        await conn.fetchval("SELECT set_config('lock_timeout',$1,true)", caller_timeout)
+        assert await conn.fetchval("SELECT c24_run_retention_target('sweep',$1,$1)", UUID(int=0))
+        assert await conn.fetchval("SELECT current_setting('lock_timeout')") == caller_timeout
 
 
 async def test_unverified_inbox_completion_is_never_inferred(pg_pool, retention_operator):
@@ -200,6 +298,51 @@ async def test_hotel_erasure_cursor_archives_then_purges_only_after_civil_retent
         "SELECT count(*) FROM messages WHERE organization_id=$1 AND id=$2",
         env.org, lineage.source_message_id,
     ) == 1
+
+
+async def test_hotel_sweep_advances_past_contended_tenant(pg_pool, retention_operator):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    stays = [await _complete_with_old_evidence(pg_pool), await _complete_with_old_evidence(pg_pool)]
+    (blocked, _, blocked_booking), (clean, _, clean_booking) = sorted(stays, key=lambda stay: stay[0].org)
+    async with pg_pool.acquire() as blocker, blocker.transaction():
+        await blocker.execute('SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))', str(blocked.org))
+        assert await asyncio.wait_for(run_c24_retention_sweep(retention_operator), timeout=5) == {
+            'enabled': True, 'batch_clear': False,
+        }
+        assert await pg_pool.fetchval("SELECT state='active' FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2", blocked.org, blocked_booking)
+        assert await pg_pool.fetchval("SELECT state='cancelled' FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2", clean.org, clean_booking)
+        cursor = await pg_pool.fetchrow("SELECT phase,last_organization_id,last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='hotel_erasure'")
+        assert tuple(cursor) == (1, clean.org, clean_booking)
+
+    # The next phase may purge the unblocked stay before the cursor wraps;
+    # a later pass must still archive the originally contended stay.
+    for _ in range(3):
+        await run_c24_retention_sweep(retention_operator)
+    assert not await pg_pool.fetchval("SELECT EXISTS(SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 AND state='active')", blocked.org, blocked_booking)
+
+
+async def test_hotel_sweep_yields_after_successful_target_then_resumes(pg_pool, retention_operator):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    stays = [await _complete_with_old_evidence(pg_pool), await _complete_with_old_evidence(pg_pool)]
+    (first, _, first_booking), (second, _, second_booking) = sorted(stays, key=lambda stay: stay[0].org)
+    await shorten_sweep_deadline(pg_pool, 'public.c24_hotel_retention_sweep()')
+    await pg_pool.execute(f"""CREATE FUNCTION test_slow_hotel_target() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN PERFORM pg_sleep(2.1); RETURN NEW; END $$;
+        CREATE TRIGGER test_slow_hotel_target BEFORE UPDATE ON booking_allocation_sets
+        FOR EACH ROW WHEN (OLD.booking_id='{first_booking}'::uuid) EXECUTE FUNCTION test_slow_hotel_target();""")
+    assert await asyncio.wait_for(run_c24_retention_sweep(retention_operator), timeout=5) == {
+        'enabled': True, 'batch_clear': False,
+    }
+    assert await pg_pool.fetchval("SELECT state='cancelled' FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2", first.org, first_booking)
+    assert await pg_pool.fetchval("SELECT state='active' FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2", second.org, second_booking)
+    cursor = await pg_pool.fetchrow("SELECT phase,last_organization_id,last_record_id FROM c24_retention_sweep_cursor WHERE scan_name='hotel_erasure'")
+    assert tuple(cursor) == (1, first.org, first_booking)
+
+    await pg_pool.execute('DROP TRIGGER test_slow_hotel_target ON booking_allocation_sets')
+    await run_c24_retention_sweep(retention_operator)
+    assert not await pg_pool.fetchval("SELECT EXISTS(SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 AND state='active')", second.org, second_booking)
 
 
 async def test_hotel_erasure_cursor_defers_a_retention_hold(pg_pool, retention_operator):
