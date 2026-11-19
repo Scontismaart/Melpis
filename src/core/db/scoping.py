@@ -45,6 +45,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "c24_suppression_cleanup_capability": ("direct", "Transaction-bound authorization to erase or expire exact C2.4 suppression records."),
     "c24_receipt_cleanup_capability": ("direct", "Receipt cleanup capability is bound to a tenant and transaction."),
     "c24_receipt_cleanup_audit": ("direct", "Receipt cleanup evidence is scoped to the owning organization."),
+    "c24_receipt_prune_checkpoint_bindings": ("direct", "Recovery checkpoint commitments bind exact receipts to their owning organization."),
     "gdpr_policies": ("direct", "Versioned controller approvals are bound to one tenant."),
     "gdpr_erasure_barriers": ("direct", "Erasure tombstones fence data production within a tenant."),
     "organizations": ("system/root", "Tenant root rows; selected by organization primary key."),

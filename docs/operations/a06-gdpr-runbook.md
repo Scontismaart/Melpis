@@ -206,7 +206,7 @@ does not by itself establish policy approval.
 | `simulator_responses` | No general retention path is authorized by the product policy; `simulator_response_days` is null. C2.4 booking proposal fields have a separate typed removal path. | A 24-hour simulator-history setting is not a legal retention period. Local simulator cache is a separate copy; no approved period or deployed purge schedule is proven. |
 | `booking_conversation_content` | Migration 089 and the C2.4 owner sweep expire eligible typed conversation state/proposal material under the approved category policy. | The allowed effective period comes from a valid tenant record within the approved product policy. Legal hold, erasure permission, source lineage, and fences are checked. This is not blanket deletion of all booking text or customer records. |
 | `technical_receipts` request records | The SQL089 sweep, replaced and extended by SQL096, handles concluded `booking_conversation_requests` under the 90-day technical-receipt policy using `c24_concluded_at` and the private keyset cursor. | Requires the C2.4 dedicated role, valid tenant policy, no hold, and safe lifecycle state. A held/uncertain target is deferred and the bounded cursor advances; a false `batch_clear` is not a completed sweep. Other webhook/idempotency rows are not covered by this claim. No successful live run is evidenced. |
-| C2.4 replay and suppression metadata | SQL097 defers retention of fences, watermarks and audit records. SQL098 removes them from the mutation batch so they cannot consume its target slots. Potentially due metadata still causes `batch_clear=false` using the former event-date filter as a backlog signal. The separate erasure barrier remains available. | The approved anchor is request conclusion. The event-date signal establishes neither eligibility nor coverage, and the retention-policy mapping remains open. A fixed scan horizon prevents newly due rows from extending the current batch cycle under normal server timestamps. It provides no throughput or deadline guarantee for an overloaded deployment. |
+| C2.4 replay and suppression metadata | SQL100 records verified immutable receipt conclusions. SQL103–104 expire only source fences with that conclusion, exact purged-source lineage, receipt-cleanup evidence and an independently retained checkpoint binding. Derived retention audit records inherit the same conclusion. SQL102/104 bound target lock waits and yield at batch boundaries. | Current policy and holds remain authoritative. Unknown historical dates, idle watermarks, and separate erasure audit evidence still require reconciliation. Checkpoint availability, independent recovery-store operation, and throughput at actual load remain operational gates. |
 | `booking_stay_content` | Migration 089's hotel sweep and migration 091's hotel lifecycle functions archive completed allocation state or purge eligible stay content after completion/lineage checks. | The 12-month period applies to eligible content only. It does not set a period for outbox, audit, or replay fences/tombstones; the reviewed source has no cleanup path for the stay purge fences and tombstones. Current approved policy, no matching hold, valid completion/allocation evidence, and safe terminal state are required. Schedule and tenant policy are unverified. |
 | Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload containing booking/customer and confirmation details. Merged PR #179 (`f5f5040`) adds migration 094 and transactional scrubbing: successful completion clears the payload; a PostgreSQL-only bounded cleanup nulls expired unconsumed payloads while retaining hashes and replay tombstones. Migration check [run #43741180457](https://github.com/Scontismaart/Melpis/actions/runs/43741180457) applied all migrations in order through 094 in a disposable database. | Expiry limits authority but does not itself delete content. CI/source evidence does not prove Staging or Production application or a scheduled run. No live schedule, backup/cache cleanup, or subject-scope behavior is certified. Do not treat capability tombstones as zero-cost billing evidence. |
 | Encrypted export snapshots | The general retention worker expires export operations and removes encrypted chunks after the 15-minute snapshot lifetime, independently of the primary-data-retention flag. | The job must be deployed and monitored. A failed purge leaves data for retry; no live schedule or provider/backup deletion is established. |
@@ -260,6 +260,22 @@ service-role query or use the retention worker as an inventory endpoint.
    verified, overall message-retention coverage remains open.
 
 For C2.4, a false/ineligible target result is a deferral, not a success receipt.
+
+For verified source-fence expiry, the trusted recovery operator authenticates a
+complete cumulative `c24-restore-v3` checkpoint, including its independently pinned
+SHA-256, minimum sequence, backup identity and exact receipt-prune tuples. Once
+the designated protected independent recovery store is approved and verified,
+the operator seals the checkpoint there with `retain_receipt_prune_checkpoint`
+and reads it back in a read-committed owner
+transaction with `bind_retained_receipt_prune_checkpoint`. Source-fence and derived
+audit expiry require these immutable bindings. The SQL lifecycle still rechecks
+receipt conclusion, current policy, holds, tenant and source lineage at deletion.
+Restore requires the externally authenticated checkpoint, current policy and hold
+reconciliation, and replay of the matching operations before verification. The
+verifier returns evidence while traffic stays quarantined. The beta gate requires
+the independent signer/store and monitoring before the cumulative checkpoint
+reaches its 10,000-entry or 2 MiB bounds. Rotation must preserve applicable older
+backup evidence and needs verified backup inventory.
 Database/authorization errors stop the run and do not silently invoke the
 application DSN. The scheduler records only the error class, then raises a
 failed-job signal. Preserve the cursor and retry after an authorized repair;

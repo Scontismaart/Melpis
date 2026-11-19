@@ -27,8 +27,8 @@ async def test_signed_replay_requires_authenticated_stay_checkpoint(pg_pool):
     trust = dict(installation_id=installation, trusted_public_key=signer.public_key(),
                  backup_checkpoint=anchor, independent_tip=JournalCheckpoint(1, hashlib.sha256(raw).hexdigest()))
     key = b'synthetic-checkpoint-key-32-bytes'
-    payload = {'version': 'c24-restore-v2', 'organization_id': str(env.org), 'backup_id': 'backup',
-               'sequence': 3, 'complete': True, 'erasures': [], 'stay_purges': []}
+    payload = {'version': 'c24-restore-v3', 'organization_id': str(env.org), 'backup_id': 'backup',
+               'sequence': 3, 'complete': True, 'erasures': [], 'stay_purges': [], 'receipt_prunes': []}
     canonical = json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
     checkpoint = {'payload': payload, 'signature': hmac.new(key, canonical, hashlib.sha256).hexdigest()}
     async with pg_pool.acquire() as conn, conn.transaction():
@@ -37,14 +37,16 @@ async def test_signed_replay_requires_authenticated_stay_checkpoint(pg_pool):
         for options in (dict(backup_id='wrong', minimum_sequence=3), dict(backup_id='backup', minimum_sequence=4)):
             with pytest.raises(RestoreBlocked):
                 await verify_restore_journal_replay(conn, env.org, raw, signature, stay_checkpoint=checkpoint,
-                    checkpoint_verification_key=key, **options, **trust)
+                    checkpoint_verification_key=key, checkpoint_sha256=hashlib.sha256(canonical).hexdigest(), **options, **trust)
         proof = await verify_restore_journal_replay(conn, env.org, raw, signature, stay_checkpoint=checkpoint,
-            checkpoint_verification_key=key, backup_id='backup', minimum_sequence=3, **trust)
+            checkpoint_verification_key=key, backup_id='backup', minimum_sequence=3,
+            checkpoint_sha256=hashlib.sha256(canonical).hexdigest(), **trust)
         assert proof['traffic_authorized'] is False
     async with pg_pool.acquire() as conn, conn.transaction(isolation='repeatable_read'):
         with pytest.raises(RestoreBlocked, match='read committed'):
             await verify_restore_journal_replay(conn, env.org, raw, signature, stay_checkpoint=checkpoint,
-                checkpoint_verification_key=key, backup_id='backup', minimum_sequence=3, **trust)
+                checkpoint_verification_key=key, backup_id='backup', minimum_sequence=3,
+                checkpoint_sha256=hashlib.sha256(canonical).hexdigest(), **trust)
 
 
 async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool):
@@ -61,8 +63,8 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
         await conn.fetchval("SELECT booking_stay_admin_purge($1,$2,'retention',NULL,'synthetic-stay-v1')", env.org, booking)
         await conn.execute('SET CONSTRAINTS ALL IMMEDIATE')
         request_ids = await conn.fetch('SELECT request_id FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
-        payload = {'version': 'c24-restore-v2', 'organization_id': str(env.org), 'backup_id': 'backup',
-                   'sequence': 3, 'complete': True, 'erasures': [], 'stay_purges': [{
+        payload = {'version': 'c24-restore-v3', 'organization_id': str(env.org), 'backup_id': 'backup',
+                   'sequence': 3, 'complete': True, 'erasures': [], 'receipt_prunes': [], 'stay_purges': [{
                        'booking_id': str(booking), 'subject_id': str(lineage.contact_id),
                        'purpose': 'retention', 'operation_id': None, 'policy_version': 'synthetic-stay-v1',
                        'request_ids': [str(row['request_id']) for row in request_ids]}]}
@@ -71,7 +73,8 @@ async def test_restore_rejects_remaining_purged_allocation_or_completion(pg_pool
 
         async def verify():
             return await verify_restore_checkpoint(conn, env.org, checkpoint, verification_key=key,
-                                                   backup_id='backup', minimum_sequence=3)
+                                                   backup_id='backup', minimum_sequence=3,
+                                                   checkpoint_sha256=hashlib.sha256(canonical).hexdigest())
 
         assert (await verify())['traffic_authorized'] is False
         for source in ('restored_archived_sets', 'restored_sets', 'restored_completion'):
