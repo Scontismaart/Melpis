@@ -148,14 +148,22 @@ async def test_concurrent_fenced_creates_do_not_duplicate_resource(pg_pool, monk
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', env.org) == 1
 
 
-async def test_non_opted_in_manual_route_keeps_legacy_contract(pg_pool, monkeypatch):
-    env = await create_environment(pg_pool, 'parrucchiere')
+@pytest.mark.parametrize('sector', ['ristorante', 'parrucchiere'])
+async def test_non_opted_in_manual_route_keeps_legacy_contract(pg_pool, monkeypatch, sector):
+    env = await create_environment(pg_pool, sector)
+    monkeypatch.setenv('BOOKING_TYPED_OWNER_MUTATIONS_ENABLED', 'true')
     app, identity = app_for(env)
     app.state.booking_service = BookingService(repo=BookingRepository(pg_pool))
     identity['ruolo'], identity['aal'] = 'manager', 'aal1'
     async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
         response = await client.post('/api/bookings', json={'nome_cliente': 'Synthetic',
             'telefono': '', 'note': '', 'data': '2026-10-28', 'ora': '10:00', 'coperti': 1})
+        assert response.status_code == 200, response.text
+        identity['ruolo'], identity['aal'] = 'owner', 'aal2'
+        booking = response.json()['id']
+        context = await client.get(f'/api/bookings/{booking}/c24-context')
+        assert context.status_code == 404
+        assert context.json()['detail'] == 'Managed booking not found'
     assert response.status_code == 200, response.text
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', env.org) == 1
 
