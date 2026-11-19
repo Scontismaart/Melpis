@@ -38,7 +38,7 @@ async def state_env(pg_pool):
             'message':message,'repo':BookingConversationRepository(pg_pool)}
 
 
-async def commit_source(env, message, text, fields, timestamp, *, provider_id=None):
+async def commit_source(env, message, text, fields, timestamp, *, provider_id=None, intent='booking'):
     pool,oid=env['pool'],env['org']; wam=provider_id or f'synthetic-{uuid4()}'
     await pool.execute("""UPDATE messages SET wam_id=$3,content_text=$4,content=$5::jsonb
         WHERE organization_id=$1 AND id=$2""",oid,message,wam,text,
@@ -47,10 +47,10 @@ async def commit_source(env, message, text, fields, timestamp, *, provider_id=No
     quota=QuotaReservations(pool); reservation=await quota.reserve(op)
     assert reservation['status']=='reserved'
     payload={'risposta':'Richiesta ricevuta.','richiede_umano':False,'motivo':'',
-             'booking_state_proposal':{'intent':'booking','slots':[{'field':k,'value':v} for k,v in fields.items()]}}
+             'booking_state_proposal':{'intent':intent,'slots':[{'field':k,'value':v} for k,v in fields.items()]}}
     response=parse_structured_response_json(json.dumps(payload),catalog=env['catalog'],organization_id=oid)
     saved=await quota.commit(op,reservation['ticket'],validate_final_response(op,reservation['ticket'],response))
-    assert saved['booking_state_proposal']['intent'] == 'booking'
+    assert saved['booking_state_proposal']['intent'] == intent
     assert saved['booking_state_proposal']['slots'] == payload['booking_state_proposal']['slots']
     return op
 

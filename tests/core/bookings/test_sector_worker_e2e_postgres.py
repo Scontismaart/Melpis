@@ -1,4 +1,4 @@
-"""Synthetic opt-in hair/spa confirmation and fenced local allocation."""
+"""Synthetic opt-in booking confirmation and guarded local allocation."""
 import asyncio
 import copy
 import json
@@ -9,8 +9,15 @@ from zoneinfo import ZoneInfo
 import asyncpg
 import pytest
 
+from src.core.bookings import worker_authority
+from src.core.bookings.allocation_contracts import AllocationRequest
+from src.core.bookings.booking_mutation_contract import (
+    BookingMutation,
+    apply_booking_mutation,
+)
 from src.core.bookings.catalog_contracts import validate_catalog_json
-from src.core.bookings.worker_authority import WorkerBookingAuthority
+from src.core.bookings.worker_authority import WorkerBookingAuthority, WorkerProofDenied
+from src.core.db.repositories.booking_allocation_repo import BookingAllocationRepository
 from src.core.db.repositories.booking_catalog_repo import BookingCatalogRepository
 from src.core.db.repositories.booking_conversation_repo import (
     BookingConversationRepository,
@@ -110,7 +117,7 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
     ))
     competing = None
     try:
-        await asyncio.wait_for(entered.wait(), 5)
+        await asyncio.wait_for(entered.wait(), 30)
         competing = asyncio.create_task(legacy_admission())
         await wait_blocked(pool, worker_pid)
     finally:
@@ -142,9 +149,16 @@ async def test_private_worker_sector_confirmation_creates_fenced_booking(pg_pool
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('sector', ['parrucchiere', 'centro_estetico'])
+@pytest.mark.parametrize(('sector', 'scenario'), [
+    ('ristorante', None),
+    ('parrucchiere', None),
+    ('centro_estetico', None),
+    ('parrucchiere', 'before_proof'),
+    ('parrucchiere', 'after_proof'),
+    ('parrucchiere', 'cancel_winner'),
+])
 async def test_two_confirmed_sector_workers_compete_for_same_resource(
-    pg_pool, private_worker_pool, monkeypatch, sector,
+    pg_pool, private_worker_pool, monkeypatch, sector, scenario,
 ):
     pool = pg_pool
     org = (await _organization(pool))['id']
@@ -157,10 +171,24 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
                           request_id=uuid4(), catalog=copy.deepcopy(CATALOGS[sector]))
     published = await publisher.write(org, actor, auth, action='published', expected_revision=1, request_id=uuid4())
     scoped = validate_catalog_json(json.dumps(published['published']), organization_id=org)
-    await pool.execute('SELECT public.booking_sector_activate_empty($1,$2)', org, sector)
-    policy = {'a05': {'authority': 'internal'}, 'c24_sector_auto':
-              {'enabled': True, 'version': 1, 'sector': sector, 'authority': 'internal'}}
-    await pool.execute('UPDATE booking_settings SET config=config || $2::jsonb WHERE organization_id=$1', org, json.dumps(policy))
+    if sector == 'ristorante':
+        policy = {'a05': {
+            'enabled': True, 'version': 1, 'authority': 'internal', 'verticale': sector,
+            'service': 'ristorante/tavolo', 'duration_minutes': 60, 'closed_dates': [],
+            'weekly_opening_intervals': {
+                'sunday': [],
+                **{weekday: [{'start': '09:00', 'end': '18:00'}]
+                   for weekday in ('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday')},
+            },
+        }}
+        await pool.execute('''UPDATE booking_settings SET config=config || $2::jsonb,
+            capienze_orarie='{"10:00":2}'::jsonb WHERE organization_id=$1''', org, json.dumps(policy))
+    else:
+        await pool.execute('SELECT public.booking_sector_activate_empty($1,$2)', org, sector)
+        policy = {'a05': {'authority': 'internal'}, 'c24_sector_auto':
+                  {'enabled': True, 'version': 1, 'sector': sector, 'authority': 'internal'}}
+        await pool.execute('UPDATE booking_settings SET config=config || $2::jsonb WHERE organization_id=$1',
+                           org, json.dumps(policy))
     appointment = date.today() + timedelta(days=7)
     while appointment.weekday() == 6:
         appointment += timedelta(days=1)
@@ -174,9 +202,13 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
         wam = 'race-proposal-' + uuid4().hex
         await pool.execute('UPDATE messages SET wam_id=$3 WHERE organization_id=$1 AND id=$2', org, message, wam)
         await _persist_ingress(pool, org, wam)
-        await commit_source(env, message, f'Mi chiamo Mario Rossi, vorrei un appuntamento il {appointment} alle 10:00',
-            {'service_id': 'standard', 'customer_name': True, 'appointment_date': appointment.isoformat(),
-             'appointment_time': '10:00'}, 1700000000, provider_id=wam)
+        text = f'Mi chiamo Mario Rossi, vorrei un appuntamento il {appointment} alle 10:00'
+        fields = {'service_id': 'standard', 'customer_name': True, 'appointment_date': appointment.isoformat(),
+                  'appointment_time': '10:00'}
+        if sector == 'ristorante':
+            text = f'Mi chiamo Mario Rossi, vorrei un tavolo per 2 persone il {appointment} alle 10:00'
+            fields['party_size'] = 2
+        await commit_source(env, message, text, fields, 1700000000, provider_id=wam)
         await env['repo'].apply_worker_source(org, conversation, message)
         prompt = await pool.fetchval("SELECT id FROM messages WHERE organization_id=$1 AND conversation_id=$2 AND handling_type='c24_confirmation_prompt'", org, conversation)
         assert prompt is not None
@@ -202,6 +234,7 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
 
     async def record_second(authority, conn, capability):
         nonlocal second_pid
+        assert capability._claim.claim_id not in active_heartbeats
         if asyncio.current_task() is second:
             second_pid = conn.get_server_pid()
             second_entered.set()
@@ -215,12 +248,71 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
             entered.set()
             await release.wait()
 
+    original_handoff = WorkerBookingAuthority._handoff_unavailable
+    original_heartbeat = worker_authority._lease_heartbeat
+    original_availability = BookingAllocationRepository._availability
+    active_heartbeats = set()
+    handoff_connection = None
+    losing_capability = None
+
+    async def track_heartbeat(pool, claim, stop_event):
+        active_heartbeats.add(claim.claim_id)
+        try:
+            await original_heartbeat(pool, claim, stop_event)
+        finally:
+            active_heartbeats.remove(claim.claim_id)
+
+    async def expire_capability(conn, capability_id):
+        # Shift both timestamps to model passage of time without violating the
+        # capability duration constraint or also expiring its claim.
+        assert await conn.fetchval('''UPDATE c24_private.worker_capabilities
+            SET issued_at=statement_timestamp()-interval '2 seconds',
+                expires_at=statement_timestamp()-interval '1 second'
+            WHERE capability_id=$1 RETURNING true''', capability_id)
+
+    async def check_handoff(authority, conn, claim, proof, capability_id):
+        nonlocal handoff_connection, losing_capability
+        assert claim.claim_id not in active_heartbeats
+        assert await conn.fetchval('''SELECT lease_until>clock_timestamp()
+            FROM booking_worker_claims WHERE organization_id=$1 AND message_id=$2
+              AND claim_id=$3''', org, claim.message_id, claim.claim_id)
+        handoff_connection = conn
+        losing_capability = capability_id
+        if scenario == 'before_proof':
+            await expire_capability(conn, capability_id)
+        if scenario == 'cancel_winner':
+            winning_id = await first
+            cancellation = AllocationRequest(
+                request_id=uuid4(), booking_id=winning_id, action='cancel',
+                expected_allocation_revision=1, expected_catalog_revision=scoped.catalog.revision,
+            )
+            result = await apply_booking_mutation(
+                pool, org, auth, cancellation, mutation=BookingMutation('cancel', '', '', ''),
+            )
+            assert result['outcome'] == 'cancelled'
+        return await original_handoff(authority, conn, claim, proof, capability_id)
+
+    async def check_availability(repo, conn, *args, **kwargs):
+        result = await original_availability(repo, conn, *args, **kwargs)
+        if scenario == 'after_proof' and conn is handoff_connection:
+            assert result == 'unavailable'
+            await expire_capability(conn, losing_capability)
+        return result
+
+    monkeypatch.setattr(worker_authority, '_lease_heartbeat', track_heartbeat)
+    monkeypatch.setattr(WorkerBookingAuthority, '_handoff_unavailable', check_handoff)
+    monkeypatch.setattr(BookingAllocationRepository, '_availability', check_availability)
     monkeypatch.setattr(WorkerBookingAuthority, '_mark_sector_admission', hold_first)
     monkeypatch.setattr(WorkerBookingAuthority, 'create_booking', record_second)
     first = asyncio.create_task(WorkerBookingAuthority().process_confirmation(
         private_worker_pool, org, *replies[0], application_pool=pool))
     try:
-        await asyncio.wait_for(entered.wait(), 30)
+        async def first_holds_lock():
+            while not entered.is_set():
+                if first.done():
+                    raise AssertionError(f'first worker ended before holding its lock: {first.exception()!r}')
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(first_holds_lock(), 30)
         second = asyncio.create_task(WorkerBookingAuthority().process_confirmation(
             private_worker_pool, org, *replies[1], application_pool=pool))
         await asyncio.wait_for(second_entered.wait(), 30)
@@ -240,8 +332,117 @@ async def test_two_confirmed_sector_workers_compete_for_same_resource(
         raise
     release.set()
     results = await asyncio.wait_for(asyncio.gather(first, second, return_exceptions=True), 15)
-    assert sum(not isinstance(result, Exception) for result in results) == 1, repr(results)
-    assert sum(isinstance(result, asyncpg.InsufficientPrivilegeError) for result in results) == 1, repr(results)
+    assert results[0] is not None and not isinstance(results[0], Exception), repr(results)
+    winner = results[0]
+    loser_conversation, loser_confirmation = replies[1]
     assert await pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1', org) == 1
-    assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', org) == 1
     assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 1
+    if scenario == 'cancel_winner':
+        assert isinstance(results[1], WorkerProofDenied), repr(results)
+        assert str(results[1]) == 'Slot unavailability no longer verified'
+        assert await pool.fetchval('SELECT stato FROM bookings WHERE organization_id=$1 AND id=$2',
+                                   org, winner) == 'cancellata'
+        assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', org) == 0
+        generation = await pool.fetchval('''UPDATE booking_worker_claims
+            SET lease_until=clock_timestamp()-interval '1 second'
+            WHERE organization_id=$1 AND conversation_id=$2 AND NOT handoff_queued RETURNING generation''',
+            org, loser_conversation)
+        assert generation is not None
+        assert await pool.fetchval('SELECT ticket_status FROM conversations WHERE organization_id=$1 AND id=$2',
+                                   org, loser_conversation) == 'AI_ACTIVE'
+        retry = WorkerBookingAuthority()
+        replacement = await retry.process_confirmation(
+            private_worker_pool, org, loser_conversation, loser_confirmation, application_pool=pool,
+        )
+        assert replacement is not None and replacement != winner
+        assert await retry.process_confirmation(
+            private_worker_pool, org, loser_conversation, loser_confirmation, application_pool=pool,
+        ) == replacement
+        assert await pool.fetchval('''SELECT generation FROM booking_worker_claims
+            WHERE organization_id=$1 AND conversation_id=$2''', org, loser_conversation) == generation + 1
+        assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', org) == 1
+        assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2',
+                                   org, replacement) == 1
+        return
+    assert await pool.fetchval('SELECT count(*) FROM booking_resource_allocations WHERE organization_id=$1', org) == 1
+    assert await pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1', org) == 1
+    if scenario:
+        reason = ('Handoff capability unavailable' if scenario == 'before_proof'
+                  else 'Handoff capability expired before transition')
+        assert isinstance(results[1], WorkerProofDenied), repr(results)
+        assert str(results[1]) == reason
+        assert await pool.fetchval('''SELECT lease_until>clock_timestamp() AND NOT handoff_queued
+            FROM booking_worker_claims WHERE organization_id=$1 AND conversation_id=$2''',
+            org, loser_conversation)
+        assert await pool.fetchval('SELECT ticket_status FROM conversations WHERE organization_id=$1 AND id=$2',
+                                   org, loser_conversation) == 'AI_ACTIVE'
+        return
+    assert results[1] is None, repr(results)
+    assert await pool.fetchval('SELECT ticket_status FROM conversations WHERE organization_id=$1 AND id=$2',
+                               org, loser_conversation) == 'PENDING_STAFF'
+    assert await pool.fetchval('SELECT ticket_status FROM conversations WHERE organization_id=$1 AND id=$2',
+                               org, replies[0][0]) == 'AI_ACTIVE'
+    assert await pool.fetchval('''SELECT handoff_queued FROM booking_worker_claims
+        WHERE organization_id=$1 AND conversation_id=$2''', org, loser_conversation)
+    revoked = await pool.fetchrow('''SELECT cap.capability_id, cap.payload IS NULL AS scrubbed,
+            cap.expires_at<=clock_timestamp() AS expired
+        FROM c24_private.worker_capabilities AS cap JOIN booking_worker_claims AS claim
+          ON claim.organization_id=cap.organization_id AND claim.message_id=cap.message_id
+         AND claim.claim_id=cap.claim_id AND claim.generation=cap.generation
+        WHERE claim.organization_id=$1 AND claim.conversation_id=$2''', org, loser_conversation)
+    assert revoked['scrubbed'] and revoked['expired']
+    async with private_worker_pool.acquire() as private:
+        with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            await private.fetchval('SELECT c24_private.c24_worker_consume_capability($1)', revoked['capability_id'])
+
+    # Staff may put the conversation back into AI mode. The expired lease and
+    # original confirmation must not reopen the already handed-off proposal.
+    await pool.execute("""UPDATE conversations SET ticket_status='AI_ACTIVE'
+        WHERE organization_id=$1 AND id=$2""", org, loser_conversation)
+    await pool.execute("""UPDATE booking_worker_claims SET lease_until=clock_timestamp()-interval '1 second'
+        WHERE organization_id=$1 AND conversation_id=$2""", org, loser_conversation)
+    retry = WorkerBookingAuthority()
+    assert await retry._confirmed_jobs(private_worker_pool, 10) == []
+    with pytest.raises(WorkerProofDenied):
+        await retry.process_confirmation(private_worker_pool, uuid4(), loser_conversation, loser_confirmation,
+                                         application_pool=pool)
+    with pytest.raises(WorkerProofDenied):
+        await retry.process_confirmation(private_worker_pool, org, loser_conversation, loser_confirmation,
+                                         application_pool=pool)
+    assert await pool.fetchval('SELECT ticket_status FROM conversations WHERE organization_id=$1 AND id=$2',
+                               org, loser_conversation) == 'AI_ACTIVE'
+    assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 1
+
+    # A later WhatsApp request can update conversational evidence. The
+    # existing owner mutation path is required to change the booking itself.
+    winner_conversation = replies[0][0]
+    timestamp = await pool.fetchval('''SELECT provider_timestamp FROM booking_conversation_states
+        WHERE organization_id=$1 AND conversation_id=$2''', org, winner_conversation)
+    for offset, (intent, text, fields) in enumerate((
+        ('modify', 'Vorrei spostare la prenotazione alle 11:00', {'appointment_time': '11:00'}),
+        ('cancel', 'Vorrei cancellare la prenotazione', {}),
+    ), 1):
+        source, wam = uuid4(), f'sector-{intent}-' + uuid4().hex
+        await pool.execute("""INSERT INTO messages(id,organization_id,conversation_id,direction,message_type,
+            content,status,wam_id) VALUES($1,$2,$3,'inbound','text','{}'::jsonb,'processing',$4)""",
+            source, org, winner_conversation, wam)
+        await _persist_ingress(pool, org, wam)
+        await commit_source(env, source, text, fields, timestamp + offset, provider_id=wam, intent=intent)
+        applied = await env['repo'].apply_worker_source(org, winner_conversation, source)
+        state = applied['state']
+        assert state.intent == intent and state.last_source_message_id == source
+        assert not applied['details_confirmed_current'] and not applied['confirmation_authorized']
+        assert (await env['repo'].apply_worker_source(org, winner_conversation, source))['replayed']
+        proposed_time = next(slot for slot in state.slots if slot.field == 'appointment_time')
+        assert proposed_time.value == '11:00'
+        if intent == 'modify':
+            modified_by = source
+            assert proposed_time.origin == 'customer_provided'
+        assert proposed_time.source_message_id == modified_by
+        assert await retry._confirmed_jobs(private_worker_pool, 10) == []
+        assert await pool.fetchval("""SELECT count(*) FROM messages WHERE organization_id=$1 AND conversation_id=$2
+            AND handling_type='c24_confirmation_prompt'""", org, winner_conversation) == 1
+        assert await pool.fetchrow('SELECT stato,ora FROM bookings WHERE organization_id=$1 AND id=$2',
+                                   org, winner) == ('confermata', time(10))
+        assert await pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1', org) == 1
+        assert await pool.fetchval('SELECT count(*) FROM booking_confirmation_outbox WHERE organization_id=$1', org) == 1

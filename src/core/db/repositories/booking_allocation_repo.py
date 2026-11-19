@@ -27,6 +27,7 @@ from src.core.db.repositories.booking_catalog_repo import (
     decode,
 )
 
+
 class AllocationDenied(PermissionError):
     """Current principal, tenant, or erasure state does not authorize access."""
 
@@ -37,6 +38,10 @@ class AllocationConflict(ValueError):
 
 class AllocationUnavailable(RuntimeError):
     """Current authoritative state cannot safely be established."""
+
+
+class WorkerSlotUnavailable(RuntimeError):
+    """The worker measured insufficient capacity under the allocation locks."""
 
 
 def _uuid(value):
@@ -130,7 +135,8 @@ class BookingAllocationRepository:
             raise ValueError("AllocationRequest required")
         return await self._run_on_connection(conn, _uuid(organization_id), _uuid(auth_user_id), request, observe=False, mutation_hash=mutation_hash, contact_preimage=contact_preimage)
 
-    async def _apply_worker_on_connection(self, conn, organization_id, message_id, inbox_id, operation_id, service_digest, request):
+    async def _apply_worker_on_connection(self, conn, organization_id, message_id, inbox_id, operation_id, service_digest, request,
+                                          *, handoff_on_unavailable=False):
         """Apply a verified create inside the lifecycle owner's transaction."""
         if not conn.is_in_transaction():
             raise RuntimeError("Allocation requires an active transaction")
@@ -151,9 +157,13 @@ class BookingAllocationRepository:
         if not source:
             raise AllocationDenied('Worker provenance unavailable')
         worker = (message, inbox, operation, service_digest)
-        return await self._run_on_connection(conn, org, None, request, observe=False, worker=worker)
+        return await self._run_on_connection(
+            conn, org, None, request, observe=False, worker=worker,
+            handoff_on_unavailable=handoff_on_unavailable,
+        )
 
-    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None, contact_preimage=None, worker=None):
+    async def _run_on_connection(self, conn, org, auth, request, *, observe, mutation_hash=None, contact_preimage=None, worker=None,
+                                 handoff_on_unavailable=False):
         orgrow = await conn.fetchrow(
             "SELECT id,timezone,business_profile FROM organizations WHERE id=$1 FOR SHARE", org)
         if not orgrow:
@@ -407,6 +417,11 @@ class BookingAllocationRepository:
                                                   worker=worker is not None)
             if observe:
                 return self._result(status, None, old, current.revision, current.revision, False)
+            if (status == "unavailable" and worker is not None and handoff_on_unavailable
+                    and current.sector in {"ristorante", "parrucchiere", "centro_estetico"}):
+                # The worker capability authorizes only an allocated receipt.
+                # Roll back the provisional booking without attempting a receipt.
+                raise WorkerSlotUnavailable()
             if status != "available" or old and old["state"] == "active" and stale:
                 outcome, applied = ("unavailable" if status == "unavailable" else "unknown"), None
             elif old and old["state"] == "active" and any(c["resource_kind"] != kind or c["exclusive"] != exclusive
