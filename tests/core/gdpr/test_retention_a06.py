@@ -235,21 +235,28 @@ async def test_worker_capability_scrub_drains_due_batches_and_keeps_replay_evide
             VALUES($1,gen_random_uuid(),gen_random_uuid(),1,gen_random_uuid(),
                 '{"synthetic":true}'::jsonb,repeat('b',64),now()+interval '1 minute')
             RETURNING capability_id""", org)
-    locked = due[0]["capability_id"]
-    async with pg_pool.acquire() as conn, conn.transaction():
-        await conn.execute("SELECT 1 FROM c24_private.worker_capabilities WHERE capability_id=$1 FOR UPDATE", locked)
-        outcome = await retention_job.scrub_expired_worker_capability_payloads(pg_pool)
-        assert outcome["worker_capability_payloads_scrubbed"] == 101
-        assert outcome["oldest_overdue_seconds"] >= 180
-    assert await retention_job.scrub_expired_worker_capability_payloads(pg_pool) == {
-        "worker_capability_payloads_scrubbed": 1, "oldest_overdue_seconds": None,
-    }
-    async with pg_pool.acquire() as conn:
-        assert await conn.fetchval("""SELECT count(*) FROM c24_private.worker_capabilities
-            WHERE organization_id=$1 AND payload IS NULL AND payload_hash=repeat('a',64)
-              AND claim_id IS NOT NULL AND generation=1 AND consumed_at IS NULL AND completed_at IS NULL""", org) == 102
-        assert await conn.fetchval("SELECT payload IS NOT NULL FROM c24_private.worker_capabilities WHERE capability_id=$1",
-                                   pending)
+    due_ids = [row["capability_id"] for row in due]
+    try:
+        locked = due_ids[0]
+        async with pg_pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT 1 FROM c24_private.worker_capabilities WHERE capability_id=$1 FOR UPDATE", locked)
+            outcome = await retention_job.scrub_expired_worker_capability_payloads(pg_pool)
+            assert outcome["worker_capability_payloads_scrubbed"] == 101
+            assert outcome["oldest_overdue_seconds"] >= 180
+        assert await retention_job.scrub_expired_worker_capability_payloads(pg_pool) == {
+            "worker_capability_payloads_scrubbed": 1, "oldest_overdue_seconds": None,
+        }
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval("""SELECT count(*) FROM c24_private.worker_capabilities
+                WHERE organization_id=$1 AND payload IS NULL AND payload_hash=repeat('a',64)
+                  AND claim_id IS NOT NULL AND generation=1 AND consumed_at IS NULL AND completed_at IS NULL""", org) == 102
+            assert await conn.fetchval("SELECT payload IS NOT NULL FROM c24_private.worker_capabilities WHERE capability_id=$1",
+                                       pending)
+    finally:
+        # The private table deliberately has no organizations FK. Resetting the
+        # synthetic public tables cannot remove these specific test capabilities.
+        await pg_pool.execute("""DELETE FROM c24_private.worker_capabilities
+            WHERE organization_id=$1 AND capability_id=ANY($2::uuid[])""", org, [*due_ids, pending])
 
 
 async def insert_message_policy(pool, org, *, version, days=1, hold=False, valid=True,
