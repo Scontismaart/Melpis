@@ -131,8 +131,11 @@ be independently attested before compaction can advance a floor.
 The paged source reconciliation can authenticate the full journal from genesis
 and compare every published erasure with the frozen source. It returns the
 oldest unpublished entries for one segment and an exact remaining count. Its
-temporary source index stores keyed digests and sequence numbers. The existing
-backup-coverage and restore entry points retain their legacy bounds.
+temporary source index stores keyed digests and sequence numbers. Backup
+coverage uses the same bounded segment scan from genesis and checks every
+backup's exact independently indexed anchor and post-anchor evidence. The
+reported segment and entry headroom still reflects the legacy restore limits.
+The restore entry point and cumulative v3/v4 checkpoint retain those bounds.
 If evidence or its current authority cannot be recovered, keep traffic closed
 and obtain the controller's disposition. No deletion rule may rely on a
 guessed backup age or an older unverified tip.
