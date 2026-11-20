@@ -19,6 +19,8 @@ class Category:
 
 
 CATEGORIES: tuple[Category, ...] = (
+    Category("ordinary_booking_completion_evidence", "", exclusion_reason=
+             "Private, subject-linked completion evidence needs controller review; no direct application grant."),
     Category("booking_stay_tombstones", """
         SELECT request_id,booking_id,original_subject_id,purpose,operation_id,policy_version,created_at
         FROM booking_stay_tombstones WHERE organization_id=$1::uuid
@@ -496,7 +498,7 @@ CATEGORIES: tuple[Category, ...] = (
     """, exclusion_reason="Arbitrary event details JSON is excluded."),
     Category("gdpr_policies", """
         SELECT category, version, approval_reference, approved_at, valid_until,
-               legal_hold, retention_days
+               legal_hold, retention_days, (to_jsonb(gdpr_policies)->>'retention_calendar_months')::integer AS retention_calendar_months
         FROM gdpr_policies WHERE organization_id = $1::uuid
     """, exclusion_reason="Approver identity and erasure policy internals are excluded."),
     Category("gdpr_erasure_barriers", """
