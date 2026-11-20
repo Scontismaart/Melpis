@@ -5,9 +5,10 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from src.core.gdpr.independent_tip import IndependentTipStore
-from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment
+from src.core.gdpr.journal_publication import LocalJournalStore, SegmentKeyEpoch, publish_segment
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
-from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged
+from src.core.gdpr.restore_journal import RestoreJournalInvalid
+from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged, publish_source_erasure_batch
 
 
 class Source:
@@ -82,3 +83,50 @@ async def test_paged_source_reconciles_prior_and_reports_exact_unpublished_backl
     rows[other][-1] = dict(fourth_row, key_id="invalid")
     with pytest.raises(RestoreBlocked, match="Unpublished source history cannot be signed"):
         await capture_erasure_journal_delta_paged(Source(rows), authority, store, **trust)
+
+
+@pytest.mark.asyncio
+async def test_source_publisher_retries_immutable_segment_and_follows_rotated_epoch(tmp_path):
+    class InterruptedStore(LocalJournalStore):
+        interrupt = True
+
+        def put_once(self, name, ciphertext):
+            super().put_once(name, ciphertext)
+            if self.interrupt:
+                raise RestoreJournalInvalid("synthetic_upload_response_lost")
+
+    org = uuid4()
+    source = Source({org: [entry(org, event)[1] for event in range(1, 4)]})
+    authority = IndependentTipStore.initialize(tmp_path / "authority.sqlite", uuid4())
+    store = InterruptedStore(tmp_path)
+    signer, key = Ed25519PrivateKey.generate(), Fernet.generate_key()
+    genesis = authority.current()
+    params = dict(expected_organizations=[org], signer=signer, journal_encryption_key=key, max_entries=2)
+    with pytest.raises(RestoreJournalInvalid, match="synthetic_upload_response_lost"):
+        await publish_source_erasure_batch(source, authority, store, **params)
+    assert authority.current() == genesis
+    candidate, = tmp_path.glob("*.fernet")
+    original_ciphertext = candidate.read_bytes()
+    store.interrupt = False
+    first, published, remaining = await publish_source_erasure_batch(source, authority, store, **params)
+    assert (first.sequence, published, remaining) == (2, 2, 1)
+    assert candidate.read_bytes() == original_ciphertext
+
+    next_signer, next_key = Ed25519PrivateKey.generate(), Fernet.generate_key()
+    authority.approve_segment_epoch(first, next_signer.public_key(), next_key)
+    epochs = (SegmentKeyEpoch(genesis, signer.public_key(), key),
+              SegmentKeyEpoch(first, next_signer.public_key(), next_key))
+    with pytest.raises(RestoreBlocked, match="does not match the active epoch"):
+        await publish_source_erasure_batch(source, authority, store, key_epochs=epochs, **params)
+    assert authority.current() == first
+    assert list(tmp_path.glob("*.fernet")) == [candidate]
+
+    params.update(signer=next_signer, journal_encryption_key=next_key, key_epochs=epochs)
+    # The write path uses its own store; independent authority reads must see
+    # the persisted successor through the configured read path.
+    reader = LocalJournalStore(tmp_path)
+    final, published, remaining = await publish_source_erasure_batch(
+        source, authority, store, reader=reader, **params,
+    )
+    assert (final.sequence, published, remaining) == (3, 1, 0)
+    assert await publish_source_erasure_batch(source, authority, store, reader=reader, **params) == (final, 0, 0)

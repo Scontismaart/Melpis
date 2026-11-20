@@ -36,7 +36,7 @@ from src.core.gdpr.independent_tip import IndependentTipStore
 from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment, publish_checkpoint
 from src.core.gdpr.restore_policy_state import capture_policy_state
 from src.core.gdpr.source_journal_evidence import capture_erasure_journal_delta
-from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged
+from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged, publish_source_erasure_batch
 from tests.core.test_quota_reservation_lifecycle import _organization, _inbound_message
 from tests.core.gdpr.test_c24_purged_source_replay import (
     historical_fence,
@@ -738,11 +738,11 @@ async def test_verified_orphan_proposal_is_erased_on_source_and_replayed_from_v5
                                                 subject_id=await subject(env))
         await Deletion(pool).advance(org, erasure, requester)
         async with pool.acquire() as conn, conn.transaction(readonly=True):
-            previous, delta, remaining = await capture_erasure_journal_delta_paged(conn, authority, store,
-                expected_organizations=[org], trusted_public_key=signer.public_key(), journal_encryption_key=journal_key)
-        assert len(delta) == 1 and not remaining
-        successor = publish_segment(store, installation, previous, list(delta), signer=signer, encryption_key=journal_key)
-        authority.advance(store, previous, successor, trusted_public_key=signer.public_key(), encryption_key=journal_key)
+            journal_tip, published, remaining = await publish_source_erasure_batch(
+                conn, authority, store, expected_organizations=[org], signer=signer,
+                journal_encryption_key=journal_key,
+            )
+        assert (journal_tip, published, remaining) == (authority.current(), 1, 0)
     async with pool.acquire() as conn, conn.transaction(readonly=True):
         captured = await capture_committed_checkpoint(conn, authority, store, org, backup_id,
             sequence=3, paged_candidate=True, prior_pin=paged, **keys)

@@ -229,6 +229,18 @@ Relevant provider references:
    with traffic authorization false. A separate authorized operational gate
    controls reopening.
 
+For source erasures, run `publish_source_erasure_batch` in a lifecycle-owner
+read-only, read-committed transaction during the authorized maintenance freeze.
+It keeps tenant locks through capture, exact signed-object readback and the
+independent tip update. Each invocation publishes at most one segment and
+returns the committed tip, the published count and the remaining count. A lost
+response is retried from a fresh transaction against the current authority. The
+same object name is resolved by authenticated readback. With a registered archive,
+use its verified reader for history and tip verification and the live writer
+for new immutable objects. Keep the maintenance freeze in place until every
+recoverable backup has a newly promoted checkpoint covering the advanced tip.
+Recovery verification and covered retention defer while those pins lag.
+
 The current v3 checkpoint has bounded cumulative size (10,000 receipt entries
 and a 2 MiB payload limit). Candidate v4 additionally authenticates the exact
 SQL108 ordinary-booking plans, including completion, policy, allocation revision

@@ -6,8 +6,11 @@ import os
 import sqlite3
 from uuid import UUID
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from src.core.gdpr.independent_tip import IndependentTipStore
 from src.core.gdpr.journal_chain_pages import scan_verified_chain
-from src.core.gdpr.journal_publication import _canonical
+from src.core.gdpr.journal_publication import _canonical, publish_segment
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_coordinator import _restore_inventory
 from src.core.gdpr.restore_journal import RestoreJournalInvalid, _hex
@@ -142,3 +145,48 @@ async def capture_erasure_journal_delta_paged(
         raise RestoreBlocked("Current signed journal unavailable") from None
     finally:
         index.close()
+
+
+async def publish_source_erasure_batch(
+    conn, authority, writer, *, expected_organizations, signer, journal_encryption_key,
+    key_epochs=None, reader=None, max_entries=1000, max_segments=40,
+):
+    """Publish one source-reconciled segment and commit its exact independent tip.
+
+    Run in the lifecycle owner's read-only transaction, during an authorized
+    freeze of source and backup administration. The transaction's tenant locks
+    stay held across capture, authenticated readback and tip CAS. When an archive
+    is registered, supply its verified reader and the separate loose writer.
+    The caller must promote the complete paged checkpoint inventory before using
+    the new tip for restore or retention. A failed CAS can leave an immutable
+    candidate object. Retry with a fresh source transaction and current trust.
+    """
+    if not isinstance(authority, IndependentTipStore) or not isinstance(signer, Ed25519PrivateKey):
+        raise RestoreBlocked("Independent source journal authority and signer required")
+    if type(expected_organizations) is list:
+        expected_organizations = tuple(expected_organizations)
+    if type(key_epochs) is list:
+        key_epochs = tuple(key_epochs)
+    if reader is None:
+        reader = writer
+    public_key = signer.public_key()
+    previous, entries, remaining = await capture_erasure_journal_delta_paged(
+        conn, authority, reader, expected_organizations=expected_organizations,
+        trusted_public_key=public_key, journal_encryption_key=journal_encryption_key,
+        key_epochs=key_epochs, max_entries=max_entries, max_segments=max_segments,
+    )
+    if not entries:
+        return previous, 0, remaining
+    if key_epochs is not None:
+        active = key_epochs[-1]
+        if (active.public_key.public_bytes_raw() != public_key.public_bytes_raw()
+                or active.encryption_key != journal_encryption_key):
+            raise RestoreBlocked("Source journal writer does not match the active epoch")
+    candidate = publish_segment(
+        writer, authority.installation_id, previous, list(entries),
+        signer=signer, encryption_key=journal_encryption_key,
+    )
+    await _restore_inventory(conn, expected_organizations)
+    current = authority.advance(reader, previous, candidate,
+                                trusted_public_key=public_key, encryption_key=journal_encryption_key)
+    return current, len(entries), remaining
