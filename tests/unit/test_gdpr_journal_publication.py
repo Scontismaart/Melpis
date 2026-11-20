@@ -106,6 +106,29 @@ def test_complete_chain_requires_all_segments_and_unique_operations(publication)
         read_chain(store, installation, anchor, [middle, duplicate], duplicate, **args)
 
 
+def test_chain_can_recover_across_independently_pinned_key_rotation(publication):
+    from src.core.gdpr.journal_publication import SegmentKeyEpoch, publish_segment, read_chain
+    from src.core.gdpr.restore_journal import JournalCheckpoint
+
+    store, installation, signer, key, anchor = publication
+    new_signer, new_key = Ed25519PrivateKey.generate(), Fernet.generate_key()
+    first, second = _entry(), _entry()
+    middle = publish_segment(store, installation, anchor, [first], signer=signer, encryption_key=key)
+    latest = publish_segment(store, installation, middle, [second], signer=new_signer, encryption_key=new_key)
+    epochs = [SegmentKeyEpoch(anchor, signer.public_key(), key),
+              SegmentKeyEpoch(middle, new_signer.public_key(), new_key)]
+    args = dict(trusted_public_key=signer.public_key(), encryption_key=key)
+    recovered = read_chain(store, installation, anchor, [middle, latest], latest, key_epochs=epochs, **args)
+    assert [str(item.operation_id) for item in recovered] == [first["operation_id"], second["operation_id"]]
+    assert len(read_chain(store, installation, middle, [latest], latest, key_epochs=epochs, **args)) == 1
+    with pytest.raises(RestoreJournalInvalid):
+        read_chain(store, installation, anchor, [middle, latest], latest, **args)
+    bad_boundary = JournalCheckpoint(middle.sequence, "a" * 64)
+    with pytest.raises(RestoreJournalInvalid):
+        read_chain(store, installation, anchor, [middle, latest], latest,
+                   key_epochs=[epochs[0], SegmentKeyEpoch(bad_boundary, new_signer.public_key(), new_key)], **args)
+
+
 def test_checkpoint_exact_pin_and_separate_key_readback(publication):
     from src.core.gdpr.journal_publication import publish_checkpoint, read_checkpoint
     from src.core.gdpr.restore_checkpoint import RestoreBlocked

@@ -36,6 +36,21 @@ including a lost response followed by authenticated readback.
   the expected installation ID. Policy-state authentication/encryption keys
   and backup keys have their own custody. Keep each key generation until all
   recoverable backups that use it are retired.
+- For a planned key rotation, freeze publication and save the current signed
+  segment tip as the exact boundary. The independent operator calls
+  `approve_segment_epoch` with the new Ed25519 public and journal Fernet
+  keys. It records their fingerprints at that boundary; advancement with
+  other keys is denied. The authority recovery snapshot retains those
+  fingerprints. Supply the matching `SegmentKeyEpoch` sequence to source
+  capture and restore from the independent custodian. Historical
+  segments continue to verify with the keys of their original epoch. Reissue
+  each active backup's cumulative checkpoint and policy snapshot with a higher
+  sequence, using the new HMAC/Fernet pair for the candidate and the old pair
+  to verify the prior pin and its complete evidence. Reconcile every tenant's
+  current pin before resuming replay or publication. Keep the older artifacts
+  and their independently wrapped key material while any recoverable backup
+  may depend on them. If an old key is lost, attempt recovery with the sealed
+  bundle. Missing required keys keep the restore quarantined.
 - Bind each backup manifest to its independently verified identity,
   installation, tenant inventory and exact segment anchor. On the authoritative
   source, use `capture_policy_state` in an owner-controlled read-only
@@ -75,8 +90,9 @@ inside a Linux container with networking disabled. The receiver has only
 the sealed artifacts and independently supplied synthetic keys and pin. It
 rejects an outdated authority and reads the authenticated journal from the
 new authority. The operational drill still has to recover using the real
-independently held authority and keys from another host. There is no automatic compaction,
-mixed-key journal replay or journal deletion in this candidate. Before reaching
+independently held authority and keys from another host. Mixed-key segment
+verification and cumulative artifact rotation have synthetic tests. There is
+no automatic compaction or journal deletion in this candidate. Before reaching
 the format bounds, measure the remaining history, enumerate every recoverable
 backup and plan the rotation against its verified recovery requirements.
 If evidence or its current authority cannot be recovered, keep traffic closed

@@ -13,6 +13,7 @@ _MAX_ENTRIES = 100000
 
 async def capture_erasure_journal_delta(
     conn, authority, store, *, expected_organizations, trusted_public_key, journal_encryption_key,
+    key_epochs=None,
 ):
     """Verify prior evidence and return a bounded, ordered append-only delta.
 
@@ -32,9 +33,11 @@ async def capture_erasure_journal_delta(
         raise RestoreBlocked("Source organization inventory changed")
     try:
         tip = authority.current()
+        authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
         previous = read_chain(
             store, authority.installation_id, _GENESIS, authority.chain_after(_GENESIS), tip,
-            trusted_public_key=trusted_public_key, encryption_key=journal_encryption_key)
+            trusted_public_key=trusted_public_key, encryption_key=journal_encryption_key,
+            key_epochs=key_epochs)
     except RestoreJournalInvalid:
         raise RestoreBlocked("Current signed journal unavailable") from None
     previous_by_org = {org: {} for org in wanted}

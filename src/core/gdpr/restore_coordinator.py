@@ -46,16 +46,18 @@ async def _restore_inventory(conn, expected_organizations):
 async def _published_restore_evidence(
     conn, authority, store, *, backup_checkpoint, backup_id, expected_organizations,
     trusted_public_key, journal_encryption_key, checkpoint_verification_key,
-    checkpoint_encryption_key,
+    checkpoint_encryption_key, key_epochs=None,
 ):
     wanted = await _restore_inventory(conn, expected_organizations)
     installation = authority.installation_id
     try:
         tip = authority.current()
+        authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
         index = authority.chain_after(backup_checkpoint)
         journal = read_chain(
             store, installation, backup_checkpoint, index, tip,
-            trusted_public_key=trusted_public_key, encryption_key=journal_encryption_key)
+            trusted_public_key=trusted_public_key, encryption_key=journal_encryption_key,
+            key_epochs=key_epochs)
         if any(entry.organization_id not in wanted for entry in journal):
             raise RestoreBlocked("Journal scope not covered by recovery inventory")
         scopes = {org: [] for org in wanted}
