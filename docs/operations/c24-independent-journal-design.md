@@ -20,7 +20,15 @@ including a lost response followed by authenticated readback.
   provider bucket and PostgreSQL backups. Use the operator medium with its
   independently attested latest journal tip and checkpoint/policy pins.
   Never reinitialize a missing authority or trust that an old SQLite copy is
-  current just because its contents are internally consistent.
+  current just because its contents are internally consistent. After each
+  publication batch, `seal_for_recovery` produces a consistent encrypted
+  authority snapshot and a separate exact recovery pin covering all tips.
+  Deliver the latest pin and wrapping key through the operator's independent
+  custody path. `recover` verifies them before creating an authority file in
+  an empty protected directory on the replacement host. An old sealed copy
+  paired with the independently current pin is rejected. An old pin and its
+  matching ciphertext cannot establish currency. Retire or isolate the
+  previous authority before enabling writes from the replacement.
 - Generate distinct Ed25519, HMAC and Fernet keys under independent operator
   control. `JournalKeys` encapsulates the segment and checkpoint keys with
   secret-safe representations. `seal_keys` encrypts the portable bundle with a
@@ -61,9 +69,13 @@ including a lost response followed by authenticated readback.
   replay is a quarantined failure. Separate checks cover provider copies and
   retention cases outside the current C2.4 contract.
 
-The portable-key test uses synthetic keys and verifies decryption without
-DPAPI. The operational drill still has to recover using the independently
-held authority and keys from another host. There is no automatic compaction,
+The local rehearsal `python -m scripts.drill_a06_authority_portability`
+creates synthetic authority and key artifacts on Windows and recovers them
+inside a Linux container with networking disabled. The receiver has only
+the sealed artifacts and independently supplied synthetic keys and pin. It
+rejects an outdated authority and reads the authenticated journal from the
+new authority. The operational drill still has to recover using the real
+independently held authority and keys from another host. There is no automatic compaction,
 mixed-key journal replay or journal deletion in this candidate. Before reaching
 the format bounds, measure the remaining history, enumerate every recoverable
 backup and plan the rotation against its verified recovery requirements.

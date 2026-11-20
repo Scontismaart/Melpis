@@ -6,11 +6,16 @@ Never bootstrap a missing production authority after a loss.
 """
 
 from contextlib import contextmanager
+from dataclasses import dataclass
+from hashlib import sha256
+import hmac
 import os
 from pathlib import Path
 import sqlite3
 import stat
 from uuid import UUID
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from src.core.gdpr.journal_publication import (
     CheckpointPin, _checkpoint_name, _require_cumulative, read_checkpoint, read_segment,
@@ -21,6 +26,17 @@ from src.core.gdpr.restore_policy_state import PolicyStatePin, _authenticate as 
 
 
 _GENESIS = JournalCheckpoint(0, "0" * 64)
+_MAX_AUTHORITY_BYTES = 64 * 1024 * 1024
+_MAX_AUTHORITY_SEALED = 90 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorityRecoveryPin:
+    """Attest the complete current authority, including checkpoint/policy pins."""
+
+    installation_id: UUID
+    tip: JournalCheckpoint
+    sha256: str
 
 
 class IndependentTipStore:
@@ -117,26 +133,98 @@ class IndependentTipStore:
         with self._connection() as conn:
             return self._current(conn)
 
+    def seal_for_recovery(self, wrapping_key):
+        """Capture a consistent portable copy, without a plaintext disk staging file."""
+        copy = sqlite3.connect(":memory:")
+        try:
+            with self._connection() as conn:
+                if conn.execute("PRAGMA page_count").fetchone()[0] * conn.execute(
+                        "PRAGMA page_size").fetchone()[0] > _MAX_AUTHORITY_BYTES:
+                    raise RestoreJournalInvalid("independent_authority_size_limit")
+                conn.backup(copy)
+            tip = self._current(copy)
+            if copy.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                raise RestoreJournalInvalid("independent_authority_invalid")
+            data = copy.serialize()
+            if not 1 <= len(data) <= _MAX_AUTHORITY_BYTES:
+                raise RestoreJournalInvalid("independent_authority_size_limit")
+            pin = AuthorityRecoveryPin(self.installation_id, tip, sha256(data).hexdigest())
+            return pin, Fernet(wrapping_key).encrypt(data)
+        except (ValueError, TypeError, sqlite3.Error):
+            raise RestoreJournalInvalid("independent_authority_snapshot_failed") from None
+        finally:
+            copy.close()
+
+    @classmethod
+    def recover(cls, path, installation_id, independent_pin, sealed, wrapping_key):
+        """Recover only the separately attested latest snapshot, at a new path.
+
+        Carry the current digest through a different trust channel from the
+        ciphertext. An old coherent snapshot with its old pin is not current.
+        """
+        cls._validate_location(path, installation_id)
+        try:
+            if (type(independent_pin) is not AuthorityRecoveryPin
+                    or independent_pin.installation_id != installation_id
+                    or not _checkpoint(independent_pin.tip)
+                    or type(independent_pin.sha256) is not str or len(independent_pin.sha256) != 64
+                    or type(sealed) is not bytes or not 1 <= len(sealed) <= _MAX_AUTHORITY_SEALED):
+                raise ValueError
+            data = Fernet(wrapping_key).decrypt(sealed)
+            if (not 1 <= len(data) <= _MAX_AUTHORITY_BYTES
+                    or not hmac.compare_digest(sha256(data).hexdigest(), independent_pin.sha256)):
+                raise ValueError
+            copy = sqlite3.connect(":memory:")
+            try:
+                copy.deserialize(data)
+                rows = copy.execute("SELECT id,sequence,digest FROM authority").fetchall()
+                if (copy.execute("PRAGMA quick_check").fetchall() != [("ok",)]
+                        or rows != [(str(installation_id), independent_pin.tip.sequence, independent_pin.tip.sha256)]):
+                    raise ValueError
+                cls._chain_after(copy, independent_pin.tip, _GENESIS)
+            finally:
+                copy.close()
+            fd = os.open(path, os.O_EXCL | os.O_CREAT | os.O_WRONLY, 0o600)
+            with os.fdopen(fd, "wb") as output:
+                output.write(data)
+                output.flush()
+                os.fsync(output.fileno())
+            if os.name != "nt":
+                directory = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        except (ValueError, TypeError, InvalidToken, OSError, sqlite3.Error):
+            raise RestoreJournalInvalid("independent_authority_recovery_failed") from None
+        recovered = cls(path, installation_id)
+        if recovered.current() != independent_pin.tip:
+            raise RestoreJournalInvalid("independent_authority_recovery_failed")
+        return recovered
+
+    @staticmethod
+    def _chain_after(conn, current, backup_checkpoint):
+        prev, result, found = _GENESIS, [], backup_checkpoint == _GENESIS
+        for sequence, digest, previous_sequence, previous_digest in conn.execute(
+                "SELECT sequence, digest, previous_sequence, previous_digest FROM segments ORDER BY sequence"):
+            tip = JournalCheckpoint(sequence, digest)
+            if (not _checkpoint(tip) or previous_sequence != prev.sequence
+                    or previous_digest != prev.sha256 or sequence <= prev.sequence):
+                raise RestoreJournalInvalid("independent_authority_invalid")
+            if found:
+                result.append(tip)
+            elif backup_checkpoint == tip:
+                found = True
+            prev = tip
+        if not found or prev != current:
+            raise RestoreJournalInvalid("independent_authority_invalid")
+        return tuple(result)
+
     def chain_after(self, backup_checkpoint):
         """Return the complete index from an exact backup anchor through current."""
         with self._connection() as conn:
             conn.execute("BEGIN")
-            current = self._current(conn)
-            prev, result, found = _GENESIS, [], backup_checkpoint == _GENESIS
-            for sequence, digest, previous_sequence, previous_digest in conn.execute(
-                    "SELECT sequence, digest, previous_sequence, previous_digest FROM segments ORDER BY sequence"):
-                tip = JournalCheckpoint(sequence, digest)
-                if (not _checkpoint(tip) or previous_sequence != prev.sequence
-                        or previous_digest != prev.sha256 or sequence <= prev.sequence):
-                    raise RestoreJournalInvalid("independent_authority_invalid")
-                if found:
-                    result.append(tip)
-                elif backup_checkpoint == tip:
-                    found = True
-                prev = tip
-            if not found or prev != current:
-                raise RestoreJournalInvalid("independent_authority_invalid")
-            return tuple(result)
+            return self._chain_after(conn, self._current(conn), backup_checkpoint)
 
     def advance(self, store, previous_tip, candidate, *, trusted_public_key, encryption_key):
         """Advance only after exact readback, with atomic CAS and uniqueness."""
