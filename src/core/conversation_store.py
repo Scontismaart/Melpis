@@ -1,4 +1,5 @@
 from collections import deque
+from threading import RLock
 import time
 
 
@@ -10,6 +11,7 @@ class ConversationStore:
         self._ttl_seconds = ttl_seconds
         self._max_conversations = max(1, max_conversations)
         self._updated_at: dict[str, float] = {}
+        self._lock = RLock()
         # Contatore tentativi raccolta dati prenotazione per conversazione.
         # Conta solo i giri in cui il cliente NON fornisce nessun dato nuovo
         # dopo una richiesta esplicita dell'assistente. Un dato ambiguo
@@ -28,57 +30,67 @@ class ConversationStore:
 
     def purge_expired(self) -> int:
         """Remove idle histories so private simulator text is not retained indefinitely."""
-        return self._purge_expired(time.monotonic())
+        with self._lock:
+            return self._purge_expired(time.monotonic())
 
     def aggiungi(self, id_conv: str, msg_cliente: str, msg_bot: str) -> None:
-        now = time.monotonic()
-        self._purge_expired(now)
-        if id_conv not in self._store:
-            if len(self._store) >= self._max_conversations:
-                if self._store:
-                    oldest = min(
-                        self._store,
-                        key=lambda key: self._updated_at.get(key, 0.0),
-                    )
-                    self.cancella(oldest)
-            self._store[id_conv] = deque(maxlen=self._max)
-        self._store[id_conv].append((msg_cliente, msg_bot))
-        self._updated_at[id_conv] = now
+        with self._lock:
+            now = time.monotonic()
+            self._purge_expired(now)
+            self._ensure_capacity(id_conv)
+            if id_conv not in self._store:
+                self._store[id_conv] = deque(maxlen=self._max)
+            self._store[id_conv].append((msg_cliente, msg_bot))
+            self._updated_at[id_conv] = now
+
+    def _ensure_capacity(self, id_conv: str) -> None:
+        if id_conv not in self._updated_at and len(self._updated_at) >= self._max_conversations:
+            self.cancella(min(self._updated_at, key=self._updated_at.__getitem__))
 
     def recupera_cronologia(self, id_conv: str) -> list[tuple[str, str]]:
-        now = time.monotonic()
-        self._purge_expired(now)
-        if id_conv in self._store:
-            self._updated_at[id_conv] = now
-        return list(self._store.get(id_conv, []))
+        with self._lock:
+            now = time.monotonic()
+            self._purge_expired(now)
+            if id_conv in self._store:
+                self._updated_at[id_conv] = now
+            return list(self._store.get(id_conv, []))
 
     def cancella(self, id_conv: str) -> None:
-        self._store.pop(id_conv, None)
-        self._updated_at.pop(id_conv, None)
-        self._tentativi_prenotazione.pop(id_conv, None)
+        with self._lock:
+            self._store.pop(id_conv, None)
+            self._updated_at.pop(id_conv, None)
+            self._tentativi_prenotazione.pop(id_conv, None)
 
     def erase_organization(self, organization_id: str) -> int:
         """Remove only this tenant's simulator keys; anonymous demo is separate."""
-        keys = [key for key in self._store if key.startswith(organization_id + ':')]
-        for key in keys:
-            self.cancella(key)
-        return len(keys)
+        with self._lock:
+            keys = [key for key in self._updated_at if key.startswith(organization_id + ':')]
+            for key in keys:
+                self.cancella(key)
+            return len(keys)
 
     def incrementa_tentativi_prenotazione(self, id_conv: str) -> int:
         """Incrementa il contatore di tentativi falliti e restituisce il nuovo valore."""
-        now = time.monotonic()
-        self._purge_expired(now)
-        self._updated_at[id_conv] = now
-        self._tentativi_prenotazione[id_conv] = self._tentativi_prenotazione.get(id_conv, 0) + 1
-        return self._tentativi_prenotazione[id_conv]
+        with self._lock:
+            now = time.monotonic()
+            self._purge_expired(now)
+            self._ensure_capacity(id_conv)
+            self._updated_at[id_conv] = now
+            self._tentativi_prenotazione[id_conv] = self._tentativi_prenotazione.get(id_conv, 0) + 1
+            return self._tentativi_prenotazione[id_conv]
 
     def resetta_tentativi_prenotazione(self, id_conv: str) -> None:
         """Reset del contatore (il cliente ha fornito un dato nuovo o la prenotazione è completata)."""
-        self._tentativi_prenotazione.pop(id_conv, None)
+        with self._lock:
+            self._tentativi_prenotazione.pop(id_conv, None)
+            if id_conv not in self._store:
+                self._updated_at.pop(id_conv, None)
 
     def tentativi_prenotazione(self, id_conv: str) -> int:
         """Restituisce il numero corrente di tentativi falliti."""
-        return self._tentativi_prenotazione.get(id_conv, 0)
+        with self._lock:
+            self._purge_expired(time.monotonic())
+            return self._tentativi_prenotazione.get(id_conv, 0)
 
 
 store = ConversationStore()
