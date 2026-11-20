@@ -21,6 +21,7 @@ _C24_ONLY = {
 }
 _C24_RETENTION_ONLY = {'c24_idle_watermarks', 'c24_source_fences', 'c24_suppression_lifecycle_audit'}
 _STAY_ONLY = {'booking_stays', 'booking_stay_purge_fences', 'booking_stay_tombstones'}
+_RECEIPT_PROJECTIONS = {'document_index_requests', 'booking_catalog_requests', 'booking_allocation_requests'}
 _LEGACY_SIMULATION_QUERY = """
     SELECT request_id, status, created_at, reserved_at, completed_at
     FROM simulation_requests WHERE organization_id = $1::uuid
@@ -138,7 +139,7 @@ class Exporter:
                               encode(datetime.now(timezone.utc).isoformat())).encode())
                 for category in CATEGORIES:
                     relation_missing = (
-                        category.name in (_STAY_ONLY | _C24_RETENTION_ONLY)
+                        category.name in (_STAY_ONLY | _C24_RETENTION_ONLY | _RECEIPT_PROJECTIONS)
                         and not await conn.fetchval(
                             'SELECT to_regclass($1) IS NOT NULL',
                             'public.' + category.name,
@@ -150,6 +151,7 @@ class Exporter:
                         reason = (
                             'stay_schema_relation_absent' if category.name in _STAY_ONLY and relation_missing else
                             'c24_retention_schema_relation_absent' if category.name in _C24_RETENTION_ONLY and relation_missing else
+                            'receipt_schema_relation_absent' if category.name in _RECEIPT_PROJECTIONS and relation_missing else
                             'conversation_schema_' + schema
                             if category.name in (_C24_ONLY | _C24_RETENTION_ONLY) and schema != 'ready'
                             else category.exclusion_reason or 'no_verified_subject_relation'
@@ -157,7 +159,8 @@ class Exporter:
                         item.update(status='excluded', reason=reason)
                         # Credential-only/system data are intentionally non-portable;
                         # an unproved subject relation needs controller review.
-                        partial |= scope != 'organization'
+                        partial |= scope != 'organization' or (
+                            category.name in _RECEIPT_PROJECTIONS and relation_missing)
                         manifest['categories'].append(item)
                         continue
                     name = 'simulator_responses' if category.name == 'simulation_requests' else category.name
@@ -185,6 +188,8 @@ class Exporter:
                         partial = True
                     else:
                         item['status'] = 'included'
+                        if category.exclusion_reason:
+                            item['omitted'] = category.exclusion_reason
                     manifest['categories'].append(item)
                 manifest['status'] = 'partial' if partial else 'complete_for_catalogue'
                 await append((',"manifest":' + encode(manifest) + '}').encode(), flush=True)

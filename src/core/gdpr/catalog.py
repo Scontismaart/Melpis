@@ -19,6 +19,28 @@ class Category:
 
 
 CATEGORIES: tuple[Category, ...] = (
+    Category("document_index_requests", """
+        SELECT request_key,document_id,published_revision,created_at
+        FROM document_index_requests WHERE organization_id=$1::uuid
+    """, exclusion_reason="Index request specifications and digests are excluded; no verified subject link."),
+    Category("booking_catalog_requests", """
+        SELECT request_id,action,applied_revision,created_at
+        FROM booking_catalog_requests WHERE organization_id=$1::uuid
+    """, exclusion_reason="Staff identity and integrity hashes are excluded; no verified subject link."),
+    Category("booking_allocation_requests", """
+        SELECT request_id,booking_id,action,outcome,applied_allocation_revision,catalog_revision,created_at
+        FROM booking_allocation_requests WHERE organization_id=$1::uuid
+    """, exclusion_reason="Actor/source identities and hashes are excluded; historical subject linkage needs review."),
+    Category("gdpr_retention_holds", "", exclusion_reason=
+             "Private legal holds require scoped controller review; no direct application grant."),
+    Category("gdpr_retention_hold_events", "", exclusion_reason=
+             "Private hold decisions require scoped controller review; no direct application grant."),
+    Category("booking_stay_completion_evidence", "", exclusion_reason=
+             "Private stay completion lineage requires scoped controller review; no direct application grant."),
+    Category("worker_capabilities", "", exclusion_reason=
+             "Private worker authorization payload and replay evidence are excluded from automated exports."),
+    Category("worker_context", "", exclusion_reason=
+             "Transaction-bound worker authorization is excluded from automated exports."),
     Category("ordinary_booking_completion_evidence", "", exclusion_reason=
              "Private, subject-linked completion evidence needs controller review; no direct application grant."),
     Category("booking_stay_tombstones", """
