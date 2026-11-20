@@ -59,6 +59,21 @@ class Deletion:
                 blockers.append('operational_cutover_not_authorized')
             if op['scope'] == 'account':
                 blockers.append('shared_account_and_auth_provider_review_required')
+            if op['scope'] in {'contact', 'organization'}:
+                hold_schema = await conn.fetchrow(
+                    """SELECT
+                         to_regclass('public.gdpr_retention_holds') IS NOT NULL AS holds,
+                         to_regclass('public.gdpr_retention_hold_events') IS NOT NULL AS events,
+                         to_regprocedure('public.gdpr_erasure_hold_check(uuid,uuid)') IS NOT NULL AS check_ready"""
+                )
+                if hold_schema['holds'] and hold_schema['events'] and hold_schema['check_ready']:
+                    hold = await conn.fetchval('SELECT public.gdpr_erasure_hold_check($1,$2)', org, oid)
+                    if hold == 'held':
+                        blockers.append('scoped_legal_hold')
+                    elif hold != 'clear':
+                        blockers.append('legal_hold_scope_unverified')
+                elif any(hold_schema.values()):
+                    blockers.append('legal_hold_check_unavailable')
             policies = await conn.fetch(
                 '''SELECT DISTINCT ON(category) category,version,erasure_allowed,legal_hold,approval_reference
                         ,valid_until>NOW() AS valid
