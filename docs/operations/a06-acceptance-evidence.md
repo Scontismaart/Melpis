@@ -36,13 +36,18 @@ The independent journal and restore increments have these integration points:
 | Authenticated v5 candidates and bounded segment read | [#223](https://github.com/Scontismaart/Melpis/pull/223) | `f66fb7b` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44730657164), 18,500-record codec round-trip |
 | EU R2 operator SDK adapter | [#224](https://github.com/Scontismaart/Melpis/pull/224) | `685ecf7` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44730753228), 12 offline SDK checks |
 
-Open candidates cover v5 authority preflight, known orphan proposal identification,
-full source reconciliation and paged backup coverage. Their integration and the
-latest post-merge image checks remain acceptance evidence to collect. See
-[#225](https://github.com/Scontismaart/Melpis/pull/225),
-[#226](https://github.com/Scontismaart/Melpis/pull/226),
-[#227](https://github.com/Scontismaart/Melpis/pull/227), and
-[#228](https://github.com/Scontismaart/Melpis/pull/228).
+PRs #225–#229 passed their PR checks before integration. Each `main` run
+completed validation and published both API and web multi-architecture GHCR
+manifests. These five merges changed no Migration Check trigger paths. Its
+latest applicable run passed migration 109. [Migration Check](https://github.com/Scontismaart/Melpis/actions/runs/44738927995)
+
+| Change | Pull request | `main` integration | Main CI and GHCR |
+| --- | --- | --- | --- |
+| v5 authority preflight | [#225](https://github.com/Scontismaart/Melpis/pull/225) | `72c32ab8` | [Run](https://github.com/Scontismaart/Melpis/actions/runs/44752691895) |
+| Orphan proposal evidence | [#226](https://github.com/Scontismaart/Melpis/pull/226) | `e8072fb9` | [Run](https://github.com/Scontismaart/Melpis/actions/runs/44752869338) |
+| Complete source reconciliation | [#227](https://github.com/Scontismaart/Melpis/pull/227) | `98702807` | [Run](https://github.com/Scontismaart/Melpis/actions/runs/44752969317) |
+| Paged backup coverage and restore | [#228](https://github.com/Scontismaart/Melpis/pull/228) | `aba5e8f0` | [Run](https://github.com/Scontismaart/Melpis/actions/runs/44753147296) |
+| v5 candidate capture and quarantine verification | [#229](https://github.com/Scontismaart/Melpis/pull/229) | `42cdea7c` | [Run](https://github.com/Scontismaart/Melpis/actions/runs/44753184709) |
 
 The optional coherent-snapshot proof in `test_backup_restore_a06.py` passed
 locally on 20 November 2026 using disposable PostgreSQL 16 with pgvector.
@@ -56,6 +61,16 @@ billing count and ledger, and decryptable snapshot. A run without the opt-in
 skipped before database setup, including with an invalid inherited test DSN.
 The signed older-backup replay drills provide the separate evidence for
 operations committed after the backup.
+
+The expanded synthetic PostgreSQL 16 and Valkey run enabled both sets of
+encrypted restore drills and reported 315 passed, zero skipped. The separate
+v5 capacity drill modeled five organizations and 30 daily backups, with 150
+tenant/backup pins and 180 erasures across 30 segments. It measured 2,283,960
+bytes in 630 encrypted store objects and a 213,092-byte sealed independent
+authority. Local promotion took about 3.7 seconds and replacement-authority
+recovery with coverage verification about 1.3 seconds. These figures measure
+the stated synthetic load on a local filesystem. The oldest backup in that
+drill is at genesis. Separate archive tests exercise prefix compaction.
 
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,

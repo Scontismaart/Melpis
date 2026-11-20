@@ -25,6 +25,9 @@ def scan_verified_chain(store, authority, anchor, expected_tip, *, trusted_publi
             or anchor.sequence > expected_tip.sequence or not callable(consume)
             or type(max_segments) is not int or not 1 <= max_segments <= 100):
         raise RestoreJournalInvalid("journal_bounds_invalid")
+    from src.core.gdpr.journal_archive import assert_registered_archive_reader
+
+    assert_registered_archive_reader(authority, store)
     authority.validate_segment_schedule(expected_tip, trusted_public_key, encryption_key, key_epochs)
     epochs = _resolve_key_epochs(key_epochs, trusted_public_key, encryption_key, expected_tip)
     # SQLite's private temporary database is discarded on close. The key stays
@@ -57,6 +60,7 @@ def scan_verified_chain(store, authority, anchor, expected_tip, *, trusted_publi
             entry_count += len(entries)
             previous = page_tip
         authority.validate_segment_schedule(expected_tip, trusted_public_key, encryption_key, key_epochs)
+        assert_registered_archive_reader(authority, store)
         if authority.current() != expected_tip:
             raise RestoreJournalInvalid("independent_authority_conflict")
     except sqlite3.Error:
