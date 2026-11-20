@@ -463,3 +463,84 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
             await restored.execute("UPDATE messages SET wam_id=NULL WHERE organization_id=$1 AND id=$2", org, source)
     finally:
         await restored.close()
+
+
+@pytest.mark.asyncio
+async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from src.core.gdpr.source_checkpoint import capture_committed_checkpoint, purge_inventory_covered_ordinary_bookings
+    from src.core.gdpr.restore_coordinator import replay_primary_published_erasures
+    from tests.core.gdpr.test_ordinary_booking_retention_plan import _candidate
+
+    container, dsn, principal, source_db = restore_target
+    await _verify_restore_target(container)
+    env, booking, request_ids = await _candidate(pg_pool)
+    org = env.org
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED","true")
+    installation = uuid4()
+    objects, pins = tmp_path/"objects", tmp_path/"pins"
+    objects.mkdir(mode=0o700)
+    pins.mkdir(mode=0o700)
+    store=LocalJournalStore(objects)
+    authority=IndependentTipStore.initialize(pins/"authority.sqlite",installation)
+    signer=Ed25519PrivateKey.generate()
+    key,checkpoint_cipher,journal_key=secrets.token_bytes(32),Fernet.generate_key(),Fernet.generate_key()
+    policy_key,policy_cipher=secrets.token_bytes(32),Fernet.generate_key()
+    backup_id="synthetic-ordinary-v4"
+    anchor=authority.current()
+    async with pg_pool.acquire() as conn, conn.transaction(readonly=True):
+        payload=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
+            sequence=1,verification_key=key,encryption_key=checkpoint_cipher,pending_ordinary_bookings=[booking])
+        policy_pin,policy_data=await capture_policy_state(conn,org,installation_id=installation,
+            backup_id=backup_id,sequence=1,verification_key=policy_key,encryption_key=policy_cipher)
+    assert payload["version"]=="c24-restore-v4"
+    assert payload["ordinary_booking_purges"][0]["request_ids"]==sorted(map(str,request_ids))
+    backup_plain=await _docker("exec",container,"pg_dump","-U",principal,"-d",source_db,
+                               "--no-owner","--no-privileges","--format=plain")
+    backup_cipher=Fernet(Fernet.generate_key())
+    encrypted=backup_cipher.encrypt(backup_plain)
+    plain_digest=sha256(backup_plain).digest()
+    del backup_plain
+    inventory=json.dumps(dict(version=1,installation_id=str(installation),backups=[
+        dict(backup_id=backup_id,manifest_sha256=sha256(encrypted).hexdigest(),
+             completed_at=datetime.now(timezone.utc).isoformat(),organizations=[str(org)],
+             anchor=dict(sequence=anchor.sequence,sha256=anchor.sha256),exception=None)])).encode()
+    inventory_digest=sha256(inventory).hexdigest()
+    pin=publish_checkpoint(store,installation,payload,verification_key=key,encryption_key=checkpoint_cipher)
+    authority.advance_checkpoint(store,None,pin,verification_key=key,encryption_key=checkpoint_cipher)
+    authority.publish_policy(store,None,policy_pin,policy_data,verification_key=policy_key,encryption_key=policy_cipher)
+    trust=dict(trusted_public_key=signer.public_key(),journal_encryption_key=journal_key,
+        checkpoint_verification_key=key,checkpoint_encryption_key=checkpoint_cipher,
+        policy_verification_key=policy_key,policy_encryption_key=policy_cipher)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        assert await purge_inventory_covered_ordinary_bookings(conn,authority,store,org,inventory,
+            latest_inventory_sha256=inventory_digest,**trust)==1
+    assert not await pg_pool.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
+    async with pg_pool.acquire() as conn,conn.transaction(readonly=True):
+        committed=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
+            sequence=2,verification_key=key,encryption_key=checkpoint_cipher,prior_pin=pin)
+    assert committed["ordinary_booking_purges"]==payload["ordinary_booking_purges"]
+    restored_db="melpis_c24_restore_dst_"+uuid4().hex[:12]
+    await _docker("exec",container,"createdb","-U",principal,restored_db)
+    await _docker("exec",container,"psql","-U",principal,"-d","postgres","-v","ON_ERROR_STOP=1",
+                  "-c",f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
+    plaintext=backup_cipher.decrypt(encrypted)
+    assert sha256(plaintext).digest()==plain_digest
+    await _docker("exec","-i",container,"psql","-X","-v","ON_ERROR_STOP=1",
+                  "-U",principal,"-d",restored_db,input_bytes=plaintext)
+    del plaintext
+    restored=await asyncpg.create_pool(dsn.rsplit("/",1)[0]+"/"+restored_db,min_size=1,max_size=1)
+    try:
+        assert await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
+        replay_args=dict(backup_checkpoint=anchor,backup_id=backup_id,expected_organizations=[org],
+                         quarantine_database=restored_db,ordinary_inventory_bytes=inventory,
+                         latest_inventory_sha256=inventory_digest,**trust)
+        with pytest.raises(RestoreBlocked):
+            await replay_primary_published_erasures(restored,authority,store,**dict(replay_args,latest_inventory_sha256="0"*64))
+        assert await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
+        for _ in range(2):
+            assert (await replay_primary_published_erasures(restored,authority,store,**replay_args))["traffic_authorized"] is False
+        assert not await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
+        assert await restored.fetchval("SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2",org,booking)==len(request_ids)
+    finally:
+        await restored.close()

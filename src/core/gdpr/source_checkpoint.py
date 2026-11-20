@@ -1,11 +1,12 @@
 """Read-only owner capture of v3 checkpoint evidence from a frozen source."""
 
 from datetime import datetime, timezone
+import os
 from uuid import UUID
 
 from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args, read_checkpoint
 from src.core.gdpr.restore_checkpoint import (
-    RestoreBlocked, _bind_receipt_prune_checkpoint, _parse_receipt_prunes, _receipt_prune_digest,
+    RestoreBlocked, _bind_receipt_prune_checkpoint, _parse_receipt_prunes, _parse_ordinary_purges, _receipt_prune_digest,
 )
 from src.core.gdpr.backup_coverage import _backups, assess_backup_coverage
 
@@ -14,7 +15,8 @@ _LIMIT = 10000
 
 async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *,
                                        sequence, verification_key, encryption_key,
-                                       prior_pin=None, prior_keys=None, pending_requests=()):
+                                       prior_pin=None, prior_keys=None, pending_requests=(),
+                                       pending_ordinary_bookings=()):
     """Capture committed erasures, stay purges and bound receipt tuples.
 
     A prior independently pinned checkpoint is necessary when a receipt tuple
@@ -22,7 +24,10 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
     the same tenant. No historical tuple is reconstructed from a digest.
     Freeze source writes and independent pin advancement through publication.
     """
-    if (type(pending_requests) not in (tuple, list) or len(pending_requests)>_LIMIT
+    if (type(pending_ordinary_bookings) not in (tuple,list) or len(pending_ordinary_bookings)>_LIMIT
+            or any(type(value) is not UUID or not value.int for value in pending_ordinary_bookings)
+            or len(set(pending_ordinary_bookings))!=len(pending_ordinary_bookings)
+            or type(pending_requests) not in (tuple, list) or len(pending_requests)>_LIMIT
             or any(type(value) is not UUID or not value.int for value in pending_requests)
             or len(set(pending_requests))!=len(pending_requests)
             or not isinstance(org, UUID) or not org.int or type(sequence) is not int
@@ -38,6 +43,8 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
     if not await conn.fetchval("SELECT EXISTS(SELECT FROM organizations WHERE id=$1)", org):
         raise RestoreBlocked("Checkpoint organization unavailable")
     previous = []
+    previous_ordinary = []
+    prior_v4 = False
     prior_args = _previous_key_args(prior_pin, prior_keys, verification_key, encryption_key)
     if prior_pin is not None:
         if (type(prior_pin) is not CheckpointPin or prior_pin.organization_id != org
@@ -46,6 +53,8 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         checkpoint = read_checkpoint(store, authority.installation_id, org, prior_pin.backup_id, prior_pin,
                                      **prior_args)
         previous = _parse_receipt_prunes(checkpoint["payload"]["receipt_prunes"])
+        prior_v4 = checkpoint["payload"]["version"] == "c24-restore-v4"
+        previous_ordinary = _parse_ordinary_purges(org, checkpoint["payload"].get("ordinary_booking_purges", []))
     carried = {item[0]: item for item in previous}
     if await conn.fetchval("""SELECT EXISTS (SELECT FROM gdpr_operation_steps s
         WHERE s.organization_id=$1 AND s.name='local' AND s.status='confirmed'
@@ -64,7 +73,9 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
             "SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1", org)):
         raise RestoreBlocked("Committed erasure evidence is incomplete or exceeds v3 capacity")
     fences = await conn.fetch("""SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count
-        FROM booking_stay_purge_fences WHERE organization_id=$1 ORDER BY booking_id LIMIT $2""", org, _LIMIT+1)
+        FROM booking_stay_purge_fences WHERE organization_id=$1
+          AND COALESCE(to_jsonb(booking_stay_purge_fences)->>'purge_kind','stay')='stay'
+        ORDER BY booking_id LIMIT $2""", org, _LIMIT+1)
     if len(fences)>_LIMIT:
         raise RestoreBlocked("Stay purge evidence exceeds v3 capacity")
     stays = []
@@ -88,8 +99,15 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         if stay_bytes>2*1024*1024:
             raise RestoreBlocked("Stay purge evidence exceeds v3 capacity")
         stays.append(item)
-    if receipt_count!=await conn.fetchval("SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1", org):
+    if receipt_count!=await conn.fetchval("""SELECT count(*) FROM booking_stay_tombstones t
+        JOIN booking_stay_purge_fences f ON f.organization_id=t.organization_id AND f.booking_id=t.booking_id
+        WHERE t.organization_id=$1 AND f.organization_id=$1
+        AND COALESCE(to_jsonb(f)->>'purge_kind','stay')='stay'""", org):
         raise RestoreBlocked("Stay purge receipt evidence is incomplete")
+    if await conn.fetchval("""SELECT EXISTS(SELECT FROM booking_stay_tombstones t
+        WHERE t.organization_id=$1 AND NOT EXISTS(SELECT FROM booking_stay_purge_fences f
+          WHERE f.organization_id=$1 AND f.booking_id=t.booking_id))""", org):
+        raise RestoreBlocked("Booking purge receipt lacks a source fence")
     bindings = await conn.fetch("""SELECT b.request_id,b.tuple_sha256,b.checkpoint_sequence,
         f.source_message_id,f.conversation_id,f.subject_id
         FROM c24_receipt_prune_checkpoint_bindings b LEFT JOIN c24_source_fences f
@@ -139,8 +157,40 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
             dict(operation_id=str(row["operation_id"]), scope=row["scope"],
                  subject_id=str(row["subject_id"]) if row["subject_id"] else None) for row in erasures],
         stay_purges=stays, receipt_prunes=prunes)
+    ordinary = []
+    if await conn.fetchval("SELECT to_regclass('public.ordinary_booking_purge_bindings') IS NOT NULL"):
+        rows = await conn.fetch("""SELECT booking_id,plan,checkpoint_sequence FROM ordinary_booking_purge_bindings
+            WHERE organization_id=$1 ORDER BY booking_id LIMIT $2""", org, _LIMIT+1)
+        if len(rows)>_LIMIT or len(rows)!=await conn.fetchval("""SELECT count(*) FROM booking_stay_purge_fences
+            WHERE organization_id=$1 AND purge_kind='ordinary'""",org):
+            raise RestoreBlocked("Ordinary booking purge evidence is incomplete or exceeds checkpoint capacity")
+        from src.core.gdpr.operations import document
+        existing = set()
+        for row in rows:
+            plan = document(row["plan"])
+            if (row["checkpoint_sequence"]>sequence or str(row["booking_id"])!=plan["booking_id"]
+                    or not await conn.fetchval("SELECT public.ordinary_verify_booking_retention_purge($1,$2,$3::jsonb)",
+                                                org,row["booking_id"],_canonical(plan).decode())):
+                raise RestoreBlocked("Ordinary booking committed evidence is incomplete")
+            ordinary.append(plan)
+            existing.add(row["booking_id"])
+        for booking in sorted(set(pending_ordinary_bookings)-existing):
+            raw = await conn.fetchval("SELECT public.ordinary_completed_booking_retention_plan($1,$2)",org,booking)
+            if raw is None:
+                raise RestoreBlocked("Ordinary booking lacks verified retention eligibility")
+            ordinary.append(document(raw))
+    elif pending_ordinary_bookings or prior_v4:
+        raise RestoreBlocked("Ordinary booking purge schema unavailable")
+    if ordinary or prior_v4:
+        try:
+            _parse_ordinary_purges(org,ordinary)
+        except (ValueError, TypeError, KeyError):
+            raise RestoreBlocked("Invalid ordinary booking checkpoint evidence") from None
+        if not {_canonical(plan) for plan in previous_ordinary}<={_canonical(plan) for plan in ordinary}:
+            raise RestoreBlocked("Prior ordinary booking purge evidence is incomplete")
+        payload.update(version="c24-restore-v4",ordinary_booking_purges=ordinary)
     if len(_canonical(payload))>2*1024*1024:
-        raise RestoreBlocked("Checkpoint exceeds v3 capacity")
+        raise RestoreBlocked("Checkpoint exceeds format capacity")
     if prior_pin is not None and authority.checkpoint_pin(org, prior_pin.backup_id) != prior_pin:
         raise RestoreBlocked("Prior independent checkpoint changed during capture")
     return payload
@@ -208,3 +258,74 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
                 for backup, value in pins.items())):
             raise RestoreBlocked("Independent recovery evidence changed during binding")
     return result
+
+
+async def purge_inventory_covered_ordinary_bookings(
+    conn, authority, store, org, inventory_bytes, *, latest_inventory_sha256, **trust,
+):
+    """Owner-only maintenance operation for independently covered SQL109 plans.
+
+    The operator must freeze source/authority/inventory maintenance and obtain
+    the separate operational authorization before connecting to a live source.
+    SQL109 rechecks the exact eligible preimage and policy on each mutation.
+    """
+    if os.getenv("GDPR_RETENTION_EXECUTION_ENABLED")!="true":
+        raise RestoreBlocked("Ordinary retention is not operationally enabled")
+    if (type(org) is not UUID or not org.int or not conn.is_in_transaction()
+            or await conn.fetchval("SHOW transaction_isolation") != "read committed"
+            or not await conn.fetchval("""SELECT current_setting('transaction_read_only')='off'
+                AND EXISTS(SELECT FROM pg_class WHERE oid=to_regclass('public.ordinary_booking_purge_bindings')
+                AND relowner=current_user::regrole)""")):
+        raise RestoreBlocked("Ordinary purge requires a read committed owner transaction")
+    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR NO KEY UPDATE",org)
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))", str(org))
+    audit_at=trust.get("audit_at") or datetime.now(timezone.utc)
+    trust=dict(trust,audit_at=audit_at)
+    tip=authority.current()
+    assess_backup_coverage(authority,store,inventory_bytes,latest_inventory_sha256=latest_inventory_sha256,**trust)
+    backups=list(_backups(inventory_bytes,latest_inventory_sha256,authority.installation_id,audit_at))
+    if authority.current()!=tip:
+        raise RestoreBlocked("Independent recovery evidence changed during coverage check")
+    expected=None
+    pins={}
+    selected=None
+    for backup,orgs,_,_ in backups:
+        if org not in orgs:
+            continue
+        pin=authority.checkpoint_pin(org,backup)
+        policy=authority.policy_pin(org,backup)
+        checkpoint=read_checkpoint(store,authority.installation_id,org,backup,pin,
+            verification_key=trust["checkpoint_verification_key"],encryption_key=trust["checkpoint_encryption_key"])
+        if checkpoint["payload"]["version"]!="c24-restore-v4":
+            raise RestoreBlocked("Every relevant backup requires v4 ordinary purge coverage")
+        plans=checkpoint["payload"]["ordinary_booking_purges"]
+        canonical={_canonical(plan) for plan in plans}
+        if expected is not None and expected!=canonical:
+            raise RestoreBlocked("Ordinary purge evidence differs across recoverable backups")
+        expected=canonical
+        policy_data,_=authority.read_policy(store,policy,verification_key=trust["policy_verification_key"],
+                                           encryption_key=trust["policy_encryption_key"])
+        from src.core.gdpr.restore_policy_state import verify_policy_state
+        await verify_policy_state(conn,org,policy_data,installation_id=authority.installation_id,
+            backup_id=backup,independent_pin=policy,verification_key=trust["policy_verification_key"],
+            encryption_key=trust["policy_encryption_key"])
+        pins[backup]=(pin,policy)
+        if selected is None or pin.sequence<selected[0].sequence:
+            selected=(pin,plans)
+    if selected is None:
+        raise RestoreBlocked("No independently covered backup for ordinary purge")
+    pin,plans=selected
+    async with conn.transaction():
+        for plan in plans:
+            booking=UUID(plan["booking_id"])
+            args=(org,booking,_canonical(plan).decode(),pin.sha256,pin.sequence,latest_inventory_sha256)
+            if not await conn.fetchval("SELECT public.ordinary_bind_booking_retention_checkpoint($1,$2,$3::jsonb,$4,$5,$6)",*args):
+                raise RestoreBlocked("Ordinary booking binding rejected current evidence")
+            if not await conn.fetchval("SELECT public.ordinary_admin_purge_booking($1,$2,$3::jsonb,$4,$5,$6)",*args):
+                raise RestoreBlocked("Ordinary booking purge rejected current evidence")
+        assess_backup_coverage(authority,store,inventory_bytes,latest_inventory_sha256=latest_inventory_sha256,**trust)
+        if authority.current()!=tip or any(
+                (authority.checkpoint_pin(org,backup),authority.policy_pin(org,backup))!=pair
+                for backup,pair in pins.items()):
+            raise RestoreBlocked("Independent recovery evidence changed during purge")
+    return len(plans)
