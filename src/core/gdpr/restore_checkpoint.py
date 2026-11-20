@@ -261,6 +261,12 @@ async def _bind_receipt_prune_checkpoint(conn, organization_id, checkpoint, *,
         organization_id, checkpoint, verification_key=verification_key, backup_id=backup_id,
         minimum_sequence=minimum_sequence, checkpoint_sha256=checkpoint_sha256,
     )
+    return await _bind_verified_receipt_prunes(conn, org, prunes, sequence=sequence,
+                                              checkpoint_sha256=checkpoint_sha256)
+
+
+async def _bind_verified_receipt_prunes(conn, org, prunes, *, sequence, checkpoint_sha256):
+    """Apply tuples decoded from the exact authenticated checkpoint by the caller."""
     if prunes is None or not conn.is_in_transaction() or await conn.fetchval('SHOW transaction_isolation') != 'read committed':
         raise RestoreBlocked('Current receipt checkpoint requires a read committed transaction')
     await conn.execute('SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))', str(org))
@@ -309,7 +315,7 @@ async def verify_restore_journal_replay(conn, organization_id, payload, signatur
 
 
 async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None, purges=None,
-                                  receipt_prunes=None, ordinary_purges=None):
+                                  receipt_prunes=None, ordinary_purges=None, require_committed=False):
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
     if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
@@ -360,6 +366,13 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
               AND subject_id IS NOT DISTINCT FROM $4::uuid)''', org, operation, scope, subject)
         if not present:
             raise RestoreBlocked('Newer erasure journal has not been replayed')
+        if require_committed and not await conn.fetchval('''SELECT EXISTS(SELECT FROM gdpr_operations o
+            JOIN gdpr_operation_steps s ON s.organization_id=o.organization_id AND s.operation_id=o.id
+            WHERE o.organization_id=$1 AND s.organization_id=$1 AND o.id=$2 AND o.kind='erase'
+              AND o.scope=$3 AND o.subject_id IS NOT DISTINCT FROM $4::uuid
+              AND o.status IN ('partial','completed') AND s.name='local' AND s.status='confirmed')''',
+            org, operation, scope, subject):
+            raise RestoreBlocked('Replayed erasure has no confirmed local operation')
         if fingerprints is not None:
             digest, key_id = fingerprints[operation]
             reconciled = await conn.fetchval('''SELECT EXISTS(

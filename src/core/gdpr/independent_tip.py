@@ -8,6 +8,7 @@ Never bootstrap a missing production authority after a loss.
 from contextlib import contextmanager
 import base64
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 import hmac
 import os
@@ -24,7 +25,7 @@ from src.core.gdpr.journal_publication import (
     _resolve_key_epochs, read_checkpoint, read_segment,
 )
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
-from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint
+from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _hex
 from src.core.gdpr.restore_policy_state import PolicyStatePin, _authenticate as authenticate_policy_state
 
 
@@ -394,6 +395,103 @@ class IndependentTipStore:
             if self._current(conn) != tip or self._checkpoint(conn, org, backup) != current:
                 raise RestoreBlocked("Independent recovery authority changed during candidate verification")
         return PreparedCheckpoint(self.installation_id, tip, current, candidate)
+
+    @staticmethod
+    def _paged_inventory(conn):
+        # Older portable authorities do not yet have the promotion registry.
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='paged_checkpoint_inventories'").fetchone() is None:
+            return None
+        row = conn.execute("SELECT digest FROM paged_checkpoint_inventories ORDER BY generation DESC LIMIT 1").fetchone()
+        if row is None or not _hex(row[0], 64):
+            raise RestoreBlocked("Paged recovery inventory authority is incomplete")
+        return row[0]
+
+    def assert_paged_inventory(self, latest_inventory_sha256, *, required=True):
+        """Check the exact active digest, allowing legacy use only before first promotion."""
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            self._current(conn)
+            current = self._paged_inventory(conn)
+            if current is None and required is False:
+                return False
+            if not _hex(latest_inventory_sha256, 64):
+                raise RestoreBlocked("Independently pinned paged recovery inventory required")
+            if current != latest_inventory_sha256:
+                raise RestoreBlocked("Paged recovery inventory is not current")
+            return True
+
+    def promote_paged_checkpoints(self, store, inventory_bytes, *, latest_inventory_sha256,
+                                  candidates, previous_inventory_sha256=None, audit_at=None, **trust):
+        """Promote all inventoried v5 pins in one independent authority transaction.
+
+        Only an authorized recovery operator with independently attested current
+        inventory and exclusive custody can run this operation. Freeze source,
+        backup inventory, and evidence publication for the complete maintenance
+        window. A successful promotion authorizes neither traffic nor deletion.
+        An inventory replacement requires the current prior digest and a new
+        digest that has never been active before.
+        """
+        from src.core.gdpr.backup_coverage import _backups, assess_paged_backup_candidates
+        from src.core.gdpr.checkpoint_pages import verify_checkpoint_candidate
+
+        if type(candidates) is not dict:
+            raise RestoreBlocked("Exact paged candidate inventory required")
+        candidates = dict(candidates)
+        audit_at = datetime.now(timezone.utc) if audit_at is None else audit_at
+
+        def authority_state(conn, scopes):
+            tip = self._current(conn)
+            epochs = tuple(conn.execute("""SELECT sequence,digest,signing_key_sha,encryption_key_sha
+                FROM segment_key_epochs ORDER BY sequence LIMIT 1001"""))
+            pins = {scope: (self._checkpoint(conn, *scope), self._policy_pin(conn, *scope)) for scope in scopes}
+            return tip, epochs, pins, self._paged_inventory(conn)
+
+        try:
+            backups = list(_backups(inventory_bytes, latest_inventory_sha256, self.installation_id, audit_at))
+            scopes = sorted((org, backup) for backup, organizations, _, _ in backups for org in organizations)
+            if candidates.keys() != set(scopes):
+                raise RestoreBlocked("Paged checkpoint candidates must cover the exact backup inventory")
+            for scope, candidate in candidates.items():
+                _checkpoint_name(self.installation_id, candidate)
+                if (candidate.organization_id, candidate.backup_id) != scope:
+                    raise RestoreBlocked("Paged checkpoint candidate scope mismatch")
+            with self._connection() as conn:
+                conn.execute("BEGIN")
+                expected = authority_state(conn, scopes)
+            _, _, pins, inventory = expected
+            if (inventory != latest_inventory_sha256 and previous_inventory_sha256 != inventory
+                    or inventory == latest_inventory_sha256 and previous_inventory_sha256 not in (None, inventory)):
+                raise RestoreBlocked("Independent paged inventory CAS conflict")
+            assess_paged_backup_candidates(self, store, inventory_bytes, latest_inventory_sha256=latest_inventory_sha256,
+                                           candidates=candidates, audit_at=audit_at, **trust)
+            keys = dict(verification_key=trust["checkpoint_verification_key"],
+                        encryption_key=trust["checkpoint_encryption_key"])
+            with self._connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if authority_state(conn, scopes) != expected:
+                    raise RestoreBlocked("Independent recovery evidence changed during promotion")
+                # Re-read every exact candidate and cumulative predecessor
+                # under the write lock. A prepared result is no authorization.
+                for scope in scopes:
+                    payload = verify_checkpoint_candidate(store, self.installation_id, pins[scope][0],
+                                                          candidates[scope], **keys)
+                    if payload["version"] != "c24-restore-v5":
+                        raise RestoreBlocked("Paged checkpoint candidate required")
+                if inventory != latest_inventory_sha256:
+                    conn.execute("""CREATE TABLE IF NOT EXISTS paged_checkpoint_inventories (
+                        generation INTEGER PRIMARY KEY, digest TEXT NOT NULL UNIQUE)""")
+                    conn.execute("INSERT INTO paged_checkpoint_inventories (digest) VALUES (?)",
+                                 (latest_inventory_sha256,))
+                conn.executemany("UPDATE checkpoints SET sequence=?, digest=? WHERE org=? AND backup=?", [
+                    (candidates[scope].sequence, candidates[scope].sha256, str(scope[0]), scope[1])
+                    for scope in scopes
+                ])
+                if any(self._checkpoint(conn, *scope) != candidates[scope] for scope in scopes):
+                    raise RestoreBlocked("Independent checkpoint batch could not be committed")
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError, RestoreJournalInvalid):
+            raise RestoreBlocked("Independent paged checkpoint promotion failed") from None
+        return {"promoted_checkpoints": len(candidates), "authority_advanced": True,
+                "traffic_authorized": False, "deletion_authorized": False}
 
     def advance_checkpoint(self, store, previous_pin, candidate, *, verification_key, encryption_key,
                            previous_keys=None):
