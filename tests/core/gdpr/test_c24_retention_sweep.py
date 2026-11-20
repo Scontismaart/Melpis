@@ -142,7 +142,17 @@ async def test_scheduler_drains_beta_backlog_with_continued_arrivals_and_hold(pg
     assert 0 < remaining[0] < 180
     assert remaining == sorted(remaining, reverse=True)
     assert remaining[3:] == [0, 0, 0]
-    assert await pg_pool.fetchval(remaining_sql, eligible, "due-%") <= 20
+    # New arrivals behind an already advanced UUID cursor can require the
+    # next scan horizon. Verify bounded catch-up, independently of their
+    # random UUID ordering, including continued fresh arrivals.
+    assert await pg_pool.fetchval(remaining_sql, eligible, "due-%") <= 60
+    for round_number in range(7, 10):
+        for organization in eligible:
+            await seed(organization, f"fresh-{round_number}-", 5, 1)
+        await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=25)
+        assert await pg_pool.fetchval(remaining_sql, [held], "held-%") == 25
+        assert await pg_pool.fetchval(remaining_sql, eligible, "fresh-%") == round_number * 20
+    assert await pg_pool.fetchval(remaining_sql, eligible, "due-%") == 0
     assert await pg_pool.fetchval("""
         SELECT count(*) FROM meta_webhook_inbox
         WHERE organization_id=ANY($1::uuid[]) AND event_key LIKE 'initial-%'
