@@ -128,6 +128,11 @@ This primitive does not certify a pre-anchor prefix, change any current
 restore caller, or establish an authorized recovery floor. The earliest
 recoverable backup anchor and complete historical operation commitments must
 be independently attested before compaction can advance a floor.
+The paged source reconciliation can authenticate the full journal from genesis
+and compare every published erasure with the frozen source. It returns the
+oldest unpublished entries for one segment and an exact remaining count. Its
+temporary source index stores keyed digests and sequence numbers. The existing
+backup-coverage and restore entry points retain their legacy bounds.
 If evidence or its current authority cannot be recovered, keep traffic closed
 and obtain the controller's disposition. No deletion rule may rely on a
 guessed backup age or an older unverified tip.
