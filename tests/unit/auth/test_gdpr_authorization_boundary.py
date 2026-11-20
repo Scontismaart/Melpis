@@ -469,6 +469,44 @@ async def test_revoked_session_cannot_download_and_token_remains(client, gdpr_ap
     assert await token_store.read_token(token) is not None
 
 
+@pytest.mark.parametrize("change,expected_status", [
+    ("membership_revoked", 403),
+    ("owner_demoted", 403),
+    ("account_disabled", 403),
+    ("session_revoked", 401),
+    ("mfa_changed", 403),
+])
+async def test_download_rechecks_authority_after_snapshot_preflight(
+    client, gdpr_app, monkeypatch, change, expected_status,
+):
+    app, _, verify = gdpr_app
+    token = await _issue_export(client)
+    client.cookies.set(token_store.DOWNLOAD_COOKIE, token, path="/api/gdpr/download")
+
+    async def authority_changes_during_preflight(*_args):
+        if change == "membership_revoked":
+            app.state.repo.get_memberships_by_auth.return_value = []
+        elif change == "owner_demoted":
+            app.state.repo.get_memberships_by_auth.return_value[0]["ruolo"] = "manager"
+        elif change == "account_disabled":
+            app.state.repo.get_auth_access_allowed.return_value = False
+        elif change == "session_revoked":
+            dependencies.is_token_revoked.return_value = True
+        else:
+            verify.return_value["aal"] = "aal1"
+
+    class RevocationDuringPreflight(FakeExporter):
+        def __init__(self, pool):
+            super().__init__(pool)
+            self.preflight.side_effect = authority_changes_during_preflight
+
+    monkeypatch.setattr(routes, "Exporter", RevocationDuringPreflight)
+    response = await client.get("/api/gdpr/download", headers=_auth_headers())
+    assert response.status_code == expected_status
+    assert await token_store.read_token(token) is not None
+    assert "tenant-owned" not in response.text
+
+
 async def test_download_fails_closed_on_membership_store_failure_and_keeps_token(client, gdpr_app):
     app, _, _ = gdpr_app
     token = await _issue_export(client)
