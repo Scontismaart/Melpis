@@ -144,6 +144,76 @@ async def test_export_snapshot_expiry_cleans_at_most_one_hundred_chunks(pg_pool,
         assert await conn.fetchval("SELECT count(*) FROM gdpr_operations WHERE organization_id=$1 AND status='ready'", org) == 1
 
 
+async def seed_snapshot_chunks(pool, org, count, *, expiry_seconds=-120):
+    ids = [uuid.uuid4() for _ in range(count)]
+    ciphertext = b"synthetic-encrypted-chunk"
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """INSERT INTO gdpr_operations(id,organization_id,requester,request_id,request_hash,
+                   kind,scope,status,manifest,expires_at)
+               VALUES($1,$2,'retention-qa',$3,$4,'export','organization','ready','{}',
+                      NOW()+make_interval(secs=>$5::double precision))""",
+            [(oid, org, uuid.uuid4(), hashlib.sha256(oid.bytes).hexdigest(), expiry_seconds) for oid in ids],
+        )
+        await conn.executemany(
+            """INSERT INTO gdpr_export_chunks(organization_id,operation_id,sequence,ciphertext,digest)
+               VALUES($1,$2,0,$3,$4)""",
+            [(org, oid, ciphertext, hashlib.sha256(ciphertext).hexdigest()) for oid in ids],
+        )
+    return ids
+
+
+@pytest.mark.asyncio
+async def test_dedicated_snapshot_expiry_drains_backlog_past_busy_snapshot(pg_pool, sample_org, other_org):
+    org, other = sample_org["id"], other_org["id"]
+    busy, = await seed_snapshot_chunks(pg_pool, org, 1, expiry_seconds=-300)
+    await seed_snapshot_chunks(pg_pool, org, 100)
+    await seed_snapshot_chunks(pg_pool, other, 4)
+    live, = await seed_snapshot_chunks(pg_pool, other, 1, expiry_seconds=900)
+
+    async with pg_pool.acquire() as locked, locked.transaction():
+        await locked.fetchval(
+            "SELECT id FROM gdpr_operations WHERE organization_id=$1 AND id=$2 FOR UPDATE", org, busy,
+        )
+        outcome = await retention_job.expire_export_snapshots(pg_pool)
+        assert outcome["exports_expired"] == 104
+        assert outcome["oldest_overdue_seconds"] >= 300
+        async with pg_pool.acquire() as conn:
+            remaining = await conn.fetch("SELECT operation_id FROM gdpr_export_chunks")
+            assert {row["operation_id"] for row in remaining} == {busy, live}
+
+    outcome = await retention_job.expire_export_snapshots(pg_pool)
+    assert outcome == {"exports_expired": 1, "oldest_overdue_seconds": None}
+    assert await retention_job.expire_export_snapshots(pg_pool) == {
+        "exports_expired": 0, "oldest_overdue_seconds": None,
+    }
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval("SELECT operation_id FROM gdpr_export_chunks") == live
+        assert await conn.fetchval(
+            "SELECT count(*) FROM gdpr_operation_events WHERE event_type='export.expired'"
+        ) == 105
+
+
+@pytest.mark.asyncio
+async def test_snapshot_expiry_survives_unrelated_capability_scrub_failure(pg_pool, sample_org, monkeypatch):
+    org = sample_org["id"]
+    expired, = await seed_snapshot_chunks(pg_pool, org, 1)
+
+    async def failed_scrub(_pool):
+        raise RuntimeError("synthetic capability scrub failure")
+
+    monkeypatch.setattr(retention_job, "_scrub_expired_worker_capability_payloads", failed_scrub)
+    with pytest.raises(RuntimeError, match="synthetic capability"):
+        await run_retention(pg_pool)
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT status FROM gdpr_operations WHERE organization_id=$1 AND id=$2", org, expired,
+        ) == "expired"
+        assert await conn.fetchval(
+            "SELECT count(*) FROM gdpr_export_chunks WHERE organization_id=$1 AND operation_id=$2", org, expired,
+        ) == 0
+
+
 async def insert_message_policy(pool, org, *, version, days=1, hold=False, valid=True,
                                 approved_offset="0 seconds"):
     valid_until = "NOW()+INTERVAL '1 day'" if valid else "NOW()-INTERVAL '1 second'"

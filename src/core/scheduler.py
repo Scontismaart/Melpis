@@ -126,6 +126,28 @@ async def _retention_job(pool):
     await run_retention(pool)
 
 
+def _run_export_expiry():
+    try:
+        asyncio.run(_con_pool_esimero(_export_expiry_job))
+    except Exception as exc:
+        logger.error("scheduler=gdpr_export_expiry_failed error_type=%s", type(exc).__name__)
+        raise RuntimeError("GDPR export expiry failed") from None
+
+
+async def _export_expiry_job(pool):
+    from src.core.retention_job import expire_export_snapshots
+
+    try:
+        outcome = await expire_export_snapshots(pool)
+    except Exception as exc:
+        logger.error("scheduler=gdpr_export_expiry_failed error_type=%s", type(exc).__name__)
+        raise RuntimeError("GDPR export expiry failed") from None
+    age = outcome["oldest_overdue_seconds"]
+    log = logger.warning if age is not None and age >= 60 else logger.info
+    log("scheduler=gdpr_export_expiry expired=%d oldest_overdue_seconds=%s",
+        outcome["exports_expired"], age)
+
+
 def _run_c24_retention_sweep():
     """Run C2.4 retention only with its isolated, explicitly enabled identity."""
     if (os.getenv("GDPR_RETENTION_EXECUTION_ENABLED") != "true"
@@ -150,7 +172,10 @@ async def _run_c24_retention_sweep_async(dsn):
     pool = None
     try:
         pool = await asyncpg.create_pool(
-            dsn=dsn, min_size=1, max_size=1, command_timeout=_JOB_COMMAND_TIMEOUT,
+            # The distributed lock holds its own pool connection while the
+            # retention controller borrows another. A single slot deadlocks.
+            dsn=dsn, min_size=_JOB_POOL_MIN, max_size=_JOB_POOL_MAX,
+            command_timeout=_JOB_COMMAND_TIMEOUT,
         )
         from src.core.jobs.base import execute_with_advisory_lock
 
@@ -398,6 +423,17 @@ def avvia_scheduler():
         name="Data retention — soft-delete e purge",
         replace_existing=True,
     )
+    # Export artifacts expire after 15 minutes independently of primary-data
+    # flags, private worker-capability cleanup and the daily retention job.
+    _scheduler.add_job(
+        _run_export_expiry,
+        IntervalTrigger(minutes=1),
+        id="gdpr_export_expiry",
+        name="Expiry of encrypted GDPR export artifacts",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
     if c24_retention_enabled:
         # Never fall back to the application's database identity.
         _scheduler.add_job(
@@ -487,7 +523,7 @@ def avvia_scheduler():
     )
     _purge_local_simulator_history()
     _scheduler.start()
-    logger.info("[scheduler] Avviato — report 20:00, retention 03:00, reminders every 30min, no-show 23:30, calendar sync every 60min, nonce cleanup 04:00, suspension notice 08:00, report settimanale lun 08:30.")
+    logger.info("[scheduler] Avviato — report 20:00, retention 03:00, GDPR export expiry every minute, reminders every 30min, no-show 23:30, calendar sync every 60min, nonce cleanup 04:00, suspension notice 08:00, report settimanale lun 08:30.")
 
 
 def ferma_scheduler():

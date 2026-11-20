@@ -160,17 +160,30 @@ async def run_c24_retention_sweep(pool):
     """
     if not _enabled() or os.getenv("GDPR_C24_AUTO_RETENTION_ENABLED") != "true":
         return {"enabled": False, "batch_clear": False}
-    async with pool.acquire() as conn, conn.transaction(isolation="read_committed"):
-        await _assume_operator(conn)
-        zero = UUID(int=0)
-        clear = await conn.fetchval(
-            "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
-            "sweep", zero, zero,
-        )
-        hotel_clear = await conn.fetchval(
-            "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
-            "hotel_sweep", zero, zero,
-        )
+    async def run_batch(kind):
+        async with pool.acquire() as conn, conn.transaction(isolation="read_committed"):
+            await _assume_operator(conn)
+            zero = UUID(int=0)
+            return await conn.fetchval(
+                "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
+                kind, zero, zero,
+            )
+
+    # Independent cursors also need independent commits. A transient failure
+    # in either sweep must not erase or starve the other's progress. Still
+    # signal the failure to the caller; never report a clear batch on error.
+    ordinary_failure = None
+    try:
+        clear = await run_batch("sweep")
+    except (asyncpg.LockNotAvailableError, asyncpg.DeadlockDetectedError,
+            asyncpg.QueryCanceledError, TimeoutError) as exc:
+        ordinary_failure = exc
+        clear = False
+    # Authorization and other non-transient failures above stop the run;
+    # this transaction independently rechecks operator authority.
+    hotel_clear = await run_batch("hotel_sweep")
+    if ordinary_failure is not None:
+        raise ordinary_failure
     return {"enabled": True, "batch_clear": clear is True and hotel_clear is True}
 
 

@@ -1,6 +1,8 @@
 """Bounded automated retention on a disposable PostgreSQL database."""
 import asyncio
+import os
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -23,6 +25,9 @@ async def retention_operator(pg_pool, postgres_container, monkeypatch):
         await admin.execute(f'GRANT melpis_c24_retention TO {role}')
     dsn=postgres_container.get_connection_url().replace('+psycopg2','')
     operator=await asyncpg.create_pool(dsn=dsn,user=role,password=password,min_size=1,max_size=1)
+    parsed = urlsplit(dsn)
+    monkeypatch.setenv('GDPR_C24_OWNER_RETENTION_DSN', urlunsplit(parsed._replace(
+        netloc=f'{role}:{password}@{parsed.netloc.rsplit("@", 1)[-1]}')))
     for key in ('GDPR_RETENTION_EXECUTION_ENABLED','GDPR_C24_OWNER_RETENTION_ENABLED',
                 'GDPR_C24_AUTO_RETENTION_ENABLED'):
         monkeypatch.setenv(key,'true')
@@ -59,6 +64,59 @@ async def shorten_sweep_deadline(pool, function_name):
     definition = await pool.fetchval('SELECT pg_get_functiondef($1::text::regprocedure)', function_name)
     assert definition.count("interval '12 seconds'") == 1
     await pool.execute(definition.replace("interval '12 seconds'", "interval '2 seconds'"))
+
+
+async def test_scheduler_uses_dedicated_connection_and_distributed_lock(pg_pool, retention_operator):
+    from src.core.jobs.base import compute_advisory_lock_id
+    from src.core.scheduler import _run_c24_retention_sweep_async
+
+    org = (await _organization(pg_pool))['id']
+    await approve_messages(pg_pool, org)
+    inbox = await completed_inbox(pg_pool, org)
+    dsn = os.environ['GDPR_C24_OWNER_RETENTION_DSN']
+    lock_id = compute_advisory_lock_id('c24_retention_sweep')
+    async with retention_operator.acquire() as blocker:
+        await blocker.execute('SELECT pg_advisory_lock($1)', lock_id)
+        try:
+            await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
+            assert await pg_pool.fetchval('SELECT c24_payload_purged_at IS NULL FROM meta_webhook_inbox WHERE id=$1', inbox)
+        finally:
+            await blocker.execute('SELECT pg_advisory_unlock($1)', lock_id)
+
+    # The actual scheduler must make progress while holding its separate
+    # advisory-lock connection; a pool that cannot lend a second one hangs.
+    await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL AND payload='{}'::jsonb FROM meta_webhook_inbox WHERE id=$1", inbox)
+    await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
+
+
+@pytest.mark.parametrize('failed_scan', ['retention', 'hotel_erasure'])
+async def test_independent_sweeps_preserve_other_cursor_on_timeout(pg_pool, retention_operator, failed_scan):
+    from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
+
+    org = (await _organization(pg_pool))['id']
+    await approve_messages(pg_pool, org)
+    inbox = await completed_inbox(pg_pool, org)
+    env, _, booking = await _complete_with_old_evidence(pg_pool)
+    await pg_pool.execute(f"""CREATE FUNCTION test_sweep_cursor_timeout() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'synthetic cursor timeout' USING ERRCODE='57014'; END $$;
+        CREATE TRIGGER test_sweep_cursor_timeout BEFORE UPDATE ON c24_retention_sweep_cursor
+        FOR EACH ROW WHEN (OLD.scan_name='{failed_scan}') EXECUTE FUNCTION test_sweep_cursor_timeout();""")
+
+    # A transient failure must remain visible, but cannot roll back or prevent
+    # the other independent policy category's successful transaction.
+    with pytest.raises(asyncpg.QueryCanceledError, match='synthetic cursor timeout'):
+        await run_c24_retention_sweep(retention_operator)
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", inbox) == (failed_scan != 'retention')
+    assert await pg_pool.fetchval("SELECT state='cancelled' FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2", env.org, booking) == (failed_scan != 'hotel_erasure')
+    assert await pg_pool.fetchval("SELECT phase=0 FROM c24_retention_sweep_cursor WHERE scan_name=$1", failed_scan)
+    other_scan = 'hotel_erasure' if failed_scan == 'retention' else 'retention'
+    assert await pg_pool.fetchval("SELECT phase=1 FROM c24_retention_sweep_cursor WHERE scan_name=$1", other_scan)
+
+    await pg_pool.execute('DROP TRIGGER test_sweep_cursor_timeout ON c24_retention_sweep_cursor')
+    await run_c24_retention_sweep(retention_operator)
+    assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL FROM meta_webhook_inbox WHERE id=$1", inbox)
+    assert await pg_pool.fetchval("SELECT NOT EXISTS (SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2 AND state='active')", env.org, booking)
 
 
 async def test_automatic_sweep_expires_state_without_consuming_receipt_or_usage(state_env, retention_operator):
