@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import asyncpg
 
-from src.core.gdpr.operations import Operations, RequestConflict
+from src.core.gdpr.operations import OperationUnavailable, Operations, RequestConflict
 
 
 async def make_operation(pool, org_id, requester="owner-a", request_id=None):
@@ -16,6 +16,20 @@ async def make_operation(pool, org_id, requester="owner-a", request_id=None):
         org_id, requester, request_id, kind="erase", scope="organization",
     )
     return oid, request_id
+
+
+async def authorize_stage(pool, org, oid, provider="provider.crm"):
+    """Model the already committed local erasure and its inventoried provider."""
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "UPDATE gdpr_operations SET status='partial' WHERE organization_id=$1 AND id=$2",
+            org, oid,
+        )
+        await conn.execute(
+            """INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status)
+               VALUES($1,$2,'local','confirmed'),($1,$2,$3,'pending')""",
+            org, oid, provider,
+        )
 
 
 @pytest.mark.asyncio
@@ -54,6 +68,7 @@ async def test_get_is_bound_to_organization_and_requester(pg_pool, sample_org, o
 async def test_provider_claim_has_one_concurrent_winner(pg_pool, sample_org):
     oid, _ = await make_operation(pg_pool, sample_org["id"])
     ops = Operations(pg_pool)
+    await authorize_stage(pg_pool, sample_org["id"], oid)
     claims = await asyncio.gather(*(
         ops.claim_provider(sample_org["id"], oid, "provider.crm")
         for _ in range(20)
@@ -61,8 +76,44 @@ async def test_provider_claim_has_one_concurrent_winner(pg_pool, sample_org):
 
     assert sum(claim is not None for claim in claims) == 1
     state = await ops.get(sample_org["id"], oid, "owner-a")
-    assert state["steps"][0]["status"] == "running"
-    assert state["steps"][0]["attempts"] == 1
+    step = next(s for s in state["steps"] if s["name"] == "provider.crm")
+    assert step["status"] == "running"
+    assert step["attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_claim_requires_preexisting_inventory_stage(pg_pool, sample_org):
+    org = sample_org["id"]
+    oid, _ = await make_operation(pg_pool, org)
+    await authorize_stage(pg_pool, org, oid)
+    assert await Operations(pg_pool).claim_provider(org, oid, "provider.other") is None
+    state = await Operations(pg_pool).get(org, oid, "owner-a")
+    assert {step["name"] for step in state["steps"]} == {"local", "provider.crm"}
+
+
+@pytest.mark.asyncio
+async def test_provider_claim_requires_confirmed_local_stage(pg_pool, sample_org):
+    org = sample_org["id"]
+    oid, _ = await make_operation(pg_pool, org)
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE gdpr_operations SET status='partial'
+               WHERE organization_id=$1 AND id=$2""", org, oid,
+        )
+        await conn.execute(
+            """INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status)
+               VALUES($1,$2,'provider.crm','pending')""", org, oid,
+        )
+    with pytest.raises(OperationUnavailable):
+        await Operations(pg_pool).claim_provider(org, oid, "provider.crm")
+
+
+@pytest.mark.asyncio
+async def test_inventory_review_is_not_a_dispatchable_stage(pg_pool, sample_org):
+    org = sample_org["id"]
+    oid, _ = await make_operation(pg_pool, org)
+    await authorize_stage(pg_pool, org, oid, provider="provider.inventory_review")
+    assert await Operations(pg_pool).claim_provider(org, oid, "provider.inventory_review") is None
 
 
 @pytest.mark.asyncio
@@ -71,6 +122,7 @@ async def test_expired_claim_is_fenced_uncertain_and_verified_reconciliation_per
 ):
     org = sample_org["id"]
     oid, _ = await make_operation(pg_pool, org)
+    await authorize_stage(pg_pool, org, oid)
     ops = Operations(pg_pool)
     fence = await ops.claim_provider(org, oid, "provider.crm")
     assert fence is not None
@@ -84,8 +136,9 @@ async def test_expired_claim_is_fenced_uncertain_and_verified_reconciliation_per
     assert await ops.claim_provider(org, oid, "provider.crm") is None
 
     uncertain = await Operations(pg_pool).get(org, oid, "owner-a")
-    assert uncertain["steps"][0]["status"] == "uncertain"
-    assert uncertain["steps"][0]["fence"] == fence + 1
+    step = next(s for s in uncertain["steps"] if s["name"] == "provider.crm")
+    assert step["status"] == "uncertain"
+    assert step["fence"] == fence + 1
     with pytest.raises(RequestConflict):
         await ops.provider_result(org, oid, "provider.crm", fence, receipt={
             "http_status": 200,
@@ -103,14 +156,16 @@ async def test_expired_claim_is_fenced_uncertain_and_verified_reconciliation_per
     await ops.reconcile_provider(org, oid, "provider.crm", receipt=receipt)
 
     persisted = await Operations(pg_pool).get(org, oid, "owner-a")
-    assert persisted["steps"][0]["status"] == "confirmed"
-    assert persisted["steps"][0]["fence"] == fence + 2
+    step = next(s for s in persisted["steps"] if s["name"] == "provider.crm")
+    assert step["status"] == "confirmed"
+    assert step["fence"] == fence + 2
 
 
 @pytest.mark.asyncio
 async def test_bare_provider_success_is_not_deletion_confirmation(pg_pool, sample_org):
     org = sample_org["id"]
     oid, _ = await make_operation(pg_pool, org)
+    await authorize_stage(pg_pool, org, oid)
     ops = Operations(pg_pool)
     fence = await ops.claim_provider(org, oid, "provider.crm")
 

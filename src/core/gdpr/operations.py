@@ -112,21 +112,46 @@ class Operations:
         result['steps'] = [dict(s) for s in steps]
         return result
 
+    @staticmethod
+    def _dispatchable_provider(name):
+        if not re.fullmatch(r'provider\.[a-z][a-z0-9_.-]{0,65}', name):
+            raise ValueError('Invalid provider stage')
+        # Inventory review is a controller approval gate, not an adapter stage.
+        return name != 'provider.inventory_review'
+
+    @staticmethod
+    async def _lock_provider_operation(conn, org, oid):
+        # Local erasure and provider transitions use the same operation lock.
+        # Check local authorization while that lock remains held, never in an
+        # earlier transaction that could authorize a different lifecycle state.
+        op = await conn.fetchrow(
+            '''SELECT kind,status FROM gdpr_operations
+               WHERE organization_id=$1 AND id=$2 FOR UPDATE''', org, oid,
+        )
+        if not op or op['kind'] != 'erase' or op['status'] != 'partial':
+            raise OperationUnavailable('Local erasure and durable authorization required')
+        if not await conn.fetchval(
+            '''SELECT EXISTS (SELECT 1 FROM gdpr_operation_steps
+               WHERE organization_id=$1 AND operation_id=$2
+                 AND name='local' AND status='confirmed')''', org, oid,
+        ):
+            raise OperationUnavailable('Local erasure and durable authorization required')
+
     async def claim_provider(self, org, operation_id, name):
         """Reserve before HTTP. Expired workers become uncertain, never unsent."""
         org, oid = UUID(str(org)), UUID(str(operation_id))
-        if not re.fullmatch(r'provider\.[a-z][a-z0-9_.-]{0,65}', name):
-            raise ValueError('Invalid provider stage')
+        if not self._dispatchable_provider(name):
+            return None
         async with self.pool.acquire() as conn, conn.transaction():
-            await conn.fetchrow('SELECT id FROM gdpr_operations WHERE organization_id=$1 AND id=$2 FOR UPDATE', org, oid)
-            await conn.execute(
-                '''INSERT INTO gdpr_operation_steps(organization_id,operation_id,name)
-                   VALUES($1,$2,$3) ON CONFLICT DO NOTHING''', org, oid, name,
-            )
+            await self._lock_provider_operation(conn, org, oid)
             row = await conn.fetchrow(
                 '''SELECT status,fence,lease_until,lease_until>NOW() AS live FROM gdpr_operation_steps
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 FOR UPDATE''', org, oid, name,
             )
+            # Only the inventory captured during authorized local erasure can
+            # establish a provider step. Dispatch never creates a new one.
+            if row is None:
+                return None
             if row['status'] == 'running':
                 if not row['live']:
                     await conn.execute(
@@ -152,6 +177,9 @@ class Operations:
         status = 'confirmed' if valid else 'pending' if not_sent else 'uncertain'
         evidence = {'digest': receipt['evidence_digest']} if valid else {}
         async with self.pool.acquire() as conn, conn.transaction():
+            if not self._dispatchable_provider(name):
+                raise OperationUnavailable('Provider stage is not dispatchable')
+            await self._lock_provider_operation(conn, org, oid)
             result = await conn.execute(
                 '''UPDATE gdpr_operation_steps SET status=$5,evidence=$6::jsonb,lease_until=NULL,updated_at=NOW()
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 AND fence=$4
@@ -163,6 +191,19 @@ class Operations:
             await refresh_provider_coverage(conn, org, oid)
         return status
 
+    async def provider_reconcilable(self, org, operation_id, name):
+        """Check authorization before consulting an external receipt endpoint."""
+        org, oid = UUID(str(org)), UUID(str(operation_id))
+        if not self._dispatchable_provider(name):
+            return False
+        async with self.pool.acquire() as conn, conn.transaction():
+            await self._lock_provider_operation(conn, org, oid)
+            return await conn.fetchval(
+                '''SELECT EXISTS (SELECT 1 FROM gdpr_operation_steps
+                   WHERE organization_id=$1 AND operation_id=$2 AND name=$3
+                     AND status='uncertain')''', org, oid, name,
+            )
+
     async def reconcile_provider(self, org, operation_id, name, *, receipt):
         """Offline, trusted reconciliation: never called from a user route.
 
@@ -173,6 +214,9 @@ class Operations:
         if not verified_receipt(receipt, org, oid, name):
             raise ValueError('Verified provider receipt required')
         async with self.pool.acquire() as conn, conn.transaction():
+            if not self._dispatchable_provider(name):
+                raise OperationUnavailable('Provider stage is not dispatchable')
+            await self._lock_provider_operation(conn, org, oid)
             result = await conn.execute(
                 '''UPDATE gdpr_operation_steps SET status='confirmed',fence=fence+1,evidence=$4::jsonb,
                        lease_until=NULL,updated_at=NOW()
