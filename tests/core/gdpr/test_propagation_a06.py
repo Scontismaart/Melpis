@@ -146,6 +146,11 @@ async def make_partial_operation(pool, org, requester="provider-qa"):
                VALUES($1,$2,'local','confirmed',1)""",
             org, oid,
         )
+        await conn.execute(
+            """INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status)
+               VALUES($1,$2,'provider.synthetic','pending')""",
+            org, oid,
+        )
     return oid
 
 
@@ -163,6 +168,20 @@ async def test_provider_cutover_disabled_makes_no_http_request(pg_pool, sample_o
             pg_pool, sample_org["id"], oid, "provider.synthetic", LocalSyntheticAdapter(url),
         )
     assert state.deletes == 0
+
+
+@pytest.mark.asyncio
+async def test_receipt_lookup_requires_uncertain_stage(pg_pool, sample_org, local_provider, monkeypatch):
+    """An unused, pending stage must not consult the external provider."""
+    state, url = local_provider
+    org = sample_org["id"]
+    oid = await make_partial_operation(pg_pool, org)
+    monkeypatch.setenv("GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED", "true")
+    with pytest.raises(OperationUnavailable):
+        await propagation.reconcile_operation(
+            pg_pool, org, oid, "provider.synthetic", LocalSyntheticAdapter(url),
+        )
+    assert state.lookups == 0
 
 
 @pytest.mark.asyncio

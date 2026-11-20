@@ -38,15 +38,6 @@ async def propagate_operation(pool, organization_id, operation_id, provider, ada
     if getattr(adapter, 'provider', None) != provider or getattr(adapter, 'idempotent_delete', False) is not True:
         raise OperationUnavailable('Verified, idempotent provider adapter required')
     org, oid = UUID(str(organization_id)), UUID(str(operation_id))
-    async with pool.acquire() as conn:
-        authorized = await conn.fetchval(
-            '''SELECT EXISTS(SELECT 1 FROM gdpr_operations o JOIN gdpr_operation_steps s
-                 ON s.operation_id=o.id AND s.organization_id=$1
-               WHERE o.organization_id=$1 AND o.id=$2 AND o.kind='erase' AND o.status='partial'
-                 AND s.name='local' AND s.status='confirmed')''', org, oid,
-        )
-    if not authorized:
-        raise OperationUnavailable('Local erasure and durable authorization required')
     ops = Operations(pool)
     fence = await ops.claim_provider(org, oid, provider)
     if fence is None:
@@ -68,5 +59,9 @@ async def reconcile_operation(pool, organization_id, operation_id, provider, ada
         raise OperationUnavailable('Provider verification requires separate authorization')
     if getattr(adapter, 'provider', None) != provider:
         raise OperationUnavailable('Provider adapter mismatch')
-    receipt = await adapter.lookup_deletion(UUID(str(organization_id)), UUID(str(operation_id)))
-    await Operations(pool).reconcile_provider(organization_id, operation_id, provider, receipt=receipt)
+    org, oid = UUID(str(organization_id)), UUID(str(operation_id))
+    ops = Operations(pool)
+    if not await ops.provider_reconcilable(org, oid, provider):
+        raise OperationUnavailable('Provider stage is not reconcilable')
+    receipt = await adapter.lookup_deletion(org, oid)
+    await ops.reconcile_provider(org, oid, provider, receipt=receipt)
