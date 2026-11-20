@@ -23,7 +23,7 @@ RUN node ./web/scripts/compose-dashboard.mjs --output /tmp/dashboard.html && \
     node ./web/scripts/compose-dashboard-css.mjs --output /tmp/style.css && \
     cmp --silent /tmp/style.css ./web/style.css
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.31-alpine AS runtime
 
 # â”€â”€ Landing e pagine pubbliche multilingua (root del docroot) â”€
 COPY landing/index.html landing/style.css landing/app.js landing/navbar.js /usr/share/nginx/html/
