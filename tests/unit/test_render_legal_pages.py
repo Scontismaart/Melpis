@@ -40,6 +40,8 @@ def test_renderer_writes_only_rendered_public_legal_pages(tmp_path):
         content = path.read_text(encoding="utf-8")
         assert "{{LEGAL_" not in content
         assert "postgresql://secret" not in content
+        if not any("cookie" in part for part in path.relative_to(output_dir).parts):
+            assert "2026-09-21" in content
     privacy = (output_dir / "privacy.html").read_text(encoding="utf-8")
     assert "Melpis &amp; Partners &quot;S.r.l.&quot;" in privacy
     assert "Via &quot;Roma&quot; 1" in privacy

@@ -202,7 +202,7 @@
 
 <main class="legal-main container-narrow">
     <h1>Privacy Policy</h1>
-    <p class="legal-updated">Ultimo aggiornamento: settembre 2026</p>
+    <p class="legal-updated">Ultimo aggiornamento: {{LEGAL_DOCUMENT_EFFECTIVE_DATE}}</p>
     <section>
         <h2>1. Titolare e ruoli</h2>
         <p>{{LEGAL_ENTITY_NAME}} — sede: {{LEGAL_ENTITY_REGISTERED_OFFICE}}, P.IVA: {{LEGAL_ENTITY_VAT_NUMBER}}, contatto privacy: <strong>{{LEGAL_PRIVACY_CONTACT_EMAIL}}</strong>.</p><p>Per i dati degli account e del sito Melpis opera come titolare. Per i messaggi e gli altri dati dei clienti finali caricati dall'attività, quest'ultima determina finalità e istruzioni del trattamento; il relativo accordo sul trattamento deve essere definito prima dell'uso operativo.</p>
@@ -217,11 +217,12 @@
     </section>
     <section>
         <h2>4. Destinatari e trasferimenti</h2>
-        <p>In base alle funzioni effettivamente attivate, i dati possono essere trattati da fornitori di infrastruttura e database, Supabase per l'autenticazione, Meta per WhatsApp/Instagram, Google per accesso o integrazioni e dal provider AI configurato (Groq o OpenRouter). I contenuti necessari alla risposta possono essere inviati al provider AI scelto. Luogo del trattamento, eventuali trasferimenti fuori SEE e garanzie contrattuali vanno verificati per la configurazione attiva prima del lancio. Nessun particolare fornitore di hosting futuro è qui dichiarato come già operativo.</p>
+        <p>In base alle funzioni attivate, le categorie di destinatari comprendono fornitori di infrastruttura, autenticazione e database, servizi di messaggistica, integrazioni, posta elettronica, fatturazione e generazione AI. Quando la generazione AI è abilitata, il fornitore selezionato e gli eventuali fornitori che eseguono il modello possono ricevere i contenuti necessari a preparare una risposta, inclusi messaggi ed estratti dei documenti pertinenti. Per informazioni sui destinatari, sulle località del trattamento e sulle garanzie per eventuali trasferimenti fuori dallo SEE, scrivere a <strong>{{LEGAL_PRIVACY_CONTACT_EMAIL}}</strong>.</p>
     </section>
     <section>
         <h2>5. Conservazione e cancellazione</h2>
-        <p>I dati sono conservati per il tempo necessario alle finalità descritte e secondo le impostazioni operative e gli obblighi applicabili. Una richiesta di chiusura, esportazione o cancellazione va inviata a <strong>{{LEGAL_PRIVACY_CONTACT_EMAIL}}</strong>; sarà valutata tenendo conto di copie di backup, log, dati presso terzi e obblighi di conservazione. Non è attualmente garantita una cancellazione completa entro un termine fisso, né una funzione autonoma di esportazione o cancellazione dalla dashboard.</p>
+        <p>La policy V1 prevede la consultazione ordinaria del contenuto dei messaggi per un massimo di 60 giorni e la rimozione dal database primario entro 90 giorni. Prevede inoltre un massimo di 30 giorni dall’ultima attività pertinente per lo stato conversazionale strutturato, 90 giorni dalla conclusione della richiesta per le ricevute tecniche e 12 mesi di calendario dalla conclusione per l’archivio operativo di prenotazioni e soggiorni. Questi limiti di policy richiedono verifica operativa prima della beta. Obblighi specifici di conservazione, backup e copie presso terzi sono valutati separatamente.</p>
+        <p>Per chiedere accesso, esportazione, chiusura o cancellazione, scrivere a <strong>{{LEGAL_PRIVACY_CONTACT_EMAIL}}</strong>. I titolari delle organizzazioni possono usare i flussi di esportazione e richiesta di cancellazione ove abilitati. Una richiesta di cancellazione può rimanere parziale o in attesa quando occorrono verifiche su copie esterne, backup o obblighi di conservazione.</p>
     </section>
     <section>
         <h2>6. Diritti</h2>
