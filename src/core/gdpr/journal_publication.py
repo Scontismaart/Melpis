@@ -356,9 +356,11 @@ def _require_cumulative(previous, previous_pin, current, pin):
     if pin.sequence < previous_pin.sequence or (
             pin.sequence == previous_pin.sequence and pin != previous_pin):
         raise RestoreBlocked("Checkpoint sequence cannot regress")
-    for field in ("erasures", "stay_purges", "receipt_prunes"):
-        if not {_canonical(item) for item in previous[field]} <= {
-                _canonical(item) for item in current[field]}:
+    if previous["version"] == "c24-restore-v4" and current["version"] != "c24-restore-v4":
+        raise RestoreBlocked("Checkpoint version cannot regress")
+    for field in ("erasures", "stay_purges", "receipt_prunes", "ordinary_booking_purges"):
+        if not {_canonical(item) for item in previous.get(field, [])} <= {
+                _canonical(item) for item in current.get(field, [])}:
             raise RestoreBlocked("Checkpoint omits prior evidence")
 
 
@@ -366,7 +368,7 @@ def publish_checkpoint(store, installation_id, payload, *, verification_key, enc
                        previous_pin=None, previous_keys=None):
     """Authenticate a complete v3 checkpoint from operator-reconciled evidence."""
     try:
-        if payload["version"] != "c24-restore-v3":
+        if payload["version"] not in ("c24-restore-v3","c24-restore-v4"):
             raise ValueError
         cipher = _checkpoint_keys(verification_key, encryption_key)
         raw = _canonical(payload)
@@ -410,7 +412,7 @@ def read_checkpoint(store, installation_id, organization_id, backup_id, pin, *,
         if type(sealed) is not bytes or not 1 <= len(sealed) <= _MAX_OBJECT:
             raise ValueError
         checkpoint = json.loads(cipher.decrypt(sealed), object_pairs_hook=_unique_object)
-        _, _, sequence, _, prunes = _authenticate_checkpoint(
+        _, _, sequence, _, prunes, _ = _authenticate_checkpoint(
             organization_id, checkpoint, verification_key=verification_key, backup_id=backup_id,
             minimum_sequence=pin.sequence, checkpoint_sha256=pin.sha256)
         if sequence != pin.sequence or prunes is None:

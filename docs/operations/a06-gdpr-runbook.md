@@ -247,17 +247,23 @@ completion time, allocation revision and ordered request IDs. It always carries
 relationships and known ID references. Free text and unverified historical
 copies still need reconciliation, and the result is a point-in-time observation.
 
-An ordinary booking purge requires an independently authenticated journal
-entry with distinct ordinary-booking scope, coverage for all recoverable
-backups, and an authenticated restore replay path. The source transaction must
-revalidate the current policy, holds, immutable completion and receipt scope,
-all provider and financial dependencies, and the locked allocation preimage.
-It must establish booking-ID and request-ID fences before any release of claims,
-receipt deletion, removal of completion evidence, or booking deletion. The
-ordinary evidence FK restricts booking deletion until that lifecycle exists.
-Keep financial counters, audit and provider evidence intact unless a separately
-approved lifecycle establishes disposition. SQL108 grants no application or
-scheduler access and performs no purge.
+The candidate SQL109 owner lifecycle consumes an exact independently
+authenticated v4 ordinary-booking plan in one read committed transaction.
+The separate operator workflow verifies coverage of all recoverable backups,
+current policy pins and checkpoint readback before calling the SQL binding
+and purge. Source writers and backup and authority administration must remain
+frozen throughout this window. SQL109 revalidates current policy, holds,
+immutable completion and receipt scope, known provider and financial
+dependencies, and the locked allocation preimage. It establishes typed
+booking-ID and request-ID fences before releasing claims, completion evidence
+and the booking. Receipt deletion follows the protected parent cascade.
+An unconsumed or mismatching binding cannot commit. The durable plan and
+fences remain for replay and recovery with their own lifecycle obligation.
+Accounting, unrelated audit and provider evidence are preserved. The narrow
+path does not certify unknown free text, historical dependency attribution, or
+payment or provider-linked bookings. No application or scheduler role is
+granted execution, and actual owner credentials, independent custody,
+operational verification and authorization are still required.
 
 ### Proposed legacy-message provenance review (read-only)
 

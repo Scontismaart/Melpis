@@ -8,6 +8,8 @@ This verifier only covers primary C2.4 copies, not external providers or backups
 import hashlib
 import hmac
 import json
+import re
+from datetime import datetime
 import os
 from pathlib import Path
 from uuid import UUID
@@ -32,12 +34,13 @@ async def verify_restore_checkpoint(conn, organization_id, checkpoint, *, verifi
     No journal, wrong signature, missing tombstone, or restored content fails
     closed. A successful result is evidence for C2.4 only, never a global GO.
     """
-    org, entries, sequence, purges, receipt_prunes = _authenticate_checkpoint(
+    org, entries, sequence, purges, receipt_prunes, ordinary_purges = _authenticate_checkpoint(
         organization_id, checkpoint, verification_key=verification_key,
         backup_id=backup_id, minimum_sequence=minimum_sequence, checkpoint_sha256=checkpoint_sha256,
     )
     return await _verify_replayed_erasures(
         conn, org, entries, sequence, purges=purges, receipt_prunes=receipt_prunes,
+        ordinary_purges=ordinary_purges,
     )
 
 
@@ -55,11 +58,13 @@ def _authenticate_checkpoint(organization_id, checkpoint, *, verification_key, b
             raise ValueError
         expected = {'version', 'organization_id', 'backup_id', 'sequence', 'complete', 'erasures'}
         version = payload.get('version')
-        if version in {'c24-restore-v2', 'c24-restore-v3'}:
+        if version in {'c24-restore-v2', 'c24-restore-v3', 'c24-restore-v4'}:
             expected.add('stay_purges')
-        if version == 'c24-restore-v3':
+        if version in {'c24-restore-v3', 'c24-restore-v4'}:
             expected.add('receipt_prunes')
-        if (set(payload) != expected or version not in {'c24-restore-v1', 'c24-restore-v2', 'c24-restore-v3'}
+        if version == 'c24-restore-v4':
+            expected.add('ordinary_booking_purges')
+        if (set(payload) != expected or version not in {'c24-restore-v1', 'c24-restore-v2', 'c24-restore-v3', 'c24-restore-v4'}
                 or payload['complete'] is not True
                 or payload['organization_id'] != str(org) or payload['backup_id'] != backup_id
                 or type(payload['sequence']) is not int or payload['sequence'] < minimum_sequence
@@ -70,7 +75,7 @@ def _authenticate_checkpoint(organization_id, checkpoint, *, verification_key, b
         if len(raw) > 2 * 1024 * 1024 or not hmac.compare_digest(
                 signature, hmac.new(verification_key, raw, hashlib.sha256).hexdigest()):
             raise ValueError
-        if version == 'c24-restore-v3' and (not isinstance(checkpoint_sha256, str)
+        if version in {'c24-restore-v3','c24-restore-v4'} and (not isinstance(checkpoint_sha256, str)
                 or not hmac.compare_digest(checkpoint_sha256, hashlib.sha256(raw).hexdigest())):
             raise ValueError
         entries, seen = [], set()
@@ -111,10 +116,46 @@ def _authenticate_checkpoint(organization_id, checkpoint, *, verification_key, b
         receipt_prunes = None
         if 'receipt_prunes' in expected:
             receipt_prunes = _parse_receipt_prunes(payload['receipt_prunes'])
+        ordinary_purges = None
+        if 'ordinary_booking_purges' in expected:
+            ordinary_purges = _parse_ordinary_purges(org, payload['ordinary_booking_purges'])
+            if ({str(p[0]) for p in purges} & {item["booking_id"] for item in ordinary_purges}
+                    or {str(request) for purge in purges for request in purge[5]}
+                    & {request for item in ordinary_purges for request in item["request_ids"]}):
+                raise ValueError
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
         raise RestoreBlocked('Authenticated external restore checkpoint required') from None
 
-    return org, entries, payload['sequence'], purges, receipt_prunes
+    return org, entries, payload['sequence'], purges, receipt_prunes, ordinary_purges
+
+
+def _parse_ordinary_purges(org, plans):
+    from src.core.gdpr.restore_journal import _uuid
+
+    fields = {"kind", "organization_id", "booking_id", "subject_id", "policy_version",
+              "completed_at", "timezone", "allocation_revision", "request_ids", "deletion_authorized"}
+    if type(plans) is not list or len(plans)>10000:
+        raise ValueError
+    bookings, all_requests = set(), set()
+    for plan in plans:
+        if (type(plan) is not dict or set(plan)!=fields or plan["kind"]!="ordinary_managed_booking_candidate_v1"
+                or _uuid(plan["organization_id"])!=org or plan["deletion_authorized"] is not False
+                or type(plan["allocation_revision"]) is not int or not 1<=plan["allocation_revision"]<2**63
+                or type(plan["policy_version"]) is not str or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}",plan["policy_version"])
+                or type(plan["timezone"]) is not str or not re.fullmatch(r"[A-Za-z0-9_+./-]{1,100}",plan["timezone"])
+                or type(plan["completed_at"]) is not str or not re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z",plan["completed_at"])
+                or type(plan["request_ids"]) is not list or not 1<=len(plan["request_ids"])<=1000):
+            raise ValueError
+        datetime.fromisoformat(plan["completed_at"].replace("Z","+00:00"))
+        booking = _uuid(plan["booking_id"])
+        _uuid(plan["subject_id"])
+        requests = [_uuid(value) for value in plan["request_ids"]]
+        if booking in bookings or requests!=sorted(set(requests)) or all_requests.intersection(requests):
+            raise ValueError
+        bookings.add(booking)
+        all_requests.update(requests)
+    return plans
 
 
 def _parse_receipt_prunes(items):
@@ -157,7 +198,7 @@ def retain_receipt_prune_checkpoint(path, organization_id, checkpoint, *, encryp
     The caller owns the trusted directory, key and independent anchor. Existing
     artifacts are never overwritten. The database is untouched.
     """
-    _, _, _, _, prunes = _authenticate_checkpoint(
+    _, _, _, _, prunes, _ = _authenticate_checkpoint(
         organization_id, checkpoint, verification_key=verification_key, backup_id=backup_id,
         minimum_sequence=minimum_sequence, checkpoint_sha256=checkpoint_sha256,
     )
@@ -216,7 +257,7 @@ async def _bind_receipt_prune_checkpoint(conn, organization_id, checkpoint, *,
     recovery store. The caller must durably retain the checkpoint first. This
     function only records owner-scoped commitments and never deletes content.
     """
-    org, _, sequence, _, prunes = _authenticate_checkpoint(
+    org, _, sequence, _, prunes, _ = _authenticate_checkpoint(
         organization_id, checkpoint, verification_key=verification_key, backup_id=backup_id,
         minimum_sequence=minimum_sequence, checkpoint_sha256=checkpoint_sha256,
     )
@@ -245,9 +286,9 @@ async def verify_restore_journal_replay(conn, organization_id, payload, signatur
         verified = verify_erasure_segment(payload, signature, **trust)
     except RestoreJournalInvalid:
         raise RestoreBlocked('Authenticated external restore journal required') from None
-    purges, receipt_prunes = None, None
+    purges, receipt_prunes, ordinary_purges = None, None, None
     if stay_checkpoint is not None:
-        _, checkpoint_entries, checkpoint_sequence, purges, receipt_prunes = _authenticate_checkpoint(
+        _, checkpoint_entries, checkpoint_sequence, purges, receipt_prunes, ordinary_purges = _authenticate_checkpoint(
             org, stay_checkpoint, verification_key=checkpoint_verification_key,
             backup_id=backup_id, minimum_sequence=minimum_sequence, checkpoint_sha256=checkpoint_sha256,
         )
@@ -255,6 +296,7 @@ async def verify_restore_journal_replay(conn, organization_id, payload, signatur
             raise RestoreBlocked('Authenticated stay purge journal required')
         await _verify_replayed_erasures(
             conn, org, checkpoint_entries, checkpoint_sequence, purges=purges, receipt_prunes=receipt_prunes,
+            ordinary_purges=ordinary_purges,
         )
     scoped = tuple(entry for entry in verified if entry.organization_id == org)
     return await _verify_replayed_erasures(
@@ -262,11 +304,12 @@ async def verify_restore_journal_replay(conn, organization_id, payload, signatur
         trust['independent_tip'].sequence,
         fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped},
         purges=purges, receipt_prunes=receipt_prunes,
+        ordinary_purges=ordinary_purges,
     )
 
 
 async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprints=None, purges=None,
-                                  receipt_prunes=None):
+                                  receipt_prunes=None, ordinary_purges=None):
     if not conn.is_in_transaction():
         raise RestoreBlocked('Restore verification requires a quarantined transaction')
     if await conn.fetchval('SHOW transaction_isolation') != 'read committed':
@@ -278,12 +321,20 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
     if stay_schema:
         if purges is None:
             raise RestoreBlocked('Authenticated stay purge journal required')
-        actual = await conn.fetch('''SELECT booking_id,original_subject_id,purpose,operation_id,policy_version
+        actual = await conn.fetch('''SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,
+            COALESCE(to_jsonb(booking_stay_purge_fences)->>'purge_kind','stay') AS purge_kind
             FROM booking_stay_purge_fences WHERE organization_id=$1''', org)
         expected_fences = {(b,s,p,o,v) for b,s,p,o,v,_ in purges}
-        if {(r['booking_id'],r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) for r in actual} != expected_fences:
+        expected_ordinary = {(UUID(plan["booking_id"]), UUID(plan["subject_id"]), "retention", None, plan["policy_version"])
+                             for plan in (ordinary_purges or [])}
+        def fence_tuple(row):
+            return tuple(row[field] for field in ('booking_id','original_subject_id','purpose','operation_id','policy_version'))
+        if ({fence_tuple(row) for row in actual if row["purge_kind"]=="stay"} != expected_fences
+                or {fence_tuple(row) for row in actual if row["purge_kind"]=="ordinary"} != expected_ordinary
+                or any(row["purge_kind"] not in ("stay","ordinary") for row in actual)):
             raise RestoreBlocked('Stay purge fences do not match authenticated journal')
-        if await conn.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1', org) != sum(len(p[5]) for p in purges):
+        if await conn.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1', org) != (
+                sum(len(p[5]) for p in purges)+sum(len(plan["request_ids"]) for plan in (ordinary_purges or []))):
             raise RestoreBlocked('Stay purge tombstones do not match authenticated journal')
         for booking, subject, purpose, operation, version, requests in purges:
             rows = await conn.fetch('''SELECT request_id,original_subject_id,purpose,operation_id,policy_version
@@ -301,6 +352,7 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
                 raise RestoreBlocked('Stay purge copies do not match authenticated journal')
     elif purges:
         raise RestoreBlocked('Stay purge schema required by authenticated journal')
+    await _verify_ordinary_purges(conn, org, ordinary_purges)
     await _verify_replayed_receipt_prunes(conn, org, receipt_prunes)
     for operation, scope, subject in entries:
         present = await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM gdpr_erasure_barriers
@@ -361,6 +413,40 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
     return {'organization_id': str(org), 'sequence': sequence,
             'verified_erasures': len(entries), 'scope': 'primary_c24_only',
             'traffic_authorized': False, 'external_copies_certified': False}
+
+
+async def _verify_ordinary_purges(conn, org, plans):
+    relation = await conn.fetchval("SELECT to_regclass('public.ordinary_booking_purge_bindings') IS NOT NULL")
+    if not relation:
+        if plans:
+            raise RestoreBlocked("Ordinary booking purge schema unavailable")
+        return
+    rows = await conn.fetch("""SELECT booking_id,plan FROM ordinary_booking_purge_bindings
+        WHERE organization_id=$1""", org)
+    actual = {row["booking_id"]: json.loads(row["plan"]) if isinstance(row["plan"], str)
+              else row["plan"] for row in rows}
+    expected = {UUID(plan["booking_id"]): plan for plan in (plans or [])}
+    if actual != expected:
+        raise RestoreBlocked("Ordinary booking purge commitments do not match authenticated journal")
+    for booking, plan in expected.items():
+        if not await conn.fetchval("SELECT public.ordinary_verify_booking_retention_purge($1,$2,$3::jsonb)",
+                                   org, booking, json.dumps(plan, sort_keys=True)):
+            raise RestoreBlocked("Ordinary booking purge postconditions do not match authenticated journal")
+        tombstones = await conn.fetch("""SELECT request_id,original_subject_id,purpose,operation_id,policy_version
+            FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2""", org, booking)
+        if ({str(row["request_id"]) for row in tombstones} != set(plan["request_ids"])
+                or any(str(row["original_subject_id"])!=plan["subject_id"]
+                       or row["purpose"]!="retention" or row["operation_id"] is not None
+                       or row["policy_version"]!=plan["policy_version"] for row in tombstones)):
+            raise RestoreBlocked("Ordinary booking request fences do not match authenticated journal")
+        if await conn.fetchval("""SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)
+            OR EXISTS(SELECT FROM ordinary_booking_completion_evidence WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2)
+            OR EXISTS(SELECT FROM external_booking_sync WHERE organization_id=$1 AND internal_booking_id=$2)""", org, booking):
+            raise RestoreBlocked("Ordinary booking purge copies remain")
 
 
 async def _verify_replayed_receipt_prunes(conn, org, prunes):

@@ -108,14 +108,14 @@ records the verified encrypted manifest digest, verified completion time,
 exact segment anchor, verified tenant IDs, and any documented exception
 authority reference and review deadline. The check authenticates the current
 source chain, referenced checkpoints and policy snapshots, and reports the
-oldest required backup anchor, overdue backup IDs and exact remaining v3
+oldest required backup anchor, overdue backup IDs and exact remaining v3/v4
 entry/byte capacity. An inventory digest held with the inventory or a bucket
 listing alone cannot establish completeness. Evidence mismatches block the
 assessment. The report carries no deletion authorization.
 
 Reaching a limit requires a successor format or an approved operational
 intervention. Removing old backups does not remove the cumulative tuple
-requirements for the v3 verifier or the source check's genesis dependency.
+requirements for the v3/v4 verifier or the source check's genesis dependency.
 Preserve all artifacts and immutable bindings until a successor has verified
 every retained backup and source proof.
 If evidence or its current authority cannot be recovered, keep traffic closed
@@ -198,7 +198,12 @@ Relevant provider references:
    controls reopening.
 
 The current v3 checkpoint has bounded cumulative size (10,000 receipt entries
-and a 2 MiB payload limit). Establish monitored beta capacity and a signed
+and a 2 MiB payload limit). Candidate v4 additionally authenticates the exact
+SQL108 ordinary-booking plans, including completion, policy, allocation revision
+and ordered request IDs. It preserves v3 evidence, rejects downgrades, and requires
+a verified backup inventory and current policy before an owner-only SQL109 replay.
+V4 retains the same cumulative payload limit and does not authorize journal deletion.
+Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized
 backup still needs it. The applicable backup policy is the approved ordinary

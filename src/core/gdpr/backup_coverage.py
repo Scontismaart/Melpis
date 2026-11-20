@@ -116,8 +116,9 @@ def assess_backup_coverage(
                 if not expected <= actual:
                     raise RestoreBlocked("Backup checkpoint omits signed erasure evidence")
                 bytes_remaining = min(bytes_remaining, 2 * 1024 * 1024 - len(_canonical(checkpoint)))
+                fields = (*_CHECKPOINT_FIELDS,"ordinary_booking_purges") if checkpoint["version"]=="c24-restore-v4" else _CHECKPOINT_FIELDS
                 entries_remaining = min(entries_remaining, *(10000 - len(checkpoint[field])
-                                                              for field in _CHECKPOINT_FIELDS))
+                                                              for field in fields))
         if authority.current() != tip or any(
                 (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)) != evidence
                 for (org, backup), evidence in pins.items()):

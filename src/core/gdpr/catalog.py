@@ -43,6 +43,8 @@ CATEGORIES: tuple[Category, ...] = (
              "Transaction-bound worker authorization is excluded from automated exports."),
     Category("ordinary_booking_completion_evidence", "", exclusion_reason=
              "Private, subject-linked completion evidence needs controller review; no direct application grant."),
+    Category("ordinary_booking_purge_bindings", "", exclusion_reason=
+             "Private ordinary booking recovery commitments need scoped controller review; no direct application grant."),
     Category("booking_stay_tombstones", """
         SELECT request_id,booking_id,original_subject_id,purpose,operation_id,policy_version,created_at
         FROM booking_stay_tombstones WHERE organization_id=$1::uuid
@@ -51,10 +53,12 @@ CATEGORIES: tuple[Category, ...] = (
         WHERE organization_id=$1::uuid AND original_subject_id=$2::uuid
     """, exclusion_reason="Replay fences remain subject-linked pending an approved lifecycle."),
     Category("booking_stay_purge_fences", """
-        SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count,created_at
+        SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count,created_at,
+               COALESCE(to_jsonb(booking_stay_purge_fences)->>'purge_kind','stay') AS purge_kind
         FROM booking_stay_purge_fences WHERE organization_id=$1::uuid
     """, contact_query="""
-        SELECT booking_id,purpose,operation_id,policy_version,receipt_count,created_at FROM booking_stay_purge_fences
+        SELECT booking_id,purpose,operation_id,policy_version,receipt_count,created_at,
+               COALESCE(to_jsonb(booking_stay_purge_fences)->>'purge_kind','stay') AS purge_kind FROM booking_stay_purge_fences
         WHERE organization_id=$1::uuid AND original_subject_id=$2::uuid
     """, exclusion_reason="Replay fences remain subject-linked pending an approved lifecycle."),
     Category("booking_stays", """

@@ -71,14 +71,14 @@ async def _published_restore_evidence(
                 store, installation, org, backup_id, pin,
                 verification_key=checkpoint_verification_key,
                 encryption_key=checkpoint_encryption_key)
-            _, checkpoint_entries, sequence, purges, prunes = _authenticate_checkpoint(
+            _, checkpoint_entries, sequence, purges, prunes, ordinary = _authenticate_checkpoint(
                 org, checkpoint, verification_key=checkpoint_verification_key,
                 backup_id=backup_id, minimum_sequence=pin.sequence, checkpoint_sha256=pin.sha256)
             scoped = scopes[org]
             signed_entries = [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped]
             if not set(signed_entries) <= set(checkpoint_entries):
                 raise RestoreBlocked("Checkpoint omits authenticated erasure evidence")
-            checkpoints[org] = (checkpoint, checkpoint_entries, sequence, purges, prunes)
+            checkpoints[org] = (checkpoint, checkpoint_entries, sequence, purges, prunes, ordinary)
         _assert_current(authority, backup_id, tip, pins)
     except RestoreJournalInvalid:
         raise RestoreBlocked("Authenticated independent recovery evidence required") from None
@@ -95,12 +95,14 @@ async def verify_primary_published_restore(conn, authority, store, **trust):
     """Require every restored tenant and the exact current independent evidence."""
     tip, pins, journal, scopes, checkpoints = await _published_restore_evidence(
         conn, authority, store, **trust)
-    for org, (_, entries, sequence, purges, prunes) in checkpoints.items():
-        await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges, receipt_prunes=prunes)
+    for org, (_, entries, sequence, purges, prunes, ordinary) in checkpoints.items():
+        await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges, receipt_prunes=prunes,
+                                       ordinary_purges=ordinary)
         scoped = scopes[org]
         await _verify_replayed_erasures(
             conn, org, [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped],
             tip.sequence, purges=purges, receipt_prunes=prunes,
+            ordinary_purges=ordinary,
             fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped})
     _assert_current(authority, trust["backup_id"], tip, pins)
     return {"verified_organizations": len(checkpoints), "verified_erasure_entries": len(journal),
@@ -195,7 +197,7 @@ async def _replay_stay_retention(conn, org, purges):
 
 async def replay_primary_published_erasures(
     pool, authority, store, *, quarantine_database, policy_verification_key,
-    policy_encryption_key, **trust,
+    policy_encryption_key, ordinary_inventory_bytes=None, latest_inventory_sha256=None, **trust,
 ):
     """Replay only authenticated entries on a dedicated database under current policy.
 
@@ -242,10 +244,29 @@ async def replay_primary_published_erasures(
             await verify_policy_state(
                 conn, org, ciphertext, installation_id=authority.installation_id,
                 backup_id=backup_id, independent_pin=pin, **policy_args)
-            checkpoint, _, _, purges, prunes = checkpoints[org]
+            checkpoint, _, _, purges, prunes, ordinary = checkpoints[org]
             await _replay_stay_retention(conn, org, purges)
             await _replay_receipt_prunes(
                 conn, org, checkpoint, prunes, pins[org], trust["checkpoint_verification_key"])
+            if ordinary:
+                from datetime import datetime, timezone
+                from src.core.gdpr.backup_coverage import _backups
+                from src.core.gdpr.source_checkpoint import purge_inventory_covered_ordinary_bookings
+                try:
+                    inventory = list(_backups(ordinary_inventory_bytes, latest_inventory_sha256,
+                        authority.installation_id, datetime.now(timezone.utc)))
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    raise RestoreBlocked("Independent backup inventory required for ordinary replay") from None
+                if not any(backup==backup_id and organizations==set(trust["expected_organizations"])
+                           and anchor==trust["backup_checkpoint"] for backup,organizations,anchor,_ in inventory):
+                    raise RestoreBlocked("Restored backup does not match independent inventory")
+                await purge_inventory_covered_ordinary_bookings(conn,authority,store,org,ordinary_inventory_bytes,
+                    latest_inventory_sha256=latest_inventory_sha256,
+                    trusted_public_key=trust["trusted_public_key"],journal_encryption_key=trust["journal_encryption_key"],
+                    checkpoint_verification_key=trust["checkpoint_verification_key"],
+                    checkpoint_encryption_key=trust["checkpoint_encryption_key"],
+                    policy_verification_key=policy_verification_key,policy_encryption_key=policy_encryption_key,
+                    key_epochs=trust.get("key_epochs"))
         result = await verify_primary_published_restore(conn, authority, store, **trust)
         _assert_policy_current(authority, backup_id, policy_state)
     return dict(result, current_policy_reconciliation_required=False)

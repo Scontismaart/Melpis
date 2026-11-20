@@ -144,6 +144,32 @@ def test_checkpoint_publication_in_nested_operator_directory(tmp_path):
     assert read_checkpoint(store, installation, org, "backup", pin, **args)["payload"] == payload
 
 
+def test_v4_checkpoint_rejects_cross_tenant_duplicate_and_downgrade(tmp_path):
+    from src.core.gdpr.journal_publication import LocalJournalStore, publish_checkpoint, read_checkpoint
+    from src.core.gdpr.restore_checkpoint import RestoreBlocked
+    from uuid import uuid4
+
+    store=LocalJournalStore(tmp_path)
+    installation,org=uuid4(),uuid4()
+    keys=dict(verification_key=bytes(range(32)),encryption_key=Fernet.generate_key())
+    base=dict(version="c24-restore-v3",organization_id=str(org),backup_id="backup",
+              sequence=1,complete=True,erasures=[],stay_purges=[],receipt_prunes=[])
+    old=publish_checkpoint(store,installation,base,**keys)
+    plan=dict(kind="ordinary_managed_booking_candidate_v1",organization_id=str(org),
+              booking_id=str(uuid4()),subject_id=str(uuid4()),policy_version="qa",
+              completed_at="2024-01-01T12:00:00.000000Z",timezone="Europe/Rome",
+              allocation_revision=2,request_ids=[str(uuid4())],deletion_authorized=False)
+    candidate=dict(base,version="c24-restore-v4",sequence=2,ordinary_booking_purges=[plan])
+    for invalid in ([dict(plan,organization_id=str(uuid4()))], [plan,plan],
+                    [dict(plan,deletion_authorized=True)], [dict(plan,completed_at="unknown")]):
+        with pytest.raises(RestoreBlocked):
+            publish_checkpoint(store,installation,dict(candidate,ordinary_booking_purges=invalid),**keys)
+    pin=publish_checkpoint(store,installation,candidate,previous_pin=old,**keys)
+    assert read_checkpoint(store,installation,org,"backup",pin,**keys)["payload"]==candidate
+    with pytest.raises(RestoreBlocked):
+        publish_checkpoint(store,installation,dict(base,sequence=3),previous_pin=pin,**keys)
+
+
 def test_checkpoint_exact_pin_and_separate_key_readback(publication):
     from src.core.gdpr.journal_publication import publish_checkpoint, read_checkpoint
     from src.core.gdpr.restore_checkpoint import RestoreBlocked

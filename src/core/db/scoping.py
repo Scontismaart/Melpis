@@ -73,6 +73,7 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "booking_allocation_requests": ("direct", "Dark allocation receipts carry organization_id."),
     "booking_completion_erasure_markers": ("direct", "Private erasure markers are bound to the tenant and transaction."),
     "ordinary_booking_completion_evidence": ("direct", "Verified managed booking completion evidence is bound to its tenant and subject."),
+    "ordinary_booking_purge_bindings": ("direct", "Independently retained ordinary booking purge evidence is bound to its tenant and subject."),
     "booking_stays": ("direct", "Canonical civil stays retain verified original-subject scope."),
     "booking_stay_purge_markers": ("direct", "Private transaction-bound administrative purge authority."),
     "booking_stay_purge_fences": ("direct", "Subject-linked booking replay fences carry organization_id."),
