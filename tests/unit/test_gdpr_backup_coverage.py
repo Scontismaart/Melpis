@@ -15,7 +15,8 @@ from src.core.gdpr.restore_policy_state import PolicyStatePin
 
 
 def test_coverage_requires_every_independently_pinned_backup_and_reports_headroom(tmp_path, monkeypatch):
-    from src.core.gdpr.backup_coverage import assess_backup_coverage
+    from src.core.gdpr.backup_coverage import assess_backup_coverage, assess_paged_backup_candidates
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
 
     objects, authority_dir = tmp_path / "objects", tmp_path / "authority"
     objects.mkdir(mode=0o700)
@@ -100,6 +101,7 @@ def test_coverage_requires_every_independently_pinned_backup_and_reports_headroo
     with pytest.raises(RestoreBlocked, match="omits signed erasure evidence"):
         assess_backup_coverage(authority, store, reviewed, **reviewed_args)
     # Covering every backup across both pages makes the proof valid again.
+    candidate_pins, current_pins = {}, {}
     for backup in (old_backup, recent_backup):
         prior_pin = authority.checkpoint_pin(org, backup["backup_id"])
         payload = {"version": "c24-restore-v3", "organization_id": str(org), "backup_id": backup["backup_id"],
@@ -109,6 +111,10 @@ def test_coverage_requires_every_independently_pinned_backup_and_reports_headroo
         new_pin = publish_checkpoint(store, installation, payload,
                                      verification_key=key, encryption_key=ciphertext, previous_pin=prior_pin)
         authority.advance_checkpoint(store, prior_pin, new_pin, verification_key=key, encryption_key=ciphertext)
+        current_pins[org, backup["backup_id"]] = new_pin
+        candidate_pins[org, backup["backup_id"]] = publish_checkpoint_pages(store, installation,
+            dict(payload, sequence=3, version="c24-restore-v5", ordinary_booking_purges=[]),
+            verification_key=key, encryption_key=ciphertext, previous_pin=new_pin)
     assert assess_backup_coverage(authority, store, reviewed, **reviewed_args)["source_chain_entries_remaining"] == 99998
     with monkeypatch.context() as bounds:
         bounds.setattr("src.core.gdpr.backup_coverage._LEGACY_SEGMENT_LIMIT", 1)
@@ -119,6 +125,16 @@ def test_coverage_requires_every_independently_pinned_backup_and_reports_headroo
     with pytest.raises(RestoreBlocked):
         assess_backup_coverage(authority, store, wrong_inventory,
                                **dict(args, latest_inventory_sha256=sha256(wrong_inventory).hexdigest()))
+    paged = assess_paged_backup_candidates(authority, store, reviewed, candidates=candidate_pins, **reviewed_args)
+    assert paged["verified_paged_candidates"] == 2
+    assert paged["authority_advanced"] is paged["deletion_authorized"] is False
+    assert all(authority.checkpoint_pin(org_id, backup_id) == pin for (org_id, backup_id), pin in current_pins.items())
+    with pytest.raises(RestoreBlocked, match="exact backup inventory"):
+        assess_paged_backup_candidates(authority, store, reviewed,
+            candidates={(org, "old"): candidate_pins[org, "old"]}, **reviewed_args)
+    swapped = {(org, "old"): candidate_pins[org, "recent"], (org, "recent"): candidate_pins[org, "old"]}
+    with pytest.raises(RestoreBlocked, match="Independent checkpoint pin conflict"):
+        assess_paged_backup_candidates(authority, store, reviewed, candidates=swapped, **reviewed_args)
     next(path for path in objects.iterdir() if path.name.startswith("policy-")).unlink()
     with pytest.raises(RestoreBlocked):
         assess_backup_coverage(authority, store, reviewed, **reviewed_args)
