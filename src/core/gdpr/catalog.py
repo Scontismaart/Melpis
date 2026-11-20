@@ -43,6 +43,8 @@ CATEGORIES: tuple[Category, ...] = (
              "Transaction-bound worker authorization is excluded from automated exports."),
     Category("ordinary_booking_completion_evidence", "", exclusion_reason=
              "Private, subject-linked completion evidence needs controller review; no direct application grant."),
+    Category("c24_account_response_receipts", "", exclusion_reason=
+             "Private integrity evidence for a tenant account response. The approved export contains separately scoped business data."),
     Category("ordinary_booking_purge_bindings", "", exclusion_reason=
              "Private ordinary booking recovery commitments need scoped controller review; no direct application grant."),
     Category("booking_stay_tombstones", """

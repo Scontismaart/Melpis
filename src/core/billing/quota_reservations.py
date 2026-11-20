@@ -655,6 +655,14 @@ class QuotaReservations:
             if final.knowledge_epoch is not None:
                 metadata["knowledge_epoch"] = final.knowledge_epoch
             await self._save(conn, operation, metadata)
+            if operation.channel != "inbound" and await conn.fetchval("""SELECT to_regprocedure(
+                'public.c24_record_account_response_receipt(uuid,uuid,uuid,text,uuid,uuid,text)') IS NOT NULL"""):
+                # Later lifecycle work can distinguish this exact independent
+                # account response without reconstructing historical evidence.
+                if not await conn.fetchval("SELECT public.c24_record_account_response_receipt($1,$2,$3,$4,$5,$6,$7)",
+                    operation.organization_id, operation.actor_id, operation.id, operation.channel,
+                    ticket.claim_id, epoch, metadata["response_hash"]):
+                    _deny()
             if private_booking_enabled:
                 from src.core.db.inbound_worker_provenance import (
                     record_committed_operation,
