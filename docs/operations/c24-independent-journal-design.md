@@ -93,8 +93,23 @@ new authority. The operational drill still has to recover using the real
 independently held authority and keys from another host. Mixed-key segment
 verification and cumulative artifact rotation have synthetic tests. There is
 no automatic compaction or journal deletion in this candidate. Before reaching
-the format bounds, measure the remaining history, enumerate every recoverable
-backup and plan the rotation against its verified recovery requirements.
+the format bounds, run `assess_backup_coverage` on the current, independently
+pinned inventory of every recoverable backup, including older copies still
+accessible under an exception. For each distinct backup ID the inventory
+records the verified encrypted manifest digest, verified completion time,
+exact segment anchor, verified tenant IDs, and any documented exception
+authority reference and review deadline. The check authenticates the current
+source chain, referenced checkpoints and policy snapshots, and reports the
+oldest required backup anchor, overdue backup IDs and exact remaining v3
+entry/byte capacity. An inventory digest held with the inventory or a bucket
+listing alone cannot establish completeness. Evidence mismatches block the
+assessment. The report carries no deletion authorization.
+
+Reaching a limit requires a successor format or an approved operational
+intervention. Removing old backups does not remove the cumulative tuple
+requirements for the v3 verifier or the source check's genesis dependency.
+Preserve all artifacts and immutable bindings until a successor has verified
+every retained backup and source proof.
 If evidence or its current authority cannot be recovered, keep traffic closed
 and obtain the controller's disposition. No deletion rule may rely on a
 guessed backup age or an older unverified tip.
