@@ -48,6 +48,15 @@ async def test_managed_minute_completion_captures_same_transaction_evidence(pg_p
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 1
 
 
+async def test_owner_can_reinitialize_empty_table_but_not_truncate_completion_evidence(pg_pool):
+    await pg_pool.execute('TRUNCATE ordinary_booking_completion_evidence')
+    env, booking = await _managed_booking(pg_pool)
+    await _complete(env, booking)
+    with pytest.raises(asyncpg.InsufficientPrivilegeError):
+        await pg_pool.execute('TRUNCATE ordinary_booking_completion_evidence')
+    assert await pg_pool.fetchval('SELECT count(*) FROM ordinary_booking_completion_evidence WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 1
+
+
 async def test_untyped_or_future_completion_does_not_create_evidence(pg_pool):
     env, booking = await _managed_booking(pg_pool)
     await pg_pool.execute("UPDATE bookings SET stato='completata',completata_at=now() WHERE organization_id=$1 AND id=$2", env.org, booking)
