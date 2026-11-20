@@ -15,7 +15,8 @@ from src.core.gdpr.guard import ErasureBlocked
 from src.core.gdpr.journal_publication import read_chain, read_checkpoint
 from src.core.gdpr.operations import encode, event
 from src.core.gdpr.restore_checkpoint import (
-    RestoreBlocked, _authenticate_checkpoint, _verify_replayed_erasures,
+    RestoreBlocked, _authenticate_checkpoint, _bind_receipt_prune_checkpoint,
+    _verify_replayed_erasures, _verify_replayed_receipt_prunes,
 )
 from src.core.gdpr.restore_journal import RestoreJournalInvalid
 from src.core.gdpr.restore_policy_state import reconcile_policy_state, verify_policy_state
@@ -75,7 +76,7 @@ async def _published_restore_evidence(
             signed_entries = [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped]
             if not set(signed_entries) <= set(checkpoint_entries):
                 raise RestoreBlocked("Checkpoint omits authenticated erasure evidence")
-            checkpoints[org] = (checkpoint_entries, sequence, purges, prunes)
+            checkpoints[org] = (checkpoint, checkpoint_entries, sequence, purges, prunes)
         _assert_current(authority, backup_id, tip, pins)
     except RestoreJournalInvalid:
         raise RestoreBlocked("Authenticated independent recovery evidence required") from None
@@ -92,7 +93,7 @@ async def verify_primary_published_restore(conn, authority, store, **trust):
     """Require every restored tenant and the exact current independent evidence."""
     tip, pins, journal, scopes, checkpoints = await _published_restore_evidence(
         conn, authority, store, **trust)
-    for org, (entries, sequence, purges, prunes) in checkpoints.items():
+    for org, (_, entries, sequence, purges, prunes) in checkpoints.items():
         await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges, receipt_prunes=prunes)
         scoped = scopes[org]
         await _verify_replayed_erasures(
@@ -144,6 +145,29 @@ async def _materialize_recovery_request(conn, entry):
     return _RECOVERY_REQUESTER
 
 
+async def _replay_receipt_prunes(conn, org, checkpoint, prunes, pin, verification_key):
+    if not prunes:
+        return
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))", str(org))
+    for request, source, _, _ in prunes:
+        # PostgreSQL functions check the current verified scope, clock, safe
+        # copy lifecycle and holds. Final proof requires actual postconditions.
+        await conn.fetchval("SELECT public.c24_purge_source($1,$2)", org, source)
+        await conn.fetchval("SELECT public.c24_cleanup_receipt($1,$2)", org, request)
+    await _bind_receipt_prune_checkpoint(
+        conn, org, checkpoint, verification_key=verification_key, backup_id=pin.backup_id,
+        minimum_sequence=pin.sequence, checkpoint_sha256=pin.sha256)
+    for request, source, conversation, subject in prunes:
+        await conn.fetchval("SELECT public.c24_cleanup_source_fences($1,$2,$3)", org, conversation, request)
+        audit_ids = await conn.fetch("""SELECT audit_id FROM c24_suppression_lifecycle_audit
+            WHERE organization_id=$1 AND source_record_id=$2 AND c24_source_message_id=$3
+              AND conversation_id=$4 AND subject_id=$5 AND action='retention' AND record_kind='source_fence'""",
+            org, request, source, conversation, subject)
+        for row in audit_ids:
+            await conn.fetchval("SELECT public.c24_cleanup_suppression_audit($1,$2)", org, row["audit_id"])
+    await _verify_replayed_receipt_prunes(conn, org, prunes)
+
+
 async def replay_primary_published_erasures(
     pool, authority, store, *, quarantine_database, policy_verification_key,
     policy_encryption_key, **trust,
@@ -158,7 +182,7 @@ async def replay_primary_published_erasures(
     backup_id = trust["backup_id"]
     async with pool.acquire() as conn, conn.transaction():
         await _assert_quarantine(conn, quarantine_database)
-        tip, pins, journal, scopes, _ = await _published_restore_evidence(conn, authority, store, **trust)
+        tip, pins, journal, scopes, checkpoints = await _published_restore_evidence(conn, authority, store, **trust)
         policy_state = {}
         for org in sorted(scopes):
             pin = authority.policy_pin(org, backup_id)
@@ -187,11 +211,16 @@ async def replay_primary_published_erasures(
                 raise RestoreBlocked("Authenticated erasure blocked by current policy or evidence")
     async with pool.acquire() as conn, conn.transaction():
         await _assert_quarantine(conn, quarantine_database)
-        result = await verify_primary_published_restore(conn, authority, store, **trust)
+        _assert_current(authority, backup_id, tip, pins)
+        _assert_policy_current(authority, backup_id, policy_state)
         for org, (pin, ciphertext) in policy_state.items():
             await verify_policy_state(
                 conn, org, ciphertext, installation_id=authority.installation_id,
                 backup_id=backup_id, independent_pin=pin, **policy_args)
+            checkpoint, _, _, _, prunes = checkpoints[org]
+            await _replay_receipt_prunes(
+                conn, org, checkpoint, prunes, pins[org], trust["checkpoint_verification_key"])
+        result = await verify_primary_published_restore(conn, authority, store, **trust)
         _assert_policy_current(authority, backup_id, policy_state)
     return dict(result, current_policy_reconciliation_required=False)
 

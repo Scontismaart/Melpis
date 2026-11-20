@@ -343,14 +343,34 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
     omitted, _, omitted_sha = signed_prune_checkpoint(org, [], key=key, sequence=2)
     with pytest.raises(RestoreBlocked, match="commitments do not match"):
         await verify(pool, omitted, omitted_sha)
+    installation = uuid4()
+    signer = Ed25519PrivateKey.generate()
+    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
+    object_root, authority_root = tmp_path / "journal", tmp_path / "operator"
+    object_root.mkdir(mode=0o700)
+    authority_root.mkdir(mode=0o700)
+    store = LocalJournalStore(object_root)
+    authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
+    anchor = authority.current()
+    pin = publish_checkpoint(store, installation, checkpoint["payload"],
+                             verification_key=key, encryption_key=journal_key)
+    authority.advance_checkpoint(store, None, pin, verification_key=key, encryption_key=journal_key)
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        policy_pin, sealed_policy = await capture_policy_state(
+            conn, org, installation_id=installation, backup_id=pin.backup_id,
+            sequence=1, verification_key=policy_key, encryption_key=policy_cipher)
+    authority.publish_policy(store, None, policy_pin, sealed_policy,
+                             verification_key=policy_key, encryption_key=policy_cipher)
     restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
     await _docker("exec", container, "createdb", "-U", principal, restored_db)
+    await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                  "-c", f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
     restored_sql = cipher.decrypt(encrypted_snapshot)
     assert sha256(restored_sql).digest() == digest
     await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
                   "-U", principal, "-d", restored_db, input_bytes=restored_sql)
     del restored_sql
-    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=3)
+    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=1)
     try:
         assert not await reconciled(restored)
         with pytest.raises(RestoreBlocked, match="Receipt expiry commitments do not match"):
@@ -361,9 +381,19 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
         legacy_checkpoint = {"payload": legacy, "signature": hmac.new(key, canonical, sha256).hexdigest()}
         with pytest.raises(RestoreBlocked, match="Authenticated receipt expiry checkpoint required"):
             await verify(restored, legacy_checkpoint, None)
-        await expire(restored)
+        from src.core.gdpr.restore_coordinator import replay_primary_published_erasures
+
+        async def replay():
+            return await replay_primary_published_erasures(
+                restored, authority, store, backup_checkpoint=anchor, backup_id=pin.backup_id,
+                expected_organizations=[org], trusted_public_key=signer.public_key(),
+                journal_encryption_key=journal_key, checkpoint_verification_key=key,
+                checkpoint_encryption_key=journal_key, quarantine_database=restored_db,
+                policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+        assert (await replay())["traffic_authorized"] is False
         assert await reconciled(restored)
         assert await verify(restored, checkpoint, receipt_checkpoint_sha) == before
+        assert (await replay())["traffic_authorized"] is False
         assert not await restored.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
         with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match="delivery identity is immutable"):
             await restored.execute("UPDATE messages SET wam_id=NULL WHERE organization_id=$1 AND id=$2", org, source)

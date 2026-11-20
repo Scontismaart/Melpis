@@ -15,7 +15,8 @@ before primary-data erasure or retention can run. Do not infer periods from
 legacy constants or sample values. The product registry now checks supported
 worker day schedules against the approved maxima, including the locked latest
 row and cross-category C2.4 permission. Unsupported schedules fail closed;
-they are never silently clamped. Visibility, complete expiry coverage and
+they are never silently clamped. The ordinary inbox and dashboard have 60-day
+message visibility controls. Complete expiry coverage and full
 last-pertinent-activity timing still require implementation and verification;
 see the [category matrix](../governance/privacy-v1-implementation-matrix.md).
 
@@ -90,6 +91,8 @@ in batches of 100 with a maximum of ten batches per run, and reports
 `oldest_overdue_seconds` without subject or tenant identifiers. Monitor failed
 runs and overdue age, including across restarts and periods of high export
 volume. Physical removal depends on the deployed schedule and its capacity.
+Streaming reads one authorized chunk at a time without holding a database
+lock while the client receives it. Revocation and expiry stop later chunk reads.
 The export manifest identifies excluded and partial categories. External
 copies and backups require separate coverage evidence.
 
@@ -127,12 +130,12 @@ copies and backups require separate coverage evidence.
    held. Free-text content may contain other people. Do not mark it erased by
    inference.
 6. External provider work is a separately fenced stage. Recorded dependencies
-can include Meta, AI providers, Google Calendar and Business, Airtable, external
-booking, configured Softr/Sentry/SMTP, Stripe retention review, backups, and
-worker caches. Dispatch claims only an existing inventoried step after the
-locked erasure operation has confirmed local work and remains partial.
-`provider.inventory_review` is reserved for the controller. A lookup at a
-provider is allowed only for an authorized uncertain step. Only a verified,
+   can include Meta, AI providers, Google Calendar and Business, Airtable,
+   external booking, configured Softr/Sentry/SMTP, Stripe retention review,
+   backups, and worker caches. Dispatch claims only an existing inventoried
+   step after the locked erasure operation has confirmed local work and remains
+   partial. `provider.inventory_review` is reserved for the controller. A
+   lookup at a provider is allowed only for an authorized uncertain step. Only a verified,
    authenticated, operation-correlated deletion receipt confirms a stage.
    Bare HTTP 2xx/202 and transport failures are uncertain. Never resend a
    destructive request after uncertainty without provider-native idempotency
@@ -196,9 +199,9 @@ present, and removes only typed C2.4 booking proposal fields from eligible
 source/cache records. SQL096 adds a bounded, hold-aware purge for eligible
 terminal C2.4 messages only when receipt and subject lineage are present,
 along with the policy and lifecycle checks; `deleted_at` need not be set. It
-is merged into source, but remote application is unverified and no live
+is in the Staging migration 104 baseline recorded on issue #91. No live
 schedule is proven. Ordinary or legacy messages
-without those C2.4 fields have no verified 60/90-day cleanup path in this
+without those C2.4 fields have no verified 90-day cleanup path in this
 snapshot; overall message-retention coverage remains open.
 The product policy does not assign a simulator-response period or authorize a
 general simulator-response purge. The general job also does not perform the
