@@ -20,7 +20,7 @@ _LIMIT = 10000
 async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *,
                                        sequence, verification_key, encryption_key,
                                        prior_pin=None, prior_keys=None, pending_requests=(),
-                                       pending_ordinary_bookings=(), paged_candidate=False):
+                                       pending_ordinary_bookings=(), pending_orphan_sources=(), paged_candidate=False):
     """Capture committed erasures, stay purges and bound receipt tuples.
 
     A prior independently pinned checkpoint is necessary when a receipt tuple
@@ -31,6 +31,11 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
     """
     if type(paged_candidate) is not bool:
         raise RestoreBlocked("Checkpoint format selection invalid")
+    if (type(pending_orphan_sources) not in (list, tuple) or len(pending_orphan_sources) > _LIMIT
+            or any(type(value) is not UUID or not value.int for value in pending_orphan_sources)
+            or len(set(pending_orphan_sources)) != len(pending_orphan_sources)
+            or (pending_orphan_sources and not paged_candidate)):
+        raise RestoreBlocked("Orphan proposal evidence requires an exact paged selection")
     collection_limit = _MAX_RECORDS if paged_candidate else _LIMIT
     size_limit = _MAX_AGGREGATE_BYTES if paged_candidate else 2*1024*1024
     if (type(pending_ordinary_bookings) not in (tuple,list) or len(pending_ordinary_bookings)>_LIMIT
@@ -53,6 +58,7 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         raise RestoreBlocked("Checkpoint organization unavailable")
     previous = []
     previous_ordinary = []
+    previous_orphans = []
     prior_v4 = False
     prior_args = _previous_key_args(prior_pin, prior_keys, verification_key, encryption_key)
     if prior_pin is not None:
@@ -67,6 +73,7 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
                     for record in _parse_receipt_prunes(previous_items[offset:offset+_LIMIT])]
         prior_v4 = prior["version"] in ("c24-restore-v4", "c24-restore-v5")
         previous_ordinary = prior.get("ordinary_booking_purges", [])
+        previous_orphans = prior.get("orphan_proposal_prunes", [])
     carried = {item[0]: item for item in previous}
     if await conn.fetchval("""SELECT EXISTS (SELECT FROM gdpr_operation_steps s
         WHERE s.organization_id=$1 AND s.name='local' AND s.status='confirmed'
@@ -215,6 +222,37 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
             raise RestoreBlocked("Prior ordinary booking purge evidence is incomplete")
         payload.update(version="c24-restore-v5" if paged_candidate else "c24-restore-v4",
                        ordinary_booking_purges=ordinary)
+    if await conn.fetchval("SELECT to_regclass('public.c24_orphan_proposal_expirations') IS NOT NULL"):
+        if paged_candidate:
+            from src.core.gdpr.operations import document
+            from src.core.gdpr.orphan_proposal import plan_orphan_proposal_expiry
+            from src.core.gdpr.orphan_proposal_expiry import verify_orphan_proposal_expirations
+
+            orphans, known = [], set()
+            rows = conn.cursor("""SELECT source_message_id,plan,checkpoint_sequence
+                FROM c24_orphan_proposal_expirations WHERE organization_id=$1 ORDER BY source_message_id
+                LIMIT $2""", org, collection_limit+1, prefetch=64)
+            async for row in rows:
+                plan = document(row["plan"])
+                if (len(orphans) == collection_limit or row["checkpoint_sequence"] > sequence
+                        or str(row["source_message_id"]) != plan["source_message_id"]):
+                    raise RestoreBlocked("Committed orphan proposal evidence is incomplete")
+                orphans.append(plan)
+                known.add(row["source_message_id"])
+            await verify_orphan_proposal_expirations(conn, org, orphans)
+            for source in sorted(set(pending_orphan_sources) - known):
+                plan = await plan_orphan_proposal_expiry(conn, org, source)
+                if plan is None:
+                    raise RestoreBlocked("Pending orphan proposal lacks current verified evidence")
+                orphans.append(plan)
+            if not {_canonical(plan) for plan in previous_orphans} <= {_canonical(plan) for plan in orphans}:
+                raise RestoreBlocked("Prior orphan proposal evidence is incomplete")
+            if orphans:
+                payload["orphan_proposal_prunes"] = orphans
+        elif await conn.fetchval("SELECT EXISTS(SELECT FROM c24_orphan_proposal_expirations WHERE organization_id=$1)", org):
+            raise RestoreBlocked("Verified orphan proposal evidence requires the paged checkpoint format")
+    elif pending_orphan_sources or previous_orphans:
+        raise RestoreBlocked("Orphan proposal expiry schema is unavailable")
     if len(_canonical(payload))>size_limit:
         raise RestoreBlocked("Checkpoint exceeds format capacity")
     if paged_candidate:

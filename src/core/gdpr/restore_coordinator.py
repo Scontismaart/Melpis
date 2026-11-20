@@ -103,7 +103,8 @@ async def _published_restore_evidence(
             signed_entries = [(entry.operation_id, entry.scope, entry.subject_id) for entry in scoped]
             if not set(signed_entries) <= set(checkpoint_entries):
                 raise RestoreBlocked("Checkpoint omits authenticated erasure evidence")
-            checkpoints[org] = (payload["version"], checkpoint_entries, pin.sequence, purges, prunes, ordinary)
+            checkpoints[org] = (payload["version"], checkpoint_entries, pin.sequence, purges, prunes, ordinary,
+                                payload.get("orphan_proposal_prunes", []))
         if _assert_paged_inventory_current(authority, checkpoints, latest_inventory_sha256):
             _assert_recovery_inventory(authority, recovery_inventory_bytes, latest_inventory_sha256,
                                        backup_id, wanted, backup_checkpoint)
@@ -151,7 +152,10 @@ def _assert_paged_inventory_current(authority, checkpoints, digest):
 
 
 async def _verify_published_postconditions(conn, tip, scopes, checkpoints):
-    for org, (version, entries, sequence, purges, prunes, ordinary) in checkpoints.items():
+    from src.core.gdpr.orphan_proposal_expiry import verify_orphan_proposal_expirations
+
+    for org, (version, entries, sequence, purges, prunes, ordinary, orphans) in checkpoints.items():
+        await verify_orphan_proposal_expirations(conn, org, orphans)
         await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges, receipt_prunes=prunes,
                                        ordinary_purges=ordinary, require_committed=version == "c24-restore-v5")
         scoped = scopes[org]
@@ -170,6 +174,8 @@ async def verify_paged_restore_candidates(conn, authority, store, *, quarantine_
     verifies restored postconditions under that pin and the paged successor
     without changing the database, promoting authority or authorizing traffic.
     """
+    from src.core.gdpr.orphan_proposal_expiry import verify_orphan_proposal_expirations
+
     await _assert_quarantine(conn, quarantine_database)
     if not conn.is_in_transaction() or await conn.fetchval("SHOW transaction_read_only") != "on":
         raise RestoreBlocked("Paged restore candidate verification requires a read-only transaction")
@@ -185,6 +191,7 @@ async def verify_paged_restore_candidates(conn, authority, store, *, quarantine_
         if prepared.expected_tip != tip or prepared.expected_pin != pin:
             raise RestoreBlocked("Independent recovery evidence changed during candidate verification")
         payload = read_checkpoint_pages(store, authority.installation_id, org, trust["backup_id"], candidate, **keys)
+        await verify_orphan_proposal_expirations(conn, org, payload.get("orphan_proposal_prunes", []))
         erasures, stays, receipts, ordinary = decode_replay_checkpoint(payload)
         await _verify_replayed_erasures(conn, org, erasures, candidate.sequence, purges=stays,
                                        receipt_prunes=receipts, ordinary_purges=ordinary, require_committed=True)
@@ -330,6 +337,25 @@ async def replay_primary_published_erasures(
         _assert_policy_current(authority, policy_state)
         _assert_current(authority, backup_id, tip, pins)
         assert_active_inventory()
+        # A known proposal can be expired before a later signed subject
+        # erasure removes its preimage. The same current policy and hold gate
+        # applies to both operations.
+        for org in scopes:
+            if not checkpoints[org][-1]:
+                continue
+            from src.core.gdpr.orphan_proposal_expiry import expire_inventory_covered_orphan_proposals
+
+            await expire_inventory_covered_orphan_proposals(conn, authority, store, org, ordinary_inventory_bytes,
+                latest_inventory_sha256=latest_inventory_sha256,
+                restored_backup_id=backup_id, quarantine_database=quarantine_database,
+                trusted_public_key=trust["trusted_public_key"], journal_encryption_key=trust["journal_encryption_key"],
+                checkpoint_verification_key=trust["checkpoint_verification_key"],
+                checkpoint_encryption_key=trust["checkpoint_encryption_key"],
+                policy_verification_key=policy_verification_key, policy_encryption_key=policy_encryption_key,
+                key_epochs=trust.get("key_epochs"))
+        _assert_policy_current(authority, policy_state)
+        _assert_current(authority, backup_id, tip, pins)
+        assert_active_inventory()
     for entry in journal:
         _assert_current(authority, backup_id, tip, pins)
         _assert_policy_current(authority, policy_state)
@@ -358,7 +384,7 @@ async def replay_primary_published_erasures(
             await verify_policy_state(
                 conn, org, ciphertext, installation_id=authority.installation_id,
                 backup_id=backup_id, independent_pin=pin, **policy_args)
-            _, _, _, purges, prunes, ordinary = checkpoints[org]
+            _, _, _, purges, prunes, ordinary, _ = checkpoints[org]
             await _replay_stay_retention(conn, org, purges)
             await _replay_receipt_prunes(conn, org, prunes, pins[org])
             if ordinary:

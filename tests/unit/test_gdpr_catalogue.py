@@ -23,7 +23,7 @@ def test_every_nonempty_frozen_projection_passes_runtime_validator():
     # C24 suppression metadata adds organization/contact projections, while
     # the lifecycle audit exposes only bounded tenant/contact projections.
     assert count == 92
-    assert len({category.name for category in catalog.CATEGORIES}) == 71
+    assert len({category.name for category in catalog.CATEGORIES}) == 72
 
 
 @pytest.mark.parametrize('name', [

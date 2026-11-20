@@ -85,3 +85,28 @@ async def test_existing_applied_state_is_not_orphan(state_env):
     await approve_conversation(env['pool'], env['org'])
     await age_message(env['pool'], env['org'], env['message'], 31)
     assert await _plan(env) is None
+
+
+async def test_exact_orphan_expiry_strips_only_proposal_and_fences_repopulation(state_env):
+    import asyncpg
+
+    env = state_env
+    operation = await _known_orphan(env)
+    plan = await _plan(env)
+    pool, org, source = (env[key] for key in ('pool', 'org', 'message'))
+    used = await _used(pool, org)
+    content = await pool.fetchval('SELECT content_text FROM messages WHERE organization_id=$1 AND id=$2', org, source)
+    before = await pool.fetchval('SELECT ai_reply_cache FROM messages WHERE organization_id=$1 AND id=$2', org, source)
+    args = (org, source, json.dumps(plan), 'a' * 64, 2, 'b' * 64)
+    sql = 'SELECT public.c24_apply_orphan_proposal_expiry($1,$2,$3::jsonb,$4,$5,$6)'
+    assert await pool.fetchval(sql, *args)
+    assert await pool.fetchval(sql, *args)
+    assert await pool.fetchval('SELECT content_text FROM messages WHERE organization_id=$1 AND id=$2', org, source) == content
+    expected = json.loads(before)
+    del expected['booking_state_proposal']
+    assert json.loads(await pool.fetchval('SELECT ai_reply_cache FROM messages WHERE organization_id=$1 AND id=$2', org, source)) == expected
+    assert json.loads(await pool.fetchval('SELECT response FROM simulation_requests WHERE organization_id=$1 AND request_id=$2',
+                                          org, operation.id)) == expected
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match='Expired orphan proposal'):
+        await pool.execute('UPDATE messages SET ai_reply_cache=$3::jsonb WHERE organization_id=$1 AND id=$2', org, source, before)
+    assert await _used(pool, org) == used

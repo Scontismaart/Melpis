@@ -34,6 +34,24 @@ def _erasure(index):
     return dict(operation_id=str(UUID(int=index)), scope="contact", subject_id=str(UUID(int=index + 300_000)))
 
 
+def test_v5_orphan_evidence_is_exact_cumulative_and_scoped(recovery):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, read_checkpoint_pages
+
+    store, installation, org, keys = recovery
+    plan = dict(kind="known_source_orphan_proposal_candidate_v1", organization_id=str(org),
+        conversation_id=str(uuid4()), subject_id=str(uuid4()), source_message_id=str(uuid4()),
+        quota_operation_id=str(uuid4()), received_at="2026-10-01T10:50:01.100001+00:00",
+        policy_version="qa-policy", response_hash="3" * 64, provider_message_sha256="4" * 64, deletion_authorized=False)
+    payload = dict(_payload(org), orphan_proposal_prunes=[plan])
+    pin = publish_checkpoint_pages(store, installation, payload, **keys)
+    assert read_checkpoint_pages(store, installation, org, "synthetic", pin, **keys) == payload
+    with pytest.raises(RestoreBlocked):
+        publish_checkpoint_pages(store, installation, _payload(org, sequence=2), previous_pin=pin, **keys)
+    for invalid in (dict(plan, organization_id=str(uuid4())), dict(plan, deletion_authorized=True)):
+        with pytest.raises(RestoreBlocked):
+            publish_checkpoint_pages(store, installation, dict(payload, sequence=2, orphan_proposal_prunes=[invalid]), **keys)
+
+
 def test_checkpoint_pages_roundtrip_exceeds_legacy_aggregate_bounds(recovery):
     from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, read_checkpoint_pages
 

@@ -1,13 +1,14 @@
 """Operator-only v5 checkpoint objects with a bounded, authenticated page manifest.
 
-The returned CheckpointPin is a candidate. Existing v3/v4 callers and the
-authority must be upgraded before v5 can be used for source purge or restore.
-This module publishes no authoritative pin and performs no database writes.
+The returned CheckpointPin becomes authoritative only after the independent
+inventory-wide promotion. This module performs no database writes.
 """
 
+from datetime import datetime, timedelta
 from hashlib import sha256
 import hmac
 import json
+import re
 from uuid import UUID
 
 from cryptography.fernet import InvalidToken
@@ -37,6 +38,9 @@ _IDENTITIES = {
     "receipt_prunes": "request_id",
     "ordinary_booking_purges": "booking_id",
 }
+_ORPHAN = "orphan_proposal_prunes"
+_REQUIRED_CATEGORIES = frozenset(_IDENTITIES)
+_IDENTITIES[_ORPHAN] = "source_message_id"
 _SCOPE_FIELDS = {"version", "organization_id", "backup_id", "sequence", "complete"}
 _DESCRIPTOR_FIELDS = {"category", "index", "count", "first", "last", "sha256", "bytes"}
 
@@ -81,21 +85,27 @@ def _normalized_records(category, records):
 
 
 def _normalize(payload):
-    if (type(payload) is not dict or set(payload) != _SCOPE_FIELDS | _IDENTITIES.keys()
+    if (type(payload) is not dict or not _valid_categories(set(payload)-_SCOPE_FIELDS)
+            or not _SCOPE_FIELDS <= payload.keys()
             or payload["version"] != _VERSION or payload["complete"] is not True
-            or any(type(payload[category]) is not list for category in _IDENTITIES)
-            or sum(len(payload[category]) for category in _IDENTITIES) > _MAX_RECORDS):
+            or any(type(payload[category]) is not list for category in _IDENTITIES if category in payload)
+            or sum(len(payload[category]) for category in _IDENTITIES if category in payload) > _MAX_RECORDS):
         raise ValueError
     return dict(payload, **{
-        category: _normalized_records(category, payload[category]) for category in _IDENTITIES
+        category: _normalized_records(category, payload[category]) for category in _IDENTITIES if category in payload
     })
+
+
+def _valid_categories(categories):
+    return categories in (_REQUIRED_CATEGORIES, _REQUIRED_CATEGORIES | {_ORPHAN})
 
 
 def _assert_global_uniqueness(payload):
     bookings, purge_requests, receipt_sources = set(), set(), set()
+    orphan_operations = set()
     for category in _IDENTITIES:
         last = None
-        for item in payload[category]:
+        for item in payload.get(category, []):
             identity = _record_identity(category, item)
             if last is not None and identity <= last:
                 raise ValueError
@@ -112,16 +122,43 @@ def _assert_global_uniqueness(payload):
                     raise ValueError
                 bookings.add(identity)
                 purge_requests.update(requests)
+            if category == _ORPHAN:
+                operation = _uuid(item["quota_operation_id"])
+                if operation in orphan_operations or identity in receipt_sources:
+                    raise ValueError
+                orphan_operations.add(operation)
+
+
+def _validate_orphan_plan(org, item):
+    fields = {"kind", "organization_id", "conversation_id", "subject_id", "source_message_id",
+              "quota_operation_id", "received_at", "policy_version", "response_hash", "provider_message_sha256",
+              "deletion_authorized"}
+    if (type(item) is not dict or item.keys() != fields
+            or item["kind"] != "known_source_orphan_proposal_candidate_v1"
+            or _uuid(item["organization_id"]) != org or item["deletion_authorized"] is not False
+            or type(item["policy_version"]) is not str or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", item["policy_version"])
+            or not _hex(item["response_hash"], 64) or not _hex(item["provider_message_sha256"], 64)
+            or type(item["received_at"]) is not str):
+        raise ValueError
+    for field in ("conversation_id", "subject_id", "source_message_id", "quota_operation_id"):
+        _uuid(item[field])
+    received = datetime.fromisoformat(item["received_at"])
+    if received.utcoffset() != timedelta(0) or received.isoformat() != item["received_at"]:
+        raise ValueError
 
 
 def _check_page_records(org, scope, category, records, verification_key):
+    if category == _ORPHAN:
+        for record in records:
+            _validate_orphan_plan(org, record)
+        return
     # Reuse all strict v4 evidence field/cross-field validation on each small
     # page. Global identity checks additionally cover conflicts between pages
     # and between stay and ordinary-booking categories.
     payload = {
         "version": "c24-restore-v4", "organization_id": str(org),
         "backup_id": scope["backup_id"], "sequence": scope["sequence"], "complete": True,
-        **{name: [] for name in _IDENTITIES},
+        **{name: [] for name in _REQUIRED_CATEGORIES},
     }
     payload[category] = records
     raw = _canonical(payload)
@@ -144,7 +181,7 @@ def _pages(org, scope, payload, verification_key):
     for category in _IDENTITIES:
         index, records = 0, []
         size = len(_canonical(_page(scope, category, index, [])))
-        for item in payload[category]:
+        for item in payload.get(category, []):
             record_bytes = len(_canonical(item)) + 1
             record_bytes_total += record_bytes
             if record_bytes_total > _MAX_AGGREGATE_BYTES:
@@ -221,12 +258,12 @@ def _manifest_descriptors(manifest, scope):
             or any(manifest[key] != value for key, value in scope.items())
             or type(manifest["sequence"]) is not int
             or manifest["version"] != _VERSION or manifest["complete"] is not True
-            or type(manifest["counts"]) is not dict or set(manifest["counts"]) != _IDENTITIES.keys()
+            or type(manifest["counts"]) is not dict or not _valid_categories(set(manifest["counts"]))
             or any(type(count) is not int or count < 0 for count in manifest["counts"].values())
             or sum(manifest["counts"].values()) > _MAX_RECORDS
             or type(manifest["pages"]) is not list or len(manifest["pages"]) > _MAX_PAGES):
         raise ValueError
-    counts = {category: 0 for category in _IDENTITIES}
+    counts = {category: 0 for category in manifest["counts"]}
     category_index = {category: index for index, category in enumerate(_IDENTITIES)}
     page_indices = dict(counts)
     last_order, last_ids, seen, total_bytes = None, {}, set(), 0
@@ -269,7 +306,7 @@ def read_checkpoint_pages(store: JournalStore, installation, org, backup, pin, *
             store, name, pin.sha256, _MANIFEST_DOMAIN, _MAX_MANIFEST_BYTES, verification_key, cipher)
         descriptors = _manifest_descriptors(manifest, scope)
         payload = {"version": _VERSION, "complete": True, "organization_id": str(org),
-                   "backup_id": backup, "sequence": pin.sequence, **{name: [] for name in _IDENTITIES}}
+                   "backup_id": backup, "sequence": pin.sequence, **{name: [] for name in manifest["counts"]}}
         for descriptor in descriptors:
             category, index, digest = descriptor["category"], descriptor["index"], descriptor["sha256"]
             page, length = _read_object(
@@ -369,7 +406,7 @@ def _require_candidate_cumulative(previous, previous_pin, payload, pin):
         return
     for category, identity in _IDENTITIES.items():
         old = _normalized_records(category, previous.get(category, []))
-        current = {item[identity]: _canonical(item) for item in payload[category]}
+        current = {item[identity]: _canonical(item) for item in payload.get(category, [])}
         if any(current.get(item[identity]) != _canonical(item) for item in old):
             raise RestoreBlocked("Paged checkpoint omits prior evidence")
 
@@ -411,7 +448,7 @@ def publish_checkpoint_pages(store: JournalStore, installation, payload, *,
         _assert_global_uniqueness(payload)
         pages = _pages(org, scope, payload, verification_key)
         manifest = dict(scope, version=_VERSION, complete=True,
-                        counts={category: len(payload[category]) for category in _IDENTITIES},
+                        counts={category: len(payload[category]) for category in _IDENTITIES if category in payload},
                         pages=[descriptor for descriptor, _ in pages])
         raw = _canonical(manifest)
         if len(raw) > _MAX_MANIFEST_BYTES:
