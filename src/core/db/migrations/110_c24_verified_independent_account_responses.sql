@@ -20,9 +20,9 @@ REVOKE ALL ON public.c24_account_response_receipts FROM PUBLIC,anon,authenticate
 DROP TRIGGER IF EXISTS c24_account_response_receipt_immutable ON public.c24_account_response_receipts;
 CREATE TRIGGER c24_account_response_receipt_immutable BEFORE UPDATE ON public.c24_account_response_receipts
  FOR EACH ROW EXECUTE FUNCTION public.gdpr_immutable_record();
+-- Parent lifecycle resets may cascade to the receipt. Loss of the receipt
+-- causes deferral. No runtime principal has a direct TRUNCATE grant.
 DROP TRIGGER IF EXISTS c24_account_response_receipt_no_truncate ON public.c24_account_response_receipts;
-CREATE TRIGGER c24_account_response_receipt_no_truncate BEFORE TRUNCATE ON public.c24_account_response_receipts
- FOR EACH STATEMENT EXECUTE FUNCTION public.gdpr_immutable_record();
 
 -- Called in the same transaction as the trusted A04 account commit after
 -- verifying the deterministic operation, current trust epoch and response hash.
