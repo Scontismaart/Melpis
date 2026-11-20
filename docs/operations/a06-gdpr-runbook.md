@@ -235,6 +235,30 @@ does not by itself establish policy approval.
 | Encrypted export snapshots | Snapshot access expires at 15 minutes. The dedicated minute job deletes chunks for expired operations independently of primary-data flags. | Verify schedule, throughput and overdue age in the target environment. Failed or locked work remains due for retry. |
 | Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
 
+SQL108 adds a separate owner-only preflight for the manual Dashboard subset.
+Run `ordinary_completed_booking_retention_plan` with the exact organization
+and booking IDs in a read-only read committed transaction. A busy tenant lock,
+missing completion or current policy, any applicable hold, a source or
+conversation link, payment or reminder state, provider or outbox link,
+worker capability, ambiguous accounting or linked audit evidence returns no
+candidate. A candidate identifies the exact booking, subject, policy version,
+completion time, allocation revision and ordered request IDs. It always carries
+`deletion_authorized=false`. The planner only recognizes the described structured
+relationships and known ID references. Free text and unverified historical
+copies still need reconciliation, and the result is a point-in-time observation.
+
+An ordinary booking purge requires an independently authenticated journal
+entry with distinct ordinary-booking scope, coverage for all recoverable
+backups, and an authenticated restore replay path. The source transaction must
+revalidate the current policy, holds, immutable completion and receipt scope,
+all provider and financial dependencies, and the locked allocation preimage.
+It must establish booking-ID and request-ID fences before any release of claims,
+receipt deletion, removal of completion evidence, or booking deletion. The
+ordinary evidence FK restricts booking deletion until that lifecycle exists.
+Keep financial counters, audit and provider evidence intact unless a separately
+approved lifecycle establishes disposition. SQL108 grants no application or
+scheduler access and performs no purge.
+
 ### Proposed legacy-message provenance review (read-only)
 
 This is a review protocol only. It neither authorizes retention or erasure nor
