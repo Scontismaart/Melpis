@@ -282,6 +282,75 @@ async def test_related_raw_envelope_blocks_source_until_scrubbed(state_env):
     assert await pool.fetchval('SELECT public.c24_purge_source($1,$2)',org,source)
 
 
+@pytest.mark.parametrize('account_evidence', [
+    'verified', 'claim_mismatch', 'obsolete_epoch', 'ambiguous_actor', 'response_changed', 'ledger_changed', 'client_grant',
+])
+async def test_aged_billed_source_distinguishes_independent_simulator_from_unknown_copy(state_env, account_evidence):
+    from src.core.billing.quota_reservations import QuotaReservations
+    from tests.core.test_quota_reservation_lifecycle import _final, _operation
+
+    env = state_env
+    pool, org, source = (env[key] for key in ('pool', 'org', 'message'))
+    inbound = await commit_source(env, source, '2026-11-12', {'service_id': 'standard'}, 1700000000)
+    await pool.execute("""UPDATE messages SET status='handled',handling_type='ai_handled'
+        WHERE organization_id=$1 AND id=$2""", org, source)
+    await approve_messages(pool, org)
+    await age_message(pool, org, source, 91)
+    simulator = _operation(org, actor_id=env['auth'], content='isolated synthetic simulator input')
+    quota = QuotaReservations(pool)
+    reservation = await quota.reserve(simulator)
+    await quota.commit(simulator, reservation['ticket'], _final(simulator, reservation['ticket']))
+    if account_evidence == 'claim_mismatch':
+        await pool.execute('UPDATE simulation_requests SET claim_token=$3 WHERE organization_id=$1 AND request_id=$2',
+                           org, simulator.id, uuid4())
+    if account_evidence == 'obsolete_epoch':
+        await pool.execute("""UPDATE usage_events SET metadata=jsonb_set(metadata,'{epoch}',to_jsonb($3::text))
+            WHERE organization_id=$1 AND id=$2""", org, simulator.id, str(uuid4()))
+    if account_evidence == 'ambiguous_actor':
+        await pool.execute("""INSERT INTO simulation_requests(organization_id,auth_user_id,request_id,
+                payload_hash,claim_token,status,response,completed_at)
+            SELECT organization_id,$3,request_id,payload_hash,claim_token,status,response,completed_at
+            FROM simulation_requests WHERE organization_id=$1 AND request_id=$2""", org, simulator.id, uuid4())
+    if account_evidence == 'response_changed':
+        await pool.execute("""UPDATE simulation_requests SET response=jsonb_set(response,'{risposta}', '"changed"')
+            WHERE organization_id=$1 AND request_id=$2""", org, simulator.id)
+    if account_evidence == 'ledger_changed':
+        await pool.execute("""UPDATE usage_events SET metadata=metadata || '{"untested": true}'::jsonb
+            WHERE organization_id=$1 AND id=$2""", org, simulator.id)
+    if account_evidence == 'client_grant':
+        await pool.execute('GRANT UPDATE(response) ON simulation_requests TO authenticated')
+    before = await _used(pool, org)
+    account_response = await pool.fetchval('SELECT response FROM simulation_requests WHERE organization_id=$1 AND request_id=$2 AND auth_user_id=$3',
+                                           org, simulator.id, simulator.actor_id)
+    eligible = account_evidence == 'verified'
+    assert await pool.fetchval('SELECT public.c24_purge_source($1,$2)', org, source) is eligible
+    assert await pool.fetchval('SELECT content_purged_at IS NOT NULL FROM messages WHERE organization_id=$1 AND id=$2',
+                               org, source) is eligible
+    assert await pool.fetchval("SELECT response='{}'::jsonb FROM simulation_requests WHERE organization_id=$1 AND request_id=$2",
+                               org, inbound.id) is eligible
+    assert await pool.fetchval('SELECT response FROM simulation_requests WHERE organization_id=$1 AND request_id=$2 AND auth_user_id=$3',
+                               org, simulator.id, simulator.actor_id) == account_response
+    assert await _used(pool, org) == before
+
+
+async def test_account_provenance_ends_with_its_response(state_env):
+    from src.core.billing.quota_reservations import QuotaReservations
+    from tests.core.test_quota_reservation_lifecycle import _final, _operation
+
+    pool, org, actor = (state_env[key] for key in ('pool', 'org', 'auth'))
+    operation = _operation(org, actor_id=actor)
+    quota = QuotaReservations(pool)
+    reservation = await quota.reserve(operation)
+    await quota.commit(operation, reservation['ticket'], _final(operation, reservation['ticket']))
+    assert await pool.fetchval('SELECT count(*) FROM c24_account_response_receipts WHERE organization_id=$1 AND request_id=$2',
+                               org, operation.id) == 1
+    await pool.execute('DELETE FROM simulation_requests WHERE organization_id=$1 AND auth_user_id=$2 AND request_id=$3',
+                       org, actor, operation.id)
+    assert await pool.fetchval('SELECT count(*) FROM c24_account_response_receipts WHERE organization_id=$1 AND request_id=$2',
+                               org, operation.id) == 0
+    assert await _used(pool, org) == 1
+
+
 async def test_outbound_source_purge_uses_immutable_server_receipt_time(state_env):
     env = state_env; pool = env['pool']; org = env['org']; source = env['message']
     await commit_source(env, source, '2026-11-12', {'service_id': 'standard'}, 1700000000)
