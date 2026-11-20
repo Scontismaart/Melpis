@@ -314,6 +314,14 @@ service-role query or use the retention worker as an inventory endpoint.
 
 For C2.4, a false/ineligible target result is a deferral, not a success receipt.
 
+The operator-only `reconcile_legacy_message` procedure accepts an exact
+tenant and source ID in a read-only database-owner transaction. It reports
+which historical anchors are missing and authenticates an independently held
+case digest when contemporaneous original subject and receipt evidence is
+available. The case contains only typed identifiers and a restricted evidence
+reference. A conflict or active scoped hold prevents a due disposition.
+The procedure does not write historical anchors or authorize purging the source.
+
 For verified source-fence expiry, the trusted recovery operator authenticates a
 complete cumulative `c24-restore-v3` checkpoint, including its independently pinned
 SHA-256, minimum sequence, backup identity and exact receipt-prune tuples. Once
