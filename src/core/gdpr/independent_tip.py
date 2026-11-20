@@ -6,6 +6,7 @@ Never bootstrap a missing production authority after a loss.
 """
 
 from contextlib import contextmanager
+import base64
 from dataclasses import dataclass
 from hashlib import sha256
 import hmac
@@ -16,9 +17,11 @@ import stat
 from uuid import UUID
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from src.core.gdpr.journal_publication import (
-    CheckpointPin, _checkpoint_name, _require_cumulative, read_checkpoint, read_segment,
+    CheckpointPin, _checkpoint_name, _previous_key_args, _require_cumulative,
+    _resolve_key_epochs, read_checkpoint, read_segment,
 )
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint
@@ -37,6 +40,17 @@ class AuthorityRecoveryPin:
     installation_id: UUID
     tip: JournalCheckpoint
     sha256: str
+
+
+def _key_fingerprints(public_key, encryption_key):
+    if not isinstance(public_key, Ed25519PublicKey):
+        raise RestoreJournalInvalid("journal_key_epoch_invalid")
+    try:
+        Fernet(encryption_key)
+        return sha256(public_key.public_bytes_raw()).hexdigest(), sha256(
+            base64.urlsafe_b64decode(encryption_key)).hexdigest()
+    except (ValueError, TypeError):
+        raise RestoreJournalInvalid("journal_key_epoch_invalid") from None
 
 
 class IndependentTipStore:
@@ -93,6 +107,9 @@ class IndependentTipStore:
                     connection.execute("""CREATE TABLE policy_pins (
                         org TEXT NOT NULL, backup TEXT NOT NULL, sequence INTEGER NOT NULL,
                         digest TEXT NOT NULL, PRIMARY KEY(org, backup))""")
+                    connection.execute("""CREATE TABLE segment_key_epochs (
+                        sequence INTEGER PRIMARY KEY, digest TEXT NOT NULL,
+                        signing_key_sha TEXT NOT NULL, encryption_key_sha TEXT NOT NULL)""")
             finally:
                 connection.close()
             if os.name != "nt":
@@ -230,9 +247,16 @@ class IndependentTipStore:
         """Advance only after exact readback, with atomic CAS and uniqueness."""
         entries = read_segment(store, self.installation_id, previous_tip, candidate,
                                trusted_public_key=trusted_public_key, encryption_key=encryption_key)
+        key_fingerprints = _key_fingerprints(trusted_public_key, encryption_key)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             current = self._current(conn)
+            active = conn.execute("""SELECT signing_key_sha,encryption_key_sha FROM segment_key_epochs
+                WHERE sequence<=? ORDER BY sequence DESC LIMIT 1""", (previous_tip.sequence,)).fetchone()
+            if active is None and current == _GENESIS and previous_tip == _GENESIS:
+                self._insert_segment_epoch(conn, _GENESIS, key_fingerprints)
+            elif active != key_fingerprints:
+                raise RestoreJournalInvalid("independent_segment_key_not_approved")
             if current != previous_tip:
                 if current == candidate and conn.execute(
                         "SELECT 1 FROM segments WHERE sequence=? AND digest=? AND previous_sequence=? AND previous_digest=?",
@@ -248,6 +272,41 @@ class IndependentTipStore:
             conn.execute("UPDATE authority SET sequence=?, digest=? WHERE id=?",
                          (candidate.sequence, candidate.sha256, str(self.installation_id)))
         return candidate
+
+    @staticmethod
+    def _insert_segment_epoch(conn, tip, key_fingerprints):
+        conn.execute("INSERT INTO segment_key_epochs VALUES (?, ?, ?, ?)",
+                     (tip.sequence, tip.sha256, *key_fingerprints))
+
+    def approve_segment_epoch(self, expected_tip, trusted_public_key, encryption_key):
+        """Record an operator-approved key pair at the exact current boundary."""
+        key_fingerprints = _key_fingerprints(trusted_public_key, encryption_key)
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not _checkpoint(expected_tip) or self._current(conn) != expected_tip:
+                raise RestoreJournalInvalid("independent_authority_conflict")
+            old = conn.execute("SELECT digest,signing_key_sha,encryption_key_sha FROM segment_key_epochs WHERE sequence=?",
+                               (expected_tip.sequence,)).fetchone()
+            if old and old != (expected_tip.sha256, *key_fingerprints):
+                raise RestoreJournalInvalid("independent_segment_boundary_already_approved")
+            if old is None:
+                self._insert_segment_epoch(conn, expected_tip, key_fingerprints)
+
+    def validate_segment_schedule(self, tip, public_key, encryption_key, supplied_epochs=None):
+        """Match all independently pinned epoch boundaries and key fingerprints."""
+        if not _checkpoint(tip):
+            raise RestoreJournalInvalid("independent_authority_invalid")
+        epochs = _resolve_key_epochs(supplied_epochs, public_key, encryption_key, tip)
+        trusted = [(epoch.starts_after.sequence, epoch.starts_after.sha256,
+                    *_key_fingerprints(epoch.public_key, epoch.encryption_key)) for epoch in epochs]
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            if self._current(conn) != tip:
+                raise RestoreJournalInvalid("independent_authority_conflict")
+            actual = conn.execute("""SELECT sequence,digest,signing_key_sha,encryption_key_sha
+                FROM segment_key_epochs ORDER BY sequence LIMIT 1001""").fetchall()
+            if actual != trusted and (actual or tip != _GENESIS):
+                raise RestoreJournalInvalid("independent_segment_key_not_approved")
 
     def _checkpoint(self, conn, org, backup):
         row = conn.execute(
@@ -267,16 +326,18 @@ class IndependentTipStore:
                 raise RestoreBlocked("Independent checkpoint pin unavailable")
             return pin
 
-    def advance_checkpoint(self, store, previous_pin, candidate, *, verification_key, encryption_key):
+    def advance_checkpoint(self, store, previous_pin, candidate, *, verification_key, encryption_key,
+                           previous_keys=None):
         """Commit exact, cumulative checkpoint pin via CAS after verified readback."""
         _checkpoint_name(self.installation_id, candidate)
         org, backup = candidate.organization_id, candidate.backup_id
         args = dict(verification_key=verification_key, encryption_key=encryption_key)
         current_payload = read_checkpoint(
             store, self.installation_id, org, backup, candidate, **args)["payload"]
+        previous_args = _previous_key_args(previous_pin, previous_keys, verification_key, encryption_key)
         if previous_pin is not None:
             previous_payload = read_checkpoint(
-                store, self.installation_id, org, backup, previous_pin, **args)["payload"]
+                store, self.installation_id, org, backup, previous_pin, **previous_args)["payload"]
             _require_cumulative(previous_payload, previous_pin, current_payload, candidate)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -322,11 +383,13 @@ class IndependentTipStore:
             independent_pin=pin, verification_key=verification_key, encryption_key=encryption_key)
         return sealed, data
 
-    def publish_policy(self, store, previous_pin, candidate, sealed, *, verification_key, encryption_key):
+    def publish_policy(self, store, previous_pin, candidate, sealed, *, verification_key, encryption_key,
+                       previous_keys=None):
         """Publish exact readback and atomically pin append-only policy state."""
         name = self._policy_name(candidate)
         org, backup = candidate.organization_id, candidate.backup_id
         args = dict(verification_key=verification_key, encryption_key=encryption_key)
+        previous_args = _previous_key_args(previous_pin, previous_keys, verification_key, encryption_key)
         authenticate_policy_state(
             org, sealed, installation_id=self.installation_id, backup_id=backup,
             independent_pin=candidate, **args)
@@ -338,7 +401,7 @@ class IndependentTipStore:
                     or candidate.sequence < previous_pin.sequence
                     or (candidate.sequence == previous_pin.sequence and candidate != previous_pin)):
                 raise RestoreBlocked("Policy evidence sequence cannot regress")
-            _, (old_layout, old_rows) = self.read_policy(store, previous_pin, **args)
+            _, (old_layout, old_rows) = self.read_policy(store, previous_pin, **previous_args)
             if old_layout != layout or any(
                     latest[table].get(key) != row for table, records in old_rows.items()
                     for key, row in records.items()):

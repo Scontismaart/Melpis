@@ -109,3 +109,66 @@ def test_authority_pins_checkpoint_and_rejects_omissions_even_if_signed(tmp_path
     next_pin = publish_checkpoint(store, installation, dict(payload, sequence=3), previous_pin=pin, **args)
     authority.advance_checkpoint(store, pin, next_pin, **args)
     assert authority.checkpoint_pin(org, "backup") == next_pin
+
+
+def test_checkpoint_rotation_requires_authenticated_previous_generation(tmp_path):
+    from src.core.gdpr.independent_tip import IndependentTipStore
+    from src.core.gdpr.journal_publication import ArtifactKeyPair, LocalJournalStore, publish_checkpoint, read_checkpoint
+    from src.core.gdpr.restore_checkpoint import RestoreBlocked
+
+    data, pins = tmp_path / "data", tmp_path / "pins"
+    data.mkdir(mode=0o700)
+    pins.mkdir(mode=0o700)
+    installation, org = uuid4(), uuid4()
+    store = LocalJournalStore(data)
+    authority = IndependentTipStore.initialize(pins / "tip.sqlite", installation)
+    old = ArtifactKeyPair(bytes(range(32)), Fernet.generate_key())
+    new = ArtifactKeyPair(bytes(range(1, 33)), Fernet.generate_key())
+    payload = {"version": "c24-restore-v3", "organization_id": str(org), "backup_id": "backup",
+               "sequence": 1, "complete": True, "erasures": [], "stay_purges": [], "receipt_prunes": []}
+    prior = publish_checkpoint(store, installation, payload,
+                               verification_key=old.verification_key, encryption_key=old.encryption_key)
+    authority.advance_checkpoint(store, None, prior,
+                                 verification_key=old.verification_key, encryption_key=old.encryption_key)
+    rotated = publish_checkpoint(store, installation, dict(payload, sequence=2),
+                                 verification_key=new.verification_key, encryption_key=new.encryption_key,
+                                 previous_pin=prior, previous_keys=old)
+    with pytest.raises(RestoreBlocked):
+        authority.advance_checkpoint(store, prior, rotated,
+                                     verification_key=new.verification_key, encryption_key=new.encryption_key)
+    authority.advance_checkpoint(store, prior, rotated, verification_key=new.verification_key,
+                                 encryption_key=new.encryption_key, previous_keys=old)
+    result = read_checkpoint(store, installation, org, "backup", authority.checkpoint_pin(org, "backup"),
+                             verification_key=new.verification_key, encryption_key=new.encryption_key)
+    assert result["payload"]["sequence"] == 2
+
+
+def test_tip_authority_rejects_unapproved_epoch_and_retains_approved_boundary(tmp_path):
+    from src.core.gdpr.independent_tip import IndependentTipStore
+    from src.core.gdpr.journal_publication import LocalJournalStore, SegmentKeyEpoch, publish_segment
+
+    objects, pins = tmp_path / "objects", tmp_path / "pins"
+    objects.mkdir(mode=0o700)
+    pins.mkdir(mode=0o700)
+    installation = uuid4()
+    authority = IndependentTipStore.initialize(pins / "authority.sqlite", installation)
+    store = LocalJournalStore(objects)
+    old, new = Ed25519PrivateKey.generate(), Ed25519PrivateKey.generate()
+    old_key, new_key = Fernet.generate_key(), Fernet.generate_key()
+    genesis = authority.current()
+    entry = {"organization_id": str(uuid4()), "operation_id": str(uuid4()), "scope": "organization",
+             "subject_id": None, "identifier_digest": None, "key_id": None}
+    middle = publish_segment(store, installation, genesis, [entry], signer=old, encryption_key=old_key)
+    authority.advance(store, genesis, middle, trusted_public_key=old.public_key(), encryption_key=old_key)
+    second = [dict(entry, operation_id=str(uuid4()))]
+    latest = publish_segment(store, installation, middle, second, signer=new, encryption_key=new_key)
+    with pytest.raises(RestoreJournalInvalid):
+        authority.advance(store, middle, latest, trusted_public_key=new.public_key(), encryption_key=new_key)
+    authority.approve_segment_epoch(middle, new.public_key(), new_key)
+    authority.advance(store, middle, latest, trusted_public_key=new.public_key(), encryption_key=new_key)
+    schedule = [SegmentKeyEpoch(genesis, old.public_key(), old_key),
+                SegmentKeyEpoch(middle, new.public_key(), new_key)]
+    reopened = IndependentTipStore(pins / "authority.sqlite", installation)
+    reopened.validate_segment_schedule(latest, old.public_key(), old_key, schedule)
+    with pytest.raises(RestoreJournalInvalid):
+        reopened.validate_segment_schedule(latest, new.public_key(), new_key, schedule[1:])

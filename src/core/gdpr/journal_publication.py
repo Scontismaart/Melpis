@@ -13,13 +13,13 @@ import re
 import stat
 import tempfile
 from hashlib import sha256
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
 from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from src.core.gdpr.restore_journal import (
     JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _DOMAIN,
@@ -225,8 +225,17 @@ def read_segment(store: JournalStore, installation_id, previous_tip, independent
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SegmentKeyEpoch:
+    """Keys independently approved to verify segments after one exact boundary."""
+
+    starts_after: JournalCheckpoint
+    public_key: Ed25519PublicKey
+    encryption_key: bytes = field(repr=False)
+
+
 def read_chain(store, installation_id, backup_checkpoint, segment_tips, independent_tip,
-               *, trusted_public_key, encryption_key):
+               *, trusted_public_key, encryption_key, key_epochs=None):
     """Verify complete, contiguous coverage to the independently supplied tip.
 
     The operator supplies the ordered segment index. Missing index entries,
@@ -237,11 +246,27 @@ def read_chain(store, installation_id, backup_checkpoint, segment_tips, independ
             or type(segment_tips) not in (tuple, list) or len(segment_tips) > 10000
             or independent_tip.sequence < backup_checkpoint.sequence):
         raise RestoreJournalInvalid("journal_bounds_invalid")
+    epochs = _resolve_key_epochs(key_epochs, trusted_public_key, encryption_key, independent_tip)
+    epoch_index = 0
+    while (epoch_index + 1 < len(epochs)
+           and epochs[epoch_index + 1].starts_after.sequence <= backup_checkpoint.sequence):
+        epoch_index += 1
+    if (epochs[epoch_index].starts_after.sequence == backup_checkpoint.sequence
+            and epochs[epoch_index].starts_after != backup_checkpoint):
+        raise RestoreJournalInvalid("journal_key_boundary_mismatch")
     previous, entries, seen = backup_checkpoint, [], set()
     for tip in segment_tips:
+        if not _checkpoint(tip):
+            raise RestoreJournalInvalid("journal_bounds_invalid")
+        epoch = epochs[epoch_index]
+        next_epoch = epochs[epoch_index + 1] if epoch_index + 1 < len(epochs) else None
+        if next_epoch is not None and tip.sequence >= next_epoch.starts_after.sequence:
+            if tip != next_epoch.starts_after:
+                raise RestoreJournalInvalid("journal_key_boundary_mismatch")
+            epoch_index += 1
         result = read_segment(store, installation_id, previous, tip,
-                              trusted_public_key=trusted_public_key,
-                              encryption_key=encryption_key)
+                              trusted_public_key=epoch.public_key,
+                              encryption_key=epoch.encryption_key)
         for entry in result:
             identity = (entry.organization_id, entry.operation_id)
             if identity in seen or len(entries) >= 100000:
@@ -254,12 +279,46 @@ def read_chain(store, installation_id, backup_checkpoint, segment_tips, independ
     return tuple(entries)
 
 
+def _resolve_key_epochs(key_epochs, public_key, encryption_key, independent_tip):
+    if key_epochs is None:
+        return (SegmentKeyEpoch(JournalCheckpoint(0, "0" * 64), public_key, encryption_key),)
+    if type(key_epochs) not in (tuple, list) or not 1 <= len(key_epochs) <= 1000:
+        raise RestoreJournalInvalid("journal_key_epoch_invalid")
+    last = -1
+    for epoch in key_epochs:
+        if (type(epoch) is not SegmentKeyEpoch or not _checkpoint(epoch.starts_after)
+                or not last < epoch.starts_after.sequence <= independent_tip.sequence
+                or (last == -1 and epoch.starts_after.sequence != 0)
+                or not isinstance(epoch.public_key, Ed25519PublicKey)):
+            raise RestoreJournalInvalid("journal_key_epoch_invalid")
+        try:
+            Fernet(epoch.encryption_key)
+        except (TypeError, ValueError):
+            raise RestoreJournalInvalid("journal_key_epoch_invalid") from None
+        last = epoch.starts_after.sequence
+    return tuple(key_epochs)
+
+
 @dataclass(frozen=True, slots=True)
 class CheckpointPin:
     organization_id: UUID
     backup_id: str
     sequence: int
     sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactKeyPair:
+    verification_key: bytes = field(repr=False)
+    encryption_key: bytes = field(repr=False)
+
+
+def _previous_key_args(previous_pin, previous_keys, verification_key, encryption_key):
+    if previous_keys is None:
+        return dict(verification_key=verification_key, encryption_key=encryption_key)
+    if previous_pin is None or type(previous_keys) is not ArtifactKeyPair:
+        raise RestoreBlocked("Previous artifact pin and keys required")
+    return dict(verification_key=previous_keys.verification_key, encryption_key=previous_keys.encryption_key)
 
 
 def _checkpoint_name(installation_id, pin):
@@ -295,7 +354,7 @@ def _require_cumulative(previous, previous_pin, current, pin):
 
 
 def publish_checkpoint(store, installation_id, payload, *, verification_key, encryption_key,
-                       previous_pin=None):
+                       previous_pin=None, previous_keys=None):
     """Authenticate a complete v3 checkpoint from operator-reconciled evidence."""
     try:
         if payload["version"] != "c24-restore-v3":
@@ -311,10 +370,11 @@ def publish_checkpoint(store, installation_id, payload, *, verification_key, enc
         _authenticate_checkpoint(pin.organization_id, checkpoint,
                                  verification_key=verification_key, backup_id=pin.backup_id,
                                  minimum_sequence=pin.sequence, checkpoint_sha256=pin.sha256)
+        previous_args = _previous_key_args(previous_pin, previous_keys, verification_key, encryption_key)
         if previous_pin is not None:
             previous = read_checkpoint(
                 store, installation_id, pin.organization_id, pin.backup_id, previous_pin,
-                verification_key=verification_key, encryption_key=encryption_key)["payload"]
+                **previous_args)["payload"]
             _require_cumulative(previous, previous_pin, payload, pin)
         sealed = cipher.encrypt(_canonical(checkpoint))
         if len(sealed) > _MAX_OBJECT:
