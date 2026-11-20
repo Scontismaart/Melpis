@@ -81,11 +81,17 @@ data is returned. Do not copy tickets into logs, support systems, or URLs.
 
 Snapshots are encrypted in PostgreSQL and streamed in bounded chunks. A row
 over 512 KiB is omitted and recorded as partial. A snapshot over 512 MiB fails
-closed and requires a controlled offline export process. Snapshot expiry is
-15 minutes; the expiry worker removes encrypted chunks and marks the operation
-expired. Verify the worker is scheduled and monitor failures. An export
-manifest identifies excluded and partial categories; an export is not proof
-that all external copies or backups were searched.
+closed and requires a controlled offline export process. Access to a snapshot
+expires after 15 minutes. The dedicated `gdpr_export_expiry` job runs every
+minute when the scheduler is active, independently of the primary-data flags
+and worker-capability scrubbing. It removes encrypted chunks and marks each
+operation expired in the same transaction. It skips locked operations, works
+in batches of 100 with a maximum of ten batches per run, and reports
+`oldest_overdue_seconds` without subject or tenant identifiers. Monitor failed
+runs and overdue age, including across restarts and periods of high export
+volume. Physical removal depends on the deployed schedule and its capacity.
+The export manifest identifies excluded and partial categories. External
+copies and backups require separate coverage evidence.
 
 ## Handling an erasure request
 
@@ -102,6 +108,14 @@ that all external copies or backups were searched.
    categories involved and the cutover. Organization scope also requires
    knowledge-content and organization-profile policies. Missing policy rows
    are expected until C05 approval is recorded through the authorized process.
+   With migration 107, local erasure also checks scoped holds under the tenant
+   lock that serializes hold and policy changes. A known overlap yields
+   `scoped_legal_hold`. Unresolved record lineage or a potentially shared inbox
+   or worker-cache copy yields `legal_hold_scope_unverified`. An overdue review
+   remains a hold until the authorized release is recorded. When a hold registry
+   exists but the restricted lookup is unavailable, erasure is deferred with
+   `legal_hold_check_unavailable`. The backend receives only a decision for
+   the persisted operation. It does not read hold reasons or review identities.
 4. If the checks pass and erasure execution has been approved and enabled,
    the local transaction creates a durable erasure barrier and erases or
    redacts the supported relational records. It does not physically cascade
@@ -115,8 +129,10 @@ that all external copies or backups were searched.
 6. External provider work is a separately fenced stage. Recorded dependencies
 can include Meta, AI providers, Google Calendar and Business, Airtable, external
 booking, configured Softr/Sentry/SMTP, Stripe retention review, backups, and
-worker caches. A permanent `provider.inventory_review` step is held for C05
-inventory review; adapters cannot confirm it. Only a verified,
+worker caches. Dispatch claims only an existing inventoried step after the
+locked erasure operation has confirmed local work and remains partial.
+`provider.inventory_review` is reserved for the controller. A lookup at a
+provider is allowed only for an authorized uncertain step. Only a verified,
    authenticated, operation-correlated deletion receipt confirms a stage.
    Bare HTTP 2xx/202 and transport failures are uncertain. Never resend a
    destructive request after uncertainty without provider-native idempotency
@@ -192,7 +208,10 @@ scan of inbox envelopes, messages, conversation state and concluded request
 receipts. A batch considers up to 100 targets. Work that becomes due after the
 scan started can enter the next scan when the cursor wraps. The target routines
 still check the current tenant policy, holds, lineage and activity on each
-attempt. The independent hotel lifecycle keeps its own cursor.
+attempt. Ordinary and hotel sweeps each commit their own transaction and
+cursor. Each transaction revalidates the dedicated operator. If an ordinary
+sweep hits a transient lock or timeout error, hotel work can still commit and
+the scheduler reports a failed run. Authorization failures stop the run.
 `GET /api/gdpr/retention-policy` reports
 `policy_version=tenant-approval-required`, the `C05 #100` policy/cutover gate,
 and `null` for `retention_days`, `purge_after_days`, and
@@ -208,8 +227,9 @@ does not by itself establish policy approval.
 | `technical_receipts` request records | The SQL089 sweep, replaced and extended by SQL096, handles concluded `booking_conversation_requests` under the 90-day technical-receipt policy using `c24_concluded_at` and the private keyset cursor. | Requires the C2.4 dedicated role, valid tenant policy, no hold, and safe lifecycle state. A held/uncertain target is deferred and the bounded cursor advances; a false `batch_clear` is not a completed sweep. Other webhook/idempotency rows are not covered by this claim. No successful live run is evidenced. |
 | C2.4 replay and suppression metadata | SQL100 records verified immutable receipt conclusions. SQL103–104 expire only source fences with that conclusion, exact purged-source lineage, receipt-cleanup evidence and an independently retained checkpoint binding. Derived retention audit records inherit the same conclusion. SQL102/104 bound target lock waits and yield at batch boundaries. | Current policy and holds remain authoritative. Unknown historical dates, idle watermarks, and separate erasure audit evidence still require reconciliation. Checkpoint availability, independent recovery-store operation, and throughput at actual load remain operational gates. |
 | `booking_stay_content` | Migration 089's hotel sweep and migration 091's hotel lifecycle functions archive completed allocation state or purge eligible stay content after completion/lineage checks. | The 12-month period applies to eligible content only. It does not set a period for outbox, audit, or replay fences/tombstones; the reviewed source has no cleanup path for the stay purge fences and tombstones. Current approved policy, no matching hold, valid completion/allocation evidence, and safe terminal state are required. Schedule and tenant policy are unverified. |
+| `completed_bookings_and_stays` for ordinary managed bookings | Candidate SQL106 records immutable evidence for a new typed human completion of a finished managed minute allocation with corroborating receipt, tenant and subject. The private date check uses the allocation timezone and current approved retention of 1–12 calendar months. | Owner-only planning check. The application role retains privileged booking write capabilities, so validate actual writer roles and independent evidence before giving this record destructive authority. Review unmanaged and historical records using contemporaneous proof. Build scoped redaction or removal, billing separation, dependent-copy reconciliation, replay protection, and restore verification before scheduling expiry. |
 | Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload containing booking/customer and confirmation details. Merged PR #179 (`f5f5040`) adds migration 094 and transactional scrubbing: successful completion clears the payload; a PostgreSQL-only bounded cleanup nulls expired unconsumed payloads while retaining hashes and replay tombstones. Migration check [run #43741180457](https://github.com/Scontismaart/Melpis/actions/runs/43741180457) applied all migrations in order through 094 in a disposable database. | Expiry limits authority but does not itself delete content. CI/source evidence does not prove Staging or Production application or a scheduled run. No live schedule, backup/cache cleanup, or subject-scope behavior is certified. Do not treat capability tombstones as zero-cost billing evidence. |
-| Encrypted export snapshots | The general retention worker expires export operations and removes encrypted chunks after the 15-minute snapshot lifetime, independently of the primary-data-retention flag. | The job must be deployed and monitored. A failed purge leaves data for retry; no live schedule or provider/backup deletion is established. |
+| Encrypted export snapshots | Snapshot access expires at 15 minutes. The dedicated minute job deletes chunks for expired operations independently of primary-data flags. | Verify schedule, throughput and overdue age in the target environment. Failed or locked work remains due for retry. |
 | Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
 
 ### Proposed legacy-message provenance review (read-only)
