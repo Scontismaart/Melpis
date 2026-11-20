@@ -20,7 +20,7 @@ def _material(scope, subject, identifier, key_id):
 
 def _valid_material(scope, subject, identifier, key_id):
     if scope == "contact":
-        return type(subject) is UUID and bool(subject.int) and _hex(identifier, 64) and _hex(key_id, 16)
+        return isinstance(subject, UUID) and bool(subject.int) and _hex(identifier, 64) and _hex(key_id, 16)
     return scope == "organization" and subject is None and identifier is None and key_id is None
 
 
@@ -102,7 +102,7 @@ async def capture_erasure_journal_delta_paged(
                 if (row["kind"] != "erase" or row["operation_status"] not in {"partial", "completed"}
                         or row["operation_scope"] != scope or row["operation_subject"] != subject
                         or row["local_status"] != "confirmed" or row["event_count"] != 1
-                        or type(operation) is not UUID or not operation.int
+                        or not isinstance(operation, UUID) or not operation.int
                         or type(event_id) is not int or event_id < 1):
                     raise RestoreBlocked("Source erasure lineage is incomplete")
                 prior = index.execute("SELECT fingerprint,sequence FROM evidence WHERE identity=?",
