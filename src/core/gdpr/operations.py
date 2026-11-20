@@ -4,6 +4,8 @@ import json
 import re
 from uuid import UUID, uuid4
 
+_PROVIDER_LOCAL_ATTEMPTS = 5
+_UNSENT_EXHAUSTED = 'confirmed_not_sent_budget_exhausted'
 
 class RequestConflict(ValueError):
     pass
@@ -19,6 +21,12 @@ def encode(value):
 
 def document(value):
     return json.loads(value) if isinstance(value, str) else value
+
+
+def _provider_attempt_limit(evidence):
+    value = document(evidence)
+    limit = value.get('dispatch_ceiling') if isinstance(value, dict) else None
+    return limit if type(limit) is int and _PROVIDER_LOCAL_ATTEMPTS < limit < 2**31 else _PROVIDER_LOCAL_ATTEMPTS
 
 
 def verified_receipt(receipt, org, oid, provider):
@@ -145,7 +153,7 @@ class Operations:
         async with self.pool.acquire() as conn, conn.transaction():
             await self._lock_provider_operation(conn, org, oid)
             row = await conn.fetchrow(
-                '''SELECT status,fence,lease_until,lease_until>NOW() AS live FROM gdpr_operation_steps
+                '''SELECT status,fence,attempts,evidence,lease_until,lease_until>NOW() AS live FROM gdpr_operation_steps
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 FOR UPDATE''', org, oid, name,
             )
             # Only the inventory captured during authorized local erasure can
@@ -159,8 +167,13 @@ class Operations:
                            WHERE organization_id=$1 AND operation_id=$2 AND name=$3''', org, oid, name,
                     )
                     await event(conn, org, oid, 'provider.uncertain', provider=name)
+                    await refresh_provider_coverage(conn, org, oid)
                 return None
             if row['status'] != 'pending':
+                return None
+            limit = _provider_attempt_limit(row['evidence'])
+            if row['attempts'] >= limit:
+                await self._record_unsent_exhaustion(conn, org, oid, name, row['attempts'], limit)
                 return None
             fence = await conn.fetchval(
                 '''UPDATE gdpr_operation_steps SET status='running',fence=fence+1,attempts=attempts+1,
@@ -174,12 +187,23 @@ class Operations:
         """Trusted adapter boundary; bare HTTP success is NOT a deletion receipt."""
         org, oid = UUID(str(org)), UUID(str(operation_id))
         valid = verified_receipt(receipt, org, oid, name)
-        status = 'confirmed' if valid else 'pending' if not_sent else 'uncertain'
+        status = 'confirmed' if valid else 'pending' if not_sent is True and receipt is None else 'uncertain'
         evidence = {'digest': receipt['evidence_digest']} if valid else {}
         async with self.pool.acquire() as conn, conn.transaction():
             if not self._dispatchable_provider(name):
                 raise OperationUnavailable('Provider stage is not dispatchable')
             await self._lock_provider_operation(conn, org, oid)
+            if status == 'pending':
+                row = await conn.fetchrow('''SELECT attempts,evidence FROM gdpr_operation_steps
+                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 AND fence=$4
+                      AND status='running' AND lease_until>NOW() FOR UPDATE''', org, oid, name, fence)
+                if row is None:
+                    raise RequestConflict('Stale provider worker')
+                limit = _provider_attempt_limit(row['evidence'])
+                if row['attempts'] >= limit:
+                    await self._record_unsent_exhaustion(conn, org, oid, name, row['attempts'], limit)
+                    return 'failed'
+                evidence = {'dispatch_ceiling': limit}
             result = await conn.execute(
                 '''UPDATE gdpr_operation_steps SET status=$5,evidence=$6::jsonb,lease_until=NULL,updated_at=NOW()
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 AND fence=$4
@@ -190,6 +214,41 @@ class Operations:
             await event(conn, org, oid, 'provider.' + status, provider=name, fence=fence)
             await refresh_provider_coverage(conn, org, oid)
         return status
+
+    @staticmethod
+    async def _record_unsent_exhaustion(conn, org, oid, name, attempts, limit):
+        await conn.execute('''UPDATE gdpr_operation_steps SET status='failed',fence=fence+1,evidence=$4::jsonb,
+                 lease_until=NULL,updated_at=NOW() WHERE organization_id=$1 AND operation_id=$2 AND name=$3''',
+            org, oid, name, encode({'reason': _UNSENT_EXHAUSTED, 'dispatch_ceiling': limit}))
+        await event(conn, org, oid, 'provider.dead_letter', provider=name, attempts=attempts, reason=_UNSENT_EXHAUSTED)
+        await refresh_provider_coverage(conn, org, oid)
+
+    async def requeue_definitely_unsent(self, org, operation_id, name, *, evidence_reference):
+        """Authorize one more local attempt after an operator verifies remediation."""
+        org, oid = UUID(str(org)), UUID(str(operation_id))
+        if (not self._dispatchable_provider(name) or type(evidence_reference) is not str
+                or not re.fullmatch(r'[A-Za-z0-9_.:/-]{1,128}', evidence_reference)):
+            raise OperationUnavailable('Exact provider remediation evidence required')
+        reference_digest = hashlib.sha256(evidence_reference.encode('ascii')).hexdigest()
+        async with self.pool.acquire() as conn, conn.transaction():
+            await self._lock_provider_operation(conn, org, oid)
+            if await conn.fetchval('''SELECT EXISTS(SELECT FROM gdpr_operation_events
+                WHERE organization_id=$1 AND operation_id=$2 AND event_type='provider.requeued_unsent'
+                  AND details->>'provider'=$3 AND details->>'digest'=$4)''', org, oid, name, reference_digest):
+                return
+            row = await conn.fetchrow('''SELECT attempts,evidence FROM gdpr_operation_steps
+                WHERE organization_id=$1 AND operation_id=$2 AND name=$3 AND status='failed' FOR UPDATE''',
+                org, oid, name)
+            evidence = document(row['evidence']) if row else None
+            if (type(evidence) is not dict or evidence.get('reason') != _UNSENT_EXHAUSTED
+                    or not _PROVIDER_LOCAL_ATTEMPTS <= row['attempts'] < 2**31 - 1):
+                raise OperationUnavailable('Provider stage has no verified unsent dead letter')
+            await conn.execute('''UPDATE gdpr_operation_steps SET status='pending',fence=fence+1,evidence=$4::jsonb,
+                updated_at=NOW() WHERE organization_id=$1 AND operation_id=$2 AND name=$3''',
+                org, oid, name, encode({'dispatch_ceiling': row['attempts'] + 1}))
+            await event(conn, org, oid, 'provider.requeued_unsent', provider=name, attempts=row['attempts'],
+                        digest=reference_digest)
+            await refresh_provider_coverage(conn, org, oid)
 
     async def provider_reconcilable(self, org, operation_id, name):
         """Check authorization before consulting an external receipt endpoint."""

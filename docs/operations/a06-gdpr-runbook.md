@@ -143,6 +143,11 @@ copies and backups require separate coverage evidence.
    authorized. Existing Airtable/Softr propagation helpers make no HTTP
    requests and return unconfirmed results. Discovering configuration is only
    evidence of possible copies, not proof that historical copies are absent.
+   A stage rejected locally before dispatch exhausts its automatic budget after
+   five attempts and records `provider.dead_letter`. The operation stays
+   partial. An authorized operator can record an opaque remediation reference
+   to allow one additional attempt. This route does not reopen uncertain stages
+   and makes no HTTP request itself.
 7. Report the durable status and each blocker or partial category to the
    controller. Do not report complete while any required provider receipt,
    worker-cache handling, backup treatment, legal decision, or review remains

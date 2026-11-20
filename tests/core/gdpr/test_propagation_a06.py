@@ -185,6 +185,36 @@ async def test_receipt_lookup_requires_uncertain_stage(pg_pool, sample_org, loca
 
 
 @pytest.mark.asyncio
+async def test_definite_local_rejection_reaches_auditable_dead_letter_without_retrying_uncertainty(pg_pool, sample_org, monkeypatch):
+    class NeverDispatched:
+        provider = "provider.synthetic"
+        idempotent_delete = True
+        attempts = 0
+
+        async def delete(self, *_args, **_kwargs):
+            self.attempts += 1
+            raise propagation.DefinitelyNotSent("synthetic local failure")
+
+    org = sample_org["id"]
+    oid = await make_partial_operation(pg_pool, org)
+    adapter = NeverDispatched()
+    monkeypatch.setenv("GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED", "true")
+    for _ in range(4):
+        assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "not_sent"
+    assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "failed"
+    assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "not_dispatched"
+    assert adapter.attempts == 5
+    await propagation.requeue_definitely_unsent(pg_pool, org, oid, adapter.provider, evidence_reference="qa:repaired")
+    assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "failed"
+    await propagation.requeue_definitely_unsent(pg_pool, org, oid, adapter.provider, evidence_reference="qa:repaired")
+    assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "not_dispatched"
+    assert adapter.attempts == 6
+    result = await Operations(pg_pool).get(org, oid, "provider-qa")
+    assert result["status"] == "partial"
+    assert result["manifest"]["provider_status"][adapter.provider] == "failed"
+
+
+@pytest.mark.asyncio
 async def test_uncertain_delete_is_not_retried_and_get_receipt_reconciles(
     pg_pool, sample_org, local_provider, monkeypatch, caplog,
 ):
@@ -197,6 +227,8 @@ async def test_uncertain_delete_is_not_retried_and_get_receipt_reconciles(
 
     assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "uncertain"
     assert await propagation.propagate_operation(pg_pool, org, oid, adapter.provider, adapter) == "not_dispatched"
+    with pytest.raises(OperationUnavailable, match="no verified unsent"):
+        await propagation.requeue_definitely_unsent(pg_pool, org, oid, adapter.provider, evidence_reference="qa:no")
     assert state.deletes == 1
     await propagation.reconcile_operation(pg_pool, org, oid, adapter.provider, adapter)
     assert state.lookups == 1
