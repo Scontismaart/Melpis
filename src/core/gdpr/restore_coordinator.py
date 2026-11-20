@@ -170,6 +170,29 @@ async def _replay_receipt_prunes(conn, org, checkpoint, prunes, pin, verificatio
     await _verify_replayed_receipt_prunes(conn, org, prunes)
 
 
+async def _replay_stay_retention(conn, org, purges):
+    """Reapply exactly signed retention purges with current lifecycle checks."""
+    if not purges:
+        return
+    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR NO KEY UPDATE", org)
+    await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))", str(org))
+    for booking, subject, purpose, operation, version, requests in purges:
+        if purpose != "retention":
+            continue  # The signed erasure path is handled by Deletion.advance.
+        if await conn.fetchval("""SELECT EXISTS(SELECT FROM booking_stay_purge_fences
+            WHERE organization_id=$1 AND booking_id=$2)""", org, booking):
+            continue  # The final verifier requires exact matching evidence and absence.
+        original_subject = await conn.fetchval("""SELECT original_subject_id FROM booking_stays
+            WHERE organization_id=$1 AND booking_id=$2 FOR UPDATE""", org, booking)
+        restored_requests = await conn.fetch("""SELECT request_id FROM booking_allocation_requests
+            WHERE organization_id=$1 AND booking_id=$2""", org, booking)
+        if original_subject != subject or {row["request_id"] for row in restored_requests} != requests:
+            raise RestoreBlocked("Restored stay lineage does not match authenticated purge")
+        await conn.fetchval("SELECT public.archive_completed_hotel_allocation($1,$2)", org, booking)
+        await conn.fetchval("SELECT public.booking_stay_admin_purge($1,$2,'retention',NULL,$3)",
+                            org, booking, version)
+
+
 async def replay_primary_published_erasures(
     pool, authority, store, *, quarantine_database, policy_verification_key,
     policy_encryption_key, **trust,
@@ -219,7 +242,8 @@ async def replay_primary_published_erasures(
             await verify_policy_state(
                 conn, org, ciphertext, installation_id=authority.installation_id,
                 backup_id=backup_id, independent_pin=pin, **policy_args)
-            checkpoint, _, _, _, prunes = checkpoints[org]
+            checkpoint, _, _, purges, prunes = checkpoints[org]
+            await _replay_stay_retention(conn, org, purges)
             await _replay_receipt_prunes(
                 conn, org, checkpoint, prunes, pins[org], trust["checkpoint_verification_key"])
         result = await verify_primary_published_restore(conn, authority, store, **trust)

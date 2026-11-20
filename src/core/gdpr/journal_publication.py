@@ -59,6 +59,15 @@ class LocalJournalStore:
         if not isinstance(name, str) or not _OBJECT_NAME.fullmatch(name):
             raise RestoreJournalInvalid("journal_object_name_invalid")
         path = self.root / name
+        # Journal names contain installation/tenant UUIDs and a digest. On
+        # Windows those names can exceed MAX_PATH even in a valid private
+        # directory. Use the native absolute extended-length path; the
+        # canonical root and strict object name were checked above.
+        if os.name == "nt":
+            value = str(path)
+            if not value.startswith("\\\\?\\"):
+                value = "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+            path = Path(value)
         if path.is_symlink():
             raise RestoreJournalInvalid("journal_object_invalid")
         return path
