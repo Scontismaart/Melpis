@@ -45,12 +45,20 @@ async def propagate_operation(pool, organization_id, operation_id, provider, ada
     try:
         receipt = await adapter.delete(org, oid, idempotency_key=str(oid))
     except DefinitelyNotSent:
-        await ops.provider_result(org, oid, provider, fence, not_sent=True)
-        return 'not_sent'
+        result = await ops.provider_result(org, oid, provider, fence, not_sent=True)
+        return 'not_sent' if result == 'pending' else result
     except Exception:
         await ops.provider_result(org, oid, provider, fence)
         return 'uncertain'
     return await ops.provider_result(org, oid, provider, fence, receipt=receipt)
+
+
+async def requeue_definitely_unsent(pool, organization_id, operation_id, provider, *, evidence_reference):
+    """Operator-only recovery after known local rejection, with no HTTP call."""
+    if os.getenv('GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED') != 'true':
+        raise OperationUnavailable('Provider recovery requires separate cutover authorization')
+    await Operations(pool).requeue_definitely_unsent(organization_id, operation_id, provider,
+                                                    evidence_reference=evidence_reference)
 
 
 async def reconcile_operation(pool, organization_id, operation_id, provider, adapter):
