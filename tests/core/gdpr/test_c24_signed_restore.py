@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import subprocess
+from datetime import datetime, timezone
 from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -21,6 +22,7 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from src.core.gdpr.deletion import Deletion
+from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
 from src.core.gdpr.operations import Operations
 from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked,
@@ -113,8 +115,34 @@ async def _verify_restore_target(container):
         assert binding == f"127.0.0.1:{_CONTAINERS[container]}"
 
 
+def _promote_restored_backup(authority, store, *, backup_id, anchor, organizations, encrypted_backup,
+                            signer, journal_key, checkpoint_key, policy_key, policy_cipher):
+    from src.core.gdpr.checkpoint_pages import read_any_checkpoint
+
+    inventory = json.dumps(dict(version=1, installation_id=str(authority.installation_id), backups=[
+        dict(backup_id=backup_id, manifest_sha256=sha256(encrypted_backup).hexdigest(),
+             completed_at=datetime.now(timezone.utc).isoformat(), organizations=list(map(str, organizations)),
+             anchor=dict(sequence=anchor.sequence, sha256=anchor.sha256), exception=None)])).encode()
+    inventory_digest = sha256(inventory).hexdigest()
+    keys = dict(verification_key=checkpoint_key, encryption_key=journal_key)
+    candidates = {}
+    for org in organizations:
+        old = authority.checkpoint_pin(org, backup_id)
+        payload = read_any_checkpoint(store, authority.installation_id, org, backup_id, old, **keys)
+        candidate = dict(payload, version="c24-restore-v5", sequence=old.sequence+1,
+                         ordinary_booking_purges=payload.get("ordinary_booking_purges", []))
+        candidates[org, backup_id] = publish_checkpoint_pages(store, authority.installation_id, candidate,
+                                                               previous_pin=old, **keys)
+    authority.promote_paged_checkpoints(store, inventory, candidates=candidates,
+        latest_inventory_sha256=inventory_digest, trusted_public_key=signer.public_key(),
+        journal_encryption_key=journal_key, checkpoint_verification_key=checkpoint_key,
+        checkpoint_encryption_key=journal_key, policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+    return inventory, inventory_digest
+
+
 @pytest.mark.asyncio
-async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch, tmp_path):
+@pytest.mark.parametrize("published_v5", [False, True], ids=["v3", "v5"])
+async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch, tmp_path, published_v5):
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
@@ -229,6 +257,11 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     with pytest.raises(RestoreBlocked):
         authority.publish_policy(store, None, old_policy_pin, old_policy_ciphertext,
                                  verification_key=policy_key, encryption_key=policy_cipher)
+    inventory, inventory_digest = (None, None)
+    if published_v5:
+        inventory, inventory_digest = _promote_restored_backup(authority, store, backup_id="synthetic-backup",
+            anchor=anchor, organizations=[org, foreign], encrypted_backup=encrypted_snapshot, signer=signer,
+            journal_key=journal_key, checkpoint_key=checkpoint_key, policy_key=policy_key, policy_cipher=policy_cipher)
 
     restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
     await _docker("exec", container, "createdb", "-U", principal, restored_db)
@@ -251,6 +284,7 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
                     trusted_public_key=signer.public_key(), journal_encryption_key=journal_key,
                     checkpoint_verification_key=checkpoint_key,
                     checkpoint_encryption_key=journal_key,
+                    recovery_inventory_bytes=inventory, latest_inventory_sha256=inventory_digest,
                 )
 
         async def verify():
@@ -276,9 +310,30 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
                 checkpoint_encryption_key=journal_key, quarantine_database=restored_db,
                 policy_verification_key=policy_key,
                 policy_encryption_key=policy_cipher,
+                ordinary_inventory_bytes=inventory, latest_inventory_sha256=inventory_digest,
             )
+        if published_v5:
+            later_hold = uuid4()
+            async with env["pool"].acquire() as conn, conn.transaction():
+                await add_hold(conn, org, later_hold)
+
+            async def update_policy(sequence):
+                previous = authority.policy_pin(org, "synthetic-backup")
+                async with env["pool"].acquire() as conn, conn.transaction(readonly=True):
+                    current, ciphertext = await capture_policy_state(conn, org, sequence=sequence, **policy_trust)
+                authority.publish_policy(store, previous, current, ciphertext,
+                                         verification_key=policy_key, encryption_key=policy_cipher)
+
+            await update_policy(2)
+            with pytest.raises(RestoreBlocked, match="blocked by current policy or evidence"):
+                await replay()
+            assert not await pool.fetchval("SELECT EXISTS(SELECT FROM gdpr_erasure_barriers WHERE organization_id=$1 AND operation_id=$2)", org, operation)
+            async with env["pool"].acquire() as conn, conn.transaction():
+                await hold_event(conn, org, later_hold, "reviewed")
+                await hold_event(conn, org, later_hold, "released")
+            await update_policy(3)
         assert (await replay())["traffic_authorized"] is False
-        assert await pool.fetchval("SELECT count(*) FROM gdpr_retention_hold_events WHERE organization_id=$1", org) == 2
+        assert await pool.fetchval("SELECT count(*) FROM gdpr_retention_hold_events WHERE organization_id=$1", org) == (4 if published_v5 else 2)
         proof = await verify()
         assert proof["verified_erasures"] == 1 and proof["traffic_authorized"] is False
         assert await pool.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == before
@@ -296,7 +351,8 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
 
 @pytest.mark.asyncio
 @pytest.mark.migration_limit(97)
-async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(restore_target, state_env, tmp_path):
+@pytest.mark.parametrize("published_v5", [False, True], ids=["v3", "v5"])
+async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(restore_target, state_env, tmp_path, published_v5):
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
     env = state_env
@@ -434,6 +490,11 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
             sequence=1, verification_key=policy_key, encryption_key=policy_cipher)
     authority.publish_policy(store, None, policy_pin, sealed_policy,
                              verification_key=policy_key, encryption_key=policy_cipher)
+    inventory, inventory_digest = (None, None)
+    if published_v5:
+        inventory, inventory_digest = _promote_restored_backup(authority, store, backup_id=pin.backup_id,
+            anchor=anchor, organizations=[org], encrypted_backup=encrypted_snapshot, signer=signer,
+            journal_key=journal_key, checkpoint_key=key, policy_key=policy_key, policy_cipher=policy_cipher)
     restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
     await _docker("exec", container, "createdb", "-U", principal, restored_db)
     await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
@@ -462,7 +523,8 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
                 expected_organizations=[org], trusted_public_key=signer.public_key(),
                 journal_encryption_key=journal_key, checkpoint_verification_key=key,
                 checkpoint_encryption_key=journal_key, quarantine_database=restored_db,
-                policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+                policy_verification_key=policy_key, policy_encryption_key=policy_cipher,
+                ordinary_inventory_bytes=inventory, latest_inventory_sha256=inventory_digest)
         assert (await replay())["traffic_authorized"] is False
         assert await reconciled(restored)
         assert await verify(restored, checkpoint, receipt_checkpoint_sha) == before
@@ -475,9 +537,8 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
 
 
 @pytest.mark.asyncio
-async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch):
-    from datetime import datetime, timezone
-    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
+@pytest.mark.parametrize("published_v5", [False, True], ids=["v4", "v5"])
+async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch, published_v5):
     from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_paged_restore_candidates
     from src.core.gdpr.source_checkpoint import capture_committed_checkpoint, purge_inventory_covered_ordinary_bookings
     from tests.core.gdpr.test_ordinary_booking_retention_plan import _candidate
@@ -535,6 +596,10 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
     assert paged == dict(committed, version="c24-restore-v5")
     candidate = publish_checkpoint_pages(store, installation, paged,
         verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
+    if published_v5:
+        authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=inventory_digest,
+                                           candidates={(org, backup_id): candidate}, **trust)
+        assert authority.checkpoint_pin(org, backup_id) == candidate
     restored_db="melpis_c24_restore_dst_"+uuid4().hex[:12]
     await _docker("exec",container,"createdb","-U",principal,restored_db)
     await _docker("exec",container,"psql","-U",principal,"-d","postgres","-v","ON_ERROR_STOP=1",
@@ -563,17 +628,18 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
             assert (await replay_primary_published_erasures(restored,authority,store,**replay_args))["traffic_authorized"] is False
         assert not await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
         assert await restored.fetchval("SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2",org,booking)==len(request_ids)
-        async with restored.acquire() as conn, conn.transaction(readonly=True):
-            proof = await verify_paged_restore_candidates(conn, authority, store, **candidate_args)
-            assert proof["verified_paged_candidates"] == 1 and proof["traffic_authorized"] is False
-            assert proof["authority_advanced"] is False
-            missing = dict(committed, version="c24-restore-v5", sequence=3, erasures=[
-                dict(operation_id=str(uuid4()), scope="organization", subject_id=None)])
-            missing_pin = publish_checkpoint_pages(store, installation, missing,
-                verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
-            with pytest.raises(RestoreBlocked, match="Newer erasure journal has not been replayed"):
-                await verify_paged_restore_candidates(conn, authority, store,
-                    **dict(candidate_args, candidates={org: missing_pin}))
-        assert authority.checkpoint_pin(org, backup_id) == pin
+        if not published_v5:
+            async with restored.acquire() as conn, conn.transaction(readonly=True):
+                proof = await verify_paged_restore_candidates(conn, authority, store, **candidate_args)
+                assert proof["verified_paged_candidates"] == 1 and proof["traffic_authorized"] is False
+                assert proof["authority_advanced"] is False
+                missing = dict(committed, version="c24-restore-v5", sequence=3, erasures=[
+                    dict(operation_id=str(uuid4()), scope="organization", subject_id=None)])
+                missing_pin = publish_checkpoint_pages(store, installation, missing,
+                    verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
+                with pytest.raises(RestoreBlocked, match="Newer erasure journal has not been replayed"):
+                    await verify_paged_restore_candidates(conn, authority, store,
+                        **dict(candidate_args, candidates={org: missing_pin}))
+            assert authority.checkpoint_pin(org, backup_id) == pin
     finally:
         await restored.close()

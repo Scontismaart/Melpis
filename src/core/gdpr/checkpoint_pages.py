@@ -16,7 +16,7 @@ from src.core.gdpr.journal_publication import (
     CheckpointPin, JournalStore, _canonical, _checkpoint_keys, _checkpoint_name,
     _previous_key_args, _require_cumulative, read_checkpoint,
 )
-from src.core.gdpr.restore_checkpoint import RestoreBlocked, _authenticate_checkpoint
+from src.core.gdpr.restore_checkpoint import RestoreBlocked, _authenticate_checkpoint, _parse_receipt_prunes
 from src.core.gdpr.restore_journal import RestoreJournalInvalid, _hex, _unique_object, _uuid
 
 
@@ -257,7 +257,7 @@ def _manifest_descriptors(manifest, scope):
 
 
 def read_checkpoint_pages(store: JournalStore, installation, org, backup, pin, *,
-                          verification_key, encryption_key):
+                          verification_key, encryption_key, with_capacity=False):
     """Authenticate the exact pinned manifest and every page before returning evidence."""
     try:
         name = _checkpoint_name(installation, pin)
@@ -287,13 +287,16 @@ def read_checkpoint_pages(store: JournalStore, installation, org, backup, pin, *
             _check_page_records(org, scope, category, page["records"], verification_key)
             payload[category].extend(page["records"])
         _assert_global_uniqueness(payload)
+        if with_capacity:
+            return payload, (_MAX_AGGREGATE_BYTES - sum(item["bytes"] for item in descriptors),
+                             _MAX_RECORDS - sum(manifest["counts"].values()), _MAX_PAGES - len(descriptors))
         return payload
     except (KeyError, TypeError, ValueError, AttributeError, RecursionError, InvalidToken, RestoreJournalInvalid):
         raise RestoreBlocked("Authenticated paged checkpoint unavailable") from None
 
 
 def read_any_checkpoint(store: JournalStore, installation, org, backup, pin, *,
-                        verification_key, encryption_key):
+                        verification_key, encryption_key, with_capacity=False):
     """Dispatch on the exact pinned root, then fully authenticate that format.
 
     A missing or invalid v5 page must propagate failure rather than falling
@@ -321,10 +324,32 @@ def read_any_checkpoint(store: JournalStore, installation, org, backup, pin, *,
         raise RestoreBlocked("Authenticated checkpoint unavailable") from None
     args = dict(verification_key=verification_key, encryption_key=encryption_key)
     if version == _VERSION:
-        return read_checkpoint_pages(store, installation, org, backup, pin, **args)
+        return read_checkpoint_pages(store, installation, org, backup, pin, with_capacity=with_capacity, **args)
     if version in ("c24-restore-v3", "c24-restore-v4"):
-        return read_checkpoint(store, installation, org, backup, pin, **args)["payload"]
+        payload = read_checkpoint(store, installation, org, backup, pin, **args)["payload"]
+        if with_capacity:
+            return payload, (2 * 1024 * 1024 - len(_canonical(payload)),
+                             min(10000 - len(payload[field]) for field in _IDENTITIES if field in payload), None)
+        return payload
     raise RestoreBlocked("Unsupported authenticated checkpoint format")
+
+
+def decode_receipt_prunes(payload):
+    """Convert receipt records from an already authenticated payload."""
+    if payload["version"] != _VERSION:
+        return _parse_receipt_prunes(payload["receipt_prunes"])
+    return [tuple(_uuid(row[field]) for field in ("request_id", "source_message_id", "conversation_id", "subject_id"))
+            for row in payload["receipt_prunes"]]
+
+
+def decode_replay_checkpoint(payload):
+    """Normalize the authenticated legacy or paged payload into lifecycle tuples."""
+    erasures = [(UUID(row["operation_id"]), row["scope"], UUID(row["subject_id"]) if row["subject_id"] else None)
+                for row in payload["erasures"]]
+    stays = [(UUID(row["booking_id"]), UUID(row["subject_id"]), row["purpose"],
+              UUID(row["operation_id"]) if row["operation_id"] else None, row["policy_version"],
+              {UUID(request) for request in row["request_ids"]}) for row in payload["stay_purges"]]
+    return erasures, stays, decode_receipt_prunes(payload), payload.get("ordinary_booking_purges")
 
 
 def _check_pin_progress(previous_pin, pin):

@@ -5,11 +5,12 @@ import os
 from uuid import UUID
 
 from src.core.gdpr.checkpoint_pages import (
-    _MAX_AGGREGATE_BYTES, _MAX_RECORDS, _assert_global_uniqueness, _normalize, read_any_checkpoint,
+    _MAX_AGGREGATE_BYTES, _MAX_RECORDS, _assert_global_uniqueness, _normalize,
+    decode_receipt_prunes, read_any_checkpoint,
 )
-from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args, read_checkpoint
+from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args
 from src.core.gdpr.restore_checkpoint import (
-    RestoreBlocked, _bind_receipt_prune_checkpoint, _parse_receipt_prunes, _parse_ordinary_purges, _receipt_prune_digest,
+    RestoreBlocked, _bind_verified_receipt_prunes, _parse_receipt_prunes, _parse_ordinary_purges, _receipt_prune_digest,
 )
 from src.core.gdpr.backup_coverage import _backups, assess_backup_coverage
 
@@ -245,6 +246,7 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
     audit_at = trust.get("audit_at") or datetime.now(timezone.utc)
     trust = dict(trust, audit_at=audit_at)
     tip = authority.current()
+    active_inventory = authority.assert_paged_inventory(latest_inventory_sha256, required=False)
     assess_backup_coverage(authority, store, inventory_bytes, latest_inventory_sha256=latest_inventory_sha256,
                            **trust)
     backups = list(_backups(inventory_bytes, latest_inventory_sha256, authority.installation_id, audit_at))
@@ -252,6 +254,7 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
         raise RestoreBlocked("Independent recovery evidence changed during coverage check")
     pins, policy_pins = {}, {}
     evidence, selected = None, None
+    requires_paged_inventory = False
     key_args = dict(verification_key=trust["checkpoint_verification_key"],
                     encryption_key=trust["checkpoint_encryption_key"])
     for backup, orgs, _, _ in backups:
@@ -259,7 +262,9 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
             continue
         pin = authority.checkpoint_pin(org, backup)
         policy = authority.policy_pin(org, backup)
-        checkpoint = read_checkpoint(store, authority.installation_id, org, backup, pin, **key_args)
+        payload = read_any_checkpoint(store, authority.installation_id, org, backup, pin, **key_args)
+        if payload["version"] == "c24-restore-v5":
+            requires_paged_inventory = True
         policy_data, _ = authority.read_policy(
             store, policy, verification_key=trust["policy_verification_key"],
             encryption_key=trust["policy_encryption_key"])
@@ -268,26 +273,30 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
             conn, org, policy_data, installation_id=authority.installation_id, backup_id=backup,
             independent_pin=policy, verification_key=trust["policy_verification_key"],
             encryption_key=trust["policy_encryption_key"])
-        tuples = set(_parse_receipt_prunes(checkpoint["payload"]["receipt_prunes"]))
+        prunes = decode_receipt_prunes(payload)
+        tuples = set(prunes)
         if evidence is not None and evidence != tuples:
             raise RestoreBlocked("Receipt commitments differ across recoverable backups")
         evidence = tuples
         pins[backup], policy_pins[backup] = pin, policy
         if selected is None or pin.sequence < selected[0].sequence:
-            selected = (pin, checkpoint)
+            selected = (pin, prunes)
     if selected is None:
         raise RestoreBlocked("No independently covered backup for receipt commitments")
-    pin, checkpoint = selected
+    if requires_paged_inventory and not active_inventory:
+        raise RestoreBlocked("Paged inventory changed before receipt binding")
+    pin, prunes = selected
     async with conn.transaction():
-        result = await _bind_receipt_prune_checkpoint(
-            conn, org, checkpoint, verification_key=key_args["verification_key"],
-            backup_id=pin.backup_id, minimum_sequence=pin.sequence, checkpoint_sha256=pin.sha256)
+        result = await _bind_verified_receipt_prunes(
+            conn, org, prunes, sequence=pin.sequence, checkpoint_sha256=pin.sha256)
         assess_backup_coverage(authority, store, inventory_bytes,
                                latest_inventory_sha256=latest_inventory_sha256, **trust)
         if (authority.current()!=tip or any(
                 authority.checkpoint_pin(org, backup)!=value or authority.policy_pin(org, backup)!=policy_pins[backup]
                 for backup, value in pins.items())):
             raise RestoreBlocked("Independent recovery evidence changed during binding")
+        if authority.assert_paged_inventory(latest_inventory_sha256, required=requires_paged_inventory) != active_inventory:
+            raise RestoreBlocked("Paged inventory changed during receipt binding")
     return result
 
 
@@ -313,6 +322,7 @@ async def purge_inventory_covered_ordinary_bookings(
     audit_at=trust.get("audit_at") or datetime.now(timezone.utc)
     trust=dict(trust,audit_at=audit_at)
     tip=authority.current()
+    active_inventory = authority.assert_paged_inventory(latest_inventory_sha256, required=False)
     assess_backup_coverage(authority,store,inventory_bytes,latest_inventory_sha256=latest_inventory_sha256,**trust)
     backups=list(_backups(inventory_bytes,latest_inventory_sha256,authority.installation_id,audit_at))
     if authority.current()!=tip:
@@ -320,16 +330,19 @@ async def purge_inventory_covered_ordinary_bookings(
     expected=None
     pins={}
     selected=None
+    requires_paged_inventory = False
     for backup,orgs,_,_ in backups:
         if org not in orgs:
             continue
         pin=authority.checkpoint_pin(org,backup)
         policy=authority.policy_pin(org,backup)
-        checkpoint=read_checkpoint(store,authority.installation_id,org,backup,pin,
+        payload=read_any_checkpoint(store,authority.installation_id,org,backup,pin,
             verification_key=trust["checkpoint_verification_key"],encryption_key=trust["checkpoint_encryption_key"])
-        if checkpoint["payload"]["version"]!="c24-restore-v4":
-            raise RestoreBlocked("Every relevant backup requires v4 ordinary purge coverage")
-        plans=checkpoint["payload"]["ordinary_booking_purges"]
+        if payload["version"] not in ("c24-restore-v4", "c24-restore-v5"):
+            raise RestoreBlocked("Every relevant backup requires v4 or v5 ordinary purge coverage")
+        if payload["version"] == "c24-restore-v5":
+            requires_paged_inventory = True
+        plans=payload["ordinary_booking_purges"]
         canonical={_canonical(plan) for plan in plans}
         if expected is not None and expected!=canonical:
             raise RestoreBlocked("Ordinary purge evidence differs across recoverable backups")
@@ -345,6 +358,8 @@ async def purge_inventory_covered_ordinary_bookings(
             selected=(pin,plans)
     if selected is None:
         raise RestoreBlocked("No independently covered backup for ordinary purge")
+    if requires_paged_inventory and not active_inventory:
+        raise RestoreBlocked("Paged inventory changed before ordinary purge")
     pin,plans=selected
     async with conn.transaction():
         for plan in plans:
@@ -359,4 +374,6 @@ async def purge_inventory_covered_ordinary_bookings(
                 (authority.checkpoint_pin(org,backup),authority.policy_pin(org,backup))!=pair
                 for backup,pair in pins.items()):
             raise RestoreBlocked("Independent recovery evidence changed during purge")
+        if authority.assert_paged_inventory(latest_inventory_sha256, required=requires_paged_inventory) != active_inventory:
+            raise RestoreBlocked("Paged inventory changed during ordinary purge")
     return len(plans)

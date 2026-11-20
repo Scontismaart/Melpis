@@ -8,15 +8,15 @@ import os
 import re
 import sqlite3
 
+from src.core.gdpr.checkpoint_pages import read_any_checkpoint
 from src.core.gdpr.journal_chain_pages import scan_verified_chain
-from src.core.gdpr.journal_publication import _canonical, read_checkpoint
+from src.core.gdpr.journal_publication import _canonical
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _unique_object, _uuid
 
 _GENESIS = JournalCheckpoint(0, "0" * 64)
 _HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
 _OPAQUE_ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
-_CHECKPOINT_FIELDS = ("erasures", "stay_purges", "receipt_prunes")
 _MAX_INVENTORY_BYTES = 1024 * 1024
 _LEGACY_SEGMENT_LIMIT = 10000
 _LEGACY_ENTRY_LIMIT = 100000
@@ -131,7 +131,7 @@ def assess_backup_coverage(
         if proof["segments"] > _LEGACY_SEGMENT_LIMIT or proof["entries"] > _LEGACY_ENTRY_LIMIT:
             raise RestoreBlocked("Legacy restore journal capacity exceeded")
         overdue, pins = [], {}
-        bytes_remaining, entries_remaining = 2 * 1024 * 1024, 10000
+        bytes_remaining, entries_remaining, pages_remaining = None, None, None
         for backup, orgs, anchor, is_overdue in backups:
             authorized_scopes = {digest(str(org)) for org in orgs}
             if any(tenant not in authorized_scopes for (tenant,) in index.execute(
@@ -142,9 +142,9 @@ def assess_backup_coverage(
             for org in orgs:
                 pin, policy = authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)
                 pins[org, backup] = pin, policy
-                checkpoint = read_checkpoint(
+                checkpoint, (byte_headroom, entry_headroom, page_headroom) = read_any_checkpoint(
                     store, installation, org, backup, pin, verification_key=checkpoint_verification_key,
-                    encryption_key=checkpoint_encryption_key)["payload"]
+                    encryption_key=checkpoint_encryption_key, with_capacity=True)
                 authority.read_policy(store, policy, verification_key=policy_verification_key,
                                       encryption_key=policy_encryption_key)
                 actual = {digest(row["operation_id"], row["scope"], row["subject_id"])
@@ -152,10 +152,10 @@ def assess_backup_coverage(
                 if any(record not in actual for (record,) in index.execute(
                         "SELECT record FROM entries WHERE tenant=? AND seq>?", (digest(str(org)), anchor.sequence))):
                     raise RestoreBlocked("Backup checkpoint omits signed erasure evidence")
-                bytes_remaining = min(bytes_remaining, 2 * 1024 * 1024 - len(_canonical(checkpoint)))
-                fields = (*_CHECKPOINT_FIELDS,"ordinary_booking_purges") if checkpoint["version"]=="c24-restore-v4" else _CHECKPOINT_FIELDS
-                entries_remaining = min(entries_remaining, *(10000 - len(checkpoint[field])
-                                                              for field in fields))
+                bytes_remaining = byte_headroom if bytes_remaining is None else min(bytes_remaining, byte_headroom)
+                entries_remaining = entry_headroom if entries_remaining is None else min(entries_remaining, entry_headroom)
+                if page_headroom is not None:
+                    pages_remaining = page_headroom if pages_remaining is None else min(pages_remaining, page_headroom)
         if authority.current() != tip or any(
                 (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)) != evidence
                 for (org, backup), evidence in pins.items()):
@@ -170,6 +170,7 @@ def assess_backup_coverage(
             "backup_objects_verified": False, "checkpoint_source_commitments_verified": False,
             "minimum_checkpoint_entries_remaining": entries_remaining,
             "minimum_checkpoint_bytes_remaining": bytes_remaining,
+            "minimum_paged_checkpoint_pages_remaining": pages_remaining,
             "source_chain_segments_remaining": _LEGACY_SEGMENT_LIMIT - proof["segments"],
             "source_chain_entries_remaining": _LEGACY_ENTRY_LIMIT - proof["entries"],
             "earliest_backup_anchor_sequence": min(anchor.sequence for _, _, anchor, _ in backups),

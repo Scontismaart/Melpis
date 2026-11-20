@@ -238,8 +238,22 @@ can capture structured source evidence into a v5 candidate with
 `capture_committed_checkpoint(..., paged_candidate=True)` and publish it for
 readback. `assess_paged_backup_candidates` verifies an exact candidate for each
 tenant of every independently inventoried backup using the existing current
-pins. Independent CAS, v5 mutation replay, real backup artifacts and
-recovery-floor certification are required for operational use of v5.
+pins. `promote_paged_checkpoints` then atomically compares and advances every
+affected checkpoint and records the exact independently attested inventory
+digest. The operator holds the independent authority and freezes concurrent
+publication and source maintenance through this operation. Routine pin
+advancement cannot activate v5 one backup at a time.
+
+After promotion, recovery and source mutation require that same active
+inventory digest, including any retained legacy artifacts. Quarantined replay
+checks the exact restored backup ID, anchor and tenant scope, then authenticates
+and compares the current policy and legal-hold records across all recoverable
+backups of each affected tenant. It applies the signed erasure and retention
+tuples using current lifecycle checks and verifies the exact database
+postconditions. The receipt and ordinary-booking SQL receives the independently
+promoted root digest and sequence. Legacy v3/v4 remains readable before promotion.
+Actual backup bytes, operational custody and the separate traffic reopening gate
+remain part of operational acceptance.
 Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized
