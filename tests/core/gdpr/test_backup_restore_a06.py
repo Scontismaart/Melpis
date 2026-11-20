@@ -10,16 +10,19 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import asyncpg
 import pytest
 from cryptography.fernet import Fernet
 
 from src.core.gdpr.guard import ErasureBlocked, check_contact_intake, identifier_fingerprint
+from tests.core import conftest as core_fixtures
 
 
-_EXPECTED_CONTAINER = "melpis-a06-pg-20261022"
-_EXPECTED_DSN = "postgresql://test:test@127.0.0.1:55435/melpis_a06_test"
+_EXPECTED_CONTAINER = "melpis-a06-coherence-20261120"
+_EXPECTED_IMAGE = "pgvector/pgvector:0.7.4-pg16"
+_EXPECTED_HOST_PORT = "127.0.0.1:55438"
 
 
 def _docker(*args, input_bytes=None):
@@ -34,21 +37,41 @@ def _docker(*args, input_bytes=None):
     return result.stdout
 
 
-@pytest.mark.asyncio
-async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_and_export(
-    pg_pool, sample_org, monkeypatch,
-):
+@pytest.fixture
+async def isolated_coherence_source(request):
     if os.getenv("GDPR_BACKUP_RESTORE_TEST") != "1":
         pytest.skip("set GDPR_BACKUP_RESTORE_TEST=1 for the isolated local backup/restore proof")
     if os.getenv("GDPR_BACKUP_RESTORE_CONTAINER") != _EXPECTED_CONTAINER:
         pytest.fail("backup/restore test requires the exact named synthetic container opt-in")
-    if os.getenv("TEST_DB_DSN") != _EXPECTED_DSN:
-        pytest.fail("backup/restore test is restricted to the named synthetic source database")
-
     container_name = _docker(
         "inspect", "--format", "{{.Name}}", _EXPECTED_CONTAINER,
     ).decode("ascii").strip()
-    assert container_name == "/" + _EXPECTED_CONTAINER
+    image = _docker(
+        "inspect", "--format", "{{.Config.Image}}", _EXPECTED_CONTAINER,
+    ).decode("ascii").strip()
+    port = _docker("port", _EXPECTED_CONTAINER, "5432/tcp").decode("ascii").strip()
+    if (container_name, image, port) != ("/" + _EXPECTED_CONTAINER, _EXPECTED_IMAGE, _EXPECTED_HOST_PORT):
+        pytest.fail("backup/restore container does not match the dedicated loopback test target")
+
+    # The shared PostgreSQL bootstrap resets public. Run it only after the
+    # opt-in and target checks and only against a database we just created.
+    source_db = "melpis_a06_coherence_src_" + uuid.uuid4().hex[:16]
+    _docker("exec", _EXPECTED_CONTAINER, "createdb", "-U", "postgres", source_db)
+    target = SimpleNamespace(get_connection_url=lambda: f"postgresql://postgres:test@{_EXPECTED_HOST_PORT}/{source_db}")
+    bootstrap = core_fixtures.pg_pool.__wrapped__(target, request)
+    try:
+        pool = await anext(bootstrap)
+        yield pool, target.get_connection_url(), source_db
+    finally:
+        await bootstrap.aclose()
+        _docker("exec", _EXPECTED_CONTAINER, "dropdb", "--force", "-U", "postgres", source_db)
+
+
+@pytest.mark.asyncio
+async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_and_export(
+    isolated_coherence_source, monkeypatch,
+):
+    pg_pool, source_dsn, source_db = isolated_coherence_source
 
     org, contact_id, operation_id, export_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     phone = "+15550009991"
@@ -69,9 +92,9 @@ async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_a
         )
         await conn.execute(
             """INSERT INTO gdpr_operations(id,organization_id,requester,request_id,request_hash,
-                   kind,scope,status,manifest)
-               VALUES($1,$2,'backup-proof',$3,$4,'erase','contact','partial','{}')""",
-            operation_id, org, uuid.uuid4(), hashlib.sha256(b"synthetic erase request").hexdigest(),
+                   kind,scope,status,manifest,subject_id)
+               VALUES($1,$2,'backup-proof',$3,$4,'erase','contact','partial','{}',$5)""",
+            operation_id, org, uuid.uuid4(), hashlib.sha256(b"synthetic erase request").hexdigest(), contact_id,
         )
         await conn.execute(
             """INSERT INTO gdpr_operation_steps(organization_id,operation_id,name,status,attempts)
@@ -103,7 +126,7 @@ async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_a
         )
 
     source_dump = _docker(
-        "exec", _EXPECTED_CONTAINER, "pg_dump", "-U", "test", "-d", "melpis_a06_test",
+        "exec", _EXPECTED_CONTAINER, "pg_dump", "-U", "postgres", "-d", source_db,
         "--format=plain", "--no-owner", "--no-privileges",
     )
     assert source_dump
@@ -130,17 +153,17 @@ async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_a
 
         _docker(
             "exec", "-e", "PGPASSWORD=test", _EXPECTED_CONTAINER,
-            "createdb", "-U", "test", restore_db,
+            "createdb", "-U", "postgres", restore_db,
         )
         _docker(
             "exec", "-i", "-e", "PGPASSWORD=test", _EXPECTED_CONTAINER,
-            "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "test", "-d", restore_db,
+            "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", restore_db,
             input_bytes=restored_dump,
         )
     finally:
         backup_path.unlink(missing_ok=True)
 
-    restore_dsn = _EXPECTED_DSN.rsplit("/", 1)[0] + "/" + restore_db
+    restore_dsn = source_dsn.rsplit("/", 1)[0] + "/" + restore_db
     restored = await asyncpg.connect(restore_dsn)
     try:
         assert await restored.fetchval(
@@ -162,5 +185,5 @@ async def test_encrypted_synthetic_pg_backup_restore_preserves_barrier_billing_a
         await restored.close()
 
     # Keep the uniquely named synthetic restore database as a non-secret proof
-    # artifact. No source or pre-existing database is dropped or modified here.
+    # artifact. The fixture removes only the source database it created.
     print(f"Synthetic restored database retained: {restore_db}")

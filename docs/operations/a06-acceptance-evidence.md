@@ -44,6 +44,19 @@ latest post-merge image checks remain acceptance evidence to collect. See
 [#227](https://github.com/Scontismaart/Melpis/pull/227), and
 [#228](https://github.com/Scontismaart/Melpis/pull/228).
 
+The optional coherent-snapshot proof in `test_backup_restore_a06.py` passed
+locally on 20 November 2026 using disposable PostgreSQL 16 with pgvector.
+Opt-in requires `GDPR_BACKUP_RESTORE_TEST=1` and
+`GDPR_BACKUP_RESTORE_CONTAINER=melpis-a06-coherence-20261120`. The fixture
+checks the dedicated image and loopback binding before creating a fresh
+synthetic source. It ignores the inherited test DSN and removes only the
+source it created. The run retained the synthetic restored database
+`melpis_a06_restore_114cc900c5dc4a27` and verified the erasure barrier,
+billing count and ledger, and decryptable snapshot. A run without the opt-in
+skipped before database setup, including with an invalid inherited test DSN.
+The signed older-backup replay drills provide the separate evidence for
+operations committed after the backup.
+
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,
 post-merge and published image results against each finished PR before closing the issue.
