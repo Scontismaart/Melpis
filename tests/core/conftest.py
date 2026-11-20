@@ -88,6 +88,11 @@ async def pg_pool(postgres_container, request):
                     CREATE ROLE service_role;
                 END IF;
             END $$;
+            -- The private worker tables intentionally have no foreign keys to
+            -- public organizations. Rebuild their schema too, otherwise old
+            -- capabilities survive this fixture and eventually expire during
+            -- a later test. This also restores the pre-093 migration boundary.
+            DROP SCHEMA IF EXISTS c24_private CASCADE;
             DROP SCHEMA IF EXISTS public CASCADE;
             CREATE SCHEMA public;
             -- Supabase grants the backend role schema visibility. Recreate
