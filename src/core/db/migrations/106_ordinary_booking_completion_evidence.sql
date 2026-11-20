@@ -31,6 +31,11 @@ REVOKE ALL ON public.ordinary_booking_completion_evidence
 CREATE OR REPLACE FUNCTION public.ordinary_booking_completion_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path=pg_catalog,public AS $$
 BEGIN
+ IF TG_OP='TRUNCATE' AND current_user=pg_get_userbyid(
+     (SELECT relowner FROM pg_class WHERE oid=TG_RELID))
+     AND NOT EXISTS(SELECT 1 FROM public.ordinary_booking_completion_evidence) THEN
+  RETURN NULL;
+ END IF;
  RAISE EXCEPTION 'Ordinary booking completion evidence is immutable' USING ERRCODE='42501';
 END $$;
 REVOKE ALL ON FUNCTION public.ordinary_booking_completion_immutable()
