@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from src.core.gdpr.journal_archive import assert_registered_archive_reader
 from src.core.gdpr.journal_publication import read_chain
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_coordinator import _restore_inventory
@@ -32,6 +33,7 @@ async def capture_erasure_journal_delta(
     if await _restore_inventory(conn, expected_organizations) != wanted:
         raise RestoreBlocked("Source organization inventory changed")
     try:
+        assert_registered_archive_reader(authority, store)
         tip = authority.current()
         authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
         previous = read_chain(
@@ -95,6 +97,10 @@ async def capture_erasure_journal_delta(
             }))
         if seen != list(prior):
             raise RestoreBlocked("Published erasures do not match authoritative source order")
+    try:
+        assert_registered_archive_reader(authority, store)
+    except RestoreJournalInvalid:
+        raise RestoreBlocked("Current signed journal unavailable") from None
     if authority.current() != tip:
         raise RestoreBlocked("Independent journal changed during source capture")
     return tip, tuple(record for _, record in sorted(delta, key=lambda item: item[0]))

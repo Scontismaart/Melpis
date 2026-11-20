@@ -420,6 +420,94 @@ class IndependentTipStore:
                 raise RestoreBlocked("Paged recovery inventory is not current")
             return True
 
+    def _archive_pin(self, conn):
+        from src.core.gdpr.journal_archive import ArchivePin
+
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='journal_archive_pins'").fetchone() is None:
+            return None
+        row = conn.execute("""SELECT floor_sequence,floor_digest,inventory_digest,manifest_digest
+            FROM journal_archive_pins ORDER BY generation DESC LIMIT 1""").fetchone()
+        if row is None:
+            raise RestoreJournalInvalid("independent_archive_authority_incomplete")
+        floor = JournalCheckpoint(*row[:2])
+        if not _checkpoint(floor) or floor == _GENESIS or not all(_hex(value, 64) for value in row[2:]):
+            raise RestoreJournalInvalid("independent_archive_authority_invalid")
+        return ArchivePin(self.installation_id, floor, row[2], row[3])
+
+    def archive_pin(self):
+        """Read the latest recorded archive pin, including while awaiting repack."""
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            self._current(conn)
+            pin = self._archive_pin(conn)
+            if pin is None:
+                raise RestoreJournalInvalid("independent_archive_pin_unavailable")
+            return pin
+
+    def _archive_state(self, conn):
+        tip = self._current(conn)
+        epochs = tuple(conn.execute("""SELECT sequence,digest,signing_key_sha,encryption_key_sha
+            FROM segment_key_epochs ORDER BY sequence LIMIT 1001"""))
+        return tip, epochs, self._paged_inventory(conn), self._archive_pin(conn)
+
+    def archive_state(self):
+        """Snapshot the independent observations needed to open an archive."""
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            return self._archive_state(conn)
+
+    def assert_archive_pin(self, pin, protected_inventory_sha256):
+        """Fail a previously opened reader when its pin or protected inventory changes."""
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            self._current(conn)
+            if (self._archive_pin(conn) != pin
+                    or self._paged_inventory(conn) != protected_inventory_sha256):
+                raise RestoreJournalInvalid("independent_archive_authority_changed")
+
+    def activate_archive(self, source, archive, inventory_bytes, candidate, *,
+                         expected_tip, previous_pin, latest_inventory_sha256, **trust):
+        """Register the exact verified archive under the current paged inventory."""
+        from src.core.gdpr.journal_archive import ArchivePin, open_archived_journal
+
+        try:
+            if type(candidate) is not ArchivePin or not _checkpoint(expected_tip):
+                raise ValueError
+            expected = self.archive_state()
+            tip, _, inventory, current = expected
+            if (tip != expected_tip or current != previous_pin or not _hex(inventory, 64)
+                    or inventory != latest_inventory_sha256 or candidate.inventory_sha256 != inventory):
+                raise RestoreJournalInvalid("independent_archive_cas_conflict")
+            if current is not None and (candidate.floor.sequence < current.floor.sequence
+                    or (current.inventory_sha256 == inventory and current != candidate)):
+                raise RestoreJournalInvalid("independent_archive_regression")
+            open_archived_journal(
+                source, archive, self, inventory_bytes, candidate,
+                latest_inventory_sha256=latest_inventory_sha256, **trust)
+            with self._connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if self._archive_state(conn) != expected:
+                    raise RestoreJournalInvalid("independent_archive_authority_changed")
+                # Recoverable stores are independently administered. Require
+                # exact readback again while the authority state is locked.
+                open_archived_journal(
+                    source, archive, self, inventory_bytes, candidate,
+                    latest_inventory_sha256=latest_inventory_sha256, **trust)
+                if current == candidate:
+                    return current
+                conn.execute("""CREATE TABLE IF NOT EXISTS journal_archive_pins (
+                    generation INTEGER PRIMARY KEY, floor_sequence INTEGER NOT NULL,
+                    floor_digest TEXT NOT NULL, inventory_digest TEXT NOT NULL UNIQUE,
+                    manifest_digest TEXT NOT NULL UNIQUE)""")
+                conn.execute("""INSERT INTO journal_archive_pins
+                    (floor_sequence,floor_digest,inventory_digest,manifest_digest) VALUES (?,?,?,?)""",
+                    (candidate.floor.sequence, candidate.floor.sha256, inventory, candidate.sha256))
+                if self._archive_pin(conn) != candidate:
+                    raise RestoreJournalInvalid("independent_archive_activation_failed")
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError, RestoreBlocked):
+            raise RestoreJournalInvalid("independent_archive_activation_failed") from None
+        return candidate
+
     def promote_paged_checkpoints(self, store, inventory_bytes, *, latest_inventory_sha256,
                                   candidates, previous_inventory_sha256=None, audit_at=None, **trust):
         """Promote all inventoried v5 pins in one independent authority transaction.
@@ -444,7 +532,7 @@ class IndependentTipStore:
             epochs = tuple(conn.execute("""SELECT sequence,digest,signing_key_sha,encryption_key_sha
                 FROM segment_key_epochs ORDER BY sequence LIMIT 1001"""))
             pins = {scope: (self._checkpoint(conn, *scope), self._policy_pin(conn, *scope)) for scope in scopes}
-            return tip, epochs, pins, self._paged_inventory(conn)
+            return tip, epochs, pins, self._paged_inventory(conn), self._archive_pin(conn)
 
         try:
             backups = list(_backups(inventory_bytes, latest_inventory_sha256, self.installation_id, audit_at))
@@ -458,10 +546,13 @@ class IndependentTipStore:
             with self._connection() as conn:
                 conn.execute("BEGIN")
                 expected = authority_state(conn, scopes)
-            _, _, pins, inventory = expected
+            _, _, pins, inventory, active_archive = expected
             if (inventory != latest_inventory_sha256 and previous_inventory_sha256 != inventory
                     or inventory == latest_inventory_sha256 and previous_inventory_sha256 not in (None, inventory)):
                 raise RestoreBlocked("Independent paged inventory CAS conflict")
+            if active_archive is not None and any(
+                    anchor.sequence < active_archive.floor.sequence for _, _, anchor, _ in backups):
+                raise RestoreBlocked("Paged inventory precedes the independently retained archive floor")
             assess_paged_backup_candidates(self, store, inventory_bytes, latest_inventory_sha256=latest_inventory_sha256,
                                            candidates=candidates, audit_at=audit_at, **trust)
             keys = dict(verification_key=trust["checkpoint_verification_key"],

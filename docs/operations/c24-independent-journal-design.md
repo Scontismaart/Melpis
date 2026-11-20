@@ -100,7 +100,7 @@ rejects an outdated authority and reads the authenticated journal from the
 new authority. The operational drill still has to recover using the real
 independently held authority and keys from another host. Mixed-key segment
 verification and cumulative artifact rotation have synthetic tests. There is
-no automatic compaction or journal deletion in this candidate. Before reaching
+no automatic journal deletion. Before reaching
 the format bounds, run `assess_backup_coverage` on the current, independently
 pinned inventory of every recoverable backup, including older copies still
 accessible under an exception. For each distinct backup ID the inventory
@@ -125,9 +125,20 @@ operation uniqueness across pages using a temporary keyed-digest index. Its
 consumer must be read-only or stage work in a quarantined rollback-capable
 transaction; successful completion, not an individual page, is the proof.
 The scan certifies the requested suffix. A separate check verifies the earlier
-index topology. These checks do not establish a recovery floor. The earliest
-recoverable backup anchor and complete historical operation commitments must
-be independently attested before compaction can advance a floor.
+index topology. `publish_archive_prefix` packs the original signed ciphertext
+through the earliest recoverable backup anchor into bounded, authenticated
+objects. `activate_archive` verifies readback again and commits the exact
+manifest, current inventory, floor and authority state together. A registered
+archive becomes mandatory for authority-backed chain verification, including
+backup coverage, restore and source reconciliation. Corruption or missing pages
+blocks the read even if loose copies still exist.
+
+The archived prefix preserves the original erasure signatures, keys and
+independent operation index. The archive supports up to 10,000 prefix segments
+and 256 packs. Capacity beyond those bounds and actual retirement of redundant
+loose copies require separate operational evidence and authorization. Keep the
+original ciphertext and historical keys until custody, inventory and recovery
+from an independently opened pack have been verified.
 The paged source reconciliation can authenticate the full journal from genesis
 and compare every published erasure with the frozen source. It returns the
 oldest unpublished entries for one segment and an exact remaining count. Its
