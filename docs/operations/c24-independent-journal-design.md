@@ -5,6 +5,69 @@ workflow. Provisioning a signing authority, Cloudflare resources or live
 deletion schedules requires separate authorization. No production access is
 required.
 
+## Local implementation and commissioning boundary
+
+The operator-side candidate lives in `journal_publication.py`,
+`independent_tip.py`, `journal_custody.py`, `restore_policy_state.py` and
+`restore_coordinator.py`. These modules are not routed from the application.
+The PostgreSQL drill uses a local encrypted object store and a separate
+authority directory. The R2 adapter is tested against the S3 client contract,
+including a lost response followed by authenticated readback.
+
+- Commission one protected `IndependentTipStore` per installation. On POSIX
+  use operator-owned mode-0700 directories. On Windows configure equivalent
+  ACLs. Keep the SQLite authority off the application host and outside the
+  provider bucket and PostgreSQL backups. Use the operator medium with its
+  independently attested latest journal tip and checkpoint/policy pins.
+  Never reinitialize a missing authority or trust that an old SQLite copy is
+  current just because its contents are internally consistent.
+- Generate distinct Ed25519, HMAC and Fernet keys under independent operator
+  control. `JournalKeys` encapsulates the segment and checkpoint keys with
+  secret-safe representations. `seal_keys` encrypts the portable bundle with a
+  separate recovery key, and `recover_keys` needs that separately held key and
+  the expected installation ID. Policy-state authentication/encryption keys
+  and backup keys have their own custody. Keep each key generation until all
+  recoverable backups that use it are retired.
+- Bind each backup manifest to its independently verified identity,
+  installation, tenant inventory and exact segment anchor. On the authoritative
+  source, use `capture_policy_state` in an owner-controlled read-only
+  transaction. Retain it via `publish_policy`. Publish verified erasure
+  evidence and authenticated v3 checkpoints through
+  `publish_segment`/`publish_checkpoint`, then advance only with
+  `IndependentTipStore.advance`/`advance_checkpoint`. Each advancement
+  verifies the retained object and compares the previous independent pin.
+  Publication never uses an object listing as its authority.
+- The EU adapter targets only `melpis-staging-gdpr-journal`. Supply a
+  TLS-verifying S3 client with the EU account endpoint, region `auto`,
+  retry/time-out limits and a bucket-scoped identity. The publisher needs
+  Object Read & Write for create-once and readback; the verifier needs Object
+  Read only. Bucket administration uses a separate identity. The current
+  adapter performs no bucket creation, listing, deletion or credential
+  provisioning. Confirm the actual ACL, public delivery state, Standard class,
+  usage headroom and protection against object replacement before GO.
+- On an isolated restore, use an operator-only single-connection pool with
+  PUBLIC and other principal connections disallowed. Freeze publication and
+  policy administration for the bounded final reconciliation window, recheck
+  the independent latest pins, and run `replay_primary_published_erasures`.
+  It reconciles current policy/hold evidence per tenant before local replay,
+  requires verified contact fingerprint matching, checks complete replay
+  against the supplied backup inventory and pins, and reapplies checkpointed
+  receipt-prune work using the current policy and hold checks. Traffic remains
+  disabled.
+  A hold conflict, missing evidence, conflicting operation or incomplete
+  replay is a quarantined failure. Separate checks cover provider copies and
+  retention cases outside the current C2.4 contract.
+
+The portable-key test uses synthetic keys and verifies decryption without
+DPAPI. The operational drill still has to recover using the independently
+held authority and keys from another host. There is no automatic compaction,
+mixed-key journal replay or journal deletion in this candidate. Before reaching
+the format bounds, measure the remaining history, enumerate every recoverable
+backup and plan the rotation against its verified recovery requirements.
+If evidence or its current authority cannot be recovered, keep traffic closed
+and obtain the controller's disposition. No deletion rule may rely on a
+guessed backup age or an older unverified tip.
+
 ## Evidence and trust
 
 Existing local recovery artifacts contain encrypted database backups and

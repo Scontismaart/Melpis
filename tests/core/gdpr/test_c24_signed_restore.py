@@ -30,12 +30,17 @@ from src.core.gdpr.restore_checkpoint import (
     verify_restore_journal_replay,
 )
 from src.core.gdpr.restore_journal import JournalCheckpoint
+from src.core.gdpr.independent_tip import IndependentTipStore
+from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment, publish_checkpoint
+from src.core.gdpr.restore_policy_state import capture_policy_state
+from tests.core.test_quota_reservation_lifecycle import _organization, _inbound_message
 from tests.core.gdpr.test_c24_purged_source_replay import (
     historical_fence,
     signed_prune_checkpoint,
     upgrade_fence_retention,
 )
 from tests.core.gdpr.test_c24_retention_sweep import approve_messages
+from tests.core.gdpr.test_restore_policy_state import add_hold, event as hold_event
 from tests.core.gdpr.test_conversation_lifecycle_c24 import (
     approve_conversation,
     approve_policies,
@@ -51,10 +56,12 @@ _CONTAINERS = {
     "melpis-c23-pg18-20261030": 16434,
     "melpis-c24-vector-pg16": 55434,
     "melpis-c24-vector-pg18": 55435,
+    "melpis-a06-restore-20261120": 55436,
 }
 _VECTOR_IMAGES = {
     "melpis-c24-vector-pg16": "pgvector/pgvector:0.7.4-pg16",
     "melpis-c24-vector-pg18": "pgvector/pgvector:0.8.1-pg18",
+    "melpis-a06-restore-20261120": "pgvector/pgvector:0.7.4-pg16",
 }
 _SOURCE_DB = re.compile(r"melpis_c24_restore_src_([0-9a-f]{12})\Z")
 
@@ -78,7 +85,8 @@ def restore_target():
     try:
         parsed = urlsplit(dsn)
         match = _SOURCE_DB.fullmatch(parsed.path.removeprefix("/"))
-        legacy = (container in {"melpis-filelock-vector-20261029", "melpis-c23-pg18-20261030"}
+        legacy = (container in {"melpis-filelock-vector-20261029", "melpis-c23-pg18-20261030",
+                                "melpis-a06-restore-20261120"}
                   and parsed.username in {"test", "postgres"} and parsed.password == "test")
         synthetic = (match is not None and parsed.username == "melpis_c24_src_" + match.group(1)
                      and parsed.password is not None and re.fullmatch(r"[0-9a-f]{64}", parsed.password))
@@ -102,7 +110,7 @@ async def _verify_restore_target(container):
 
 
 @pytest.mark.asyncio
-async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch):
+async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch, tmp_path):
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
@@ -117,9 +125,9 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     await approve_conversation(env["pool"], org)
     await approve_technical_receipts(env["pool"], org)
     requester = "synthetic-restore"
-    operation = await Operations(env["pool"]).create(
-        org, requester, uuid4(), kind="erase", scope="contact", subject_id=person,
-    )
+    foreign = (await _organization(env["pool"]))["id"]
+    foreign_message = await _inbound_message(env["pool"], foreign, canale="whatsapp")
+    foreign_original = await env["pool"].fetchval("SELECT content FROM messages WHERE id=$1", foreign_message)
 
     plaintext = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
                               "--no-owner", "--no-privileges", "--format=plain")
@@ -129,6 +137,20 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     del plaintext
     assert encrypted_snapshot and b"CREATE TABLE" not in encrypted_snapshot
 
+    installation, signer = uuid4(), Ed25519PrivateKey.generate()
+    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
+    policy_trust = dict(installation_id=installation, backup_id="synthetic-backup",
+                        verification_key=policy_key, encryption_key=policy_cipher)
+    async with env["pool"].acquire() as conn, conn.transaction(readonly=True):
+        old_policy_pin, old_policy_ciphertext = await capture_policy_state(conn, org, sequence=0, **policy_trust)
+    hold = uuid4()
+    async with env["pool"].acquire() as conn, conn.transaction():
+        await add_hold(conn, org, hold)
+        await hold_event(conn, org, hold, "reviewed")
+        await hold_event(conn, org, hold, "released")
+    operation = await Operations(env["pool"]).create(
+        org, requester, uuid4(), kind="erase", scope="contact", subject_id=person,
+    )
     monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
     await Deletion(env["pool"]).advance(org, operation, requester)
     barrier = await env["pool"].fetchrow(
@@ -136,7 +158,6 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
            WHERE organization_id=$1 AND operation_id=$2 AND subject_id=$3""", org, operation, person,
     )
     assert barrier
-    installation, signer = uuid4(), Ed25519PrivateKey.generate()
     anchor = JournalCheckpoint(0, "0" * 64)
     record = {"sequence": 1, "organization_id": str(org), "operation_id": str(operation),
               "scope": "contact", "subject_id": str(person), **dict(barrier)}
@@ -154,15 +175,58 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     checkpoint = {"payload": checkpoint_payload,
                   "signature": hmac.new(checkpoint_key, checkpoint_raw, sha256).hexdigest()}
 
+    # Independent authority and ciphertext store are separate even in the
+    # synthetic drill; verification must not derive the latest tip from a bucket.
+    object_root, authority_root = tmp_path / "journal", tmp_path / "operator"
+    object_root.mkdir(mode=0o700)
+    authority_root.mkdir(mode=0o700)
+    store = LocalJournalStore(object_root)
+    authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
+    journal_key = Fernet.generate_key()
+    published = publish_segment(store, installation, anchor,
+                                [{k: v for k, v in record.items() if k != "sequence"}],
+                                signer=signer, encryption_key=journal_key)
+    authority.advance(store, anchor, published, trusted_public_key=signer.public_key(),
+                      encryption_key=journal_key)
+    for payload in (checkpoint_payload, dict(checkpoint_payload, organization_id=str(foreign), erasures=[])):
+        pin = publish_checkpoint(store, installation, payload,
+                                 verification_key=checkpoint_key, encryption_key=journal_key)
+        authority.advance_checkpoint(store, None, pin, verification_key=checkpoint_key,
+                                     encryption_key=journal_key)
+    authority.publish_policy(store, None, old_policy_pin, old_policy_ciphertext,
+                             verification_key=policy_key, encryption_key=policy_cipher)
+    async with env["pool"].acquire() as conn, conn.transaction(readonly=True):
+        for tenant in (org, foreign):
+            policy_pin, sealed_policy = await capture_policy_state(conn, tenant, sequence=1, **policy_trust)
+            authority.publish_policy(store, old_policy_pin if tenant == org else None, policy_pin, sealed_policy,
+                                     verification_key=policy_key, encryption_key=policy_cipher)
+    with pytest.raises(RestoreBlocked):
+        authority.publish_policy(store, None, old_policy_pin, old_policy_ciphertext,
+                                 verification_key=policy_key, encryption_key=policy_cipher)
+
     restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
     await _docker("exec", container, "createdb", "-U", principal, restored_db)
+    await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                  "-c", f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
     restored_sql = cipher.decrypt(encrypted_snapshot)
     assert sha256(restored_sql).digest() == snapshot_sha
     await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
                   "-U", principal, "-d", restored_db, input_bytes=restored_sql)
     del restored_sql
-    pool = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=3)
+    pool = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=1)
     try:
+        from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_primary_published_restore
+
+        async def verify_independent(organizations):
+            async with pool.acquire() as conn, conn.transaction():
+                return await verify_primary_published_restore(
+                    conn, authority, store, backup_checkpoint=anchor,
+                    backup_id="synthetic-backup", expected_organizations=organizations,
+                    trusted_public_key=signer.public_key(), journal_encryption_key=journal_key,
+                    checkpoint_verification_key=checkpoint_key,
+                    checkpoint_encryption_key=journal_key,
+                )
+
         async def verify():
             async with pool.acquire() as conn, conn.transaction():
                 return await verify_restore_journal_replay(
@@ -173,13 +237,33 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
                 )
         with pytest.raises(RestoreBlocked, match="has not been replayed"):
             await verify()
+        with pytest.raises(RestoreBlocked):
+            await verify_independent([org, foreign])
         before = await pool.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org)
-        await Deletion(pool).advance(org, operation, requester)
+        assert not await pool.fetchval("SELECT EXISTS(SELECT 1 FROM gdpr_operations WHERE organization_id=$1 AND id=$2)", org, operation)
+        assert await pool.fetchval("SELECT count(*) FROM gdpr_retention_hold_events WHERE organization_id=$1", org) == 0
+        async def replay():
+            return await replay_primary_published_erasures(
+                pool, authority, store, backup_checkpoint=anchor, backup_id="synthetic-backup",
+                expected_organizations=[org, foreign], trusted_public_key=signer.public_key(),
+                journal_encryption_key=journal_key, checkpoint_verification_key=checkpoint_key,
+                checkpoint_encryption_key=journal_key, quarantine_database=restored_db,
+                policy_verification_key=policy_key,
+                policy_encryption_key=policy_cipher,
+            )
+        assert (await replay())["traffic_authorized"] is False
+        assert await pool.fetchval("SELECT count(*) FROM gdpr_retention_hold_events WHERE organization_id=$1", org) == 2
         proof = await verify()
         assert proof["verified_erasures"] == 1 and proof["traffic_authorized"] is False
         assert await pool.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == before
-        await Deletion(pool).advance(org, operation, requester)
+        await replay()
         assert (await verify())["verified_erasures"] == 1
+        independent = await verify_independent([org, foreign])
+        assert independent["traffic_authorized"] is False
+        assert independent["verified_organizations"] == 2
+        assert await pool.fetchval("SELECT content FROM messages WHERE id=$1", foreign_message) == foreign_original
+        with pytest.raises(RestoreBlocked):
+            await verify_independent([org])
     finally:
         await pool.close()
 
@@ -259,14 +343,34 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
     omitted, _, omitted_sha = signed_prune_checkpoint(org, [], key=key, sequence=2)
     with pytest.raises(RestoreBlocked, match="commitments do not match"):
         await verify(pool, omitted, omitted_sha)
+    installation = uuid4()
+    signer = Ed25519PrivateKey.generate()
+    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
+    object_root, authority_root = tmp_path / "journal", tmp_path / "operator"
+    object_root.mkdir(mode=0o700)
+    authority_root.mkdir(mode=0o700)
+    store = LocalJournalStore(object_root)
+    authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
+    anchor = authority.current()
+    pin = publish_checkpoint(store, installation, checkpoint["payload"],
+                             verification_key=key, encryption_key=journal_key)
+    authority.advance_checkpoint(store, None, pin, verification_key=key, encryption_key=journal_key)
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        policy_pin, sealed_policy = await capture_policy_state(
+            conn, org, installation_id=installation, backup_id=pin.backup_id,
+            sequence=1, verification_key=policy_key, encryption_key=policy_cipher)
+    authority.publish_policy(store, None, policy_pin, sealed_policy,
+                             verification_key=policy_key, encryption_key=policy_cipher)
     restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
     await _docker("exec", container, "createdb", "-U", principal, restored_db)
+    await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                  "-c", f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
     restored_sql = cipher.decrypt(encrypted_snapshot)
     assert sha256(restored_sql).digest() == digest
     await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
                   "-U", principal, "-d", restored_db, input_bytes=restored_sql)
     del restored_sql
-    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=3)
+    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=1)
     try:
         assert not await reconciled(restored)
         with pytest.raises(RestoreBlocked, match="Receipt expiry commitments do not match"):
@@ -277,9 +381,19 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
         legacy_checkpoint = {"payload": legacy, "signature": hmac.new(key, canonical, sha256).hexdigest()}
         with pytest.raises(RestoreBlocked, match="Authenticated receipt expiry checkpoint required"):
             await verify(restored, legacy_checkpoint, None)
-        await expire(restored)
+        from src.core.gdpr.restore_coordinator import replay_primary_published_erasures
+
+        async def replay():
+            return await replay_primary_published_erasures(
+                restored, authority, store, backup_checkpoint=anchor, backup_id=pin.backup_id,
+                expected_organizations=[org], trusted_public_key=signer.public_key(),
+                journal_encryption_key=journal_key, checkpoint_verification_key=key,
+                checkpoint_encryption_key=journal_key, quarantine_database=restored_db,
+                policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+        assert (await replay())["traffic_authorized"] is False
         assert await reconciled(restored)
         assert await verify(restored, checkpoint, receipt_checkpoint_sha) == before
+        assert (await replay())["traffic_authorized"] is False
         assert not await restored.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
         with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match="delivery identity is immutable"):
             await restored.execute("UPDATE messages SET wam_id=NULL WHERE organization_id=$1 AND id=$2", org, source)

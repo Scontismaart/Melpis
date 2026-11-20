@@ -22,7 +22,7 @@ class Deletion:
         await self.advance(org, oid, requester)
         return await ops.get(org, oid, requester)
 
-    async def advance(self, organization_id, operation_id, requester):
+    async def advance(self, organization_id, operation_id, requester, *, journal_evidence=None):
         org, oid = UUID(str(organization_id)), UUID(str(operation_id))
         async with self.pool.acquire() as conn, conn.transaction():
             # Match A03/A04 organization-first locking without blocking FK
@@ -36,12 +36,25 @@ class Deletion:
             )
             if not op or op['kind'] != 'erase':
                 raise LookupError('Erasure request not found')
+            if journal_evidence is not None:
+                if (journal_evidence.organization_id, journal_evidence.operation_id,
+                        journal_evidence.scope, journal_evidence.subject_id) != (
+                        org, oid, op['scope'], op['subject_id']):
+                    raise ValueError('Journal does not match restored erasure operation')
             prior = await conn.fetchval(
                 '''SELECT status FROM gdpr_operation_steps
                    WHERE organization_id=$1 AND operation_id=$2 AND name='local' ''', org, oid,
             )
             if prior == 'confirmed':
                 return  # Never rerun committed mutations or provider calls.
+            if journal_evidence is not None and op['subject_id'] is not None:
+                restored_identifier = await conn.fetchval(
+                    'SELECT phone_number FROM contacts WHERE organization_id=$1 AND id=$2',
+                    org, op['subject_id'],
+                )
+                if not restored_identifier or identifier_fingerprint(org, restored_identifier) != (
+                        journal_evidence.identifier_digest, journal_evidence.key_id):
+                    raise ValueError('Restored subject does not match authenticated erasure')
             schema = await conversation_schema(conn)
             blockers = []
             if schema == 'partial':

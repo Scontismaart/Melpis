@@ -335,7 +335,9 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
             OR EXISTS(SELECT 1 FROM messages m
                 JOIN conversations c ON c.organization_id=m.organization_id AND c.id=m.conversation_id
                 WHERE m.organization_id=$1 AND c.organization_id=$1 AND ($2::uuid IS NULL OR c.contact_id=$2)
-                  AND (m.deleted_at IS NULL OR m.ai_reply_cache IS NOT NULL))
+                  AND (m.deleted_at IS NULL OR m.content IS DISTINCT FROM '{}'::jsonb
+                       OR m.content_text IS NOT NULL OR m.ai_reply_cache IS NOT NULL
+                       OR m.error_title IS NOT NULL OR m.error_details IS NOT NULL))
             OR ($2::uuid IS NULL AND EXISTS(SELECT 1 FROM simulation_requests WHERE organization_id=$1))''', org, subject)
         if subject is not None:
             if await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM simulation_requests
