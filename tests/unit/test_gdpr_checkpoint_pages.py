@@ -167,3 +167,116 @@ def test_v5_successor_preserves_legacy_and_paged_commitments(recovery):
     with pytest.raises(RestoreBlocked):
         publish_checkpoint_pages(store, installation, _with_records(org, "erasures", [_erasure(2)], sequence=3),
                                  previous_pin=next_pin, **keys)
+
+
+def test_any_reader_dispatches_only_the_exact_authenticated_pin(recovery):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, read_any_checkpoint
+
+    store, installation, org, keys = recovery
+    legacy_payload = dict(_payload(org), version="c24-restore-v4")
+    legacy = publish_checkpoint(store, installation, legacy_payload, **keys)
+    paged_payload = _with_records(org, "erasures", [_erasure(1)], sequence=2)
+    paged = publish_checkpoint_pages(store, installation, paged_payload, previous_pin=legacy, **keys)
+    assert read_any_checkpoint(store, installation, org, "synthetic", legacy, **keys) == legacy_payload
+    assert read_any_checkpoint(store, installation, org, "synthetic", paged, **keys) == paged_payload
+    page = next(path for path in store.root.iterdir()
+                if legacy.sha256 not in path.name and paged.sha256 not in path.name)
+    page.unlink()
+    with pytest.raises(RestoreBlocked):
+        read_any_checkpoint(store, installation, org, "synthetic", paged, **keys)
+    assert read_any_checkpoint(store, installation, org, "synthetic", legacy, **keys) == legacy_payload
+
+
+def test_candidate_verification_rejects_v5_to_legacy_downgrade(recovery):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, verify_checkpoint_candidate
+
+    store, installation, org, keys = recovery
+    paged_payload = _with_records(org, "erasures", [_erasure(1)])
+    paged = publish_checkpoint_pages(store, installation, paged_payload, **keys)
+    downgraded_payload = dict(paged_payload, version="c24-restore-v4", sequence=2)
+    downgraded = publish_checkpoint(store, installation, downgraded_payload, **keys)
+    with pytest.raises(RestoreBlocked):
+        verify_checkpoint_candidate(store, installation, paged, downgraded, **keys)
+
+
+def test_authority_prepares_paged_candidate_without_committing_pin(recovery, tmp_path):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
+    from src.core.gdpr.independent_tip import IndependentTipStore
+
+    store, installation, org, keys = recovery
+    authority_dir = tmp_path / "authority"
+    authority_dir.mkdir(mode=0o700)
+    authority = IndependentTipStore.initialize(authority_dir / "tip.sqlite", installation)
+    prior_payload = dict(_with_records(org, "erasures", [_erasure(1)]), version="c24-restore-v4")
+    prior = publish_checkpoint(store, installation, prior_payload, **keys)
+    authority.advance_checkpoint(store, None, prior, **keys)
+    candidate_payload = _with_records(org, "erasures", [_erasure(1), _erasure(2)], sequence=2)
+    candidate = publish_checkpoint_pages(store, installation, candidate_payload, previous_pin=prior, **keys)
+    prepared = authority.prepare_paged_checkpoint(store, prior, candidate, **keys)
+    assert prepared.candidate == candidate
+    assert prepared.expected_pin == prior
+    assert prepared.expected_tip == authority.current()
+    assert authority.checkpoint_pin(org, "synthetic") == prior
+    with pytest.raises(RestoreBlocked):
+        authority.advance_checkpoint(store, prior, candidate, **keys)
+    assert authority.checkpoint_pin(org, "synthetic") == prior
+
+
+def test_authority_requires_current_prior_and_checks_every_candidate_page(recovery, tmp_path):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
+    from src.core.gdpr.independent_tip import IndependentTipStore
+
+    store, installation, org, keys = recovery
+    authority_dir = tmp_path / "authority"
+    authority_dir.mkdir(mode=0o700)
+    authority = IndependentTipStore.initialize(authority_dir / "tip.sqlite", installation)
+    prior_payload = dict(_with_records(org, "erasures", [_erasure(1)]), version="c24-restore-v4")
+    prior = publish_checkpoint(store, installation, prior_payload, **keys)
+    authority.advance_checkpoint(store, None, prior, **keys)
+    omission = publish_checkpoint_pages(store, installation, _payload(org, sequence=2), **keys)
+    with pytest.raises(RestoreBlocked):
+        authority.prepare_paged_checkpoint(store, prior, omission, **keys)
+    candidate = publish_checkpoint_pages(store, installation,
+                                         _with_records(org, "erasures", [_erasure(1)], sequence=3), **keys)
+    successor = publish_checkpoint(store, installation,
+                                   dict(prior_payload, sequence=2), previous_pin=prior, **keys)
+    authority.advance_checkpoint(store, prior, successor, **keys)
+    with pytest.raises(RestoreBlocked):
+        authority.prepare_paged_checkpoint(store, prior, candidate, **keys)
+    prepared = authority.prepare_paged_checkpoint(store, successor, candidate, **keys)
+    assert prepared.expected_pin == successor
+    page = next(path for path in store.root.iterdir()
+                if path.is_file() and all(pin.sha256 not in path.name for pin in
+                                           (prior, omission, candidate, successor)))
+    page.unlink()
+    with pytest.raises(RestoreBlocked):
+        authority.prepare_paged_checkpoint(store, successor, candidate, **keys)
+    assert authority.checkpoint_pin(org, "synthetic") == successor
+
+
+def test_authority_detects_pin_change_during_candidate_readback(recovery, tmp_path):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
+    from src.core.gdpr.independent_tip import IndependentTipStore
+
+    store, installation, org, keys = recovery
+    authority_dir = tmp_path / "authority"
+    authority_dir.mkdir(mode=0o700)
+    authority = IndependentTipStore.initialize(authority_dir / "tip.sqlite", installation)
+    previous_payload = dict(_payload(org), version="c24-restore-v4")
+    previous = publish_checkpoint(store, installation, previous_payload, **keys)
+    authority.advance_checkpoint(store, None, previous, **keys)
+    successor = publish_checkpoint(store, installation, dict(previous_payload, sequence=2), **keys)
+    candidate = publish_checkpoint_pages(store, installation, _payload(org, sequence=3), **keys)
+
+    class AdvancingStore:
+        def read(self, name):
+            if name == _checkpoint_name(installation, candidate) and authority.checkpoint_pin(org, "synthetic") == previous:
+                authority.advance_checkpoint(store, previous, successor, **keys)
+            return store.read(name)
+
+        def put_once(self, name, ciphertext):
+            raise AssertionError("Candidate verification must not publish objects")
+
+    with pytest.raises(RestoreBlocked):
+        authority.prepare_paged_checkpoint(AdvancingStore(), previous, candidate, **keys)
+    assert authority.checkpoint_pin(org, "synthetic") == successor

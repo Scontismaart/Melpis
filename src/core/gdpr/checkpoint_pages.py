@@ -14,7 +14,7 @@ from cryptography.fernet import InvalidToken
 
 from src.core.gdpr.journal_publication import (
     CheckpointPin, JournalStore, _canonical, _checkpoint_keys, _checkpoint_name,
-    _previous_key_args, read_checkpoint,
+    _previous_key_args, _require_cumulative, read_checkpoint,
 )
 from src.core.gdpr.restore_checkpoint import RestoreBlocked, _authenticate_checkpoint
 from src.core.gdpr.restore_journal import RestoreJournalInvalid, _hex, _unique_object, _uuid
@@ -292,27 +292,87 @@ def read_checkpoint_pages(store: JournalStore, installation, org, backup, pin, *
         raise RestoreBlocked("Authenticated paged checkpoint unavailable") from None
 
 
-def _check_previous(store, installation, pin, payload, previous_pin, previous_args):
-    if previous_pin is None:
-        return
+def read_any_checkpoint(store: JournalStore, installation, org, backup, pin, *,
+                        verification_key, encryption_key):
+    """Dispatch on the exact pinned root, then fully authenticate that format.
+
+    A missing or invalid v5 page must propagate failure rather than falling
+    back to a legacy or older checkpoint. The initial inspection only selects
+    the decoder; the selected reader authenticates the exact root again.
+    """
+    try:
+        name = _checkpoint_name(installation, pin)
+        if (pin.organization_id, pin.backup_id) != (org, backup):
+            raise ValueError
+        _scope(installation, org, backup, pin.sequence)
+        cipher = _checkpoint_keys(verification_key, encryption_key)
+        sealed = store.read(name)
+        if type(sealed) is not bytes or not 1 <= len(sealed) <= _MAX_OBJECT_BYTES:
+            raise ValueError
+        envelope = json.loads(cipher.decrypt(sealed), object_pairs_hook=_unique_object)
+        if (type(envelope) is not dict or set(envelope) != {"payload", "signature"}
+                or type(envelope["payload"]) is not dict):
+            raise ValueError
+        raw = _canonical(envelope["payload"])
+        if not hmac.compare_digest(sha256(raw).hexdigest(), pin.sha256):
+            raise ValueError
+        version = envelope["payload"].get("version")
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError, InvalidToken, RestoreJournalInvalid):
+        raise RestoreBlocked("Authenticated checkpoint unavailable") from None
+    args = dict(verification_key=verification_key, encryption_key=encryption_key)
+    if version == _VERSION:
+        return read_checkpoint_pages(store, installation, org, backup, pin, **args)
+    if version in ("c24-restore-v3", "c24-restore-v4"):
+        return read_checkpoint(store, installation, org, backup, pin, **args)["payload"]
+    raise RestoreBlocked("Unsupported authenticated checkpoint format")
+
+
+def _check_pin_progress(previous_pin, pin):
     if (type(previous_pin) is not CheckpointPin
             or (previous_pin.organization_id, previous_pin.backup_id) != (pin.organization_id, pin.backup_id)
             or pin.sequence < previous_pin.sequence
             or (pin.sequence == previous_pin.sequence and pin != previous_pin)):
-        raise ValueError
-    try:
-        previous = read_checkpoint_pages(
-            store, installation, pin.organization_id, pin.backup_id, previous_pin, **previous_args)
-    except RestoreBlocked:
-        # Legacy objects require their original HMAC and exact external pin.
-        # Neither format can be accepted as the other, even after corruption.
-        previous = read_checkpoint(
-            store, installation, pin.organization_id, pin.backup_id, previous_pin, **previous_args)["payload"]
+        raise RestoreBlocked("Checkpoint scope or sequence cannot regress")
+
+
+def _require_candidate_cumulative(previous, previous_pin, payload, pin):
+    _check_pin_progress(previous_pin, pin)
+    if previous["version"] == _VERSION and payload["version"] != _VERSION:
+        raise RestoreBlocked("Checkpoint version cannot regress")
+    if payload["version"] != _VERSION:
+        _require_cumulative(previous, previous_pin, payload, pin)
+        return
     for category, identity in _IDENTITIES.items():
         old = _normalized_records(category, previous.get(category, []))
         current = {item[identity]: _canonical(item) for item in payload[category]}
         if any(current.get(item[identity]) != _canonical(item) for item in old):
             raise RestoreBlocked("Paged checkpoint omits prior evidence")
+
+
+def _check_previous(store, installation, pin, payload, previous_pin, previous_args):
+    if previous_pin is None:
+        return
+    _check_pin_progress(previous_pin, pin)
+    previous = read_any_checkpoint(
+        store, installation, pin.organization_id, pin.backup_id, previous_pin, **previous_args)
+    _require_candidate_cumulative(previous, previous_pin, payload, pin)
+
+
+def verify_checkpoint_candidate(store: JournalStore, installation, previous_pin, candidate, *,
+                                verification_key, encryption_key, previous_keys=None):
+    """Verify candidate and prior exact objects. This pure check advances no authority."""
+    try:
+        _checkpoint_name(installation, candidate)
+        previous_args = _previous_key_args(previous_pin, previous_keys, verification_key, encryption_key)
+        if previous_pin is not None:
+            _check_pin_progress(previous_pin, candidate)
+        payload = read_any_checkpoint(
+            store, installation, candidate.organization_id, candidate.backup_id, candidate,
+            verification_key=verification_key, encryption_key=encryption_key)
+        _check_previous(store, installation, candidate, payload, previous_pin, previous_args)
+        return payload
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError, RestoreJournalInvalid):
+        raise RestoreBlocked("Checkpoint candidate verification failed") from None
 
 
 def publish_checkpoint_pages(store: JournalStore, installation, payload, *,
