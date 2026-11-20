@@ -118,6 +118,16 @@ intervention. Removing old backups does not remove the cumulative tuple
 requirements for the v3/v4 verifier or the source check's genesis dependency.
 Preserve all artifacts and immutable bindings until a successor has verified
 every retained backup and source proof.
+The bounded suffix-scan candidate (`journal_chain_pages.scan_verified_chain`)
+reads independently indexed segment pages under one exact current tip,
+authenticates every segment and approved key boundary, and checks global
+operation uniqueness across pages using a temporary keyed-digest index. Its
+consumer must be read-only or stage work in a quarantined rollback-capable
+transaction; successful completion, not an individual page, is the proof.
+This primitive does not certify a pre-anchor prefix, change any current
+restore caller, or establish an authorized recovery floor. The earliest
+recoverable backup anchor and complete historical operation commitments must
+be independently attested before compaction can advance a floor.
 If evidence or its current authority cannot be recovered, keep traffic closed
 and obtain the controller's disposition. No deletion rule may rely on a
 guessed backup age or an older unverified tip.
@@ -203,6 +213,15 @@ SQL108 ordinary-booking plans, including completion, policy, allocation revision
 and ordered request IDs. It preserves v3 evidence, rejects downgrades, and requires
 a verified backup inventory and current policy before an owner-only SQL109 replay.
 V4 retains the same cumulative payload limit and does not authorize journal deletion.
+The prospective v5 page codec (`checkpoint_pages`) writes separately encrypted,
+domain-authenticated immutable pages before the independently scoped manifest;
+full readback checks every descriptor, exact ordered identity and cumulative
+prior evidence. The isolated test round-trips 18,500 records above 2 MiB.
+Candidate bounds are 1 MiB/1,000 records per page, 256 pages, 100,000 total
+records and 64 MiB aggregate plaintext. The page codec returns a candidate pin,
+not an authority update. Source capture, independent CAS, complete restore,
+coverage and recovery-floor certification still have to be integrated before
+the operational use of v5 is allowed.
 Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized
