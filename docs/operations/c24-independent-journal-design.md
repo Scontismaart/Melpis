@@ -236,8 +236,10 @@ read-only transaction. Its synthetic drill rejects an unreconciled backup and
 newly asserted erasure evidence absent from the restored database. The owner
 can capture structured source evidence into a v5 candidate with
 `capture_committed_checkpoint(..., paged_candidate=True)` and publish it for
-readback. Independent CAS, v5 mutation replay, full coverage and recovery-floor
-certification are required for operational use of v5.
+readback. `assess_paged_backup_candidates` verifies an exact candidate for each
+tenant of every independently inventoried backup using the existing current
+pins. Independent CAS, v5 mutation replay, real backup artifacts and
+recovery-floor certification are required for operational use of v5.
 Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized

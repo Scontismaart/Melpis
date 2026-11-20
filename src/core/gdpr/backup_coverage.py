@@ -174,3 +174,42 @@ def assess_backup_coverage(
             "source_chain_entries_remaining": _LEGACY_ENTRY_LIMIT - proof["entries"],
             "earliest_backup_anchor_sequence": min(anchor.sequence for _, _, anchor, _ in backups),
             "deletion_authorized": False}
+
+
+def assess_paged_backup_candidates(authority, store, inventory_bytes, *, latest_inventory_sha256,
+                                   candidates, audit_at=None, **trust):
+    """Check v5 successor candidates for every tenant of every inventoried backup.
+
+    Existing verified recovery evidence remains authoritative. This separately
+    verifies candidate readback and cumulative inclusion under that evidence.
+    It does not attest actual backup bytes, publish pins or enable deletion.
+    """
+    if type(candidates) is not dict:
+        raise RestoreBlocked("Exact paged candidate inventory required")
+    candidates = dict(candidates)
+    audit_at = datetime.now(timezone.utc) if audit_at is None else audit_at
+    try:
+        backups = list(_backups(inventory_bytes, latest_inventory_sha256, authority.installation_id, audit_at))
+        scopes = {(org, backup) for backup, orgs, _, _ in backups for org in orgs}
+        if candidates.keys() != scopes:
+            raise RestoreBlocked("Paged checkpoint candidates must cover the exact backup inventory")
+        tip = authority.current()
+        pins = {(org, backup): (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup))
+                for org, backup in scopes}
+        proof = assess_backup_coverage(authority, store, inventory_bytes,
+            latest_inventory_sha256=latest_inventory_sha256, audit_at=audit_at, **trust)
+        for (org, backup), (pin, _) in pins.items():
+            prepared = authority.prepare_paged_checkpoint(store, pin, candidates[org, backup],
+                verification_key=trust["checkpoint_verification_key"],
+                encryption_key=trust["checkpoint_encryption_key"])
+            if prepared.expected_tip != tip or prepared.expected_pin != pin:
+                raise RestoreBlocked("Independent recovery evidence changed during candidate assessment")
+        if authority.current() != tip or any(
+                (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)) != expected
+                for (org, backup), expected in pins.items()):
+            raise RestoreBlocked("Independent recovery evidence changed during candidate assessment")
+        authority.validate_segment_schedule(tip, trust["trusted_public_key"], trust["journal_encryption_key"],
+                                            trust.get("key_epochs"))
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, RestoreJournalInvalid):
+        raise RestoreBlocked("Verified independently pinned backup inventory required") from None
+    return dict(proof, verified_paged_candidates=len(pins), authority_advanced=False)
