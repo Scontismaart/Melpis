@@ -243,6 +243,38 @@ class IndependentTipStore:
             conn.execute("BEGIN")
             return self._chain_after(conn, self._current(conn), backup_checkpoint)
 
+    def chain_page_after(self, anchor, expected_tip, *, max_segments=100):
+        """Read one bounded index page under a fixed independent current tip.
+
+        The caller must authenticate its initial anchor and exhaust successive
+        pages until the expected tip. This does not certify the pre-anchor prefix.
+        """
+        if (not _checkpoint(anchor) or not _checkpoint(expected_tip)
+                or anchor.sequence > expected_tip.sequence or type(max_segments) is not int
+                or not 1 <= max_segments <= 100):
+            raise RestoreJournalInvalid("journal_bounds_invalid")
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            if self._current(conn) != expected_tip:
+                raise RestoreJournalInvalid("independent_authority_conflict")
+            if anchor != _GENESIS and conn.execute("SELECT digest FROM segments WHERE sequence=?",
+                                                  (anchor.sequence,)).fetchone() != (anchor.sha256,):
+                raise RestoreJournalInvalid("independent_authority_invalid")
+            rows = conn.execute("""SELECT sequence,digest,previous_sequence,previous_digest FROM segments
+                WHERE sequence>? ORDER BY sequence LIMIT ?""", (anchor.sequence, max_segments+1)).fetchall()
+            previous, result = anchor, []
+            for sequence,digest,previous_sequence,previous_digest in rows[:max_segments]:
+                tip = JournalCheckpoint(sequence,digest)
+                if (not _checkpoint(tip) or previous_sequence != previous.sequence
+                        or previous_digest != previous.sha256 or not previous.sequence < sequence <= expected_tip.sequence):
+                    raise RestoreJournalInvalid("independent_authority_invalid")
+                previous = tip
+                result.append(tip)
+            if ((len(rows) <= max_segments and previous != expected_tip)
+                    or (len(rows) > max_segments and previous.sequence >= expected_tip.sequence)):
+                raise RestoreJournalInvalid("independent_authority_invalid")
+            return tuple(result)
+
     def advance(self, store, previous_tip, candidate, *, trusted_public_key, encryption_key):
         """Advance only after exact readback, with atomic CAS and uniqueness."""
         entries = read_segment(store, self.installation_id, previous_tip, candidate,
