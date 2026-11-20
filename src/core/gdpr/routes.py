@@ -261,6 +261,11 @@ async def require_gdpr_download_authorization(
     if pending is None:
         return None
 
+    await _validate_gdpr_download_authorization(request, user, pending)
+    return token, pending
+
+
+async def _validate_gdpr_download_authorization(request, user, pending):
     # Never use get_organization_context here: its login flow can auto-provision
     # a tenant. This check binds the export to its authenticated owner session.
     auth_user_id = user.get("auth_user_id")
@@ -300,15 +305,36 @@ async def require_gdpr_download_authorization(
     ):
         raise HTTPException(status_code=403, detail="Membership owner non valida per questo export")
 
-    return token, pending
+
+async def preflight_gdpr_download(
+    request: Request,
+    authorization: tuple[str, token_store.ExportToken] | None = Depends(
+        require_gdpr_download_authorization
+    ),
+):
+    if authorization is None:
+        return None
+    _, pending = authorization
+    if not pending.data.get('export_id'):
+        raise HTTPException(404, 'Export scaduto o revocato')
+    exporter = Exporter(get_repo(request).pool)
+    try:
+        await exporter.preflight(pending.org_id, pending.data['export_id'], pending.auth_user_id)
+    except LookupError:
+        raise HTTPException(404, 'Export scaduto o revocato') from None
+    except Exception:
+        raise HTTPException(503, 'Export temporaneamente non disponibile') from None
+    return authorization
 
 
 @router.get("/download")
 async def gdpr_download(
     request: Request,
-    authorization: tuple[str, token_store.ExportToken] | None = Depends(
-        require_gdpr_download_authorization
-    ),
+    authorization: tuple[str, token_store.ExportToken] | None = Depends(preflight_gdpr_download),
+    # Preflight may take substantial time for a large encrypted snapshot.
+    # Re-run JWT/session/account verification after it rather than reusing
+    # the request's cached initial authentication decision.
+    fresh_user: dict = Depends(get_current_user, use_cache=False),
 ):
     if authorization is None:
         response = JSONResponse(status_code=404, content={"detail": "Link di export scaduto o non valido"})
@@ -317,16 +343,8 @@ async def gdpr_download(
         return response
 
     token, pending = authorization
-    if not pending.data.get('export_id'):
-        raise HTTPException(404, 'Export scaduto o revocato')
+    await _validate_gdpr_download_authorization(request, fresh_user, pending)
     exporter = Exporter(get_repo(request).pool)
-    if pending.data.get('export_id'):
-        try:
-            await exporter.preflight(pending.org_id, pending.data['export_id'], pending.auth_user_id)
-        except LookupError:
-            raise HTTPException(404, 'Export scaduto o revocato') from None
-        except Exception:
-            raise HTTPException(503, 'Export temporaneamente non disponibile') from None
     try:
         data = await token_store.consume_token(token, pending)
     except token_store.TokenStoreUnavailable as exc:

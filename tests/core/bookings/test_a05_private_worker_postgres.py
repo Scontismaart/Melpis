@@ -89,9 +89,16 @@ async def _commit_synthetic_a04(pool, org, text, *, day=None):
     return {'id':msg_id,'organization_id':org,'conversation_id':conversation}, stored, op
 
 
+@pytest.mark.migration_limit(105)
 async def test_a04_committed_webhook_a05_private_writer_is_atomic_and_replay_safe(
     pg_pool, private_worker_pool, monkeypatch,
 ):
+    # Worker trigger execution continues through the dedicated writer without
+    # granting direct EXECUTE rights to the role (SQL105).
+    for function in ('booking_allocation_validate_worker_source', 'booking_conversation_validate_worker_source'):
+        assert not await private_worker_pool.fetchval(
+            "SELECT has_function_privilege(current_user,$1,'EXECUTE')", f'public.{function}()',
+        )
     org, _ = await _setup(pg_pool, capacity=4)
     day = await pg_pool.fetchval("SELECT (now() AT TIME ZONE 'Europe/Rome')::date + 10")
     text = f'Vorrei prenotare un tavolo per 2 persone il {day.isoformat()} alle 19:00, mi chiamo Mario Rossi'

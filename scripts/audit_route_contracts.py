@@ -65,6 +65,13 @@ def extract_route_contracts(app=None) -> dict:
     # only this concrete runtime dependency, never arbitrary endpoint/dep tags.
     from src.core.gdpr.routes import require_gdpr_download_authorization
 
+    def has_download_guard(dep):
+        # The actual guard now runs through the preflight dependency before
+        # fresh authorization. Follow its dependency edges, not metadata tags.
+        return dep.call is require_gdpr_download_authorization or any(
+            has_download_guard(child) for child in dep.dependencies
+        )
+
     contracts = {}
 
     all_routes = _collect_routes(app.routes)
@@ -78,12 +85,13 @@ def extract_route_contracts(app=None) -> dict:
         for dep in route.dependant.dependencies:
             call = dep.call
             roles = _extract_required_roles(call)
-            if call is require_gdpr_download_authorization:
+            download_guard = has_download_guard(dep)
+            if download_guard:
                 roles = ["owner"]
             if roles:
                 required_roles = roles
             call_name = getattr(call, "__name__", "")
-            if call_name in ("get_organization_context", "get_current_org_id") or call is require_gdpr_download_authorization:
+            if call_name in ("get_organization_context", "get_current_org_id") or download_guard:
                 has_org_context = True
 
 
