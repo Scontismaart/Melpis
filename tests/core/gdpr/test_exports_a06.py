@@ -1,5 +1,6 @@
 """Real-PostgreSQL GDPR snapshot, projection, and integrity contracts."""
 import uuid
+import asyncio
 
 import pytest
 from cryptography.fernet import Fernet
@@ -76,6 +77,37 @@ async def export_bytes(exporter, org, export_id, requester):
     async for chunk in exporter.stream(org, export_id, requester):
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed_by", ["expiry", "revocation"])
+async def test_paused_download_does_not_lock_snapshot_and_stops_after_access_ends(
+    pg_pool, sample_org, closed_by,
+):
+    from src.core.retention_job import expire_export_snapshots
+
+    org, requester = sample_org["id"], "owner-paused-download"
+    await seed_export_fixture(pg_pool, org, long_text=True)
+    exporter = Exporter(pg_pool)
+    ready = await exporter.prepare(org, requester, scope="organization", request_id=uuid.uuid4())
+    oid = uuid.UUID(ready["export_id"])
+    assert ready["manifest"]["chunks"] > 1
+    stream = exporter.stream(org, oid, requester)
+    try:
+        assert await anext(stream)
+        async with asyncio.timeout(2):
+            if closed_by == "expiry":
+                await pg_pool.execute("""UPDATE gdpr_operations SET expires_at=NOW()-INTERVAL '1 second'
+                    WHERE organization_id=$1 AND id=$2""", org, oid)
+                await expire_export_snapshots(pg_pool)
+            else:
+                await exporter.revoke(org, oid, requester)
+        assert not await pg_pool.fetchval("""SELECT EXISTS(SELECT FROM gdpr_export_chunks
+            WHERE organization_id=$1 AND operation_id=$2)""", org, oid)
+        with pytest.raises(OperationUnavailable):
+            await anext(stream)
+    finally:
+        await stream.aclose()
 
 
 @pytest.mark.asyncio

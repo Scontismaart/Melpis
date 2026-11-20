@@ -230,21 +230,32 @@ class Exporter:
 
     async def stream(self, org, oid, requester):
         org, oid = UUID(str(org)), UUID(str(oid))
-        async with self.pool.acquire() as conn, conn.transaction():
-            valid = await conn.fetchval(
-                '''SELECT id FROM gdpr_operations WHERE organization_id=$1 AND id=$2 AND requester=$3
-                   AND status='ready' AND expires_at>NOW() FOR SHARE''', org, oid, str(requester),
+        manifest = await self.pool.fetchval(
+            '''SELECT manifest FROM gdpr_operations WHERE organization_id=$1 AND id=$2 AND requester=$3
+               AND kind='export' AND status='ready' AND expires_at>clock_timestamp()''',
+            org, oid, str(requester),
+        )
+        count = document(manifest).get('chunks') if manifest else None
+        if type(count) is not int or count <= 0:
+            raise OperationUnavailable('Export unavailable')
+        cipher = _fernet()
+        for sequence in range(count):
+            # Backpressure from an HTTP client must not pin a database
+            # connection, a cursor snapshot, or a row lock across a yield.
+            row = await self.pool.fetchrow(
+                '''SELECT c.ciphertext,c.digest
+                   FROM gdpr_export_chunks c JOIN gdpr_operations o
+                     ON o.organization_id=c.organization_id AND o.id=c.operation_id
+                   WHERE c.organization_id=$1 AND o.organization_id=$1 AND o.id=$2
+                     AND o.requester=$3 AND o.kind='export' AND o.status='ready'
+                     AND o.expires_at>clock_timestamp() AND c.sequence=$4''',
+                org, oid, str(requester), sequence,
             )
-            if not valid:
+            if row is None:
                 raise OperationUnavailable('Export unavailable')
-            cipher = _fernet()
-            async for row in conn.cursor(
-                '''SELECT ciphertext,digest FROM gdpr_export_chunks
-                   WHERE organization_id=$1 AND operation_id=$2 ORDER BY sequence''', org, oid, prefetch=1,
-            ):
-                if hashlib.sha256(row['ciphertext']).hexdigest() != row['digest']:
-                    raise OperationUnavailable('Export integrity verification failed')
-                yield cipher.decrypt(row['ciphertext'])
+            if hashlib.sha256(row['ciphertext']).hexdigest() != row['digest']:
+                raise OperationUnavailable('Export integrity verification failed')
+            yield cipher.decrypt(row['ciphertext'])
 
     async def revoke(self, org, oid, requester):
         async with self.pool.acquire() as conn, conn.transaction():
