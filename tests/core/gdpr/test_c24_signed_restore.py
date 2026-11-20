@@ -11,7 +11,7 @@ import os
 import re
 import secrets
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -641,5 +641,157 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
                     await verify_paged_restore_candidates(conn, authority, store,
                         **dict(candidate_args, candidates={org: missing_pin}))
             assert authority.checkpoint_pin(org, backup_id) == pin
+    finally:
+        await restored.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history", ["with-preimage", "before-source", "later-erasure"])
+async def test_verified_orphan_proposal_is_erased_on_source_and_replayed_from_v5(
+    restore_target, state_env, tmp_path, monkeypatch, history,
+):
+    from src.core.gdpr.orphan_proposal_expiry import expire_inventory_covered_orphan_proposals
+    from src.core.gdpr.restore_coordinator import replay_primary_published_erasures
+    from src.core.gdpr.source_checkpoint import capture_committed_checkpoint
+    from tests.core.gdpr.test_orphan_proposal_plan import _known_orphan
+
+    container, dsn, principal, source_db = restore_target
+    await _verify_restore_target(container)
+    env = state_env
+    backup_predates_source = history == "before-source"
+    pool, org = env["pool"], env["org"]
+    original_message = env["message"]
+    plain = None
+    backup_completed_at = None
+    if backup_predates_source:
+        plain = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
+                              "--no-owner", "--no-privileges", "--format=plain")
+        backup_completed_at = datetime.now(timezone.utc) - timedelta(days=40)
+        env["message"] = await _inbound_message(pool, org, canale="whatsapp")
+        env["conv"] = await pool.fetchval("SELECT conversation_id FROM messages WHERE organization_id=$1 AND id=$2",
+                                         org, env["message"])
+    operation = await _known_orphan(env)
+    source = env["message"]
+    provider_id = await pool.fetchval("SELECT wam_id FROM messages WHERE organization_id=$1 AND id=$2", org, source)
+    monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
+    if history == "later-erasure":
+        await approve_policies(pool, org)
+        await approve_messages(pool, org)
+        await approve_technical_receipts(pool, org)
+        monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
+        monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
+    objects, pins = tmp_path / "objects", tmp_path / "pins"
+    objects.mkdir(mode=0o700)
+    pins.mkdir(mode=0o700)
+    installation = uuid4()
+    authority = IndependentTipStore.initialize(pins / "authority.sqlite", installation)
+    store = LocalJournalStore(objects)
+    signer = Ed25519PrivateKey.generate()
+    checkpoint_key, encryption_key, journal_key = secrets.token_bytes(32), Fernet.generate_key(), Fernet.generate_key()
+    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
+    keys = dict(verification_key=checkpoint_key, encryption_key=encryption_key)
+    trust = dict(trusted_public_key=signer.public_key(), journal_encryption_key=journal_key,
+        checkpoint_verification_key=checkpoint_key, checkpoint_encryption_key=encryption_key,
+        policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+    anchor, backup_id = authority.current(), "synthetic-orphan-older"
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        legacy = await capture_committed_checkpoint(conn, authority, store, org, backup_id, sequence=1, **keys)
+        planned = await capture_committed_checkpoint(conn, authority, store, org, backup_id, sequence=2,
+            paged_candidate=True, pending_orphan_sources=[source], **keys)
+        policy, sealed_policy = await capture_policy_state(conn, org, backup_id=backup_id, sequence=1,
+            installation_id=installation, verification_key=policy_key, encryption_key=policy_cipher)
+    assert len(planned["orphan_proposal_prunes"]) == 1
+    if plain is None:
+        plain = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
+                              "--no-owner", "--no-privileges", "--format=plain")
+        backup_completed_at = datetime.now(timezone.utc)
+    backup_cipher = Fernet(Fernet.generate_key())
+    encrypted = backup_cipher.encrypt(plain)
+    del plain
+    inventory = json.dumps(dict(version=1, installation_id=str(installation), backups=[dict(
+        backup_id=backup_id, manifest_sha256=sha256(encrypted).hexdigest(), completed_at=backup_completed_at.isoformat(),
+        organizations=[str(org)], anchor=dict(sequence=anchor.sequence, sha256=anchor.sha256), exception=None)])).encode()
+    digest = sha256(inventory).hexdigest()
+    old = publish_checkpoint(store, installation, legacy, **keys)
+    authority.advance_checkpoint(store, None, old, **keys)
+    authority.publish_policy(store, None, policy, sealed_policy, verification_key=policy_key, encryption_key=policy_cipher)
+    paged = publish_checkpoint_pages(store, installation, planned, previous_pin=old, **keys)
+    authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=digest,
+        candidates={(org, backup_id): paged}, **trust)
+
+    async def assert_expired(database):
+        row = await database.fetchrow("""SELECT content_text,billed_at,ai_reply_cache ? 'booking_state_proposal' AS proposal
+            FROM messages WHERE organization_id=$1 AND id=$2""", org, source)
+        assert row["content_text"] and row["billed_at"] and row["proposal"] is False
+        assert await database.fetchval("""SELECT response ? 'booking_state_proposal' FROM simulation_requests
+            WHERE organization_id=$1 AND request_id=$2""", org, operation.id) is False
+        assert await database.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == 1
+
+    async with pool.acquire() as conn, conn.transaction():
+        assert await expire_inventory_covered_orphan_proposals(conn, authority, store, org, inventory,
+            latest_inventory_sha256=digest, **trust) == 1
+    await assert_expired(pool)
+    erasure = None
+    if history == "later-erasure":
+        requester = "synthetic-orphan-erasure"
+        erasure = await Operations(pool).create(org, requester, uuid4(), kind="erase", scope="contact",
+                                                subject_id=await subject(env))
+        await Deletion(pool).advance(org, erasure, requester)
+        async with pool.acquire() as conn, conn.transaction(readonly=True):
+            previous, delta, remaining = await capture_erasure_journal_delta_paged(conn, authority, store,
+                expected_organizations=[org], trusted_public_key=signer.public_key(), journal_encryption_key=journal_key)
+        assert len(delta) == 1 and not remaining
+        successor = publish_segment(store, installation, previous, list(delta), signer=signer, encryption_key=journal_key)
+        authority.advance(store, previous, successor, trusted_public_key=signer.public_key(), encryption_key=journal_key)
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        captured = await capture_committed_checkpoint(conn, authority, store, org, backup_id,
+            sequence=3, paged_candidate=True, prior_pin=paged, **keys)
+        assert captured["orphan_proposal_prunes"] == planned["orphan_proposal_prunes"]
+    if erasure is not None:
+        successor = publish_checkpoint_pages(store, installation, captured, previous_pin=paged, **keys)
+        authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=digest,
+            candidates={(org, backup_id): successor}, **trust)
+    # The independently pinned policy renews after the original expiry. The
+    # historical evidence stays byte-for-byte immutable.
+    await pool.execute("""INSERT INTO gdpr_policies(organization_id,category,version,erasure_allowed,
+        retention_days,legal_hold,approval_reference,approved_by,approved_at,valid_until)
+        VALUES($1,'booking_conversation_content','synthetic-renewal',true,30,false,'qa:renewal','qa',
+               clock_timestamp(),clock_timestamp()+interval '7 days')""", org)
+    async with pool.acquire() as conn, conn.transaction(readonly=True):
+        renewed, renewed_data = await capture_policy_state(conn, org, backup_id=backup_id, sequence=2,
+            installation_id=installation, verification_key=policy_key, encryption_key=policy_cipher)
+    authority.publish_policy(store, policy, renewed, renewed_data, verification_key=policy_key, encryption_key=policy_cipher)
+    restored_db = "melpis_c24_restore_dst_" + uuid4().hex[:12]
+    await _docker("exec", container, "createdb", "-U", principal, restored_db)
+    await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                  "-c", f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
+    await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                  "-U", principal, "-d", restored_db, input_bytes=backup_cipher.decrypt(encrypted))
+    restored = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + restored_db, min_size=1, max_size=1)
+    try:
+        if not backup_predates_source:
+            assert await restored.fetchval("""SELECT ai_reply_cache ? 'booking_state_proposal' FROM messages
+                WHERE organization_id=$1 AND id=$2""", org, source)
+        for _ in range(2):
+            proof = await replay_primary_published_erasures(restored, authority, store, backup_checkpoint=anchor,
+                backup_id=backup_id, expected_organizations=[org], quarantine_database=restored_db,
+                ordinary_inventory_bytes=inventory, latest_inventory_sha256=digest, **trust)
+            assert proof["traffic_authorized"] is False
+        if backup_predates_source:
+            assert await restored.fetchval("SELECT count(*) FROM c24_orphan_proposal_expirations WHERE organization_id=$1 AND source_message_id=$2",
+                                           org, source) == 1
+            assert not await restored.fetchval("SELECT EXISTS(SELECT FROM messages WHERE organization_id=$1 AND id=$2)", org, source)
+            assert await restored.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == 0
+            with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match="Expired orphan proposal"):
+                await restored.execute("""UPDATE messages SET wam_id=$3,ai_reply_cache='{"booking_state_proposal":{}}'
+                    WHERE organization_id=$1 AND id=$2""", org, original_message, provider_id)
+        elif erasure is not None:
+            assert await restored.fetchval("SELECT EXISTS(SELECT FROM gdpr_erasure_barriers WHERE organization_id=$1 AND operation_id=$2)",
+                                           org, erasure)
+            assert await restored.fetchval("SELECT content_text IS NULL AND billed_at IS NOT NULL FROM messages WHERE organization_id=$1 AND id=$2",
+                                           org, source)
+            assert await restored.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == 1
+        else:
+            await assert_expired(restored)
     finally:
         await restored.close()

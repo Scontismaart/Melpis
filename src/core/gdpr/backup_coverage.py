@@ -117,6 +117,18 @@ def assess_backup_coverage(
     verified encrypted backup manifest, not a bucket listing or inferred date.
     This function reports available capacity and never deletes or rotates data.
     """
+    return _assess_backup_coverage(authority, store, inventory_bytes,
+        latest_inventory_sha256=latest_inventory_sha256, trusted_public_key=trusted_public_key,
+        journal_encryption_key=journal_encryption_key, checkpoint_verification_key=checkpoint_verification_key,
+        checkpoint_encryption_key=checkpoint_encryption_key, policy_verification_key=policy_verification_key,
+        policy_encryption_key=policy_encryption_key, key_epochs=key_epochs, audit_at=audit_at)
+
+
+def _assess_backup_coverage(
+    authority, store, inventory_bytes, *, latest_inventory_sha256,
+    trusted_public_key, journal_encryption_key, checkpoint_verification_key, checkpoint_encryption_key,
+    policy_verification_key, policy_encryption_key, key_epochs=None, audit_at=None, candidate_pins=None,
+):
     installation = authority.installation_id
     if audit_at is None:
         audit_at = datetime.now(timezone.utc)
@@ -143,8 +155,9 @@ def assess_backup_coverage(
             for org in orgs:
                 pin, policy = authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)
                 pins[org, backup] = pin, policy
+                artifact = pin if candidate_pins is None else candidate_pins[org, backup]
                 checkpoint, (byte_headroom, entry_headroom, page_headroom) = read_any_checkpoint(
-                    store, installation, org, backup, pin, verification_key=checkpoint_verification_key,
+                    store, installation, org, backup, artifact, verification_key=checkpoint_verification_key,
                     encryption_key=checkpoint_encryption_key, with_capacity=True)
                 authority.read_policy(store, policy, verification_key=policy_verification_key,
                                       encryption_key=policy_encryption_key)
@@ -198,13 +211,18 @@ def assess_paged_backup_candidates(authority, store, inventory_bytes, *, latest_
         tip = authority.current()
         pins = {(org, backup): (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup))
                 for org, backup in scopes}
-        proof = assess_backup_coverage(authority, store, inventory_bytes,
-            latest_inventory_sha256=latest_inventory_sha256, audit_at=audit_at, **trust)
         keys = _candidate_checkpoint_keys(candidate_keys, trust)
         for (org, backup), (pin, _) in pins.items():
             prepared = authority.prepare_paged_checkpoint(store, pin, candidates[org, backup], **keys)
             if prepared.expected_tip != tip or prepared.expected_pin != pin:
                 raise RestoreBlocked("Independent recovery evidence changed during candidate assessment")
+        candidate_trust = dict(trust, checkpoint_verification_key=keys["verification_key"],
+                              checkpoint_encryption_key=keys["encryption_key"])
+        # New signed erasures can arrive after the previous checkpoint. The
+        # candidate has to cover them. Its exact prior evidence was already
+        # authenticated above, even if the prior checkpoint predates them.
+        proof = _assess_backup_coverage(authority, store, inventory_bytes, candidate_pins=candidates,
+            latest_inventory_sha256=latest_inventory_sha256, audit_at=audit_at, **candidate_trust)
         if authority.current() != tip or any(
                 (authority.checkpoint_pin(org, backup), authority.policy_pin(org, backup)) != expected
                 for (org, backup), expected in pins.items()):

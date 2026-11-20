@@ -1,6 +1,7 @@
 """Read-only evidence for a verified, never-applied C2.4 proposal source."""
 
 from datetime import timezone
+from hashlib import sha256
 from uuid import UUID
 
 from src.core.billing.quota_reservations import QuotaOperation, _decode, _hash, QuotaConflict
@@ -57,16 +58,21 @@ async def plan_orphan_proposal_expiry(conn, organization_id, source_message_id):
     recheck this evidence, current holds and the full lifecycle in its write
     transaction. Unknown/ambiguous sources deliberately produce no candidate.
     """
+    return await _plan_orphan_proposal(conn, organization_id, source_message_id, read_only=True)
+
+
+async def _plan_orphan_proposal(conn, organization_id, source_message_id, *, read_only):
     if (not isinstance(organization_id, UUID) or not organization_id.int
             or not isinstance(source_message_id, UUID) or not source_message_id.int):
         raise RestoreBlocked('Exact orphan proposal organization and source required')
     org, source = UUID(str(organization_id)), UUID(str(source_message_id))
     if (not conn.is_in_transaction() or not await conn.fetchval('''SELECT
-            current_setting('transaction_read_only')='on' AND current_setting('transaction_isolation')='read committed'
+            current_setting('transaction_read_only')=$1 AND current_setting('transaction_isolation')='read committed'
             AND (SELECT count(*)=4 AND bool_and(relowner=current_user::regrole)
                  FROM pg_class WHERE oid IN ('public.messages'::regclass,'public.usage_events'::regclass,
-                   'public.simulation_requests'::regclass,'public.gdpr_policies'::regclass))''')):
-        raise RestoreBlocked('Orphan proposal planning requires a read-only lifecycle owner transaction')
+                   'public.simulation_requests'::regclass,'public.gdpr_policies'::regclass))''', 'on' if read_only else 'off')):
+        raise RestoreBlocked('Orphan proposal planning requires a read-only lifecycle owner transaction' if read_only
+                             else 'Orphan proposal replay requires a writable lifecycle owner transaction')
     if not await conn.fetchval('SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,606))', str(org)):
         return None
     row = await conn.fetchrow('''SELECT m.id,m.conversation_id,m.c24_original_subject_id,m.c24_received_at,
@@ -173,5 +179,7 @@ async def plan_orphan_proposal_expiry(conn, organization_id, source_message_id):
         'subject_id': str(subject), 'source_message_id': str(source),
         'received_at': row['c24_received_at'].astimezone(timezone.utc).isoformat(),
         'policy_version': row['policy_version'], 'quota_operation_id': str(operation.id),
-        'response_hash': metadata['response_hash'], 'deletion_authorized': False,
+        'response_hash': metadata['response_hash'],
+        'provider_message_sha256': sha256(row['wam_id'].encode('utf-8')).hexdigest(),
+        'deletion_authorized': False,
     }

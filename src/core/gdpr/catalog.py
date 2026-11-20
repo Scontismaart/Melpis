@@ -45,6 +45,8 @@ CATEGORIES: tuple[Category, ...] = (
              "Private, subject-linked completion evidence needs controller review; no direct application grant."),
     Category("c24_account_response_receipts", "", exclusion_reason=
              "Private integrity evidence for a tenant account response. The approved export contains separately scoped business data."),
+    Category("c24_orphan_proposal_expirations", "", exclusion_reason=
+             "Private replay evidence for expired proposals. No proposal text is stored in the evidence."),
     Category("ordinary_booking_purge_bindings", "", exclusion_reason=
              "Private ordinary booking recovery commitments need scoped controller review; no direct application grant."),
     Category("booking_stay_tombstones", """
