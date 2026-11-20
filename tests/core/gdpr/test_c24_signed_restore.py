@@ -529,8 +529,11 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
     async with pg_pool.acquire() as conn,conn.transaction(readonly=True):
         committed=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
             sequence=2,verification_key=key,encryption_key=checkpoint_cipher,prior_pin=pin)
+        paged = await capture_committed_checkpoint(conn, authority, store, org, backup_id, sequence=2,
+            verification_key=key, encryption_key=checkpoint_cipher, prior_pin=pin, paged_candidate=True)
     assert committed["ordinary_booking_purges"]==payload["ordinary_booking_purges"]
-    candidate = publish_checkpoint_pages(store, installation, dict(committed, version="c24-restore-v5"),
+    assert paged == dict(committed, version="c24-restore-v5")
+    candidate = publish_checkpoint_pages(store, installation, paged,
         verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
     restored_db="melpis_c24_restore_dst_"+uuid4().hex[:12]
     await _docker("exec",container,"createdb","-U",principal,restored_db)

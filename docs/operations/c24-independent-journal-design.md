@@ -233,9 +233,11 @@ records and 64 MiB aggregate plaintext. The page codec returns a candidate pin,
 not an authority update. `verify_paged_restore_candidates` compares all candidate
 pages with the postconditions of an isolated, already-replayed database in a
 read-only transaction. Its synthetic drill rejects an unreconciled backup and
-newly asserted erasure evidence absent from the restored database. Paged source
-capture, independent CAS, mutation replay, coverage and recovery-floor
-certification still have to be integrated before operational use of v5.
+newly asserted erasure evidence absent from the restored database. The owner
+can capture structured source evidence into a v5 candidate with
+`capture_committed_checkpoint(..., paged_candidate=True)` and publish it for
+readback. Independent CAS, v5 mutation replay, full coverage and recovery-floor
+certification are required for operational use of v5.
 Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized

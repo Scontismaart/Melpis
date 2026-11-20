@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 import os
 from uuid import UUID
 
+from src.core.gdpr.checkpoint_pages import (
+    _MAX_AGGREGATE_BYTES, _MAX_RECORDS, _assert_global_uniqueness, _normalize, read_any_checkpoint,
+)
 from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args, read_checkpoint
 from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked, _bind_receipt_prune_checkpoint, _parse_receipt_prunes, _parse_ordinary_purges, _receipt_prune_digest,
@@ -16,14 +19,19 @@ _LIMIT = 10000
 async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *,
                                        sequence, verification_key, encryption_key,
                                        prior_pin=None, prior_keys=None, pending_requests=(),
-                                       pending_ordinary_bookings=()):
+                                       pending_ordinary_bookings=(), paged_candidate=False):
     """Capture committed erasures, stay purges and bound receipt tuples.
 
     A prior independently pinned checkpoint is necessary when a receipt tuple
     has already been retired locally. It may belong to a different backup of
     the same tenant. No historical tuple is reconstructed from a digest.
     Freeze source writes and independent pin advancement through publication.
+    The explicit paged mode prepares evidence for the v5 candidate codec.
     """
+    if type(paged_candidate) is not bool:
+        raise RestoreBlocked("Checkpoint format selection invalid")
+    collection_limit = _MAX_RECORDS if paged_candidate else _LIMIT
+    size_limit = _MAX_AGGREGATE_BYTES if paged_candidate else 2*1024*1024
     if (type(pending_ordinary_bookings) not in (tuple,list) or len(pending_ordinary_bookings)>_LIMIT
             or any(type(value) is not UUID or not value.int for value in pending_ordinary_bookings)
             or len(set(pending_ordinary_bookings))!=len(pending_ordinary_bookings)
@@ -50,11 +58,14 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         if (type(prior_pin) is not CheckpointPin or prior_pin.organization_id != org
                 or authority.checkpoint_pin(org, prior_pin.backup_id) != prior_pin):
             raise RestoreBlocked("Prior independent checkpoint pin is not current")
-        checkpoint = read_checkpoint(store, authority.installation_id, org, prior_pin.backup_id, prior_pin,
-                                     **prior_args)
-        previous = _parse_receipt_prunes(checkpoint["payload"]["receipt_prunes"])
-        prior_v4 = checkpoint["payload"]["version"] == "c24-restore-v4"
-        previous_ordinary = _parse_ordinary_purges(org, checkpoint["payload"].get("ordinary_booking_purges", []))
+        prior = read_any_checkpoint(store, authority.installation_id, org, prior_pin.backup_id, prior_pin, **prior_args)
+        if prior["version"] == "c24-restore-v5" and not paged_candidate:
+            raise RestoreBlocked("Checkpoint format cannot regress")
+        previous_items = prior["receipt_prunes"]
+        previous = [record for offset in range(0, len(previous_items), _LIMIT)
+                    for record in _parse_receipt_prunes(previous_items[offset:offset+_LIMIT])]
+        prior_v4 = prior["version"] in ("c24-restore-v4", "c24-restore-v5")
+        previous_ordinary = prior.get("ordinary_booking_purges", [])
     carried = {item[0]: item for item in previous}
     if await conn.fetchval("""SELECT EXISTS (SELECT FROM gdpr_operation_steps s
         WHERE s.organization_id=$1 AND s.name='local' AND s.status='confirmed'
@@ -68,16 +79,16 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         JOIN gdpr_operation_steps s ON s.organization_id=b.organization_id AND s.operation_id=b.operation_id
           AND s.name='local' AND s.status='confirmed'
         WHERE b.organization_id=$1 AND o.organization_id=$1 AND s.organization_id=$1
-        ORDER BY b.operation_id LIMIT $2""", org, _LIMIT+1)
-    if (len(erasures)>_LIMIT or len(erasures)!=await conn.fetchval(
+        ORDER BY b.operation_id LIMIT $2""", org, collection_limit+1)
+    if (len(erasures)>collection_limit or len(erasures)!=await conn.fetchval(
             "SELECT count(*) FROM gdpr_erasure_barriers WHERE organization_id=$1", org)):
-        raise RestoreBlocked("Committed erasure evidence is incomplete or exceeds v3 capacity")
+        raise RestoreBlocked("Committed erasure evidence is incomplete or exceeds format capacity")
     fences = await conn.fetch("""SELECT booking_id,original_subject_id,purpose,operation_id,policy_version,receipt_count
         FROM booking_stay_purge_fences WHERE organization_id=$1
           AND COALESCE(to_jsonb(booking_stay_purge_fences)->>'purge_kind','stay')='stay'
-        ORDER BY booking_id LIMIT $2""", org, _LIMIT+1)
-    if len(fences)>_LIMIT:
-        raise RestoreBlocked("Stay purge evidence exceeds v3 capacity")
+        ORDER BY booking_id LIMIT $2""", org, collection_limit+1)
+    if len(fences)>collection_limit:
+        raise RestoreBlocked("Stay purge evidence exceeds format capacity")
     stays = []
     receipt_count = 0
     stay_bytes = 2
@@ -96,8 +107,8 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
                           purpose=fence["purpose"], operation_id=str(fence["operation_id"]) if fence["operation_id"] else None,
                           policy_version=fence["policy_version"], request_ids=[str(row["request_id"]) for row in requests])
         stay_bytes += len(_canonical(item)) + bool(stays)
-        if stay_bytes>2*1024*1024:
-            raise RestoreBlocked("Stay purge evidence exceeds v3 capacity")
+        if stay_bytes>size_limit:
+            raise RestoreBlocked("Stay purge evidence exceeds format capacity")
         stays.append(item)
     if receipt_count!=await conn.fetchval("""SELECT count(*) FROM booking_stay_tombstones t
         JOIN booking_stay_purge_fences f ON f.organization_id=t.organization_id AND f.booking_id=t.booking_id
@@ -112,9 +123,9 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         f.source_message_id,f.conversation_id,f.subject_id
         FROM c24_receipt_prune_checkpoint_bindings b LEFT JOIN c24_source_fences f
           ON f.organization_id=b.organization_id AND f.organization_id=$1 AND f.request_id=b.request_id
-        WHERE b.organization_id=$1 ORDER BY b.request_id LIMIT $2""", org, _LIMIT+1)
-    if len(bindings)>_LIMIT:
-        raise RestoreBlocked("Receipt commitment evidence exceeds v3 capacity")
+        WHERE b.organization_id=$1 ORDER BY b.request_id LIMIT $2""", org, collection_limit+1)
+    if len(bindings)>collection_limit:
+        raise RestoreBlocked("Receipt commitment evidence exceeds format capacity")
     prunes = []
     bound_requests = set()
     for row in bindings:
@@ -148,8 +159,8 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
         if prior is not None and prior != item:
             raise RestoreBlocked("Prior pending receipt conflicts with source tuple")
         prunes.append(dict(zip(("request_id","source_message_id","conversation_id","subject_id"), map(str,item))))
-    if len(prunes)>_LIMIT:
-        raise RestoreBlocked("Receipt commitment evidence exceeds v3 capacity")
+    if len(prunes)>collection_limit:
+        raise RestoreBlocked("Receipt commitment evidence exceeds format capacity")
     if carried:
         raise RestoreBlocked("Prior checkpoint includes receipt evidence not bound at source")
     payload = dict(version="c24-restore-v3", organization_id=str(org), backup_id=backup_id,
@@ -158,39 +169,59 @@ async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *
                  subject_id=str(row["subject_id"]) if row["subject_id"] else None) for row in erasures],
         stay_purges=stays, receipt_prunes=prunes)
     ordinary = []
+    ordinary_bytes = 2
     if await conn.fetchval("SELECT to_regclass('public.ordinary_booking_purge_bindings') IS NOT NULL"):
-        rows = await conn.fetch("""SELECT booking_id,plan,checkpoint_sequence FROM ordinary_booking_purge_bindings
-            WHERE organization_id=$1 ORDER BY booking_id LIMIT $2""", org, _LIMIT+1)
-        if len(rows)>_LIMIT or len(rows)!=await conn.fetchval("""SELECT count(*) FROM booking_stay_purge_fences
-            WHERE organization_id=$1 AND purge_kind='ordinary'""",org):
-            raise RestoreBlocked("Ordinary booking purge evidence is incomplete or exceeds checkpoint capacity")
+        rows = conn.cursor("""SELECT booking_id,plan,checkpoint_sequence FROM ordinary_booking_purge_bindings
+            WHERE organization_id=$1 ORDER BY booking_id LIMIT $2""", org, collection_limit+1, prefetch=64)
         from src.core.gdpr.operations import document
         existing = set()
-        for row in rows:
+        async for row in rows:
+            if len(ordinary) == collection_limit:
+                raise RestoreBlocked("Ordinary booking purge evidence exceeds checkpoint capacity")
             plan = document(row["plan"])
             if (row["checkpoint_sequence"]>sequence or str(row["booking_id"])!=plan["booking_id"]
                     or not await conn.fetchval("SELECT public.ordinary_verify_booking_retention_purge($1,$2,$3::jsonb)",
                                                 org,row["booking_id"],_canonical(plan).decode())):
                 raise RestoreBlocked("Ordinary booking committed evidence is incomplete")
+            ordinary_bytes += len(_canonical(plan)) + bool(ordinary)
+            if ordinary_bytes + stay_bytes > size_limit:
+                raise RestoreBlocked("Booking purge evidence exceeds format capacity")
             ordinary.append(plan)
             existing.add(row["booking_id"])
+        if len(ordinary) != await conn.fetchval("""SELECT count(*) FROM booking_stay_purge_fences
+            WHERE organization_id=$1 AND purge_kind='ordinary'""", org):
+            raise RestoreBlocked("Ordinary booking purge evidence is incomplete")
         for booking in sorted(set(pending_ordinary_bookings)-existing):
             raw = await conn.fetchval("SELECT public.ordinary_completed_booking_retention_plan($1,$2)",org,booking)
             if raw is None:
                 raise RestoreBlocked("Ordinary booking lacks verified retention eligibility")
-            ordinary.append(document(raw))
+            plan = document(raw)
+            ordinary_bytes += len(_canonical(plan)) + bool(ordinary)
+            if ordinary_bytes + stay_bytes > size_limit:
+                raise RestoreBlocked("Booking purge evidence exceeds format capacity")
+            ordinary.append(plan)
     elif pending_ordinary_bookings or prior_v4:
         raise RestoreBlocked("Ordinary booking purge schema unavailable")
-    if ordinary or prior_v4:
+    if ordinary or prior_v4 or paged_candidate:
+        if len(ordinary) > collection_limit:
+            raise RestoreBlocked("Ordinary booking purge evidence exceeds format capacity")
         try:
-            _parse_ordinary_purges(org,ordinary)
+            for offset in range(0, len(ordinary), _LIMIT):
+                _parse_ordinary_purges(org, ordinary[offset:offset+_LIMIT])
         except (ValueError, TypeError, KeyError):
             raise RestoreBlocked("Invalid ordinary booking checkpoint evidence") from None
         if not {_canonical(plan) for plan in previous_ordinary}<={_canonical(plan) for plan in ordinary}:
             raise RestoreBlocked("Prior ordinary booking purge evidence is incomplete")
-        payload.update(version="c24-restore-v4",ordinary_booking_purges=ordinary)
-    if len(_canonical(payload))>2*1024*1024:
+        payload.update(version="c24-restore-v5" if paged_candidate else "c24-restore-v4",
+                       ordinary_booking_purges=ordinary)
+    if len(_canonical(payload))>size_limit:
         raise RestoreBlocked("Checkpoint exceeds format capacity")
+    if paged_candidate:
+        try:
+            payload = _normalize(payload)
+            _assert_global_uniqueness(payload)
+        except (ValueError, TypeError, KeyError):
+            raise RestoreBlocked("Paged checkpoint source evidence is invalid") from None
     if prior_pin is not None and authority.checkpoint_pin(org, prior_pin.backup_id) != prior_pin:
         raise RestoreBlocked("Prior independent checkpoint changed during capture")
     return payload
