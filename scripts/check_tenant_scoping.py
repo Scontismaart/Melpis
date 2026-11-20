@@ -71,6 +71,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "bounded security cleanup of expired one-use capabilities; only digest and immutable replay lineage remain",
     "src/core/db/quota_provenance.py::require_quota_trust_epoch":
         "reads the fixed NULL-organization protocol marker only; no caller-controlled row selector",
+    "src/core/gdpr/orphan_proposal.py::_read_only_quota_epoch":
+        "reads the same fixed protocol marker in a read-only owner planning transaction",
     "src/core/db/repositories/message_repo.py::claim_inbound_messages":
         "trusted worker claims the global inbound queue with SKIP LOCKED",
     "src/core/db/repositories/message_repo.py::reconstruct_payload_for_retry":
@@ -133,6 +135,7 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "810f12dd6ee94b01cec490aa87e2061c03e8912f033fc178d29326a7e20b4330"): "attempt insertion uses only the outbound message id from the locked, tenant-consistent outbox row",
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "10033a45b8df8fa6c14cc2fcd746e5cf6d6c2e7da8bcbd5d8d90e31d0bdca9b4"): "outbox status update uses only the id selected and locked by the same transaction",
     ("src/core/db/quota_provenance.py::require_quota_trust_epoch", "6ca4c3cfbc19d39d2db05a3d9ece55d1391817dfdf370d18a81fc4860bb2c4df"): "exact read-only marker UUID, NULL organization, protocol event type and zero quantity; every other SQL literal remains checked",
+    ("src/core/gdpr/orphan_proposal.py::_read_only_quota_epoch", "b5964ff4cf5c103aae15a074bed3691f861d2e1e38f7e59ffad2934d671692a9"): "read-only owner planning checks only the fixed global quota trust marker UUID, NULL organization, protocol event type and zero quantity",
     ("src/core/db/repositories/organization_repo.py::get_memberships_by_auth", "29778c3d709058faa351c858baae4a2eb2a9d9b77bcaa9a503cb77f1f6990b01"): "principal membership resolution, bound to verified auth subject",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "48f99c0cd04ace9aed7749c723e6a46fb3e8eb78bc31defca15f5d36198b8776"): "JIT lookup is bound to verified auth subject",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "JIT owner membership is inserted from the newly created organization row",
