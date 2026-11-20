@@ -126,7 +126,7 @@ verified.
 | `onboarding_profiles` | Tenant | Business profile, services, schedules and escalation settings | Limited identifiers/status/language fields; free-form profile/config excluded | Tenant cascade |
 | `instagram_accounts` | Tenant | Instagram account ID and access token | Account ID and timestamps only | Tenant cascade; access token excluded |
 | `faq_cache` | Tenant | FAQ question/answer text and embeddings | Question, answer, prompt variant and timestamps; vector/hash excluded | Tenant invalidation helper exists; no retention policy found |
-| `message_feedback` | Tenant; message/conversation → contact | Feedback value/source and creator account | Explicit feedback fields; contact projection joins conversation | Tenant cascade; no separate retention found |
+| `message_feedback` | Tenant; message/conversation → contact; staff creator → authenticated account and joined tenant membership | Feedback value/source and creator account | Contact projection joins conversation. Account projection returns only its own attributable staff UI feedback ID, source, value and date for same-tenant outbound messages. | Tenant cascade; no separate retention found |
 | `weekly_report_log` | Tenant | Reporting dates, recipients and status | Dates/status only; recipient addresses and error reason excluded | Tenant cascade; no retention policy found |
 | `outbound_dedup` | Tenant; message → conversation → contact | Cached response text | Message ID/time only; response text excluded | Tenant cascade; message FK path supports contact filtering |
 | `external_booking_credentials` | Tenant | Provider name, active flag, encrypted credentials and config JSON | Provider name, active flag and timestamps only | Tenant cascade; credentials/config excluded |

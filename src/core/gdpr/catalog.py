@@ -363,6 +363,18 @@ CATEGORIES: tuple[Category, ...] = (
         JOIN conversations AS c ON c.id = f.conversation_id
         WHERE f.organization_id = $1::uuid
           AND c.organization_id = $1::uuid AND c.contact_id = $2::uuid
+    """, account_query="""
+        SELECT f.id, f.source, f.value, f.created_at
+        FROM message_feedback AS f
+        JOIN user_profiles AS p ON p.id = f.created_by_user_id
+        JOIN organization_memberships AS om ON om.user_id = p.id
+                                           AND om.organization_id = f.organization_id
+        JOIN messages AS m ON m.id = f.message_id
+                          AND m.organization_id = f.organization_id
+                          AND m.conversation_id = f.conversation_id
+        WHERE f.organization_id = $1::uuid AND om.organization_id = $1::uuid
+          AND m.organization_id = $1::uuid AND p.auth_user_id = $2::uuid
+          AND om.joined_at IS NOT NULL AND f.source = 'staff_ui' AND m.direction = 'outbound'
     """),
     Category("weekly_report_log", """
         SELECT id, periodo_inizio, periodo_fine, inviato_at, stato
