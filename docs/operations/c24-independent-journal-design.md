@@ -57,7 +57,15 @@ including a lost response followed by authenticated readback.
   transaction. Retain it via `publish_policy`. During a frozen source window
   `capture_erasure_journal_delta` compares all source tenant IDs and committed
   local barriers with the retained signed history, rejects gaps or conflicting
-  lineage and returns the ordered entries pending publication. Publish verified erasure
+  lineage and returns the ordered entries pending publication.
+  `capture_committed_checkpoint` builds the v3 tenant checkpoint from the
+  committed erasures, exact stay/receipt fences and explicitly proposed
+  receipt IDs whose source and cleanup evidence are verified. A retired
+  receipt tuple requires its current independently pinned prior checkpoint.
+  `bind_inventory_covered_receipts` checks current policy and the identical
+  cumulative tuple set in every relevant recoverable backup before binding.
+  Run both within a frozen source/inventory/authority maintenance window.
+  Publish verified erasure
   evidence and authenticated v3 checkpoints through
   `publish_segment`/`publish_checkpoint`, then advance only with
   `IndependentTipStore.advance`/`advance_checkpoint`. Each advancement

@@ -129,6 +129,21 @@ def test_chain_can_recover_across_independently_pinned_key_rotation(publication)
                    key_epochs=[epochs[0], SegmentKeyEpoch(bad_boundary, new_signer.public_key(), new_key)], **args)
 
 
+def test_checkpoint_publication_in_nested_operator_directory(tmp_path):
+    from src.core.gdpr.journal_publication import LocalJournalStore, publish_checkpoint, read_checkpoint
+    from uuid import uuid4
+
+    nested = tmp_path / ("private-" + "a" * 50) / ("recovery-" + "b" * 30)
+    nested.mkdir(parents=True, mode=0o700)
+    store = LocalJournalStore(nested)
+    installation, org = uuid4(), uuid4()
+    args = dict(verification_key=bytes(range(32)), encryption_key=Fernet.generate_key())
+    payload = dict(version="c24-restore-v3", organization_id=str(org), backup_id="backup",
+                   sequence=1, complete=True, erasures=[], stay_purges=[], receipt_prunes=[])
+    pin = publish_checkpoint(store, installation, payload, **args)
+    assert read_checkpoint(store, installation, org, "backup", pin, **args)["payload"] == payload
+
+
 def test_checkpoint_exact_pin_and_separate_key_readback(publication):
     from src.core.gdpr.journal_publication import publish_checkpoint, read_checkpoint
     from src.core.gdpr.restore_checkpoint import RestoreBlocked

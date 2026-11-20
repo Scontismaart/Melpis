@@ -315,11 +315,60 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
     with pytest.raises(RestoreBlocked, match="Unable to retain encrypted"):
         retain_receipt_prune_checkpoint(journal_path, org, checkpoint, **journal_trust)
     checkpoint = json.loads(Fernet(journal_key).decrypt(journal_path.read_bytes()))
+    installation = uuid4()
+    object_root, authority_root = tmp_path / "journal", tmp_path / "operator"
+    object_root.mkdir(mode=0o700)
+    authority_root.mkdir(mode=0o700)
+    store = LocalJournalStore(object_root)
+    authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
+    signer = Ed25519PrivateKey.generate()
+    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
+    from src.core.gdpr.source_checkpoint import bind_inventory_covered_receipts, capture_committed_checkpoint
 
     async def expire(target):
         assert await target.fetchval("SELECT c24_purge_source($1,$2)", org, source)
         assert await target.fetchval("SELECT c24_cleanup_receipt($1,$2)", org, request)
         assert not await target.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
+        async with target.acquire() as conn, conn.transaction(readonly=True):
+            with pytest.raises(RestoreBlocked, match="Pending receipt"):
+                await capture_committed_checkpoint(conn, authority, store, org, "pending-backup",
+                    sequence=1, verification_key=key, encryption_key=journal_key, pending_requests=[uuid4()])
+            captured_pending = await capture_committed_checkpoint(conn, authority, store, org, "pending-backup",
+                sequence=1, verification_key=key, encryption_key=journal_key, pending_requests=[request])
+            assert captured_pending["receipt_prunes"] == checkpoint["payload"]["receipt_prunes"]
+        from datetime import datetime, timezone
+        inventory = dict(version=1, installation_id=str(installation), backups=[])
+        pins = {}
+        for number, backup in enumerate(("pending-backup-a", "pending-backup-b"), 1):
+            candidate = dict(captured_pending, backup_id=backup)
+            if number == 2:
+                candidate["receipt_prunes"] = []
+            pin = publish_checkpoint(store, installation, candidate, verification_key=key, encryption_key=journal_key)
+            authority.advance_checkpoint(store, None, pin, verification_key=key, encryption_key=journal_key)
+            pins[backup] = pin
+            async with target.acquire() as conn, conn.transaction(readonly=True):
+                policy_pin, policy_data = await capture_policy_state(conn, org, installation_id=installation,
+                    backup_id=backup, sequence=1, verification_key=policy_key, encryption_key=policy_cipher)
+            authority.publish_policy(store, None, policy_pin, policy_data,
+                verification_key=policy_key, encryption_key=policy_cipher)
+            inventory["backups"].append(dict(backup_id=backup, manifest_sha256=str(number)*64,
+                completed_at=datetime.now(timezone.utc).isoformat(), organizations=[str(org)],
+                anchor=dict(sequence=0, sha256="0"*64), exception=None))
+        inventory_bytes = json.dumps(inventory).encode()
+        coverage_trust = dict(latest_inventory_sha256=sha256(inventory_bytes).hexdigest(),
+            trusted_public_key=signer.public_key(), journal_encryption_key=journal_key,
+            checkpoint_verification_key=key, checkpoint_encryption_key=journal_key,
+            policy_verification_key=policy_key, policy_encryption_key=policy_cipher)
+        async with target.acquire() as conn, conn.transaction():
+            with pytest.raises(RestoreBlocked, match="differ across recoverable backups"):
+                await bind_inventory_covered_receipts(conn, authority, store, org, inventory_bytes, **coverage_trust)
+            assert await conn.fetchval("SELECT count(*) FROM c24_receipt_prune_checkpoint_bindings WHERE organization_id=$1", org) == 0
+        previous = pins["pending-backup-b"]
+        updated = publish_checkpoint(store, installation, dict(captured_pending, backup_id=previous.backup_id, sequence=2),
+            verification_key=key, encryption_key=journal_key, previous_pin=previous)
+        authority.advance_checkpoint(store, previous, updated, verification_key=key, encryption_key=journal_key)
+        async with target.acquire() as conn, conn.transaction():
+            assert await bind_inventory_covered_receipts(conn, authority, store, org, inventory_bytes, **coverage_trust) == 1
         async with target.acquire() as conn, conn.transaction():
             assert await bind_retained_receipt_prune_checkpoint(conn, org, journal_path, **journal_trust) == 1
         assert await target.fetchval("SELECT c24_cleanup_suppression($1,$2)", org, conversation)
@@ -360,19 +409,17 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
     omitted, _, omitted_sha = signed_prune_checkpoint(org, [], key=key, sequence=2)
     with pytest.raises(RestoreBlocked, match="commitments do not match"):
         await verify(pool, omitted, omitted_sha)
-    installation = uuid4()
-    signer = Ed25519PrivateKey.generate()
-    policy_key, policy_cipher = secrets.token_bytes(32), Fernet.generate_key()
-    object_root, authority_root = tmp_path / "journal", tmp_path / "operator"
-    object_root.mkdir(mode=0o700)
-    authority_root.mkdir(mode=0o700)
-    store = LocalJournalStore(object_root)
-    authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
     anchor = authority.current()
     pin = publish_checkpoint(store, installation, checkpoint["payload"],
                              verification_key=key, encryption_key=journal_key)
     authority.advance_checkpoint(store, None, pin, verification_key=key, encryption_key=journal_key)
     async with pool.acquire() as conn, conn.transaction(readonly=True):
+        with pytest.raises(RestoreBlocked, match="historical receipt tuple"):
+            await capture_committed_checkpoint(conn, authority, store, org, "next-backup",
+                sequence=2, verification_key=key, encryption_key=journal_key)
+        captured = await capture_committed_checkpoint(conn, authority, store, org, "next-backup",
+            sequence=2, verification_key=key, encryption_key=journal_key, prior_pin=pin)
+        assert captured["receipt_prunes"] == checkpoint["payload"]["receipt_prunes"]
         policy_pin, sealed_policy = await capture_policy_state(
             conn, org, installation_id=installation, backup_id=pin.backup_id,
             sequence=1, verification_key=policy_key, encryption_key=policy_cipher)

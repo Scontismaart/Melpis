@@ -6,13 +6,44 @@ from uuid import uuid4
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.fernet import Fernet
 
 from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint, verify_restore_journal_replay
 from src.core.gdpr.restore_journal import JournalCheckpoint
+from src.core.gdpr.restore_coordinator import _replay_stay_retention
+from src.core.gdpr.source_checkpoint import capture_committed_checkpoint
+from src.core.gdpr.independent_tip import IndependentTipStore
+from src.core.gdpr.journal_publication import LocalJournalStore
 from tests.core.bookings.test_booking_stays_postgres import hotel_setup
 from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_replay_stay_retention_requires_exact_signed_lineage_and_is_idempotent(pg_pool, tmp_path):
+    env, lineage, booking = await _complete_with_old_evidence(pg_pool)
+    rows = await pg_pool.fetch('SELECT request_id FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking)
+    requests = {row['request_id'] for row in rows}
+    purge = (booking, lineage.contact_id, 'retention', None, 'synthetic-stay-v1', requests)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        with pytest.raises(RestoreBlocked, match='lineage'):
+            await _replay_stay_retention(conn, env.org, [(*purge[:-1], set())])
+        assert await conn.fetchval('SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)', env.org, booking)
+        await _replay_stay_retention(conn, env.org, [purge])
+        await _replay_stay_retention(conn, env.org, [purge])
+        assert not await conn.fetchval('SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)', env.org, booking)
+        assert await conn.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == len(requests)
+    authority_dir, objects = tmp_path / "authority", tmp_path / "objects"
+    authority_dir.mkdir(mode=0o700)
+    objects.mkdir(mode=0o700)
+    authority = IndependentTipStore.initialize(authority_dir / "tip.sqlite", uuid4())
+    store = LocalJournalStore(objects)
+    async with pg_pool.acquire() as conn, conn.transaction(readonly=True):
+        payload = await capture_committed_checkpoint(conn, authority, store, env.org, "backup",
+            sequence=1, verification_key=bytes(range(32)), encryption_key=Fernet.generate_key())
+        assert payload["stay_purges"] == [dict(booking_id=str(booking), subject_id=str(lineage.contact_id),
+            purpose="retention", operation_id=None, policy_version="synthetic-stay-v1",
+            request_ids=sorted(map(str, requests)))]
 
 
 async def test_signed_replay_requires_authenticated_stay_checkpoint(pg_pool):

@@ -290,10 +290,13 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
                 FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2''', org, booking)
             if ({r['request_id'] for r in rows} != requests
                 or any((r['original_subject_id'],r['purpose'],r['operation_id'],r['policy_version']) != (subject,purpose,operation,version) for r in rows)
-                or await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)
+                or await conn.fetchval('''SELECT EXISTS(SELECT 1 FROM bookings WHERE organization_id=$1 AND id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_stays WHERE organization_id=$1 AND booking_id=$2)
                     OR EXISTS(SELECT 1 FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2)
                     OR EXISTS(SELECT 1 FROM booking_allocation_sets WHERE organization_id=$1 AND booking_id=$2)
                     OR EXISTS(SELECT 1 FROM booking_resource_allocations WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM booking_confirmation_outbox WHERE organization_id=$1 AND booking_id=$2)
+                    OR EXISTS(SELECT 1 FROM external_booking_sync WHERE organization_id=$1 AND internal_booking_id=$2)
                     OR EXISTS(SELECT 1 FROM booking_stay_completion_evidence WHERE organization_id=$1 AND booking_id=$2)''', org, booking)):
                 raise RestoreBlocked('Stay purge copies do not match authenticated journal')
     elif purges:
