@@ -509,7 +509,8 @@ class IndependentTipStore:
         return candidate
 
     def promote_paged_checkpoints(self, store, inventory_bytes, *, latest_inventory_sha256,
-                                  candidates, previous_inventory_sha256=None, audit_at=None, **trust):
+                                  candidates, previous_inventory_sha256=None, previous_inventory_bytes=None,
+                                  retirement_proof=None, audit_at=None, candidate_keys=None, **trust):
         """Promote all inventoried v5 pins in one independent authority transaction.
 
         Only an authorized recovery operator with independently attested current
@@ -519,7 +520,9 @@ class IndependentTipStore:
         An inventory replacement requires the current prior digest and a new
         digest that has never been active before.
         """
-        from src.core.gdpr.backup_coverage import _backups, assess_paged_backup_candidates
+        from src.core.gdpr.backup_coverage import (
+            _backups, _candidate_checkpoint_keys, _verify_inventory_rollover, assess_paged_backup_candidates,
+        )
         from src.core.gdpr.checkpoint_pages import verify_checkpoint_candidate
 
         if type(candidates) is not dict:
@@ -550,13 +553,19 @@ class IndependentTipStore:
             if (inventory != latest_inventory_sha256 and previous_inventory_sha256 != inventory
                     or inventory == latest_inventory_sha256 and previous_inventory_sha256 not in (None, inventory)):
                 raise RestoreBlocked("Independent paged inventory CAS conflict")
+            retirement_digest = None
+            if inventory is not None and inventory != latest_inventory_sha256:
+                retirement_digest = _verify_inventory_rollover(previous_inventory_bytes, inventory,
+                    inventory_bytes, latest_inventory_sha256, self.installation_id, audit_at, retirement_proof,
+                    trust["policy_verification_key"])
+            elif previous_inventory_bytes is not None or retirement_proof is not None:
+                raise RestoreBlocked("Backup retirement evidence only applies during an inventory rollover")
             if active_archive is not None and any(
                     anchor.sequence < active_archive.floor.sequence for _, _, anchor, _ in backups):
                 raise RestoreBlocked("Paged inventory precedes the independently retained archive floor")
             assess_paged_backup_candidates(self, store, inventory_bytes, latest_inventory_sha256=latest_inventory_sha256,
-                                           candidates=candidates, audit_at=audit_at, **trust)
-            keys = dict(verification_key=trust["checkpoint_verification_key"],
-                        encryption_key=trust["checkpoint_encryption_key"])
+                                           candidates=candidates, audit_at=audit_at, candidate_keys=candidate_keys, **trust)
+            keys = _candidate_checkpoint_keys(candidate_keys, trust)
             with self._connection() as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 if authority_state(conn, scopes) != expected:
@@ -573,6 +582,11 @@ class IndependentTipStore:
                         generation INTEGER PRIMARY KEY, digest TEXT NOT NULL UNIQUE)""")
                     conn.execute("INSERT INTO paged_checkpoint_inventories (digest) VALUES (?)",
                                  (latest_inventory_sha256,))
+                if retirement_digest is not None:
+                    conn.execute("""CREATE TABLE IF NOT EXISTS paged_inventory_retirements (
+                        next_digest TEXT PRIMARY KEY, previous_digest TEXT NOT NULL, evidence_digest TEXT NOT NULL)""")
+                    conn.execute("INSERT INTO paged_inventory_retirements VALUES (?, ?, ?)",
+                                 (latest_inventory_sha256, inventory, retirement_digest))
                 conn.executemany("UPDATE checkpoints SET sequence=?, digest=? WHERE org=? AND backup=?", [
                     (candidates[scope].sequence, candidates[scope].sha256, str(scope[0]), scope[1])
                     for scope in scopes

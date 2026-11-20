@@ -160,3 +160,62 @@ def test_active_replay_rejects_hold_present_only_on_another_backup(promotion):
         sha256(raw).hexdigest()), cipher.encrypt(_canonical(dict(payload=payload, signature=signature))), **keys)
     with pytest.raises(RestoreBlocked, match="legal holds differ"):
         _current_restore_policies(authority, store, {org}, "alpha", backups, keys)
+
+
+def test_rotating_checkpoint_keys_requires_both_exact_key_pairs(promotion):
+    from src.core.gdpr.checkpoint_pages import read_any_checkpoint
+    from src.core.gdpr.journal_publication import ArtifactKeyPair
+
+    authority, store, _, inventory, _, original_candidates, trust = promotion
+    _promote(promotion)
+    old = ArtifactKeyPair(trust["checkpoint_verification_key"], trust["checkpoint_encryption_key"])
+    new = ArtifactKeyPair(bytes(range(2, 34)), Fernet.generate_key())
+    args = dict(verification_key=new.verification_key, encryption_key=new.encryption_key)
+    adapted = {}
+    for (org, backup), pin in original_candidates.items():
+        payload = read_any_checkpoint(store, authority.installation_id, org, backup, pin,
+            verification_key=old.verification_key, encryption_key=old.encryption_key)
+        adapted[org, backup] = publish_checkpoint_pages(store, authority.installation_id,
+            dict(payload, sequence=pin.sequence+1), previous_pin=pin, previous_keys=old, **args)
+    digest = sha256(inventory).hexdigest()
+    lost = dict(trust, checkpoint_encryption_key=Fernet.generate_key())
+    with pytest.raises(RestoreBlocked):
+        authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=digest,
+                                            candidates=adapted, candidate_keys=new, **lost)
+    assert {scope: authority.checkpoint_pin(*scope) for scope in adapted} == original_candidates
+    authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=digest,
+                                        candidates=adapted, candidate_keys=new, **trust)
+    for (org, backup), pin in adapted.items():
+        assert authority.checkpoint_pin(org, backup) == pin
+        assert read_any_checkpoint(store, authority.installation_id, org, backup, pin, **args)["sequence"] == 3
+
+
+def test_inventory_replacement_cannot_drop_a_recoverable_backup_without_exact_receipt(promotion):
+    from src.core.gdpr.backup_coverage import authenticate_backup_retirements
+
+    authority, store, _, prior, _, candidates, trust = promotion
+    _promote(promotion)
+    before = sha256(prior).hexdigest()
+    document = json.loads(prior)
+    retired = document["backups"].pop()
+    successor = _canonical(document)
+    after = sha256(successor).hexdigest()
+    remaining = {scope: pin for scope, pin in candidates.items() if scope[1] == "alpha"}
+    args = dict(latest_inventory_sha256=after, previous_inventory_sha256=before,
+                previous_inventory_bytes=prior, candidates=remaining, **trust)
+    with pytest.raises(RestoreBlocked, match="retirement evidence"):
+        authority.promote_paged_checkpoints(store, successor, **args)
+    authority.assert_paged_inventory(before)
+    proof = authenticate_backup_retirements(prior, successor, installation_id=authority.installation_id,
+        previous_inventory_sha256=before, latest_inventory_sha256=after,
+        retired=[dict(backup_id=retired["backup_id"], manifest_sha256=retired["manifest_sha256"],
+                      disposition="verified_unrecoverable", evidence_reference="synthetic:destruction-receipt")],
+        policy_verification_key=trust["policy_verification_key"], audit_at=trust["audit_at"])
+    with pytest.raises(RestoreBlocked, match="retirement evidence"):
+        authority.promote_paged_checkpoints(store, successor, retirement_proof=proof[:-1], **args)
+    authority.promote_paged_checkpoints(store, successor, retirement_proof=proof, **args)
+    authority.assert_paged_inventory(after)
+    with pytest.raises(RestoreBlocked):
+        authority.assert_paged_inventory(before, required=False)
+    # The old pin remains recoverable as evidence, but cannot authorize replay.
+    assert authority.checkpoint_pin(*next(scope for scope in candidates if scope[1] == "beta")) in candidates.values()

@@ -255,6 +255,22 @@ digest. The operator holds the independent authority and freezes concurrent
 publication and source maintenance through this operation. Routine pin
 advancement cannot activate v5 one backup at a time.
 
+To rotate checkpoint keys, publish cumulative successor pages with the new
+key pair and the exact predecessor, then pass `candidate_keys` to the batch
+promotion while supplying the predecessor pair in the current trust options.
+Losing either needed pair aborts the batch with the existing pins intact.
+Keep the previous keys until protected custody can recover the new authority
+and every active artifact is independently readable.
+
+An inventory rollover requires the exact previously pinned inventory bytes.
+The identity, completion time, anchor and organization scope of a retained
+backup are immutable. To remove a backup from the recoverable cohort, the
+independent operator authenticates a receipt for its exact manifest and
+verified unavailability, bound to both inventories. Promotion records the
+receipt digest with the new inventory. A review date or an overdue backup
+alone cannot remove it from the recovery set. This procedure records a
+verified disposition and never removes backup objects.
+
 After promotion, recovery and source mutation require that same active
 inventory digest, including any retained legacy artifacts. Quarantined replay
 checks the exact restored backup ID, anchor and tenant scope, then authenticates
