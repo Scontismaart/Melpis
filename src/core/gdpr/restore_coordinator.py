@@ -10,6 +10,7 @@ import re
 from uuid import UUID
 
 from src.core.db.scoping import system_scope
+from src.core.gdpr.checkpoint_pages import read_checkpoint_pages
 from src.core.gdpr.deletion import Deletion
 from src.core.gdpr.guard import ErasureBlocked
 from src.core.gdpr.journal_chain_pages import scan_verified_chain
@@ -19,7 +20,7 @@ from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked, _authenticate_checkpoint, _bind_receipt_prune_checkpoint,
     _verify_replayed_erasures, _verify_replayed_receipt_prunes,
 )
-from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint
+from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _uuid
 from src.core.gdpr.restore_policy_state import reconcile_policy_state, verify_policy_state
 
 
@@ -121,6 +122,15 @@ async def verify_primary_published_restore(conn, authority, store, **trust):
     """Require every restored tenant and the exact current independent evidence."""
     tip, pins, journal, scopes, checkpoints = await _published_restore_evidence(
         conn, authority, store, **trust)
+    await _verify_published_postconditions(conn, tip, scopes, checkpoints)
+    _assert_current(authority, trust["backup_id"], tip, pins)
+    return {"verified_organizations": len(checkpoints), "verified_erasure_entries": len(journal),
+            "sequence": tip.sequence, "scope": "primary_c24_only",
+            "traffic_authorized": False, "external_copies_certified": False,
+            "current_policy_reconciliation_required": True}
+
+
+async def _verify_published_postconditions(conn, tip, scopes, checkpoints):
     for org, (_, entries, sequence, purges, prunes, ordinary) in checkpoints.items():
         await _verify_replayed_erasures(conn, org, entries, sequence, purges=purges, receipt_prunes=prunes,
                                        ordinary_purges=ordinary)
@@ -130,9 +140,43 @@ async def verify_primary_published_restore(conn, authority, store, **trust):
             tip.sequence, purges=purges, receipt_prunes=prunes,
             ordinary_purges=ordinary,
             fingerprints={entry.operation_id: (entry.identifier_digest, entry.key_id) for entry in scoped})
+
+
+async def verify_paged_restore_candidates(conn, authority, store, *, quarantine_database,
+                                         candidates, **trust):
+    """Compare candidate v5 evidence with a reconciled, quarantined database.
+
+    Each candidate must extend the current independent legacy pin. This
+    verifies restored postconditions under that pin and the paged successor
+    without changing the database, promoting authority or authorizing traffic.
+    """
+    await _assert_quarantine(conn, quarantine_database)
+    if not conn.is_in_transaction() or await conn.fetchval("SHOW transaction_read_only") != "on":
+        raise RestoreBlocked("Paged restore candidate verification requires a read-only transaction")
+    tip, pins, _, scopes, checkpoints = await _published_restore_evidence(conn, authority, store, **trust)
+    if type(candidates) is not dict or candidates.keys() != pins.keys():
+        raise RestoreBlocked("Paged checkpoint candidates must cover every restored organization")
+    await _verify_published_postconditions(conn, tip, scopes, checkpoints)
+    keys = dict(verification_key=trust["checkpoint_verification_key"],
+                encryption_key=trust["checkpoint_encryption_key"])
+    for org, pin in pins.items():
+        candidate = candidates[org]
+        prepared = authority.prepare_paged_checkpoint(store, pin, candidate, **keys)
+        if prepared.expected_tip != tip or prepared.expected_pin != pin:
+            raise RestoreBlocked("Independent recovery evidence changed during candidate verification")
+        payload = read_checkpoint_pages(store, authority.installation_id, org, trust["backup_id"], candidate, **keys)
+        erasures = [(_uuid(row["operation_id"]), row["scope"], _uuid(row["subject_id"]) if row["subject_id"] else None)
+                    for row in payload["erasures"]]
+        stays = [(_uuid(row["booking_id"]), _uuid(row["subject_id"]), row["purpose"],
+                  _uuid(row["operation_id"]) if row["operation_id"] else None, row["policy_version"],
+                  {_uuid(request) for request in row["request_ids"]}) for row in payload["stay_purges"]]
+        receipts = [tuple(_uuid(row[field]) for field in ("request_id", "source_message_id", "conversation_id", "subject_id"))
+                    for row in payload["receipt_prunes"]]
+        await _verify_replayed_erasures(conn, org, erasures, candidate.sequence, purges=stays,
+                                       receipt_prunes=receipts, ordinary_purges=payload["ordinary_booking_purges"])
     _assert_current(authority, trust["backup_id"], tip, pins)
-    return {"verified_organizations": len(checkpoints), "verified_erasure_entries": len(journal),
-            "sequence": tip.sequence, "scope": "primary_c24_only",
+    await _assert_quarantine(conn, quarantine_database)
+    return {"verified_paged_candidates": len(candidates), "authority_advanced": False,
             "traffic_authorized": False, "external_copies_certified": False,
             "current_policy_reconciliation_required": True}
 

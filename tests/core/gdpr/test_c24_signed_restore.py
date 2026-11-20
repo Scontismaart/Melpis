@@ -59,11 +59,13 @@ _CONTAINERS = {
     "melpis-c24-vector-pg16": 55434,
     "melpis-c24-vector-pg18": 55435,
     "melpis-a06-restore-20261120": 55436,
+    "melpis-a06-pg17-20261120": 55437,
 }
 _VECTOR_IMAGES = {
     "melpis-c24-vector-pg16": "pgvector/pgvector:0.7.4-pg16",
     "melpis-c24-vector-pg18": "pgvector/pgvector:0.8.1-pg18",
     "melpis-a06-restore-20261120": "pgvector/pgvector:0.7.4-pg16",
+    "melpis-a06-pg17-20261120": "pgvector/pgvector:pg17",
 }
 _SOURCE_DB = re.compile(r"melpis_c24_restore_src_([0-9a-f]{12})\Z")
 
@@ -88,7 +90,7 @@ def restore_target():
         parsed = urlsplit(dsn)
         match = _SOURCE_DB.fullmatch(parsed.path.removeprefix("/"))
         legacy = (container in {"melpis-filelock-vector-20261029", "melpis-c23-pg18-20261030",
-                                "melpis-a06-restore-20261120"}
+                                "melpis-a06-restore-20261120", "melpis-a06-pg17-20261120"}
                   and parsed.username in {"test", "postgres"} and parsed.password == "test")
         synthetic = (match is not None and parsed.username == "melpis_c24_src_" + match.group(1)
                      and parsed.password is not None and re.fullmatch(r"[0-9a-f]{64}", parsed.password))
@@ -475,8 +477,9 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
 @pytest.mark.asyncio
 async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch):
     from datetime import datetime, timezone
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages
+    from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_paged_restore_candidates
     from src.core.gdpr.source_checkpoint import capture_committed_checkpoint, purge_inventory_covered_ordinary_bookings
-    from src.core.gdpr.restore_coordinator import replay_primary_published_erasures
     from tests.core.gdpr.test_ordinary_booking_retention_plan import _candidate
 
     container, dsn, principal, source_db = restore_target
@@ -527,6 +530,8 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
         committed=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
             sequence=2,verification_key=key,encryption_key=checkpoint_cipher,prior_pin=pin)
     assert committed["ordinary_booking_purges"]==payload["ordinary_booking_purges"]
+    candidate = publish_checkpoint_pages(store, installation, dict(committed, version="c24-restore-v5"),
+        verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
     restored_db="melpis_c24_restore_dst_"+uuid4().hex[:12]
     await _docker("exec",container,"createdb","-U",principal,restored_db)
     await _docker("exec",container,"psql","-U",principal,"-d","postgres","-v","ON_ERROR_STOP=1",
@@ -542,6 +547,12 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
         replay_args=dict(backup_checkpoint=anchor,backup_id=backup_id,expected_organizations=[org],
                          quarantine_database=restored_db,ordinary_inventory_bytes=inventory,
                          latest_inventory_sha256=inventory_digest,**trust)
+        candidate_args = dict(backup_checkpoint=anchor, backup_id=backup_id, expected_organizations=[org],
+            quarantine_database=restored_db, candidates={org: candidate}, **{
+                name: value for name, value in trust.items() if not name.startswith("policy_")})
+        async with restored.acquire() as conn, conn.transaction(readonly=True):
+            with pytest.raises(RestoreBlocked):
+                await verify_paged_restore_candidates(conn, authority, store, **candidate_args)
         with pytest.raises(RestoreBlocked):
             await replay_primary_published_erasures(restored,authority,store,**dict(replay_args,latest_inventory_sha256="0"*64))
         assert await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
@@ -549,5 +560,17 @@ async def test_v4_managed_ordinary_booking_older_backup_replay(restore_target, p
             assert (await replay_primary_published_erasures(restored,authority,store,**replay_args))["traffic_authorized"] is False
         assert not await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
         assert await restored.fetchval("SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2",org,booking)==len(request_ids)
+        async with restored.acquire() as conn, conn.transaction(readonly=True):
+            proof = await verify_paged_restore_candidates(conn, authority, store, **candidate_args)
+            assert proof["verified_paged_candidates"] == 1 and proof["traffic_authorized"] is False
+            assert proof["authority_advanced"] is False
+            missing = dict(committed, version="c24-restore-v5", sequence=3, erasures=[
+                dict(operation_id=str(uuid4()), scope="organization", subject_id=None)])
+            missing_pin = publish_checkpoint_pages(store, installation, missing,
+                verification_key=key, encryption_key=checkpoint_cipher, previous_pin=pin)
+            with pytest.raises(RestoreBlocked, match="Newer erasure journal has not been replayed"):
+                await verify_paged_restore_candidates(conn, authority, store,
+                    **dict(candidate_args, candidates={org: missing_pin}))
+        assert authority.checkpoint_pin(org, backup_id) == pin
     finally:
         await restored.close()
