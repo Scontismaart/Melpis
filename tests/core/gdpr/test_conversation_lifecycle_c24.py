@@ -1,5 +1,6 @@
 """C2.4 privacy lifecycle integration tests against isolated PostgreSQL."""
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
@@ -33,6 +34,14 @@ async def populated(env):
     return request
 
 
+async def install_scoped_hold_check(pool):
+    # These tests pin historical C2.4 schemas deliberately. Install the
+    # current app's hold-read capability without changing the version of the
+    # C2.4 lifecycle or restore under test.
+    migration = Path("src/core/db/migrations/107_scoped_gdpr_erasure_holds.sql")
+    await pool.execute(migration.read_text(encoding="utf-8"))
+
+
 async def test_historical_source_without_original_subject_cannot_be_adopted(state_env):
     env = state_env
     await populated(env)
@@ -50,6 +59,7 @@ async def test_historical_source_without_original_subject_cannot_be_adopted(stat
 @pytest.mark.migration_limit(91)
 async def test_contact_erasure_covers_canonical_copy_after_source_hard_delete(state_env, monkeypatch):
     env = state_env
+    await install_scoped_hold_check(env['pool'])
     await populated(env)
     contact = await subject(env)
     await env['pool'].execute('DELETE FROM messages WHERE organization_id=$1 AND id=$2', env['org'], env['message'])
@@ -140,6 +150,7 @@ async def approve_technical_receipts(pool, org):
 @pytest.mark.migration_limit(91)
 async def test_erasure_requires_conversation_policy_then_removes_all_copies(state_env, monkeypatch):
     env = state_env
+    await install_scoped_hold_check(env['pool'])
     request = await populated(env)
     contact = await subject(env)
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
@@ -275,6 +286,7 @@ async def test_approved_policy_cannot_age_messages_without_verified_receipt(stat
 @pytest.mark.migration_limit(91)
 async def test_concurrent_erasure_and_apply_cannot_resurrect_state(state_env, monkeypatch):
     env = state_env
+    await install_scoped_hold_check(env['pool'])
     await commit_source(env, env['message'], '2026-11-12', {'service_id': 'standard'}, 1700000000)
     contact = await subject(env)
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
@@ -352,6 +364,7 @@ async def test_restore_checkpoint_accepts_completed_local_erasure_only(state_env
     from src.core.gdpr.restore_checkpoint import RestoreBlocked, verify_restore_checkpoint, verify_restore_journal_replay
     from src.core.gdpr.restore_journal import JournalCheckpoint
     env = state_env
+    await install_scoped_hold_check(env['pool'])
     await populated(env)
     contact = await subject(env)
     await env['pool'].execute("UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2", env['org'], env['message'])
