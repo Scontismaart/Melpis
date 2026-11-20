@@ -34,6 +34,7 @@ from src.core.gdpr.independent_tip import IndependentTipStore
 from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment, publish_checkpoint
 from src.core.gdpr.restore_policy_state import capture_policy_state
 from src.core.gdpr.source_journal_evidence import capture_erasure_journal_delta
+from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged
 from tests.core.test_quota_reservation_lifecycle import _organization, _inbound_message
 from tests.core.gdpr.test_c24_purged_source_replay import (
     historical_fence,
@@ -196,6 +197,9 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
                     conn, authority, store, expected_organizations=[org], **source_trust)
             prior_tip, delta = await capture_erasure_journal_delta(
                 conn, authority, store, expected_organizations=[org, foreign], **source_trust)
+            assert await capture_erasure_journal_delta_paged(
+                conn, authority, store, expected_organizations=[org, foreign], max_entries=1,
+                max_segments=1, **source_trust) == (prior_tip, delta, 0)
     assert prior_tip == anchor
     assert delta == ({k: v for k, v in record.items() if k != "sequence"},)
     published = publish_segment(store, installation, prior_tip, list(delta),
@@ -205,6 +209,9 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     async with env["pool"].acquire() as conn, conn.transaction(readonly=True):
         assert await capture_erasure_journal_delta(
             conn, authority, store, expected_organizations=[org, foreign], **source_trust) == (published, ())
+        assert await capture_erasure_journal_delta_paged(
+            conn, authority, store, expected_organizations=[org, foreign], max_segments=1,
+            **source_trust) == (published, (), 0)
     for payload in (checkpoint_payload, dict(checkpoint_payload, organization_id=str(foreign), erasures=[])):
         pin = publish_checkpoint(store, installation, payload,
                                  verification_key=checkpoint_key, encryption_key=journal_key)
