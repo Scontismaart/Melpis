@@ -33,6 +33,7 @@ from src.core.gdpr.restore_journal import JournalCheckpoint
 from src.core.gdpr.independent_tip import IndependentTipStore
 from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment, publish_checkpoint
 from src.core.gdpr.restore_policy_state import capture_policy_state
+from src.core.gdpr.source_journal_evidence import capture_erasure_journal_delta
 from tests.core.test_quota_reservation_lifecycle import _organization, _inbound_message
 from tests.core.gdpr.test_c24_purged_source_replay import (
     historical_fence,
@@ -183,11 +184,27 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     store = LocalJournalStore(object_root)
     authority = IndependentTipStore.initialize(authority_root / "tip.sqlite", installation)
     journal_key = Fernet.generate_key()
-    published = publish_segment(store, installation, anchor,
-                                [{k: v for k, v in record.items() if k != "sequence"}],
+    source_trust = dict(trusted_public_key=signer.public_key(), journal_encryption_key=journal_key)
+    async with env["pool"].acquire() as conn:
+        async with conn.transaction():
+            with pytest.raises(RestoreBlocked, match="Read-only source authority"):
+                await capture_erasure_journal_delta(
+                    conn, authority, store, expected_organizations=[org, foreign], **source_trust)
+        async with conn.transaction(readonly=True):
+            with pytest.raises(RestoreBlocked, match="organization inventory mismatch"):
+                await capture_erasure_journal_delta(
+                    conn, authority, store, expected_organizations=[org], **source_trust)
+            prior_tip, delta = await capture_erasure_journal_delta(
+                conn, authority, store, expected_organizations=[org, foreign], **source_trust)
+    assert prior_tip == anchor
+    assert delta == ({k: v for k, v in record.items() if k != "sequence"},)
+    published = publish_segment(store, installation, prior_tip, list(delta),
                                 signer=signer, encryption_key=journal_key)
     authority.advance(store, anchor, published, trusted_public_key=signer.public_key(),
                       encryption_key=journal_key)
+    async with env["pool"].acquire() as conn, conn.transaction(readonly=True):
+        assert await capture_erasure_journal_delta(
+            conn, authority, store, expected_organizations=[org, foreign], **source_trust) == (published, ())
     for payload in (checkpoint_payload, dict(checkpoint_payload, organization_id=str(foreign), erasures=[])):
         pin = publish_checkpoint(store, installation, payload,
                                  verification_key=checkpoint_key, encryption_key=journal_key)

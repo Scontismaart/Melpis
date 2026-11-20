@@ -31,7 +31,10 @@ including a lost response followed by authenticated readback.
 - Bind each backup manifest to its independently verified identity,
   installation, tenant inventory and exact segment anchor. On the authoritative
   source, use `capture_policy_state` in an owner-controlled read-only
-  transaction. Retain it via `publish_policy`. Publish verified erasure
+  transaction. Retain it via `publish_policy`. During a frozen source window
+  `capture_erasure_journal_delta` compares all source tenant IDs and committed
+  local barriers with the retained signed history, rejects gaps or conflicting
+  lineage and returns the ordered entries pending publication. Publish verified erasure
   evidence and authenticated v3 checkpoints through
   `publish_segment`/`publish_checkpoint`, then advance only with
   `IndependentTipStore.advance`/`advance_checkpoint`. Each advancement
