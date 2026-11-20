@@ -63,6 +63,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "read-only PostgreSQL catalog readiness check for the dedicated private worker principal; no tenant records are read",
     "src/core/retention_job.py::_expired_exports":
         "enumerates expired snapshot IDs with SKIP LOCKED LIMIT 100; each mutation binds its stored tenant",
+    "src/core/retention_job.py::_oldest_overdue_export_seconds":
+        "reports only the oldest overdue export age platform-wide; no row identity or payload is returned",
     "src/core/retention_job.py::_retention_policies":
         "enumerates immutable policy metadata only; all primary-data mutations bind a policy tenant and require explicit approval and execution gate",
     "src/core/retention_job.py::_scrub_expired_worker_capability_payloads":
@@ -120,8 +122,10 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
         "dynamic count is restricted to schema/table identifiers obtained from pg_catalog, each identifier is independently quoted, and the function compares only verified backup/restore snapshots",
     ("src/core/bookings/private_worker_lifecycle.py::assert_private_booking_ready", "8c0fb690e1bc6108c73e7b401eedd14b509df0387cbf2ed71b40779c49a40e4a"):
         "exact read-only pg_class/pg_attribute readiness query; verifies table ownership and required schema only",
-    ("src/core/retention_job.py::_expired_exports", "78b2481fd729638ce87ca4abc5bc58025e7c1d7c3597c276cf1979cbd9a8d8cb"):
+    ("src/core/retention_job.py::_expired_exports", "8b4e5b8f26cbb94ae68c4ba7993ad7aa3a945a2a4f80581233568cf5557b6687"):
         "bounded expiration of derived encrypted export artifacts, not source data",
+    ("src/core/retention_job.py::_oldest_overdue_export_seconds", "63a55c537924bad0f118de5babe9f904afacf6f6574d532af010f603ee0a82d3"):
+        "fixed projection of one scalar age for overdue encrypted export artifacts, without tenant identity or content",
     ("src/core/retention_job.py::_retention_policies", "672e839eec8bb38ab3c9c981b8e7aff866b18b10f656c5140476015fd979ed86"):
         "reviewed fixed-category policy inventory including C24 metadata only; no content/credentials; every mutation revalidates the exact tenant policy under its fence",
     ("src/core/calendar/repository.py::claim", "ca49781fa9e8cc26c388a66f2dbb7256dcd072bed1493150c5c3255bd4693c5e"): "bounded global claim joins credentials by tenant and epoch, locks only queue rows; each downstream operation revalidates tenant/fence; wall-clock lease expiry",

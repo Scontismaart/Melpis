@@ -57,13 +57,13 @@ async def test_automatic_sweep_requires_its_own_flag_and_dedicated_role(monkeypa
     pool.acquire.assert_not_called()
 
     monkeypatch.setenv("GDPR_C24_AUTO_RETENTION_ENABLED", "true")
-    pool, conn = pool_with_results([True, True, True, False])
+    pool, conn = pool_with_results([True, True, True, True, True, False])
     assert await run_c24_retention_sweep(pool) == {"enabled": True, "batch_clear": False}
     assert conn.fetchval.await_args_list[-1].args == (
         "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
         "hotel_sweep", UUID(int=0), UUID(int=0),
     )
-    assert conn.fetchval.await_args_list[-2].args == (
+    assert conn.fetchval.await_args_list[-4].args == (
         "SELECT public.c24_run_retention_target($1::text,$2::uuid,$3::uuid)",
         "sweep", UUID(int=0), UUID(int=0),
     )

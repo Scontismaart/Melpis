@@ -5,6 +5,7 @@ Effective tenant records and explicit operational cutover remain necessary.
 """
 import logging
 import os
+import time
 
 from src.core.db.scoping import system_scope
 from src.core.gdpr.c24_schema import conversation_schema
@@ -13,22 +14,62 @@ from src.core.gdpr.product_policy import retention_days_allowed
 
 logger = logging.getLogger(__name__)
 
+_EXPORT_EXPIRY_BATCH = 100
+_EXPORT_EXPIRY_MAX_BATCHES = 10
+_EXPORT_EXPIRY_BUDGET_SECONDS = 20
+
 
 @system_scope('scheduled expiry of encrypted time-limited GDPR snapshots only')
-async def _expired_exports(pool):
+async def _expired_exports(pool, *, deadline=None):
     async with pool.acquire() as conn, conn.transaction():
         rows = await conn.fetch(
             '''SELECT id,organization_id FROM gdpr_operations WHERE kind='export'
                AND expires_at<=NOW() AND status NOT IN ('expired','revoked')
-               ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED''',
+               ORDER BY expires_at,id LIMIT $1 FOR UPDATE SKIP LOCKED''',
+            _EXPORT_EXPIRY_BATCH,
         )
+        expired = 0
         for row in rows:
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             await conn.execute('DELETE FROM gdpr_export_chunks WHERE organization_id=$1 AND operation_id=$2', row['organization_id'], row['id'])
             await conn.execute(
                 "UPDATE gdpr_operations SET status='expired',updated_at=NOW() WHERE organization_id=$1 AND id=$2", row['organization_id'], row['id'],
             )
             await event(conn, row['organization_id'], row['id'], 'export.expired')
-        return len(rows)
+            expired += 1
+        return expired
+
+
+@system_scope('aggregate-only monitoring of overdue encrypted export snapshots')
+async def _oldest_overdue_export_seconds(pool):
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            '''SELECT FLOOR(EXTRACT(EPOCH FROM (NOW()-expires_at)))::bigint
+               FROM gdpr_operations WHERE kind='export'
+                 AND expires_at<=NOW() AND status NOT IN ('expired','revoked')
+               ORDER BY expires_at,id LIMIT 1''',
+        )
+
+
+async def expire_export_snapshots(pool):
+    """Independent short-interval artifact cleanup, not primary-data retention.
+
+    Bound each transaction and total work per run. Locked download rows can
+    be skipped without preventing other expired snapshots from progressing.
+    The oldest remaining due age is telemetry, not a completion claim.
+    """
+    deadline = time.monotonic() + _EXPORT_EXPIRY_BUDGET_SECONDS
+    total = 0
+    for _ in range(_EXPORT_EXPIRY_MAX_BATCHES):
+        if time.monotonic() >= deadline:
+            break
+        expired = await _expired_exports(pool, deadline=deadline)
+        total += expired
+        if expired < _EXPORT_EXPIRY_BATCH:
+            break
+    return {'exports_expired': total,
+            'oldest_overdue_seconds': await _oldest_overdue_export_seconds(pool)}
 
 
 @system_scope('enumerates controller policy records; every content mutation binds the returned tenant')
@@ -61,8 +102,8 @@ async def _scrub_expired_worker_capability_payloads(pool):
 
 
 async def run_retention(pool):
-    worker_payloads_scrubbed = await _scrub_expired_worker_capability_payloads(pool)
     expired = await _expired_exports(pool)
+    worker_payloads_scrubbed = await _scrub_expired_worker_capability_payloads(pool)
     counts = {'exports_expired': expired, 'messages_redacted': 0, 'simulator_purged': 0}
     if os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') != 'true':
         logger.info(
