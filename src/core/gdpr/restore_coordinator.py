@@ -12,18 +12,37 @@ from uuid import UUID
 from src.core.db.scoping import system_scope
 from src.core.gdpr.deletion import Deletion
 from src.core.gdpr.guard import ErasureBlocked
-from src.core.gdpr.journal_publication import read_chain, read_checkpoint
+from src.core.gdpr.journal_chain_pages import scan_verified_chain
+from src.core.gdpr.journal_publication import read_checkpoint
 from src.core.gdpr.operations import encode, event
 from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked, _authenticate_checkpoint, _bind_receipt_prune_checkpoint,
     _verify_replayed_erasures, _verify_replayed_receipt_prunes,
 )
-from src.core.gdpr.restore_journal import RestoreJournalInvalid
+from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint
 from src.core.gdpr.restore_policy_state import reconcile_policy_state, verify_policy_state
 
 
 _QUARANTINE_NAME = re.compile(r"melpis_(?:restore_drill_[0-9a-f]{16,32}|c24_restore_dst_[0-9a-f]{12})")
 _RECOVERY_REQUESTER = "gdpr:restore-replay"
+_GENESIS = JournalCheckpoint(0, "0" * 64)
+
+
+def _verify_anchor_index(authority, anchor, tip):
+    """Check pre-anchor topology without allocating the whole independent index."""
+    if not _checkpoint(anchor) or anchor.sequence > tip.sequence:
+        raise RestoreJournalInvalid("journal_bounds_invalid")
+    previous = _GENESIS
+    while previous != anchor:
+        page = authority.chain_page_after(previous, tip)
+        for candidate in page:
+            if candidate == anchor:
+                return
+            if candidate.sequence >= anchor.sequence:
+                raise RestoreJournalInvalid("independent_authority_invalid")
+        if not page:
+            raise RestoreJournalInvalid("independent_authority_invalid")
+        previous = page[-1]
 
 
 @system_scope("Isolated restore: compare organization IDs with the independent backup inventory")
@@ -52,17 +71,24 @@ async def _published_restore_evidence(
     installation = authority.installation_id
     try:
         tip = authority.current()
-        authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
-        index = authority.chain_after(backup_checkpoint)
-        journal = read_chain(
-            store, installation, backup_checkpoint, index, tip,
-            trusted_public_key=trusted_public_key, encryption_key=journal_encryption_key,
-            key_epochs=key_epochs)
-        if any(entry.organization_id not in wanted for entry in journal):
-            raise RestoreBlocked("Journal scope not covered by recovery inventory")
+        _verify_anchor_index(authority, backup_checkpoint, tip)
+        journal = []
         scopes = {org: [] for org in wanted}
-        for entry in journal:
-            scopes[entry.organization_id].append(entry)
+
+        def stage(page):
+            if len(journal) + len(page) > 100000:
+                raise RestoreBlocked("Restore journal entry capacity exceeded")
+            for entry in page:
+                if entry.organization_id not in wanted:
+                    raise RestoreBlocked("Journal scope not covered by recovery inventory")
+                scopes[entry.organization_id].append(entry)
+            journal.extend(page)
+
+        proof = scan_verified_chain(
+            store, authority, backup_checkpoint, tip, trusted_public_key=trusted_public_key,
+            encryption_key=journal_encryption_key, key_epochs=key_epochs, consume=stage, max_segments=40)
+        if proof["segments"] > 10000:
+            raise RestoreBlocked("Restore journal segment capacity exceeded")
         pins, checkpoints = {}, {}
         for org in sorted(wanted):
             pin = authority.checkpoint_pin(org, backup_id)
@@ -82,7 +108,7 @@ async def _published_restore_evidence(
         _assert_current(authority, backup_id, tip, pins)
     except RestoreJournalInvalid:
         raise RestoreBlocked("Authenticated independent recovery evidence required") from None
-    return tip, pins, journal, scopes, checkpoints
+    return tip, pins, tuple(journal), scopes, checkpoints
 
 
 def _assert_current(authority, backup_id, tip, pins):

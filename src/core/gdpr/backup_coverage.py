@@ -4,9 +4,12 @@ from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import hmac
 import json
+import os
 import re
+import sqlite3
 
-from src.core.gdpr.journal_publication import _canonical, read_chain, read_checkpoint
+from src.core.gdpr.journal_chain_pages import scan_verified_chain
+from src.core.gdpr.journal_publication import _canonical, read_checkpoint
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _unique_object, _uuid
 
@@ -15,6 +18,40 @@ _HEX_DIGEST = re.compile(r"[0-9a-f]{64}")
 _OPAQUE_ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
 _CHECKPOINT_FIELDS = ("erasures", "stay_purges", "receipt_prunes")
 _MAX_INVENTORY_BYTES = 1024 * 1024
+_LEGACY_SEGMENT_LIMIT = 10000
+_LEGACY_ENTRY_LIMIT = 100000
+
+
+def _covered_backup_evidence(authority, store, backups, tip, *, trusted_public_key,
+                             journal_encryption_key, key_epochs):
+    """Index verified erasures by scoped, ephemeral digest, without retaining payloads."""
+    key = os.urandom(32)
+
+    def digest(*values):
+        return hmac.digest(key, _canonical(values), "sha256")
+
+    # Verify the exact anchor against the independent index, even if the
+    # corresponding backup has no post-anchor erasures.
+    for anchor in {candidate[2] for candidate in backups}:
+        authority.chain_page_after(anchor, tip, max_segments=1)
+    index = sqlite3.connect("")
+    try:
+        index.execute("CREATE TABLE entries (seq INTEGER PRIMARY KEY, tenant BLOB NOT NULL, record BLOB NOT NULL)")
+        index.execute("CREATE INDEX entries_scope ON entries (tenant,seq)")
+
+        def stage(entries):
+            with index:
+                for row in entries:
+                    index.execute("INSERT INTO entries VALUES (?, ?, ?)", (row.sequence,
+                        digest(str(row.organization_id)), digest(str(row.operation_id), row.scope,
+                        str(row.subject_id) if row.subject_id is not None else None)))
+
+        proof = scan_verified_chain(store, authority, _GENESIS, tip, trusted_public_key=trusted_public_key,
+                                    encryption_key=journal_encryption_key, key_epochs=key_epochs, consume=stage)
+        return index, digest, proof
+    except BaseException:
+        index.close()
+        raise
 
 
 def _timestamp(value):
@@ -82,23 +119,23 @@ def assess_backup_coverage(
     installation = authority.installation_id
     if audit_at is None:
         audit_at = datetime.now(timezone.utc)
+    index = None
     try:
         backups = list(_backups(inventory_bytes, latest_inventory_sha256, installation, audit_at))
         tip = authority.current()
-        authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
-        index = authority.chain_after(_GENESIS)
-        journal = read_chain(
-            store, installation, _GENESIS, index, tip, trusted_public_key=trusted_public_key,
-            encryption_key=journal_encryption_key, key_epochs=key_epochs)
-        known_anchors = {_GENESIS, *index}
-        scopes = {}
-        for entry in journal:
-            scopes.setdefault(entry.organization_id, []).append(entry)
+        index, digest, proof = _covered_backup_evidence(authority, store, backups, tip,
+            trusted_public_key=trusted_public_key, journal_encryption_key=journal_encryption_key,
+            key_epochs=key_epochs)
+        # This assessment guards source deletion. Keep the existing restore
+        # capacity gate until the quarantined replay path also reads pages.
+        if proof["segments"] > _LEGACY_SEGMENT_LIMIT or proof["entries"] > _LEGACY_ENTRY_LIMIT:
+            raise RestoreBlocked("Legacy restore journal capacity exceeded")
         overdue, pins = [], {}
         bytes_remaining, entries_remaining = 2 * 1024 * 1024, 10000
         for backup, orgs, anchor, is_overdue in backups:
-            if anchor not in known_anchors or any(
-                    org not in orgs and entries[-1].sequence > anchor.sequence for org, entries in scopes.items()):
+            authorized_scopes = {digest(str(org)) for org in orgs}
+            if any(tenant not in authorized_scopes for (tenant,) in index.execute(
+                    "SELECT DISTINCT tenant FROM entries WHERE seq>?", (anchor.sequence,))):
                 raise RestoreBlocked("Backup anchor or journal scope is not covered")
             if is_overdue:
                 overdue.append(backup)
@@ -110,10 +147,10 @@ def assess_backup_coverage(
                     encryption_key=checkpoint_encryption_key)["payload"]
                 authority.read_policy(store, policy, verification_key=policy_verification_key,
                                       encryption_key=policy_encryption_key)
-                expected = {(str(entry.operation_id), entry.scope, str(entry.subject_id) if entry.subject_id else None)
-                            for entry in scopes.get(org, ()) if entry.sequence > anchor.sequence}
-                actual = {(row["operation_id"], row["scope"], row["subject_id"]) for row in checkpoint["erasures"]}
-                if not expected <= actual:
+                actual = {digest(row["operation_id"], row["scope"], row["subject_id"])
+                          for row in checkpoint["erasures"]}
+                if any(record not in actual for (record,) in index.execute(
+                        "SELECT record FROM entries WHERE tenant=? AND seq>?", (digest(str(org)), anchor.sequence))):
                     raise RestoreBlocked("Backup checkpoint omits signed erasure evidence")
                 bytes_remaining = min(bytes_remaining, 2 * 1024 * 1024 - len(_canonical(checkpoint)))
                 fields = (*_CHECKPOINT_FIELDS,"ordinary_booking_purges") if checkpoint["version"]=="c24-restore-v4" else _CHECKPOINT_FIELDS
@@ -124,13 +161,16 @@ def assess_backup_coverage(
                 for (org, backup), evidence in pins.items()):
             raise RestoreBlocked("Recovery authority changed during coverage check")
         authority.validate_segment_schedule(tip, trusted_public_key, journal_encryption_key, key_epochs)
-    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, RestoreJournalInvalid):
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, RestoreJournalInvalid, sqlite3.Error):
         raise RestoreBlocked("Verified independently pinned backup inventory required") from None
+    finally:
+        if index is not None:
+            index.close()
     return {"backups_with_verified_recovery_evidence": len(backups), "overdue_backups": tuple(sorted(overdue)),
             "backup_objects_verified": False, "checkpoint_source_commitments_verified": False,
             "minimum_checkpoint_entries_remaining": entries_remaining,
             "minimum_checkpoint_bytes_remaining": bytes_remaining,
-            "source_chain_segments_remaining": 10000 - len(index),
-            "source_chain_entries_remaining": 100000 - len(journal),
+            "source_chain_segments_remaining": _LEGACY_SEGMENT_LIMIT - proof["segments"],
+            "source_chain_entries_remaining": _LEGACY_ENTRY_LIMIT - proof["entries"],
             "earliest_backup_anchor_sequence": min(anchor.sequence for _, _, anchor, _ in backups),
             "deletion_authorized": False}

@@ -40,6 +40,19 @@ def test_pages_have_exact_boundaries_and_stale_authority_fails(journal):
             authority.chain_page_after(anchor, expected, max_segments=2)
 
 
+def test_restore_checks_exact_index_prefix_before_scanning_suffix(journal, monkeypatch):
+    from src.core.gdpr.restore_coordinator import _verify_anchor_index
+
+    _, authority, _, _, tips, _ = journal
+    original = authority.chain_page_after
+    monkeypatch.setattr(authority, "chain_page_after", lambda anchor, tip: original(anchor, tip, max_segments=1))
+    _verify_anchor_index(authority, tips[3], tips[-1])
+    with pytest.raises(RestoreJournalInvalid, match="independent_authority_invalid"):
+        _verify_anchor_index(authority, JournalCheckpoint(tips[3].sequence, "9" * 64), tips[-1])
+    with pytest.raises(RestoreJournalInvalid, match="independent_authority_conflict"):
+        _verify_anchor_index(authority, tips[2], tips[4])
+
+
 def test_paged_verified_scan_covers_suffix_without_partial_success(journal):
     from src.core.gdpr.journal_chain_pages import scan_verified_chain
 

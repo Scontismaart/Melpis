@@ -14,7 +14,7 @@ from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_policy_state import PolicyStatePin
 
 
-def test_coverage_requires_every_independently_pinned_backup_and_reports_headroom(tmp_path):
+def test_coverage_requires_every_independently_pinned_backup_and_reports_headroom(tmp_path, monkeypatch):
     from src.core.gdpr.backup_coverage import assess_backup_coverage
 
     objects, authority_dir = tmp_path / "objects", tmp_path / "authority"
@@ -91,18 +91,34 @@ def test_coverage_requires_every_independently_pinned_backup_and_reports_headroo
     tip = publish_segment(store, installation, previous, [record],
                           signer=signer, encryption_key=journal_key)
     authority.advance(store, previous, tip, trusted_public_key=signer.public_key(), encryption_key=journal_key)
+    second = dict(record, operation_id=str(uuid4()))
+    latest = publish_segment(store, installation, tip, [second], signer=signer, encryption_key=journal_key)
+    authority.advance(store, tip, latest, trusted_public_key=signer.public_key(), encryption_key=journal_key)
+    original_page_reader = authority.chain_page_after
+    monkeypatch.setattr(authority, "chain_page_after", lambda anchor, current, max_segments:
+                        original_page_reader(anchor, current, max_segments=1))
     with pytest.raises(RestoreBlocked, match="omits signed erasure evidence"):
         assess_backup_coverage(authority, store, reviewed, **reviewed_args)
-    # Covering every backup's post-anchor entry makes the proof valid again.
+    # Covering every backup across both pages makes the proof valid again.
     for backup in (old_backup, recent_backup):
         prior_pin = authority.checkpoint_pin(org, backup["backup_id"])
         payload = {"version": "c24-restore-v3", "organization_id": str(org), "backup_id": backup["backup_id"],
                    "sequence": 2, "complete": True, "stay_purges": [], "receipt_prunes": [],
-                   "erasures": [{field: record[field] for field in ("operation_id", "scope", "subject_id")}]}
+                   "erasures": [{field: item[field] for field in ("operation_id", "scope", "subject_id")}
+                                for item in (record, second)]}
         new_pin = publish_checkpoint(store, installation, payload,
                                      verification_key=key, encryption_key=ciphertext, previous_pin=prior_pin)
         authority.advance_checkpoint(store, prior_pin, new_pin, verification_key=key, encryption_key=ciphertext)
-    assert assess_backup_coverage(authority, store, reviewed, **reviewed_args)["source_chain_entries_remaining"] == 99999
+    assert assess_backup_coverage(authority, store, reviewed, **reviewed_args)["source_chain_entries_remaining"] == 99998
+    with monkeypatch.context() as bounds:
+        bounds.setattr("src.core.gdpr.backup_coverage._LEGACY_SEGMENT_LIMIT", 1)
+        with pytest.raises(RestoreBlocked, match="Legacy restore journal capacity exceeded"):
+            assess_backup_coverage(authority, store, reviewed, **reviewed_args)
+    wrong_anchor = dict(old_backup, anchor={"sequence": tip.sequence, "sha256": "9" * 64})
+    wrong_inventory = json.dumps(dict(inventory, backups=[wrong_anchor, recent_backup])).encode()
+    with pytest.raises(RestoreBlocked):
+        assess_backup_coverage(authority, store, wrong_inventory,
+                               **dict(args, latest_inventory_sha256=sha256(wrong_inventory).hexdigest()))
     next(path for path in objects.iterdir() if path.name.startswith("policy-")).unlink()
     with pytest.raises(RestoreBlocked):
         assess_backup_coverage(authority, store, reviewed, **reviewed_args)

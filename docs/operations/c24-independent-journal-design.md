@@ -124,15 +124,21 @@ authenticates every segment and approved key boundary, and checks global
 operation uniqueness across pages using a temporary keyed-digest index. Its
 consumer must be read-only or stage work in a quarantined rollback-capable
 transaction; successful completion, not an individual page, is the proof.
-This primitive does not certify a pre-anchor prefix, change any current
-restore caller, or establish an authorized recovery floor. The earliest
+The scan certifies the requested suffix. A separate check verifies the earlier
+index topology. These checks do not establish a recovery floor. The earliest
 recoverable backup anchor and complete historical operation commitments must
 be independently attested before compaction can advance a floor.
 The paged source reconciliation can authenticate the full journal from genesis
 and compare every published erasure with the frozen source. It returns the
 oldest unpublished entries for one segment and an exact remaining count. Its
-temporary source index stores keyed digests and sequence numbers. The existing
-backup-coverage and restore entry points retain their legacy bounds.
+temporary source index stores keyed digests and sequence numbers. Backup
+coverage uses the same bounded segment scan from genesis and checks every
+backup's exact independently indexed anchor and post-anchor evidence. The
+reported segment and entry headroom still reflects the legacy restore limits.
+The restore coordinator also reads bounded segment pages and checks the
+independent index up to the exact backup anchor before reading the suffix.
+The coordinator still materializes the suffix under the existing replay
+limits. The cumulative v3/v4 checkpoint retains its original bounds.
 If evidence or its current authority cannot be recovered, keep traffic closed
 and obtain the controller's disposition. No deletion rule may rely on a
 guessed backup age or an older unverified tip.

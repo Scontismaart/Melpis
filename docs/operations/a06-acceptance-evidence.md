@@ -25,6 +25,25 @@ The issue remains open. This record tracks implementation and proof separately.
 | Restore with later erasure and retention | `test_c24_signed_restore.py`: real encrypted PostgreSQL synthetic backup, restore before an operation exists, cross-tenant preservation, authenticated published replay, policy reconciliation, fence-expiry replay and no traffic authorization. | Exercise all remaining ordinary data categories, fully independent host/custody and actual provider storage. Keep quarantine for incomplete scope/hold/journal, or when a backup lacks necessary evidence. |
 | Staging security review | #208 and SQL105 address two trigger-only client grants. Read-only advisor review found no client table or column grants on 35 RLS-enabled, policy-less backend relations. The authenticated self-only access helper remains necessary for RLS. Dedicated roles lack login/inherit/superuser/bypass privileges on the baseline. | Verify SQL105+ after authorized migration and the deployed application's non-owner/non-escalating role. Public `btree_gist` extension warning and plan-dependent leaked-password setting are tracked separately from the trigger correction. |
 
+The independent journal and restore increments have these integration points:
+
+| Change | Pull request | `main` integration | Verification |
+| --- | --- | --- | --- |
+| Backup-inventory coverage and retention review | [#219](https://github.com/Scontismaart/Melpis/pull/219) | `d22bc7f` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44727021885) |
+| Verified ordinary-booking preflight | [#220](https://github.com/Scontismaart/Melpis/pull/220) | `b7ea79a` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44728208935), [migration check](https://github.com/Scontismaart/Melpis/actions/runs/44728209154) |
+| Source checkpoints, signed stay and receipt replay | [#221](https://github.com/Scontismaart/Melpis/pull/221) | `e782395` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44728293048) |
+| Narrow ordinary-booking purge and exact v4 replay | [#222](https://github.com/Scontismaart/Melpis/pull/222) | `0b0f407` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44730012030), [migration check](https://github.com/Scontismaart/Melpis/actions/runs/44730012099), isolated encrypted PostgreSQL restore |
+| Authenticated v5 candidates and bounded segment read | [#223](https://github.com/Scontismaart/Melpis/pull/223) | `f66fb7b` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44730657164), 18,500-record codec round-trip |
+| EU R2 operator SDK adapter | [#224](https://github.com/Scontismaart/Melpis/pull/224) | `685ecf7` | [PR CI](https://github.com/Scontismaart/Melpis/actions/runs/44730753228), 12 offline SDK checks |
+
+Open candidates cover v5 authority preflight, known orphan proposal identification,
+full source reconciliation and paged backup coverage. Their integration and the
+latest post-merge image checks remain acceptance evidence to collect. See
+[#225](https://github.com/Scontismaart/Melpis/pull/225),
+[#226](https://github.com/Scontismaart/Melpis/pull/226),
+[#227](https://github.com/Scontismaart/Melpis/pull/227), and
+[#228](https://github.com/Scontismaart/Melpis/pull/228).
+
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,
 post-merge and published image results against each finished PR before closing the issue.
