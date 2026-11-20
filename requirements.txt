@@ -18,7 +18,7 @@ fastapi==0.139.2
 # Official fix for CVE-2026-112909 and CVE-2026-112910.
 # Resolve normally; no metadata override or audit exception.
 filelock==4.2.1
-google-api-python-client==2.198.0
+google-api-python-client==2.201.0
 google-auth-httplib2==0.4.0
 google-auth-oauthlib==1.4.0
 httpx==0.28.1
