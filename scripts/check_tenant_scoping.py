@@ -67,8 +67,8 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "reports only the oldest overdue export age platform-wide; no row identity or payload is returned",
     "src/core/retention_job.py::_retention_policies":
         "enumerates immutable policy metadata only; all primary-data mutations bind a policy tenant and require explicit approval and execution gate",
-    "src/core/retention_job.py::_scrub_expired_worker_capability_payloads":
-        "bounded security cleanup of expired one-use capabilities; only digest and immutable replay lineage remain",
+    "src/core/retention_job.py::scrub_expired_worker_capability_payloads":
+        "owner-only bounded cleanup of expired unused capability payloads; oldest due age is aggregate-only",
     "src/core/db/quota_provenance.py::require_quota_trust_epoch":
         "reads the fixed NULL-organization protocol marker only; no caller-controlled row selector",
     "src/core/gdpr/orphan_proposal.py::_read_only_quota_epoch":
@@ -128,6 +128,8 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
         "bounded expiration of derived encrypted export artifacts, not source data",
     ("src/core/retention_job.py::_oldest_overdue_export_seconds", "63a55c537924bad0f118de5babe9f904afacf6f6574d532af010f603ee0a82d3"):
         "fixed projection of one scalar age for overdue encrypted export artifacts, without tenant identity or content",
+    ("src/core/retention_job.py::scrub_expired_worker_capability_payloads", "8eb8d8df49a791258ac2d664da210ac137b2d03cdd615102c5408d92702ba3ea"):
+        "one fixed scalar age for due unused capability payloads; no tenant, row identity or content",
     ("src/core/retention_job.py::_retention_policies", "672e839eec8bb38ab3c9c981b8e7aff866b18b10f656c5140476015fd979ed86"):
         "reviewed fixed-category policy inventory including C24 metadata only; no content/credentials; every mutation revalidates the exact tenant policy under its fence",
     ("src/core/calendar/repository.py::claim", "ca49781fa9e8cc26c388a66f2dbb7256dcd072bed1493150c5c3255bd4693c5e"): "bounded global claim joins credentials by tenant and epoch, locks only queue rows; each downstream operation revalidates tenant/fence; wall-clock lease expiry",

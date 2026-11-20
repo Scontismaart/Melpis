@@ -90,6 +90,66 @@ async def test_scheduler_uses_dedicated_connection_and_distributed_lock(pg_pool,
     await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
 
 
+async def test_scheduler_drains_beta_backlog_with_continued_arrivals_and_hold(pg_pool, retention_operator):
+    from src.core.scheduler import _run_c24_retention_sweep_async
+
+    organizations = sorted([(await _organization(pg_pool))["id"] for _ in range(5)])
+    held, *eligible = organizations
+    for organization in organizations:
+        await approve_messages(pg_pool, organization)
+    await pg_pool.execute("""
+        INSERT INTO gdpr_retention_holds(organization_id,hold_id,category,scope,
+            reason_code,authority_reference,approved_by,approved_at,review_by)
+        VALUES($1,$2,'messages_content','organization','litigation','case:synthetic-load','qa',
+            clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')
+    """, held, uuid4())
+
+    async def seed(organization, prefix, count, age_days):
+        async with pg_pool.acquire() as conn, conn.transaction():
+            # Seed exact synthetic receipt ages, then restore the production guard.
+            await conn.execute("ALTER TABLE meta_webhook_inbox DISABLE TRIGGER c24_inbox_lifecycle_guard")
+            await conn.execute("""
+                INSERT INTO meta_webhook_inbox(id,organization_id,channel,event_key,payload,
+                    trace_id,status,c24_completed_at)
+                SELECT gen_random_uuid(),$1,'whatsapp',$2::text||n,'{"synthetic":true}'::jsonb,'qa','completed',
+                    clock_timestamp()-make_interval(days=>$4)
+                FROM generate_series(1,$3::integer) AS n
+            """, organization, prefix, count, age_days)
+            await conn.execute("ALTER TABLE meta_webhook_inbox ENABLE TRIGGER c24_inbox_lifecycle_guard")
+
+    for organization in eligible:
+        await seed(organization, "initial-", 45, 91)
+    await seed(held, "held-", 25, 91)
+    remaining_sql = """
+        SELECT count(*) FROM meta_webhook_inbox
+        WHERE organization_id=ANY($1::uuid[]) AND event_key LIKE $2
+          AND c24_payload_purged_at IS NULL
+    """
+
+    dsn = os.environ["GDPR_C24_OWNER_RETENTION_DSN"]
+    remaining = []
+    for round_number in range(1, 7):
+        # Each scheduler invocation recreates the dedicated connection pool.
+        # New due work and fresh (not due) envelopes coexist across restarts.
+        for organization in eligible:
+            await seed(organization, f"due-{round_number}-", 5, 91)
+            await seed(organization, f"fresh-{round_number}-", 5, 1)
+        await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=25)
+        remaining.append(await pg_pool.fetchval(remaining_sql, eligible, "initial-%"))
+        assert await pg_pool.fetchval(remaining_sql, [held], "held-%") == 25
+        assert await pg_pool.fetchval(remaining_sql, eligible, "fresh-%") == round_number * 20
+
+    assert 0 < remaining[0] < 180
+    assert remaining == sorted(remaining, reverse=True)
+    assert remaining[3:] == [0, 0, 0]
+    assert await pg_pool.fetchval(remaining_sql, eligible, "due-%") <= 20
+    assert await pg_pool.fetchval("""
+        SELECT count(*) FROM meta_webhook_inbox
+        WHERE organization_id=ANY($1::uuid[]) AND event_key LIKE 'initial-%'
+          AND c24_payload_purged_at IS NOT NULL AND payload='{}'::jsonb
+    """, eligible) == 180
+
+
 @pytest.mark.parametrize('failed_scan', ['retention', 'hotel_erasure'])
 async def test_independent_sweeps_preserve_other_cursor_on_timeout(pg_pool, retention_operator, failed_scan):
     from tests.core.bookings.test_hotel_allocation_archive_postgres import _complete_with_old_evidence

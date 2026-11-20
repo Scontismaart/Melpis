@@ -68,11 +68,6 @@ async def test_unmanaged_content_retention_blocks_unverified_age_and_keeps_expor
     monkeypatch, caplog, schema, category, blocked_reason,
 ):
     monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED", "true")
-    monkeypatch.setattr(
-        retention_job,
-        "_scrub_expired_worker_capability_payloads",
-        AsyncMock(return_value=None),
-    )
     expire_exports = AsyncMock(return_value=2)
     monkeypatch.setattr(retention_job, "_expired_exports", expire_exports)
     monkeypatch.setattr(
