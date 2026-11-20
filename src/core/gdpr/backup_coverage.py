@@ -10,7 +10,7 @@ import sqlite3
 
 from src.core.gdpr.checkpoint_pages import read_any_checkpoint
 from src.core.gdpr.journal_chain_pages import scan_verified_chain
-from src.core.gdpr.journal_publication import _canonical
+from src.core.gdpr.journal_publication import ArtifactKeyPair, _canonical
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 from src.core.gdpr.restore_journal import JournalCheckpoint, RestoreJournalInvalid, _checkpoint, _unique_object, _uuid
 
@@ -20,6 +20,7 @@ _OPAQUE_ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}")
 _MAX_INVENTORY_BYTES = 1024 * 1024
 _LEGACY_SEGMENT_LIMIT = 10000
 _LEGACY_ENTRY_LIMIT = 100000
+_RETIREMENT_DOMAIN = b"melpis.gdpr.backup-retirement.v1\0"
 
 
 def _covered_backup_evidence(authority, store, backups, tip, *, trusted_public_key,
@@ -178,7 +179,7 @@ def assess_backup_coverage(
 
 
 def assess_paged_backup_candidates(authority, store, inventory_bytes, *, latest_inventory_sha256,
-                                   candidates, audit_at=None, **trust):
+                                   candidates, audit_at=None, candidate_keys=None, **trust):
     """Check v5 successor candidates for every tenant of every inventoried backup.
 
     Existing verified recovery evidence remains authoritative. This separately
@@ -199,10 +200,9 @@ def assess_paged_backup_candidates(authority, store, inventory_bytes, *, latest_
                 for org, backup in scopes}
         proof = assess_backup_coverage(authority, store, inventory_bytes,
             latest_inventory_sha256=latest_inventory_sha256, audit_at=audit_at, **trust)
+        keys = _candidate_checkpoint_keys(candidate_keys, trust)
         for (org, backup), (pin, _) in pins.items():
-            prepared = authority.prepare_paged_checkpoint(store, pin, candidates[org, backup],
-                verification_key=trust["checkpoint_verification_key"],
-                encryption_key=trust["checkpoint_encryption_key"])
+            prepared = authority.prepare_paged_checkpoint(store, pin, candidates[org, backup], **keys)
             if prepared.expected_tip != tip or prepared.expected_pin != pin:
                 raise RestoreBlocked("Independent recovery evidence changed during candidate assessment")
         if authority.current() != tip or any(
@@ -214,3 +214,76 @@ def assess_paged_backup_candidates(authority, store, inventory_bytes, *, latest_
     except (ValueError, TypeError, KeyError, OverflowError, RecursionError, RestoreJournalInvalid):
         raise RestoreBlocked("Verified independently pinned backup inventory required") from None
     return dict(proof, verified_paged_candidates=len(pins), authority_advanced=False)
+
+
+def _candidate_checkpoint_keys(candidate_keys, trust):
+    current = ArtifactKeyPair(trust["checkpoint_verification_key"], trust["checkpoint_encryption_key"])
+    if candidate_keys is None:
+        return dict(verification_key=current.verification_key, encryption_key=current.encryption_key)
+    if type(candidate_keys) is not ArtifactKeyPair:
+        raise RestoreBlocked("Exact checkpoint candidate key pair required")
+    return dict(verification_key=candidate_keys.verification_key, encryption_key=candidate_keys.encryption_key,
+                previous_keys=current)
+
+
+def _verify_inventory_rollover(previous, previous_digest, updated, updated_digest, installation, audit_at,
+                               retirement_proof, policy_verification_key):
+    """Keep every previously recoverable backup until its exact retirement is attested."""
+    try:
+        list(_backups(previous, previous_digest, installation, audit_at))
+        list(_backups(updated, updated_digest, installation, audit_at))
+        old = {row["backup_id"]: row for row in json.loads(previous)["backups"]}
+        new = {row["backup_id"]: row for row in json.loads(updated)["backups"]}
+        for backup in old.keys() & new.keys():
+            if (any(old[backup][field] != new[backup][field] for field in ("manifest_sha256", "completed_at", "anchor"))
+                    or set(old[backup]["organizations"]) != set(new[backup]["organizations"])):
+                raise RestoreBlocked("An existing backup identity cannot change during rollover")
+        removed = old.keys() - new.keys()
+        if not removed and retirement_proof is None:
+            return None
+        if (not removed or type(retirement_proof) is not bytes or not 1 <= len(retirement_proof) <= _MAX_INVENTORY_BYTES
+                or type(policy_verification_key) is not bytes or len(policy_verification_key) < 32):
+            raise ValueError
+        envelope = json.loads(retirement_proof, object_pairs_hook=_unique_object)
+        if type(envelope) is not dict or set(envelope) != {"payload", "signature"}:
+            raise ValueError
+        payload, signature = envelope["payload"], envelope["signature"]
+        if (type(payload) is not dict or set(payload) != {"version", "installation_id", "previous_inventory_sha256",
+                "next_inventory_sha256", "retired"} or payload["version"] != "gdpr-backup-retirement-v1"
+                or payload["installation_id"] != str(installation) or payload["previous_inventory_sha256"] != previous_digest
+                or payload["next_inventory_sha256"] != updated_digest or type(signature) is not str
+                or not hmac.compare_digest(hmac.new(policy_verification_key,
+                    _RETIREMENT_DOMAIN + _canonical(payload), sha256).hexdigest(), signature)
+                or type(payload["retired"]) is not list or len(payload["retired"]) != len(removed)):
+            raise ValueError
+        seen = set()
+        for row in payload["retired"]:
+            if type(row) is not dict or set(row) != {"backup_id", "manifest_sha256", "disposition", "evidence_reference"}:
+                raise ValueError
+            backup = row["backup_id"]
+            if (backup not in removed or backup in seen or row["manifest_sha256"] != old[backup]["manifest_sha256"]
+                    or row["disposition"] != "verified_unrecoverable" or not _OPAQUE_ID.fullmatch(row["evidence_reference"])):
+                raise ValueError
+            seen.add(backup)
+        return sha256(retirement_proof).hexdigest()
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError, OverflowError):
+        raise RestoreBlocked("Verified inventory rollover and exact backup retirement evidence required") from None
+
+
+def authenticate_backup_retirements(previous, updated, *, installation_id, previous_inventory_sha256,
+                                    latest_inventory_sha256, retired, policy_verification_key, audit_at=None):
+    """Create an operator attestation of verified unavailable copies without deleting anything."""
+    if (type(retired) is not list or not 1 <= len(retired) <= 1000
+            or type(policy_verification_key) is not bytes or len(policy_verification_key) < 32):
+        raise RestoreBlocked("Exact backup retirement evidence required")
+    payload = dict(version="gdpr-backup-retirement-v1", installation_id=str(installation_id),
+        previous_inventory_sha256=previous_inventory_sha256, next_inventory_sha256=latest_inventory_sha256,
+        retired=retired)
+    try:
+        signature = hmac.new(policy_verification_key, _RETIREMENT_DOMAIN + _canonical(payload), sha256).hexdigest()
+        envelope = _canonical(dict(payload=payload, signature=signature))
+    except (TypeError, ValueError, RecursionError):
+        raise RestoreBlocked("Exact backup retirement evidence required") from None
+    _verify_inventory_rollover(previous, previous_inventory_sha256, updated, latest_inventory_sha256,
+        installation_id, datetime.now(timezone.utc) if audit_at is None else audit_at, envelope, policy_verification_key)
+    return envelope
