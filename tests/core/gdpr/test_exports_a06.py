@@ -1,6 +1,7 @@
 """Real-PostgreSQL GDPR snapshot, projection, and integrity contracts."""
 import uuid
 import asyncio
+import json
 
 import pytest
 from cryptography.fernet import Fernet
@@ -77,6 +78,28 @@ async def export_bytes(exporter, org, export_id, requester):
     async for chunk in exporter.stream(org, export_id, requester):
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+@pytest.mark.asyncio
+async def test_inventory_exports_only_minimal_tenant_receipt_metadata(pg_pool, sample_org):
+    org, other, requester = sample_org["id"], uuid.uuid4(), "owner-receipt-export"
+    await pg_pool.execute("INSERT INTO organizations(id,name) VALUES($1,'Unrelated synthetic tenant')", other)
+    own_request, foreign_request = uuid.uuid4(), uuid.uuid4()
+    for tenant, key in [(org, own_request), (other, foreign_request)]:
+        await pg_pool.execute("""INSERT INTO document_index_requests
+            (organization_id,request_key,payload_hash,request_spec,published_revision)
+            VALUES($1,$2,$3,'{"source":"private-request-spec"}'::jsonb,1)""",
+            tenant, key, "a" * 64)
+    exporter = Exporter(pg_pool)
+    ready = await exporter.prepare(org, requester, request_id=uuid.uuid4())
+    result = json.loads(await export_bytes(exporter, org, ready["export_id"], requester))
+    assert [row["request_key"] for row in result["document_index_requests"]] == [str(own_request)]
+    assert "request_spec" not in result["document_index_requests"][0]
+    assert "payload_hash" not in result["document_index_requests"][0]
+    manifest = {item["category"]: item for item in result["manifest"]["categories"]}
+    assert "request specifications" in manifest["document_index_requests"]["omitted"]
+    assert manifest["gdpr_retention_holds"]["status"] == "excluded"
+    assert manifest["worker_capabilities"]["status"] == "excluded"
 
 
 @pytest.mark.asyncio

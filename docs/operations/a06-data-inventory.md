@@ -13,8 +13,8 @@ changes and remote execution must be assessed separately.
 
 ## Scope and identity keys
 
-**A06 status: technical partial.** The current export catalog contains 61 unique
-categories and 89 executable projections, including narrow subject views. This
+**A06 status: technical partial.** The current export catalog contains 69 unique
+categories and 92 executable projections, including narrow subject views. This
 is not a legal sign-off or issue closure. The five Privacy V1.0 product
 decisions are founder-approved; effective tenant records and operational
 cutover are not established by this source review. Shared authentication-account
@@ -168,8 +168,8 @@ request where applicable.
 
 The original SQL data map above covers the application tables and C2.4 lifecycle
 metadata added through migration 087. The supplemental section above records the
-later lifecycle and worker records. The frozen catalog contains 89
-executable organization/contact/account projections across 61 categories,
+later lifecycle and worker records. The frozen catalog contains 92
+executable organization/contact/account projections across 69 categories,
 including narrow C2.4 projections; `gdpr_export_chunks` remains excluded
 because it stores encrypted recursive export artifacts. Lifecycle event and
 step evidence JSON, operation manifests, request hashes, session data, and
