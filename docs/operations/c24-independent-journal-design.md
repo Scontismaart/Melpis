@@ -51,7 +51,9 @@ including a lost response followed by authenticated readback.
   the independent latest pins, and run `replay_primary_published_erasures`.
   It reconciles current policy/hold evidence per tenant before local replay,
   requires verified contact fingerprint matching, checks complete replay
-  against the supplied backup inventory and pins, and leaves traffic disabled.
+  against the supplied backup inventory and pins, and reapplies checkpointed
+  receipt-prune work using the current policy and hold checks. Traffic remains
+  disabled.
   A hold conflict, missing evidence, conflicting operation or incomplete
   replay is a quarantined failure. Separate checks cover provider copies and
   retention cases outside the current C2.4 contract.
