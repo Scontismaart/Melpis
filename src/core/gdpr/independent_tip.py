@@ -42,6 +42,16 @@ class AuthorityRecoveryPin:
     sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class PreparedCheckpoint:
+    """Exact candidate and authority snapshot for a future, separate CAS."""
+
+    installation_id: UUID
+    expected_tip: JournalCheckpoint
+    expected_pin: CheckpointPin | None
+    candidate: CheckpointPin
+
+
 def _key_fingerprints(public_key, encryption_key):
     if not isinstance(public_key, Ed25519PublicKey):
         raise RestoreJournalInvalid("journal_key_epoch_invalid")
@@ -357,6 +367,33 @@ class IndependentTipStore:
             if pin is None:
                 raise RestoreBlocked("Independent checkpoint pin unavailable")
             return pin
+
+    def prepare_paged_checkpoint(self, store, previous_pin, candidate, *,
+                                 verification_key, encryption_key, previous_keys=None):
+        """Verify v5 readiness against current authority without committing anything.
+
+        A future activation path must recheck these CAS operands and verify
+        complete source and restore support. This result is not a current pin.
+        """
+        from src.core.gdpr.checkpoint_pages import verify_checkpoint_candidate
+
+        _checkpoint_name(self.installation_id, candidate)
+        org, backup = candidate.organization_id, candidate.backup_id
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            tip, current = self._current(conn), self._checkpoint(conn, org, backup)
+            if current != previous_pin:
+                raise RestoreBlocked("Independent checkpoint pin conflict")
+        payload = verify_checkpoint_candidate(
+            store, self.installation_id, current, candidate,
+            verification_key=verification_key, encryption_key=encryption_key, previous_keys=previous_keys)
+        if payload["version"] != "c24-restore-v5":
+            raise RestoreBlocked("Paged checkpoint candidate required")
+        with self._connection() as conn:
+            conn.execute("BEGIN")
+            if self._current(conn) != tip or self._checkpoint(conn, org, backup) != current:
+                raise RestoreBlocked("Independent recovery authority changed during candidate verification")
+        return PreparedCheckpoint(self.installation_id, tip, current, candidate)
 
     def advance_checkpoint(self, store, previous_pin, candidate, *, verification_key, encryption_key,
                            previous_keys=None):
