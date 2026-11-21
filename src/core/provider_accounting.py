@@ -291,6 +291,8 @@ class ProviderAccountingContext:
                 WHERE om.organization_id=$1 AND up.auth_user_id=$2
                   AND om.ruolo IN ('owner','manager','staff')
                   AND om.joined_at IS NOT NULL
+                  AND NOT EXISTS (SELECT FROM gdpr_erasure_barriers b
+                      WHERE b.organization_id=$1 AND b.scope='organization')
                 FOR SHARE OF om, up""",
             organization_id, auth_user_id,
         )

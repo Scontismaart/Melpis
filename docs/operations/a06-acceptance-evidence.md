@@ -12,7 +12,7 @@ The issue remains open. This record tracks implementation and proof separately.
 | Snapshot expiration | [#210](https://github.com/Scontismaart/Melpis/pull/210) adds an independent bounded expiry job with skip-locked batches and overdue-age monitoring. [#213](https://github.com/Scontismaart/Melpis/pull/213) releases the snapshot lock between chunks so revocation and expiry can interrupt stalled downloads. | Observe physical deletion lag under the deployed workload, contention, interrupted runs and outstanding batches. |
 | Erasure idempotency, retry and uncertainty | #130 durable operation/barrier/step/event model, fenced local advancement, partial manifests. [#209](https://github.com/Scontismaart/Melpis/pull/209) requires an inventoried provider step and a confirmed local erasure before claim or reconciliation. The exact blocked-account review reports owner, shared-membership, assignment, invitation, audit, access and provider dependencies without changing identity or exposing other tenant identifiers. | Actual global account erasure requires the independent account controller's disposition, ownership transfers, session revocation, verified Auth provider receipts and backup replay contract. Unstructured subject attribution and held copies require case-specific evidence. |
 | Provider propagation and honest completion | `operations.py`, `propagation.py`, `test_propagation_a06.py`. #237 caps confirmed-unsent retries and permits a separately evidenced operator recovery of a dead letter. External stages retain uncertainty without correlated evidence. Historical provider review stays held. | Current and historical provider inventory, authority, supported deletion endpoints and authenticated receipts for applicable vendors, plus controller disposition for copies retained by obligation. No real provider deletion is certified. |
-| 60-day visibility | Ordinary inbox/dashboard SQL filters verified receipt time, with tests in `test_retention_visibility_dark.py` and `test_c24_visibility.py`. | Confirm all ordinary surfaces and effective version in Staging. Unknown historical receipt dates remain hidden where the verified anchor is required. |
+| 60-day visibility | Ordinary inbox/dashboard SQL filters verified receipt time. SQL114 applies the rule to direct client reads of messages and their event and feedback copies. `test_c24_visibility.py` exercises the API projections and database authenticated role. | Confirm the effective version and actual client role in Staging. |
 | 90-day primary message content | SQL096/104 and `test_c24_retention_sweep.py` purge eligible source content and linked copies while preserving accounting. SQL110 distinguishes completed account-channel work from an unknown inbound copy using the same-tenant current A04 ledger epoch, exact claim and payload binding, and an unambiguous response identity. | Prove coverage and deadlines for ordinary legacy rows and billed records without correlated receipt lineage. Unknown or stale response provenance, tenant-wide drains and unresolved provider usage can defer eligible content. Account-channel content has its own retention obligations. |
 | C2.4 30-day last pertinent activity | SQL089 handles verified last applied inbound activity. SQL111 and the v5 orphan plan path expire a verified never-applied proposal from both copies, preserve message content and accounting, and leave a replay fence. The isolated restore covers a backup with the preimage, a verified backup that predates source receipt, a subsequent signed erasure, and policy renewal under current holds. | Reconcile unattributed legacy copies and other relevant activity, measure effective workload deadlines and commission the owner publication schedule. |
 | Technical receipts 90 days from verified conclusion | SQL100/103/104, [#207](https://github.com/Scontismaart/Melpis/pull/207). Verified source-derived receipt fences and audit expiry require a retained checkpoint. SQL113 projects verified inbound receipt metadata to the relevant subject. | A controller must independently establish each remaining request-conclusion anchor, category and replay disposition. Idle-watermark expiry, revocation creation and global idempotency creation are different events; global dedup has no tenant scope. |
@@ -59,6 +59,7 @@ source it created. The run retained the synthetic restored database
 `melpis_a06_restore_114cc900c5dc4a27` and verified the erasure barrier,
 billing count and ledger, and decryptable snapshot. A run without the opt-in
 skipped before database setup, including with an invalid inherited test DSN.
+This coherence guard explains the single skip in the earlier 312-test suite.
 The signed older-backup replay drills provide the separate evidence for
 operations committed after the backup.
 
@@ -117,10 +118,11 @@ Subsequent integration evidence as of 21 November 2026:
 | [#239](https://github.com/Scontismaart/Melpis/pull/239) | `c7c59932` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817157891), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857793192) |
 | [#240](https://github.com/Scontismaart/Melpis/pull/240) | `38614615` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817169456), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857806537) |
 | [#241](https://github.com/Scontismaart/Melpis/pull/241) | `153a6979` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817180784), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857821336) |
+| [#242](https://github.com/Scontismaart/Melpis/pull/242) | `9039e49c` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44859008640), [main CI and GHCR](https://github.com/Scontismaart/Melpis/actions/runs/44864127011), [main Migration Check for SQL112–113](https://github.com/Scontismaart/Melpis/actions/runs/44864127019) |
 
 All PR checks required for the above merges passed on the exact reviewed
-heads. Main CI and GHCR completed through #238, with #239–241 tracked
-in the new main runs above. The first full CI
+heads. The #239–242 main runs passed and published API and web GHCR
+multi-architecture manifests. The first full CI
 runs for #239–241 found a private capability fixture retained across tests
 that recreate the public schema. The subsequent fixture reset clears the
 private test schema at the same disposable database boundary. The production
@@ -148,6 +150,106 @@ scrub retains its exact eligibility and batch limits.
   key and tip custody, synthetic drill, new backup and rehearsal, and
   authorized Staging migration. Recheck actual provider and backup inventory
   before certifying external copies or restoring traffic.
+
+### Founder dispositions and Staging inventory (2026-11-21)
+
+The founder confirmed that Staging is intended solely for reproducible synthetic
+data. This defines the environment's permitted purpose. It does not establish
+the provenance of pre-existing rows. The following inventory used a read-only
+transaction against the explicitly identified Melpis Staging project in
+`eu-central-1`. No row content, personal identifier, token or secret was
+retrieved. Production was excluded.
+
+| Aggregate result | Count |
+| --- | ---: |
+| Relations examined (application, private worker, selected Auth and Storage) | 101 |
+| Nonempty relations | 26 |
+| Organizations / joined memberships / Auth users | 25 / 21 / 28 |
+| Contacts / conversations / messages | 3 / 3 / 18 |
+| Messages missing both trusted receipt and original subject | 18 |
+| Billed messages lacking verified lineage | 3 |
+| Bookings / without a contact reference / broken contact references | 43 / 42 / 0 |
+| Bookings with source message or completion timestamp | 0 / 0 |
+| Auth users with more than one joined tenant membership | 0 |
+| Auth sessions / refresh tokens | 130 / 157 |
+| Usage events / global usage events | 28 / 7 |
+| Usage records mapped to quota reservation / provider attempts / trust marker / other | 0 / 0 / 1 / 27 |
+| Storage objects / provider WhatsApp account rows | 0 / 1 |
+
+A separate read-only ACL check confirmed direct `SELECT` privileges on
+messages, event log, feedback and delivery attempts for the hosted client
+roles. SQL114 applies restrictive read policies to the raw messages, event
+log and feedback. The existing delivery-attempt policy resolves its source
+through messages and inherits the visibility restriction. Private inbound
+receipt exports also require an exact current message and tenant contact
+match and a nonfuture receipt timestamp.
+
+Migration history records SQL104 as the latest applied A06 migration; SQL105+
+requires the specific GO. No synthetic label, current contact link, or raw
+creation date establishes provenance. The 18 messages require quarantine and
+exact evidence-backed reconciliation. Contactless manual guest bookings can be
+valid operational records. The 42 bookings with no contact reference and the
+absence of completion evidence require a review of source, subject and disposition,
+without assigning fabricated identities or deadlines. The remaining Auth
+records, document, messaging integration and usage records also require an
+inventory of their generating fixtures and approved disposition before any
+real-data export, backup transfer or erasure. Maintain access restrictions
+and a dated controller review until the cases are resolved; do not use
+quarantine as an indefinite retention basis.
+
+The financial disposition distinguishes invoices and statutory accounting
+records from counters, technical receipts, conversation content and bookings.
+The ordinary ten-year civil-accounting rule applies only to its verified legal
+scope and anchor, with professional validation before actual use. It does not
+set a generic AI, booking or conversation deadline. The product-policy registry
+and existing booking/retention gates preserve financial obligations without
+resetting quota or inferring an obligation from unrelated linked material.
+
+The shared Auth disposition requires tenant-local membership revocation and
+preservation of independent global identity, other tenant memberships, and
+accounting. SQL114 is an additional, narrowly scoped prerequisite identified
+after the founder disposition: it fences subsequent membership grants at the
+existing organization barrier and denies stale erased-tenant access. The
+original GO range 105–113 therefore needs an explicitly named extension
+to include SQL114. The migration itself performs no historical deletion.
+Existing committed cases with residual access require exact current policy,
+hold recheck and execution authority. Global account deletion, ownership
+changes and provider/session disposition require independently verified
+authorization. No such real changes are authorized by this record.
+
+| Founder disposition | Local candidate evidence | Precondition for operational acceptance |
+| --- | --- | --- |
+| Historical data | `test_c24_visibility.py` verifies normal inbox/dashboard and export quarantine for missing, mismatched or future receipt evidence, continued access to proven rows, rejection of older snapshots, and dated owner review. | The responsible controller must classify the inventoried Staging rows and establish contemporaneous evidence or a dated disposition. Use a newly seeded, reproducible dataset for the operational drill and its backup. |
+| Financial data | `test_webhook_ordering.py` and `test_deletion_a06.py` verify that terminal or proven-unsent checkout URLs expire without changing accounting or idempotency and that unresolved or other-tenant intents are preserved. | Record the verified legal class and applicable retention anchor for statutory records, with professional validation of the actual accounting workflow. Reconcile unknown provider and booking records using correlated evidence. |
+| Shared Auth | SQL114 and `test_tenant_access_erasure.py` verify local membership and invitation removal, refusal of regrants, retention of foreign memberships and Auth identities, and policy-gated reconciliation of stale membership links. `test_c24_signed_restore.py` replays an organization erasure through the authenticated v5 tip into an older encrypted PostgreSQL backup. | Verify deployed role behavior after migration. Global Auth decisions, session revocation and ownership transfer need verified cross-tenant dependencies and the proper authority. |
+| Journal custody | Signed v5 publication, checkpoint advancement, exact replay, policy and hold reconciliation, key rotation, and archive safeguards have local synthetic coverage. | Record the applicable account agreement and DPA, scope credentials to a private R2 EU journal, prove independent custody and run the approved synthetic drill before any remote real-data processing. |
+
+The candidate passed the local PostgreSQL 16 upgrade from 104 through 114
+on a synthetic database with pre-existing organization erasure history.
+Applying SQL114 again preserved the historical membership and Auth identity.
+Separate exact-scope reconciliation tests verify that an erased tenant's
+stale membership is inaccessible and can be removed only under current
+authorization. The synthetic Windows-to-Linux authority portability drill
+also recovered the independent authority and journal and rejected the old
+sealed authority in a replacement container without networking.
+
+The broad synthetic PostgreSQL 17 and Valkey run reported 586 passed, zero
+skipped in 967.93 seconds. It covered booking and inbound workers, the GDPR
+suite, API access, simulator and document routes, billing and journal tests,
+including both encrypted restore fixtures. The new v5 organization replay
+case was run separately on PostgreSQL 16. The broad run started before the
+final direct client visibility and private receipt export correction. The
+focused check below verifies that correction on the final candidate.
+
+The final PostgreSQL 16 check ran the database-role and ordinary API
+visibility paths, export and exact access reconciliation, plus both
+encrypted restore fixtures. All 32 tests passed with zero skips, including
+the signed v5 organization replay and the future-dated private receipt
+regression. The only warnings were the existing HTTPX cookie deprecation.
+
+Public legal references for professional confirmation: [Italian accounting
+records, Civil Code Article 2220 as reproduced in Law 772/1986](https://www.normattiva.it/atto/caricaDettaglioAtto?atto.codiceRedazionale=086U0772&atto.dataPubblicazioneGazzetta=1986-11-25&bloccoAggiornamentoBreadCrumb=true&dataVigenza=&generaTabId=true&qId=&tabID=&tipoDettaglio=originario&title=lbl.dettaglioAtto),
+[electronic invoice preservation](https://agenziaentrate.gov.it/portale/web/guest/aree-tematiche/fatturazione-elettronica/guida-fatturazione-elettronica/come-predisporre-inviare-ricevere-fe/come-si-conservano-fe).
 
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,

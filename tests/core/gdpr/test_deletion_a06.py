@@ -96,7 +96,7 @@ async def test_default_blocked_without_cutover_or_approved_policies_preserves_so
 
 @pytest.mark.asyncio
 async def test_approved_org_erasure_is_local_partial_and_preserves_root_billing_audit_and_counters(
-    pg_pool, sample_org, monkeypatch,
+    pg_pool, sample_org, other_org, monkeypatch,
 ):
     org = sample_org["id"]
     await approve_policies(pg_pool, org, organization=True)
@@ -114,6 +114,17 @@ async def test_approved_org_erasure_is_local_partial_and_preserves_root_billing_
             "INSERT INTO audit_log(organization_id,action,target_table,target_id,details) "
             "VALUES($1,'synthetic.audit','contacts',$2,'{}')", org, contact_id,
         )
+        for tenant, key, payload in (
+            (org, "resolved-synthetic-checkout", '{"_resolved":true,"_resolution":"completed"}'),
+            (org, "unresolved-synthetic-checkout", '{"_resolved":false}'),
+            (other_org["id"], "other-synthetic-checkout", '{"_resolved":true,"_resolution":"expired"}'),
+        ):
+            await conn.execute("""INSERT INTO billing_checkout_intents(
+                id,organization_id,request_key,payload_hash,payload,session_id,session_url,expires_at)
+                VALUES($1,$2,$3,'synthetic-hash',$4::jsonb,'synthetic-session',
+                       'https://checkout.example.test/synthetic',now()-interval '1 day')""",
+                uuid.uuid4(), tenant, key, payload,
+            )
         for status in ("completata", "cancellata"):
             await conn.execute(
                 """INSERT INTO bookings(organization_id,contact_id,nome_cliente,telefono,data,ora,coperti,
@@ -138,6 +149,18 @@ async def test_approved_org_erasure_is_local_partial_and_preserves_root_billing_
         assert await conn.fetchval("SELECT messages_used_this_period FROM organizations WHERE id=$1", org) == 42
         assert await conn.fetchval("SELECT count(*) FROM usage_events WHERE organization_id=$1", org) == 1
         assert await conn.fetchval("SELECT count(*) FROM audit_log WHERE organization_id=$1", org) == 1
+        billing = await conn.fetchrow("""
+            SELECT session_id,session_url,payload_hash,payload->>'_resolution' AS resolution
+            FROM billing_checkout_intents WHERE organization_id=$1 AND request_key='resolved-synthetic-checkout'
+        """, org)
+        assert dict(billing) == {
+            "session_id": "synthetic-session", "session_url": None,
+            "payload_hash": "synthetic-hash", "resolution": "completed",
+        }
+        assert await conn.fetchval("""SELECT session_url IS NOT NULL FROM billing_checkout_intents
+            WHERE organization_id=$1 AND request_key='unresolved-synthetic-checkout'""", org)
+        assert await conn.fetchval("""SELECT session_url IS NOT NULL FROM billing_checkout_intents
+            WHERE organization_id=$1 AND request_key='other-synthetic-checkout'""", other_org["id"])
         assert await conn.fetchval("SELECT count(*) FROM documents WHERE organization_id=$1", org) == 0
         assert await conn.fetchval("SELECT count(*) FROM document_chunks WHERE organization_id=$1", org) == 0
         assert await conn.fetchval("SELECT content_text IS NULL FROM messages WHERE id=$1", message_id)

@@ -11,7 +11,7 @@ from uuid import UUID
 
 from src.core.db.scoping import system_scope
 from src.core.gdpr.checkpoint_pages import decode_replay_checkpoint, read_any_checkpoint, read_checkpoint_pages
-from src.core.gdpr.deletion import Deletion
+from src.core.gdpr.deletion import Deletion, reconcile_erased_tenant_access
 from src.core.gdpr.guard import ErasureBlocked
 from src.core.gdpr.journal_chain_pages import scan_verified_chain
 from src.core.gdpr.operations import encode, event
@@ -384,7 +384,16 @@ async def replay_primary_published_erasures(
             await verify_policy_state(
                 conn, org, ciphertext, installation_id=authority.installation_id,
                 backup_id=backup_id, independent_pin=pin, **policy_args)
-            _, _, _, purges, prunes, ordinary, _ = checkpoints[org]
+            _, entries, _, purges, prunes, ordinary, _ = checkpoints[org]
+            # Cumulative checkpoints can authenticate a committed pre-114
+            # organization erasure absent from the post-backup journal. Its
+            # residual grants must be reconciled under current policy as well.
+            for operation, scope, _ in entries:
+                if scope == 'organization':
+                    try:
+                        await reconcile_erased_tenant_access(conn, org, operation)
+                    except ErasureBlocked:
+                        raise RestoreBlocked('Organization access reconciliation blocked') from None
             await _replay_stay_retention(conn, org, purges)
             await _replay_receipt_prunes(conn, org, prunes, pins[org])
             if ordinary:

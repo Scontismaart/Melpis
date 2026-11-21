@@ -445,7 +445,15 @@ class MessageRepository(TenantScopedRepository):
                   AND handling_type = 'ai_handled'
                   AND deleted_at IS NULL
                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
-                       ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                       WHEN EXISTS (
+                           SELECT 1 FROM conversations lineage_c
+                           JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                               AND lineage_ct.organization_id = $1::uuid
+                           WHERE lineage_c.organization_id = $1::uuid
+                             AND lineage_c.id = messages.conversation_id
+                             AND lineage_ct.id::text = to_jsonb(messages)->>'c24_original_subject_id'
+                       ) AND (to_jsonb(messages)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                       THEN (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                 ORDER BY created_at DESC
                 LIMIT 1
             """, organization_id, conversation_id)
@@ -458,7 +466,15 @@ class MessageRepository(TenantScopedRepository):
                 WHERE id = $2::uuid AND organization_id = $1::uuid
                   AND deleted_at IS NULL
                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
-                       ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                       WHEN EXISTS (
+                           SELECT 1 FROM conversations lineage_c
+                           JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                               AND lineage_ct.organization_id = $1::uuid
+                           WHERE lineage_c.organization_id = $1::uuid
+                             AND lineage_c.id = messages.conversation_id
+                             AND lineage_ct.id::text = to_jsonb(messages)->>'c24_original_subject_id'
+                       ) AND (to_jsonb(messages)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                       THEN (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
             """, organization_id, message_id)
             return dict(row) if row else None
 
@@ -524,7 +540,15 @@ class MessageRepository(TenantScopedRepository):
             rows = await conn.fetch(
                 """SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL
                    AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
-                        ELSE (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                        WHEN EXISTS (
+                            SELECT 1 FROM conversations lineage_c
+                            JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                                AND lineage_ct.organization_id = $1::uuid
+                            WHERE lineage_c.organization_id = $1::uuid
+                              AND lineage_c.id = messages.conversation_id
+                              AND lineage_ct.id::text = to_jsonb(messages)->>'c24_original_subject_id'
+                        ) AND (to_jsonb(messages)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                        THEN (to_jsonb(messages)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    ORDER BY created_at DESC""",
                 organization_id,
             )

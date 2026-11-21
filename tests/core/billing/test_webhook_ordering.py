@@ -2,6 +2,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -214,6 +215,14 @@ async def test_checkout_then_paid_and_paid_then_checkout_converge(repo, sample_o
     intent = await _seed_intent(repo, sample_org["id"])
     checkout = _checkout("evt_checkout_first", 300, sample_org["id"], intent)
     await handle_stripe_webhook(checkout, repo, 7)
+    completed = await repo.pool.fetchrow("""
+        SELECT session_id, session_url, payload_hash, payload->>'_resolution' AS resolution
+        FROM billing_checkout_intents WHERE organization_id=$1 AND id=$2
+    """, sample_org["id"], intent)
+    assert dict(completed) == {
+        "session_id": f"cs_{intent}", "session_url": None,
+        "payload_hash": "ordering-test", "resolution": "completed",
+    }
     await _seed_usage(repo, sample_org["id"])
     invoice = _paid_invoice("evt_paid_after_checkout", 300, intent_id=intent,
                             price_id=PRICE)
@@ -256,12 +265,54 @@ async def test_newer_checkout_expired_does_not_block_older_paid_invoice(repo, sa
     expired = _checkout("evt_checkout_expired_newer", 900, sample_org["id"], intent,
                         event_type="checkout.session.expired")
     await handle_stripe_webhook(expired, repo, 7)
+    expiry = await repo.pool.fetchrow("""
+        SELECT session_id, session_url, payload_hash, payload->>'_resolution' AS resolution
+        FROM billing_checkout_intents WHERE organization_id=$1 AND id=$2
+    """, sample_org["id"], intent)
+    assert dict(expiry) == {
+        "session_id": f"cs_{intent}", "session_url": None,
+        "payload_hash": "ordering-test", "resolution": "expired",
+    }
     invoice = _paid_invoice("evt_paid_older", 700)
     result = await handle_stripe_webhook(invoice, repo, 7)
     billing = await repo.get_organization_billing(sample_org["id"])
     assert result["action"] == "subscription_activated"
     assert billing["subscription_status"] == "active"
     assert (await _event_cursor(repo, sample_org["id"]))["stripe_event_created"] == 700
+
+
+async def test_checkout_response_cannot_restore_capability_after_verified_expiry(repo, sample_org):
+    from src.core.billing.checkout import create_durable_checkout
+    from src.core.billing.webhook_handler import handle_stripe_webhook
+
+    org = sample_org["id"]
+    await _bound_org(repo, org, status="incomplete", subscription=None, used=17)
+    stripe = SimpleNamespace(checkout=SimpleNamespace(Session=SimpleNamespace(create=object())))
+    session = SimpleNamespace(id="cs_late_synthetic", url="https://checkout.example.test/synthetic")
+    payload = {
+        "price_id": PRICE, "plan": "starter", "interval": "monthly",
+        "success_url": "https://app.example.test/success",
+        "cancel_url": "https://app.example.test/cancel",
+    }
+
+    async def fake_stripe_call(_method, **kwargs):
+        intent = uuid.UUID(kwargs["metadata"]["checkout_intent_id"])
+        expired = _checkout("evt_late_checkout_response", 900, org, intent,
+                            session_id=session.id, event_type="checkout.session.expired")
+        result = await handle_stripe_webhook(expired, repo, 7)
+        assert result["action"] == "checkout_expired"
+        return session
+
+    await create_durable_checkout(repo, org, "late-synthetic-response", payload, stripe, fake_stripe_call)
+    row = await repo.pool.fetchrow("""
+        SELECT session_id, session_url, payload_hash, payload->>'_resolution' AS resolution
+        FROM billing_checkout_intents WHERE organization_id=$1 AND request_key=$2
+    """, org, "late-synthetic-response")
+    assert row["session_id"] == session.id
+    assert row["session_url"] is None
+    assert row["payload_hash"]
+    assert row["resolution"] == "expired"
+    assert (await repo.get_organization_billing(org))["messages_used_this_period"] == 17
 
 
 @pytest.mark.parametrize("incoming_start", [PERIOD_START, PERIOD_START - 86400])

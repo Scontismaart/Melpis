@@ -142,8 +142,11 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations", "10033a45b8df8fa6c14cc2fcd746e5cf6d6c2e7da8bcbd5d8d90e31d0bdca9b4"): "outbox status update uses only the id selected and locked by the same transaction",
     ("src/core/db/quota_provenance.py::require_quota_trust_epoch", "6ca4c3cfbc19d39d2db05a3d9ece55d1391817dfdf370d18a81fc4860bb2c4df"): "exact read-only marker UUID, NULL organization, protocol event type and zero quantity; every other SQL literal remains checked",
     ("src/core/gdpr/orphan_proposal.py::_read_only_quota_epoch", "b5964ff4cf5c103aae15a074bed3691f861d2e1e38f7e59ffad2934d671692a9"): "read-only owner planning checks only the fixed global quota trust marker UUID, NULL organization, protocol event type and zero quantity",
-    ("src/core/db/repositories/organization_repo.py::get_memberships_by_auth", "29778c3d709058faa351c858baae4a2eb2a9d9b77bcaa9a503cb77f1f6990b01"): "principal membership resolution, bound to verified auth subject",
-    ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "48f99c0cd04ace9aed7749c723e6a46fb3e8eb78bc31defca15f5d36198b8776"): "JIT lookup is bound to verified auth subject",
+    (
+        "src/core/db/repositories/organization_repo.py::get_memberships_by_auth",
+        "af2dbc9265dbe944a21aeccc3004c8a09a32f30d09d0b1312e491403c6d9dfcf",
+    ): "principal membership resolution, bound to verified auth subject and joined erasure barrier",
+    ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "09355492d38d518d6e5b8044e4886cd594f11e26619c1966c643e37bb5da63a6"): "JIT lookup is bound to verified auth subject and joined erasure barrier",
     ("src/core/db/repositories/organization_repo.py::get_or_create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "JIT owner membership is inserted from the newly created organization row",
     ("src/core/db/repositories/organization_repo.py::get_org_by_phone_number_id", "b92af521898b894d1bd12f9675852502de316ca4377020173b8bbd3da20acfe2"): "pre-auth tenant resolution by provider phone-number identity",
     ("src/core/db/repositories/organization_repo.py::get_org_by_waba_id", "5ae1bafbb425db6399573777d3f9fbe9d1d49e98a9c52bdc850265e2a22baf2c"): "pre-auth tenant resolution by provider WABA identity",
@@ -183,10 +186,11 @@ ALLOWLISTED_SQL_FINGERPRINTS.update({
     ("src/core/gdpr/source_journal_pages.py::capture_erasure_journal_delta_paged", "2529ccf635c43ea4195882cb9f8e8da1f8eef647c21d28821895903a3b44a220"): "private temporary SQLite index of ephemeral keyed source evidence digests, never executed against PostgreSQL",
     ("src/core/db/repositories/message_repo.py::booking_confirmation_delivery_guard", "30e6a02241fdc3b332a8d599f7c901550d390092c76974f6f3a6b4d21eb91566"): "locks only the booking joined through an outbox row bound to both organization_id and outbound_message_id; booking organization must match the outbox",
     ("src/core/db/repositories/organization_repo.py::create_organization_with_owner", "784b96773a542ef34051427862f19594e87ad778d6c29dc50be36fe2e06ed072"): "single-organization provisioning uses the id returned by its new_org CTE",
-    ("src/api/routes/team.py::list_my_organizations", "f018234f9a40424316a12de8391d250b8c03179c1a30953029f60b3928893ecf"): "enumerates only memberships bound to the authenticated principal",
+    ("src/api/routes/team.py::list_my_organizations", "f4b6826caa80db6bff31e20d43be652fb95d1bf30f387c7ffce178e8b963400d"): "enumerates memberships of the authenticated principal after checking each tenant erasure barrier",
     ("src/core/team_invitations.py::accept_invitation", "b890eeb6b0db2692e70655634732f3cd3e534f279df2919da0253b31dbd269be"): "hashed invite-token lookup resolves its organization before scoped acceptance",
-    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "c98911815b3dcd95ee3d831f476325da9b83a45eb02dc2c26f1b93d93b2a8191"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
-    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "f9ff9857504b6b64973f0c74a4ac96044fc0f2025bdfffc1f3cd3fe1a40ee9c4"): "shared dashboard CTE binds event_log/messages/reviews and all related subqueries to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_dashboard", "714cd7a5b2014322865036e5a6829d11712ad9119a9d102f8040f40dc9d44724"): "dashboard CTE binds all related tables and immutable message lineage checks to the authenticated organization parameter",
+    ("src/api/routes/dashboard.py::recupera_eventi_prioritari", "de240f63e3f69701f547d5ad1ab207582a9c671aead8f0dc43854f6068c3c008"): "dashboard CTE binds all related tables and immutable message lineage checks to the authenticated organization parameter",
+    ("src/core/gdpr/legacy_message_reconciliation.py::inventory_quarantined_messages", "303546eda544538ad910486d3110bb55d7f4f98fe5305f1c65c278d5f38c3331"): "bounded read-only lifecycle owner inventory joins all three relations on the exact tenant, intentionally preserves absent joins, returns only message ID and booleans",
 })
 
 _SQL_KEYWORD_RE = re.compile(

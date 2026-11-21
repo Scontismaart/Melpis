@@ -200,7 +200,9 @@ async def accept_invitation(pool, *, raw_token: str, auth_user_id: str, access_t
         org_id = lookup["organization_id"]
         async with conn.transaction():
             org = await conn.fetchrow(
-                "SELECT plan, users_limit FROM organizations WHERE id = $1::uuid FOR UPDATE", org_id,
+                """SELECT plan, users_limit FROM organizations WHERE id = $1::uuid
+                   AND NOT EXISTS (SELECT FROM gdpr_erasure_barriers b
+                       WHERE b.organization_id=$1::uuid AND b.scope='organization') FOR UPDATE""", org_id,
             )
             if not org:
                 raise HTTPException(400, _UNUSABLE)

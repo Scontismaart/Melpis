@@ -37,6 +37,7 @@ from src.core.gdpr.journal_publication import LocalJournalStore, publish_segment
 from src.core.gdpr.restore_policy_state import capture_policy_state
 from src.core.gdpr.source_journal_evidence import capture_erasure_journal_delta
 from src.core.gdpr.source_journal_pages import capture_erasure_journal_delta_paged, publish_source_erasure_batch
+from tests.core.auth.test_access_revocation import add_membership
 from tests.core.test_quota_reservation_lifecycle import _organization, _inbound_message
 from tests.core.gdpr.test_c24_purged_source_replay import (
     historical_fence,
@@ -141,25 +142,46 @@ def _promote_restored_backup(authority, store, *, backup_id, anchor, organizatio
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("published_v5", [False, True], ids=["v3", "v5"])
-async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_target, state_env, monkeypatch, tmp_path, published_v5):
+@pytest.mark.parametrize(
+    ("published_v5", "scope"),
+    [(False, "contact"), (True, "contact"), (True, "organization")],
+    ids=["v3", "v5", "v5-organization"],
+)
+async def test_old_encrypted_backup_requires_signed_erasure_replay(
+    restore_target, state_env, monkeypatch, tmp_path, published_v5, scope,
+):
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     env = state_env
-    await populated(env)
-    org, person = env["org"], await subject(env)
+    org = env["org"]
+    subject_id = None
+    if scope == "contact":
+        await populated(env)
+        subject_id = await subject(env)
     await env["pool"].execute(
-        "UPDATE messages SET status='handled', handling_type='ai' WHERE organization_id=$1 AND id=$2",
-        org, env["message"],
+        """UPDATE messages SET status='handled', handling_type='ai',
+            content_text=COALESCE(content_text,'synthetic restore fixture')
+            WHERE organization_id=$1 AND id=$2""", org, env["message"],
     )
-    await approve_policies(env["pool"], org)
+    await approve_policies(env["pool"], org, organization=scope == "organization")
     await approve_conversation(env["pool"], org)
     await approve_technical_receipts(env["pool"], org)
     requester = "synthetic-restore"
     foreign = (await _organization(env["pool"]))["id"]
     foreign_message = await _inbound_message(env["pool"], foreign, canale="whatsapp")
     foreign_original = await env["pool"].fetchval("SELECT content FROM messages WHERE id=$1", foreign_message)
+
+    if scope == "organization":
+        await add_membership(env["pool"], foreign, env["actor"])
+
+    async def assert_shared_access(database, expected_tenants):
+        assert await database.fetchval("SELECT EXISTS(SELECT FROM auth.users WHERE id=$1)", env["auth"])
+        assert {row["organization_id"] for row in await database.fetch(
+            """SELECT organization_id FROM organization_memberships
+               JOIN user_profiles ON user_profiles.id=organization_memberships.user_id
+               WHERE user_profiles.auth_user_id=$1""", env["auth"],
+        )} == expected_tenants
 
     plaintext = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
                               "--no-owner", "--no-privileges", "--format=plain")
@@ -181,18 +203,21 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
         await hold_event(conn, org, hold, "reviewed")
         await hold_event(conn, org, hold, "released")
     operation = await Operations(env["pool"]).create(
-        org, requester, uuid4(), kind="erase", scope="contact", subject_id=person,
+        org, requester, uuid4(), kind="erase", scope=scope, subject_id=subject_id,
     )
     monkeypatch.setenv("GDPR_ERASURE_EXECUTION_ENABLED", "true")
     await Deletion(env["pool"]).advance(org, operation, requester)
     barrier = await env["pool"].fetchrow(
         """SELECT identifier_digest,key_id FROM gdpr_erasure_barriers
-           WHERE organization_id=$1 AND operation_id=$2 AND subject_id=$3""", org, operation, person,
+           WHERE organization_id=$1 AND operation_id=$2 AND scope=$3""", org, operation, scope,
     )
-    assert barrier
+    assert barrier, (await Operations(env["pool"]).get(org, operation, requester))["manifest"]
+    if scope == "organization":
+        await assert_shared_access(env["pool"], {foreign})
+    signed_subject = str(subject_id) if subject_id is not None else None
     anchor = JournalCheckpoint(0, "0" * 64)
     record = {"sequence": 1, "organization_id": str(org), "operation_id": str(operation),
-              "scope": "contact", "subject_id": str(person), **dict(barrier)}
+              "scope": scope, "subject_id": signed_subject, **dict(barrier)}
     journal = json.dumps({"version": 1, "installation_id": str(installation),
                           "previous_sha256": anchor.sha256, "entries": [record]}).encode()
     signature = signer.sign(b"melpis.restore.erasure-journal.v1\0" + journal)
@@ -200,8 +225,8 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     checkpoint_key = secrets.token_bytes(32)
     checkpoint_payload = {"version": "c24-restore-v3", "organization_id": str(org),
                           "backup_id": "synthetic-backup", "sequence": 1, "complete": True,
-                          "erasures": [{"operation_id": str(operation), "scope": "contact",
-                                        "subject_id": str(person)}], "stay_purges": [], "receipt_prunes": []}
+                          "erasures": [{"operation_id": str(operation), "scope": scope,
+                                        "subject_id": signed_subject}], "stay_purges": [], "receipt_prunes": []}
     checkpoint_raw = json.dumps(checkpoint_payload, sort_keys=True, separators=(",", ":"),
                                 allow_nan=False).encode()
     checkpoint = {"payload": checkpoint_payload,
@@ -276,6 +301,9 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
     try:
         from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_primary_published_restore
 
+        if scope == "organization":
+            await assert_shared_access(pool, {org, foreign})
+
         async def verify_independent(organizations):
             async with pool.acquire() as conn, conn.transaction():
                 return await verify_primary_published_restore(
@@ -328,6 +356,8 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
             with pytest.raises(RestoreBlocked, match="blocked by current policy or evidence"):
                 await replay()
             assert not await pool.fetchval("SELECT EXISTS(SELECT FROM gdpr_erasure_barriers WHERE organization_id=$1 AND operation_id=$2)", org, operation)
+            if scope == "organization":
+                await assert_shared_access(pool, {org, foreign})
             async with env["pool"].acquire() as conn, conn.transaction():
                 await hold_event(conn, org, later_hold, "reviewed")
                 await hold_event(conn, org, later_hold, "released")
@@ -343,6 +373,8 @@ async def test_old_encrypted_backup_requires_signed_erasure_replay(restore_targe
         assert independent["traffic_authorized"] is False
         assert independent["verified_organizations"] == 2
         assert await pool.fetchval("SELECT content FROM messages WHERE id=$1", foreign_message) == foreign_original
+        if scope == "organization":
+            await assert_shared_access(pool, {foreign})
         with pytest.raises(RestoreBlocked):
             await verify_independent([org])
     finally:

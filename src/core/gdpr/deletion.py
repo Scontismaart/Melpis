@@ -8,8 +8,28 @@ import os
 from uuid import UUID
 
 from src.core.gdpr.c24_schema import conversation_schema
-from src.core.gdpr.guard import identifier_fingerprint
+from src.core.gdpr.guard import ErasureBlocked, identifier_fingerprint
 from src.core.gdpr.operations import Operations, document, encode, event
+
+
+async def tenant_access_remains(conn, org):
+    return await conn.fetchval('''SELECT
+        EXISTS(SELECT 1 FROM organization_memberships WHERE organization_id=$1)
+        OR EXISTS(SELECT 1 FROM team_invitations WHERE organization_id=$1)''', org)
+
+
+async def reconcile_erased_tenant_access(conn, org, operation):
+    """Repair a committed legacy organization erasure only under current authorization."""
+    if not await tenant_access_remains(conn, org):
+        return
+    if (os.getenv('GDPR_ERASURE_EXECUTION_ENABLED') != 'true'
+            or not await conn.fetchval("SELECT to_regprocedure('public.gdpr_reconcile_erased_tenant_access(uuid,uuid)') IS NOT NULL")
+            or not await conn.fetchval('SELECT public.gdpr_reconcile_erased_tenant_access($1,$2)', org, operation)):
+        raise ErasureBlocked('Organization access reconciliation requires current policy and cutover')
+    await conn.execute('''UPDATE gdpr_operations SET manifest=manifest || $3::jsonb,updated_at=NOW()
+        WHERE organization_id=$1 AND id=$2''', org, operation,
+        encode({'tenant_access': 'revoked', 'shared_auth': 'retained'}))
+    await event(conn, org, operation, 'erase.tenant_access_reconciled')
 
 
 class Deletion:
@@ -46,6 +66,8 @@ class Deletion:
                    WHERE organization_id=$1 AND operation_id=$2 AND name='local' ''', org, oid,
             )
             if prior == 'confirmed':
+                if op['scope'] == 'organization':
+                    await reconcile_erased_tenant_access(conn, org, oid)
                 return  # Never rerun committed mutations or provider calls.
             if journal_evidence is not None and op['subject_id'] is not None:
                 restored_identifier = await conn.fetchval(
@@ -105,6 +127,9 @@ class Deletion:
                     blockers.append('administrative_stay_purge_required')
             if op['scope'] == 'organization':
                 required |= {'knowledge_content', 'organization_profile'}
+                if await tenant_access_remains(conn, org) and not await conn.fetchval(
+                        "SELECT to_regprocedure('public.gdpr_reconcile_erased_tenant_access(uuid,uuid)') IS NOT NULL"):
+                    blockers.append('tenant_access_guard_required')
             conversation_counts = {'states': 0, 'receipts': 0}
             if schema == 'ready':
                 if op['scope'] == 'contact' and await conn.fetchval('''SELECT EXISTS(
@@ -243,6 +268,14 @@ class Deletion:
             # Keep commercial, financial and security ledgers and their linkage.
             # Delete response/idempotency CONTENT, never reset the A04 counter.
             if subject is None:
+                # A completed or expired, provider-correlated checkout no longer
+                # needs its short-lived URL. Keep its frozen request, provider
+                # ID, digest and accounting evidence; uncertain intents remain.
+                await conn.execute("""UPDATE billing_checkout_intents SET session_url=NULL
+                    WHERE organization_id=$1 AND session_url IS NOT NULL
+                      AND payload->'_resolved'='true'::jsonb
+                      AND payload->>'_resolution' IN ('completed','expired')
+                      AND session_id IS NOT NULL""", org)
                 await conn.execute('DELETE FROM booking_confirmation_outbox WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM outbound_dedup WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM simulation_requests WHERE organization_id=$1', org)
@@ -254,6 +287,10 @@ class Deletion:
                 await conn.execute('DELETE FROM meta_webhook_inbox WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM airtable_webhook_events WHERE organization_id=$1', org)
                 await conn.execute('DELETE FROM onboarding_profiles WHERE organization_id=$1', org)
+                # These exact tenant links authorize access. Keep global Auth,
+                # profiles and other organizations' memberships untouched.
+                await conn.execute('DELETE FROM team_invitations WHERE organization_id=$1', org)
+                await conn.execute('DELETE FROM organization_memberships WHERE organization_id=$1', org)
                 await conn.execute('UPDATE organizations SET business_profile=NULL WHERE id=$1', org)
             else:
                 if schema == 'ready':
@@ -369,6 +406,8 @@ class Deletion:
                                      'booking_stay_replay_fences_pending_policy'],
                         'subject_unstructured_data': 'controller_review_required' if subject else 'tenant_scoped',
                         'policies': {k: {'version': p['version'], 'reference': p['approval_reference']} for k,p in policies.items()}}
+            if op['scope'] == 'organization':
+                manifest.update(tenant_access='revoked', shared_auth='retained')
             await conn.execute(
                 '''UPDATE gdpr_operations SET status='partial',manifest=$3::jsonb,updated_at=NOW()
                    WHERE organization_id=$1 AND id=$2''', org, oid, encode(manifest),

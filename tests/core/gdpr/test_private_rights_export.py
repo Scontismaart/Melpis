@@ -62,6 +62,12 @@ async def test_verified_private_receipts_follow_exact_subject_and_role(pg_pool, 
     subject, message = await _receipt(pg_pool, org)
     _, unrelated_message = await _receipt(pg_pool, org)
     _, foreign_message = await _receipt(pg_pool, other)
+    future_subject, future_message = await _receipt(pg_pool, org)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        await conn.execute('ALTER TABLE messages DISABLE TRIGGER c24_source_received')
+        await conn.execute("UPDATE messages SET c24_received_at=now()+interval '1 day' WHERE organization_id=$1 AND id=$2",
+                           org, future_message)
+        await conn.execute('ALTER TABLE messages ENABLE TRIGGER c24_source_received')
 
     contact = await _snapshot(pg_pool, org, auth, scope="contact", subject_id=subject)
     receipt, = contact["inbound_worker_receipts"]
@@ -75,6 +81,8 @@ async def test_verified_private_receipts_follow_exact_subject_and_role(pg_pool, 
     assert {r["message_id"] for r in org_export["inbound_worker_receipts"]} == {
         str(message), str(unrelated_message),
     }
+    future_contact = await _snapshot(pg_pool, org, auth, scope="contact", subject_id=future_subject)
+    assert future_contact["inbound_worker_receipts"] == []
     account = await _snapshot(pg_pool, org, auth, scope="account")
     assert "inbound_worker_receipts" not in account
 

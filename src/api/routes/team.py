@@ -94,6 +94,8 @@ async def list_team_members(
             FROM organization_memberships om
             JOIN user_profiles up ON up.id = om.user_id
             WHERE om.organization_id = $1::uuid
+              AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                 WHERE b.organization_id=$1::uuid AND b.scope='organization')
             ORDER BY
               CASE om.ruolo WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END,
               om.joined_at ASC
@@ -171,6 +173,8 @@ async def list_my_organizations(
                JOIN user_profiles up ON up.id = om.user_id
                JOIN organizations o ON o.id = om.organization_id
                WHERE up.auth_user_id = $1::uuid AND om.joined_at IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                    WHERE b.organization_id=om.organization_id AND b.scope='organization')
                ORDER BY om.joined_at DESC, om.organization_id""",
             uuid.UUID(user["auth_user_id"]),
         )

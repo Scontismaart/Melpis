@@ -53,7 +53,15 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                    AND out_m.direction = 'outbound' 
                    AND out_m.deleted_at IS NULL
                    AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN out_m.created_at
-                        ELSE (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                        WHEN EXISTS (
+                            SELECT 1 FROM conversations lineage_c
+                            JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                                AND lineage_ct.organization_id = $1
+                            WHERE lineage_c.organization_id = $1
+                              AND lineage_c.id = out_m.conversation_id
+                              AND lineage_ct.id::text = to_jsonb(out_m)->>'c24_original_subject_id'
+                        ) AND (to_jsonb(out_m)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                        THEN (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= e.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 ''
@@ -71,7 +79,15 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                             AND source_m.id = e.source_id
                             AND source_m.deleted_at IS NULL
                             AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN source_m.created_at
-                                 ELSE (to_jsonb(source_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days')
+                                 WHEN EXISTS (
+                                     SELECT 1 FROM conversations lineage_c
+                                     JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                                         AND lineage_ct.organization_id = $1
+                                     WHERE lineage_c.organization_id = $1
+                                       AND lineage_c.id = source_m.conversation_id
+                                       AND lineage_ct.id::text = to_jsonb(source_m)->>'c24_original_subject_id'
+                                 ) AND (to_jsonb(source_m)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                                 THEN (to_jsonb(source_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days')
           ))
         
         UNION ALL
@@ -94,7 +110,15 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                    AND out_m.direction = 'outbound' 
                    AND out_m.deleted_at IS NULL
                    AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN out_m.created_at
-                        ELSE (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+                        WHEN EXISTS (
+                            SELECT 1 FROM conversations lineage_c
+                            JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                                AND lineage_ct.organization_id = $1
+                            WHERE lineage_c.organization_id = $1
+                              AND lineage_c.id = out_m.conversation_id
+                              AND lineage_ct.id::text = to_jsonb(out_m)->>'c24_original_subject_id'
+                        ) AND (to_jsonb(out_m)->>'c24_received_at')::timestamptz <= clock_timestamp()
+                        THEN (to_jsonb(out_m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
                    AND out_m.created_at >= m.created_at 
                  ORDER BY out_m.created_at ASC LIMIT 1),
                 (m.ai_reply_cache->>'text'),
@@ -110,7 +134,15 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
           AND m.direction = 'inbound'
           AND m.deleted_at IS NULL
           AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
-               ELSE (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
+               WHEN EXISTS (
+                   SELECT 1 FROM conversations lineage_c
+                   JOIN contacts lineage_ct ON lineage_ct.id = lineage_c.contact_id
+                       AND lineage_ct.organization_id = $1
+                   WHERE lineage_c.organization_id = $1
+                     AND lineage_c.id = m.conversation_id
+                     AND lineage_ct.id::text = to_jsonb(m)->>'c24_original_subject_id'
+               ) AND (to_jsonb(m)->>'c24_received_at')::timestamptz <= clock_timestamp()
+               THEN (to_jsonb(m)->>'c24_received_at')::timestamptz END) > NOW() - INTERVAL '60 days'
           AND m.created_at >= NOW() - make_interval(days => $2)
           AND NOT EXISTS (
               SELECT 1 FROM event_log e 

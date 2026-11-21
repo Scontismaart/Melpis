@@ -26,6 +26,18 @@ _PRIVATE_EXPORT_PROJECTIONS = {
     'booking_stay_completion_evidence', 'ordinary_booking_completion_evidence', 'inbound_worker_receipts',
 }
 _PRIVATE_EXPORT_MAX_ROWS = 50000
+_EXPORT_VERSION = 'a06-v2'
+_PRIVATE_EXPORT_QUERY = 'SELECT record FROM public.gdpr_private_export_records($1,$2,$3,$4)'
+_INBOUND_RECEIPT_EXPORT_QUERY = '''
+    SELECT receipt.record FROM public.gdpr_private_export_records($1,$2,$3,$4) WITH ORDINALITY AS receipt(record, position)
+    WHERE receipt.record IS NULL OR EXISTS (
+        SELECT FROM public.messages m
+        JOIN public.conversations c ON c.organization_id=$1 AND c.id=m.conversation_id
+        JOIN public.contacts ct ON ct.organization_id=$1 AND ct.id=c.contact_id
+        WHERE m.organization_id=$1 AND m.id=(receipt.record::jsonb->>'message_id')::uuid
+          AND m.c24_original_subject_id=ct.id AND m.c24_received_at<=statement_timestamp())
+    ORDER BY receipt.position
+'''
 _LEGACY_SIMULATION_QUERY = """
     SELECT request_id, status, created_at, reserved_at, completed_at
     FROM simulation_requests WHERE organization_id = $1::uuid
@@ -101,8 +113,9 @@ class Exporter:
                        WHERE organization_id=$1 AND id=$2 AND requester=$3 FOR UPDATE''', org, oid, str(requester),
                 )
                 if op['status'] == 'ready':
-                    if op['expires_at'] > datetime.now(timezone.utc):
-                        return {'export_id': str(oid), 'manifest': document(op['manifest'])}
+                    existing = document(op['manifest'])
+                    if existing.get('version') == _EXPORT_VERSION and op['expires_at'] > datetime.now(timezone.utc):
+                        return {'export_id': str(oid), 'manifest': existing}
                     raise OperationUnavailable('Export requires a new request identifier')
                 if op['status'] in {'expired', 'revoked'}:
                     raise OperationUnavailable('Export requires a new request identifier')
@@ -134,7 +147,7 @@ class Exporter:
                         sequence += 1
                         buffer.clear()
 
-                manifest = {'version': 'a06-v1', 'scope': scope, 'categories': [],
+                manifest = {'version': _EXPORT_VERSION, 'scope': scope, 'categories': [],
                             'external_copies': 'not_included', 'backups': 'not_included',
                             'legal_policy_approval': 'C05-100-pending'}
                 schema = await conversation_schema(conn)
@@ -152,9 +165,10 @@ class Exporter:
                                 'reason': 'private_export_authority_unavailable'}
                         allowed = False
                         if private_export_available:
+                            projection = (_INBOUND_RECEIPT_EXPORT_QUERY if category.name == 'inbound_worker_receipts'
+                                          else _PRIVATE_EXPORT_QUERY)
                             async for row in conn.cursor(
-                                '''SELECT record FROM public.gdpr_private_export_records($1,$2,$3,$4)''',
-                                org, oid, str(requester), category.name, prefetch=32,
+                                projection, org, oid, str(requester), category.name, prefetch=32,
                             ):
                                 if not allowed:
                                     if row['record'] is not None:
@@ -220,7 +234,17 @@ class Exporter:
                         first = False
                         item['count'] += 1
                     await append(b']')
-                    if scope != 'organization' and category.exclusion_reason:
+                    quarantined = 0
+                    if category.name == 'messages' and scope == 'organization':
+                        total_messages = await conn.fetchval(
+                            'SELECT count(*) FROM messages WHERE organization_id=$1', org,
+                        )
+                        quarantined = total_messages - item['count'] - item.get('oversize_records', 0)
+                    if quarantined:
+                        item.update(status='partial', quarantined_records=quarantined,
+                                    reason='unverified_message_lineage_requires_controller_reconciliation')
+                        partial = True
+                    elif scope != 'organization' and category.exclusion_reason:
                         item.update(status='partial', reason=category.exclusion_reason)
                         partial = True
                     else:
@@ -255,7 +279,7 @@ class Exporter:
                 '''SELECT manifest FROM gdpr_operations WHERE organization_id=$1 AND id=$2 AND requester=$3
                    AND kind='export' AND status='ready' AND expires_at>NOW() FOR SHARE''', org, oid, str(requester),
             )
-            if not op:
+            if not op or document(op['manifest']).get('version') != _EXPORT_VERSION:
                 raise LookupError('Export unavailable')
             count = 0
             cipher = _fernet()
@@ -277,7 +301,8 @@ class Exporter:
                AND kind='export' AND status='ready' AND expires_at>clock_timestamp()''',
             org, oid, str(requester),
         )
-        count = document(manifest).get('chunks') if manifest else None
+        manifest = document(manifest) if manifest else {}
+        count = manifest.get('chunks') if manifest.get('version') == _EXPORT_VERSION else None
         if type(count) is not int or count <= 0:
             raise OperationUnavailable('Export unavailable')
         cipher = _fernet()
@@ -290,8 +315,9 @@ class Exporter:
                      ON o.organization_id=c.organization_id AND o.id=c.operation_id
                    WHERE c.organization_id=$1 AND o.organization_id=$1 AND o.id=$2
                      AND o.requester=$3 AND o.kind='export' AND o.status='ready'
-                     AND o.expires_at>clock_timestamp() AND c.sequence=$4''',
-                org, oid, str(requester), sequence,
+                     AND o.expires_at>clock_timestamp() AND c.sequence=$4
+                     AND o.manifest->>'version'=$5''',
+                org, oid, str(requester), sequence, _EXPORT_VERSION,
             )
             if row is None:
                 raise OperationUnavailable('Export unavailable')
