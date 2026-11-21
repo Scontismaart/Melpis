@@ -6,19 +6,19 @@ The issue remains open. This record tracks implementation and proof separately.
 
 | Requirement | Evidence on the baseline or candidate | Remaining acceptance work |
 | --- | --- | --- |
-| Inventory and export completeness | [A06 inventory](a06-data-inventory.md), `catalog.py`, `test_gdpr_catalogue.py`, `test_exports_a06.py`. The catalogue includes bounded organization metadata for allocation, catalogue and document-index receipts, declares private hold, stay and worker evidence exclusions, and #240 covers exact tenant-staff author feedback metadata in account exports. | Verify active and historical external stores. Classify remaining inbound-worker receipts and scope authorized supplements for private categories. Resolve unstructured subject attribution and the shared Auth workflow without exporting unrelated people or secret material. |
+| Inventory and export completeness | [A06 inventory](a06-data-inventory.md), `catalog.py`, `test_gdpr_catalogue.py`, `test_exports_a06.py`. #240 covers exact tenant-staff author feedback metadata in account exports. SQL113 adds a bounded, operation/requester/owner-authorized projection of verified inbound receipt dates and hotel/ordinary booking completion metadata. | Verify active and historical external stores. Controller review is required for remaining private, ambiguous or unstructured subject attribution, including worker authorization and financial records. |
 | Scoped export and revocation | [#114](https://github.com/Scontismaart/Melpis/pull/114), [#130](https://github.com/Scontismaart/Melpis/pull/130), [#208](https://github.com/Scontismaart/Melpis/pull/208). Scoped owner and MFA, account/session/member validation, recheck after preflight, tenant/subject constraints. | Verify proxy and actual application principal on Staging after authorized release. Concurrent revocation after bytes leave the server cannot recall those bytes. |
 | One-time token, URLs/logs, Redis failure | Encrypted hashed cookie capability with Redis/Valkey atomic consume, no URL bearer and no memory fallback. `test_gdpr_authorization_boundary.py`, `test_token_store.py`. #114 records a real Valkey concurrent consume proof. | Repeat on deployed settings, including log and proxy redaction. |
 | Snapshot expiration | [#210](https://github.com/Scontismaart/Melpis/pull/210) adds an independent bounded expiry job with skip-locked batches and overdue-age monitoring. [#213](https://github.com/Scontismaart/Melpis/pull/213) releases the snapshot lock between chunks so revocation and expiry can interrupt stalled downloads. | Observe physical deletion lag under the deployed workload, contention, interrupted runs and outstanding batches. |
-| Erasure idempotency, retry and uncertainty | #130 durable operation/barrier/step/event model, fenced local advancement, partial manifests. [#209](https://github.com/Scontismaart/Melpis/pull/209) requires an inventoried provider step and a confirmed local erasure before claim or reconciliation. | Resolve verified held copies, dead-letter and pending provider evidence. Finish the scoped unstructured, Auth and worker cache workflows. |
+| Erasure idempotency, retry and uncertainty | #130 durable operation/barrier/step/event model, fenced local advancement, partial manifests. [#209](https://github.com/Scontismaart/Melpis/pull/209) requires an inventoried provider step and a confirmed local erasure before claim or reconciliation. The exact blocked-account review reports owner, shared-membership, assignment, invitation, audit, access and provider dependencies without changing identity or exposing other tenant identifiers. | Actual global account erasure requires the independent account controller's disposition, ownership transfers, session revocation, verified Auth provider receipts and backup replay contract. Unstructured subject attribution and held copies require case-specific evidence. |
 | Provider propagation and honest completion | `operations.py`, `propagation.py`, `test_propagation_a06.py`. #237 caps confirmed-unsent retries and permits a separately evidenced operator recovery of a dead letter. External stages retain uncertainty without correlated evidence. Historical provider review stays held. | Current and historical provider inventory, authority, supported deletion endpoints and authenticated receipts for applicable vendors, plus controller disposition for copies retained by obligation. No real provider deletion is certified. |
 | 60-day visibility | Ordinary inbox/dashboard SQL filters verified receipt time, with tests in `test_retention_visibility_dark.py` and `test_c24_visibility.py`. | Confirm all ordinary surfaces and effective version in Staging. Unknown historical receipt dates remain hidden where the verified anchor is required. |
 | 90-day primary message content | SQL096/104 and `test_c24_retention_sweep.py` purge eligible source content and linked copies while preserving accounting. SQL110 distinguishes completed account-channel work from an unknown inbound copy using the same-tenant current A04 ledger epoch, exact claim and payload binding, and an unambiguous response identity. | Prove coverage and deadlines for ordinary legacy rows and billed records without correlated receipt lineage. Unknown or stale response provenance, tenant-wide drains and unresolved provider usage can defer eligible content. Account-channel content has its own retention obligations. |
 | C2.4 30-day last pertinent activity | SQL089 handles verified last applied inbound activity. SQL111 and the v5 orphan plan path expire a verified never-applied proposal from both copies, preserve message content and accounting, and leave a replay fence. The isolated restore covers a backup with the preimage, a verified backup that predates source receipt, a subsequent signed erasure, and policy renewal under current holds. | Reconcile unattributed legacy copies and other relevant activity, measure effective workload deadlines and commission the owner publication schedule. |
-| Technical receipts 90 days from verified conclusion | SQL100/103/104, [#207](https://github.com/Scontismaart/Melpis/pull/207). Verified source-derived receipt fences and audit expiry require a retained checkpoint. | Classify idle watermarks, revocations, global idempotency and other receipts. Prove safe expiry and replay resistance for each; unknown dates are not backfilled. |
+| Technical receipts 90 days from verified conclusion | SQL100/103/104, [#207](https://github.com/Scontismaart/Melpis/pull/207). Verified source-derived receipt fences and audit expiry require a retained checkpoint. SQL113 projects verified inbound receipt metadata to the relevant subject. | A controller must independently establish each remaining request-conclusion anchor, category and replay disposition. Idle-watermark expiry, revocation creation and global idempotency creation are different events; global dedup has no tenant scope. |
 | Bookings and stays within 12 civil months | Hotel has evidence-backed purge in SQL091/102. Candidate SQL106/108/109 records completion, plans and transactionally purges an independently covered, narrowly scoped manual managed booking with typed replay fences. The isolated encrypted v4 restore drill replays the exact signed plan and checks the SQL postconditions. | Extend coverage beyond the manual managed subset; reconcile historical completion, unstructured copies, source/financial/provider-linked bookings and operational authorization using contemporaneous evidence. |
 | Legal holds | SQL074/095 append-only scoped approvals, reviews and releases with explicit rationale, authority and review date. SQL107 applies scoped holds to local erasure. `test_scoped_erasure_holds.py`, `test_restore_policy_state.py`. | Controller must resolve unknown scope, overdue reviews and conflicts between current holds and prior deletion; provider decisions require their own authorized handling. |
-| Derived copies, finance and legacy jobs | SQL096 and tenant erasure handle linked event, simulation, delivery and outbox content. #183 retires global purge paths. #239 adds bounded scheduled SQL094 payload scrubbing. Billing/quota regression tests and the encrypted restore drill preserve usage counters. Process-local simulator cache expiry and erasure cover history and counter-only keys under one lock and capacity bound. | Trace remaining orphan, worker, provider and historical copies, including in-flight work and other processes. Separate financial evidence from linkable content with category-specific rules; the policy defines no universal accounting, simulator or security duration. |
+| Derived copies, finance and legacy jobs | SQL096 and tenant erasure handle linked event, simulation, delivery and outbox content. #183 retires global purge paths. #239 and SQL112 add bounded expired unused/orphan capability payload scrubbing with retained lineage. Billing/quota regression tests and the encrypted restore drill preserve usage counters. Simulator cache synchronization checks the exact persisted tenant barrier at lookup, write and process-local reconciliation. | Verify replicas and provider calls already dispatched. The durable account response remains a separately attributed category. Financial obligations, unstructured historical copies and provider dispositions require verified evidence; the policy defines no universal accounting, simulator or security duration. |
 | Scheduler progress and contention | SQL098/102/104 bounded horizons/cursors, target lock budgets. #210 fixes a live scheduler pool self-deadlock and isolates independent sweeps. `test_c24_retention_sweep.py` verifies lock recovery and independent batches. The synthetic five-tenant test checks six scheduler restarts with 180 initial eligible envelopes, 120 additional due envelopes, 120 fresh envelopes and 25 held envelopes. The initial backlog clears by the fourth invocation. Three further invocations with fresh arrivals must clear every outstanding due envelope while protecting all fresh and held payloads. | Measure deployed latency and recovery after outages across all categories; verify the actual dedicated runtime principal and authorized schedule. |
 | Journal signer/store and independent tip | [#214](https://github.com/Scontismaart/Melpis/pull/214) adds signed and encrypted publication and independently pinned replay. [#216](https://github.com/Scontismaart/Melpis/pull/216) reconciles source coverage. [#217](https://github.com/Scontismaart/Melpis/pull/217) adds portable authority with an offline Windows-to-Linux rehearsal. [#218](https://github.com/Scontismaart/Melpis/pull/218) verifies key rotation at independently recorded boundaries. #231 adds atomic v5 checkpoint promotion and actual restore/replay. #232 verifies encrypted authoritative prefix compaction; #233 covers inventory rollover and checkpoint-key rotation. #238 adds bounded source-to-authority publication and retry under the source owner transaction. | Commission current independent authority and custody against real resources. Prove operational expiry/retirement and recoverability with the complete real backup inventory and verify published checkpoints after advancing the tip. A stale copy of the authority cannot establish currency. |
 | R2 and backup rotation | [#207 candidate design](c24-independent-journal-design.md); separate bucket and EU endpoint adapter. The issue records encrypted Staging baseline backup with an independent R2 EU copy and DPAPI-independent recovery. | Confirm ordinary backup max 30 days and obligations over actual inventory, local and provider. Real journal bucket/access/lock/usage and synthetic byte-level R2 drill require explicit GO after prerequisites. |
@@ -78,6 +78,76 @@ authority and provenance tests, reported 363 passed and zero skipped in 809.87
 seconds. A single HTTPX cookie deprecation warning was emitted. Both guarded
 encrypted restore fixtures were enabled. The later PG17 source-publication
 and orphan replay test passed separately, along with 22 focused journal tests.
+
+The expanded integrated run on the subsequent candidate with feedback export,
+bounded worker cleanup, source journal publication and synchronized simulator
+cache completed with **375 passed, zero skipped** in 691.94 seconds.
+Both encrypted synthetic restore fixtures remained enabled. The first two runs
+of this expanded suite each identified a test issue: a synthetic private
+capability persisted beyond its fixture and aged into a later test, and an
+arrival behind the sweep cursor could require a further scan. Both fixture
+corrections are retained; the final test asserts complete bounded catch-up
+while fresh arrivals continue. Twelve focused repeated load runs passed
+across PostgreSQL 16 and PostgreSQL 17.
+
+The consolidated candidate implementing SQL112–113, exact blocked-account
+review, synchronized simulator histories across API replicas and fenced
+durable replay passed **409 tests, zero skipped** in 696.57 seconds on
+21 November 2026. The run includes PostgreSQL 16, Valkey, both encrypted
+synthetic restore fixtures, GDPR APIs, access revocation, booking and inbound
+workers, document routes and simulator tests. It ran the booking-worker
+suites before the GDPR suite to exercise the corrected private-schema
+fixture isolation. The same HTTPX cookie deprecation warning remained.
+Independent focused tests passed on PostgreSQL 17 (15) and unit/API paths
+(44); the CI-order fixture regression passed 44 tests on PostgreSQL 16.
+
+Subsequent integration evidence as of 21 November 2026:
+
+| Pull request | Merge commit | Main CI / Migration Check |
+| --- | --- | --- |
+| [#230](https://github.com/Scontismaart/Melpis/pull/230) | `7cf910ae` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44790755853) |
+| [#231](https://github.com/Scontismaart/Melpis/pull/231) | `3148571e` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44790778006) |
+| [#232](https://github.com/Scontismaart/Melpis/pull/232) | `b884f91e` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44796598706) |
+| [#233](https://github.com/Scontismaart/Melpis/pull/233) | `1f944cb0` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44801972612) |
+| [#234](https://github.com/Scontismaart/Melpis/pull/234) | `93caeabb` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44802334009), [Migration passed](https://github.com/Scontismaart/Melpis/actions/runs/44802333977) |
+| [#235](https://github.com/Scontismaart/Melpis/pull/235) | `f9798a3a` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44802353492), [Migration passed](https://github.com/Scontismaart/Melpis/actions/runs/44802352972) |
+| [#236](https://github.com/Scontismaart/Melpis/pull/236) | `ab38ff81` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44803696507) |
+| [#237](https://github.com/Scontismaart/Melpis/pull/237) | `53a96c31` | [CI + GHCR passed on rerun after OSV read timeout](https://github.com/Scontismaart/Melpis/actions/runs/44803851044) |
+| [#238](https://github.com/Scontismaart/Melpis/pull/238) | `d8f64436` | [CI + GHCR passed](https://github.com/Scontismaart/Melpis/actions/runs/44805955474) |
+| [#239](https://github.com/Scontismaart/Melpis/pull/239) | `c7c59932` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817157891), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857793192) |
+| [#240](https://github.com/Scontismaart/Melpis/pull/240) | `38614615` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817169456), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857806537) |
+| [#241](https://github.com/Scontismaart/Melpis/pull/241) | `153a6979` | [PR checks passed](https://github.com/Scontismaart/Melpis/actions/runs/44817180784), [main CI](https://github.com/Scontismaart/Melpis/actions/runs/44857821336) |
+
+All PR checks required for the above merges passed on the exact reviewed
+heads. Main CI and GHCR completed through #238, with #239–241 tracked
+in the new main runs above. The first full CI
+runs for #239–241 found a private capability fixture retained across tests
+that recreate the public schema. The subsequent fixture reset clears the
+private test schema at the same disposable database boundary. The production
+scrub retains its exact eligibility and batch limits.
+
+### Inputs required for remaining dispositions
+
+- Historical messages: authenticated contemporaneous evidence of the same
+  organization, source, conversation, original subject and actual server
+  receipt date, plus exact billed-operation and response lineage where
+  relevant. Review by the controller is required where those facts are absent.
+- Technical watermarks, revocations and global idempotency: verified request
+  conclusion and category, and demonstrated independent replay protection
+  for every still recoverable backup. Creation and suppression timestamps
+  alone cannot establish the 90-day anchor.
+- AI/provider-linked and financial bookings: verified original completion and
+  attribution, treatment of retained claims, invoices, usage, provider
+  synchronization and redaction duties. The controller must identify the
+  exact applicable obligation and minimum retained fields.
+- Shared Auth and unstructured data: independent controller disposition,
+  authorized account ownership and session arrangements, verified provider
+  receipts, and scoped attribution of text and other derived copies.
+- Operational commissioning: documented DPA applicability and account-wide
+  R2 usage, dedicated EU journal bucket, distinct credentials, independent
+  key and tip custody, synthetic drill, new backup and rehearsal, and
+  authorized Staging migration. Recheck actual provider and backup inventory
+  before certifying external copies or restoring traffic.
 
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,

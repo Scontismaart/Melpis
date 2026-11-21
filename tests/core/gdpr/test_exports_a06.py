@@ -157,7 +157,9 @@ async def test_catalog_queries_parse_and_blank_tenant_export_is_honestly_bounded
         org, requester, scope="organization", request_id=uuid.uuid4(),
     )
 
-    assert result["manifest"]["status"] == "complete_for_catalogue"
+    # This internal test requester has no persisted owner membership. Private
+    # evidence must remain excluded and the manifest must report partial.
+    assert result["manifest"]["status"] == "partial"
     assert result["manifest"]["external_copies"] == "not_included"
     assert result["manifest"]["backups"] == "not_included"
     await Exporter(pg_pool).preflight(org, result["export_id"], requester)

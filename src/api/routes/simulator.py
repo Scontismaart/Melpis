@@ -48,6 +48,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["simulator"])
 
 
+async def _simulator_replay_current(pool, operation, payload):
+    """Recheck the exact durable replay after acquiring the erasure fence."""
+    org = operation.organization_id
+    async with pool.acquire() as conn, conn.transaction(isolation="read_committed"):
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(org),
+        )
+        value = await conn.fetchval(
+            """SELECT r.response FROM simulation_requests r WHERE r.organization_id=$1
+               AND r.auth_user_id=$2 AND r.request_id=$3 AND r.payload_hash=$4
+               AND r.status='completed'
+               AND NOT EXISTS(SELECT 1 FROM gdpr_erasure_barriers b
+                   WHERE b.organization_id=$1 AND (b.scope='organization'
+                   OR (b.scope='contact' AND b.subject_id=r.c24_subject_id)))""",
+            org, operation.actor_id, operation.id, operation.payload_hash,
+        )
+        try:
+            current = json.loads(value) if isinstance(value, str) else value
+        except ValueError:
+            return False
+        return isinstance(current, dict) and current == payload
+
+
 @router.post("/api/messaggio", response_model=RispostaOutput)
 async def ricevi_messaggio(
     request: Request,
@@ -155,6 +178,13 @@ async def _ricevi_messaggio(request, messaggio, response, idempotency_key, profi
                     cached = None
             if not isinstance(cached, dict):
                 raise HTTPException(status_code=503, detail="Risposta simulata non disponibile")
+            try:
+                replay_current = await _simulator_replay_current(repo.pool, quota_operation, cached)
+            except Exception:
+                logger.warning("simulator=replay_unavailable org_id=%s trace_id=%s", org_id, trace_id)
+                raise HTTPException(status_code=503, detail="Risposta simulata non disponibile")
+            if not replay_current:
+                raise HTTPException(status_code=409, detail="Risposta simulata non disponibile")
             response.headers["Idempotency-Replayed"] = "true"
             return RispostaOutput.model_validate(cached)
         if reservation_status == "payload_conflict":
@@ -195,9 +225,23 @@ async def _ricevi_messaggio(request, messaggio, response, idempotency_key, profi
     # Cronologia del simulatore: la chiave e' client-controlled, quindi per
     # le org autenticate va namespaced per evitare incroci tra tenant.
     identity = str(user.get("user_id") or user.get("auth_user_id") or "anonymous")
-    scope = f"{org_id}:{identity}" if org_id else f"demo:{demo_session}"
+    scope = f"{uuid.UUID(str(org_id))}:{identity}" if org_id else f"demo:{demo_session}"
     chiave_conv = f"{scope}:{messaggio.id_conversazione}"
-    cronologia = conv_store.recupera_cronologia(chiave_conv)
+    cache_snapshot = None
+    if org_id is None:
+        cronologia = conv_store.recupera_cronologia(chiave_conv)
+    else:
+        try:
+            cronologia, cache_snapshot = await conv_store.tenant_history(
+                repo.pool, org_id, chiave_conv,
+            )
+        except Exception:
+            logger.warning("simulator=history_unavailable org_id=%s trace_id=%s", org_id, trace_id)
+            try:
+                await quota_reservations.release(quota_operation, quota_ticket)
+            except Exception:
+                logger.warning("simulator=quota_release_deferred org_id=%s trace_id=%s", org_id, trace_id)
+            raise HTTPException(status_code=503, detail="Cronologia simulatore non disponibile")
 
     # Billing snapshot per il routing budget-aware (invariante 8)
     billing = None if org_id is None else billing
@@ -270,7 +314,18 @@ async def _ricevi_messaggio(request, messaggio, response, idempotency_key, profi
             raise HTTPException(status_code=503, detail="Impossibile salvare la risposta simulata")
 
     # Keep conversation history only after the idempotent response is durable.
-    conv_store.aggiungi(chiave_conv, messaggio.testo, risposta.risposta)
+    if org_id is None:
+        conv_store.aggiungi(chiave_conv, messaggio.testo, risposta.risposta)
+    else:
+        try:
+            history_current = await conv_store.add_tenant_history(
+                repo.pool, org_id, chiave_conv, cache_snapshot, messaggio.testo, risposta.risposta,
+            )
+        except Exception:
+            logger.warning("simulator=history_unavailable org_id=%s trace_id=%s", org_id, trace_id)
+            raise HTTPException(status_code=503, detail="Cronologia simulatore non disponibile")
+        if not history_current:
+            raise HTTPException(status_code=409, detail="Cronologia simulatore aggiornata, riprova")
 
     prenotazione_id = None
     pren = out.prenotazione

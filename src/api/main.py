@@ -142,6 +142,7 @@ async def lifespan(app: FastAPI):
     app.state.retry_task = None
     app.state.governance_task = None
     app.state.private_booking_task = None
+    app.state.simulator_history_task = None
     app.state.private_booking_pool = None
     from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
     private_booking_enabled = background_jobs_enabled and private_booking_worker_enabled()
@@ -354,6 +355,12 @@ async def lifespan(app: FastAPI):
             _imposta_fonte_dati_per_scheduler()
     if background_jobs_enabled:
         avvia_scheduler()
+    # Each API process owns separate simulator histories, including replicas
+    # with distributed background jobs disabled.
+    if app.state.pool is not None:
+        app.state.simulator_history_task = asyncio.create_task(
+            _reconcile_local_simulator_histories(app.state.pool)
+        )
     yield
     if background_jobs_enabled:
         ferma_scheduler()
@@ -364,6 +371,7 @@ async def lifespan(app: FastAPI):
             getattr(app.state, "retry_task", None),
             getattr(app.state, "governance_task", None),
             getattr(app.state, "private_booking_task", None),
+            getattr(app.state, "simulator_history_task", None),
         ) if task is not None
     ]
     for task in background_tasks:
@@ -379,6 +387,12 @@ async def lifespan(app: FastAPI):
     await shutdown_local_workers()
     await close_http_client()
     await close_rate_limiter()
+
+
+async def _reconcile_local_simulator_histories(pool):
+    while True:
+        await conv_store.reconcile_tenant_histories(pool)
+        await asyncio.sleep(60)
 
 
 app = FastAPI(

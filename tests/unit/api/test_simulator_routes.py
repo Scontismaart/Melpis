@@ -42,6 +42,11 @@ def client():
     return TestClient(app)
 
 
+@asynccontextmanager
+async def _unchanged_cache_barrier(*_args):
+    yield b"unchanged", False
+
+
 def test_recensione_unauthorized(client):
     res = client.post("/api/recensione", json={
         "testo": "Cibo ottimo e personale gentile",
@@ -177,6 +182,7 @@ def test_messaggio_authenticated_organization(client):
     conversation_id = f"conv-{uuid.uuid4().hex}"
     with patch.object(app.state, "repo", mock_repo, create=True), \
          patch.object(app.state, "orchestrator", mock_orchestrator, create=True), \
+         patch("src.core.conversation_store._locked_erasure_snapshot", _unchanged_cache_barrier), \
          patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota):
         res = client.post("/api/messaggio", headers={"Idempotency-Key": str(request_id)}, json={
             "testo": "Siete aperti stasera?",
@@ -230,6 +236,7 @@ def test_messaggio_provider_failure_logs_only_org_and_trace(client, caplog):
     try:
         with patch.object(app.state, "repo", mock_repo, create=True), \
              patch.object(app.state, "orchestrator", mock_orchestrator, create=True), \
+             patch("src.core.conversation_store._locked_erasure_snapshot", _unchanged_cache_barrier), \
              patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota):
             response = client.post(
                 "/api/messaggio", headers={

@@ -95,12 +95,17 @@ async def test_authenticated_org_without_profile_returns_409_without_demo_fallba
 
 
 @pytest.mark.asyncio
-async def test_simulator_history_key_includes_org_user_and_client_session():
+@pytest.mark.parametrize("cache_current", [True, False, None])
+async def test_simulator_history_key_includes_org_user_and_client_session(cache_current):
     user = _user()
     repo = MagicMock()
     repo.get_organization = AsyncMock(return_value={"name": "Org", "business_profile": {"nome": "Org"}})
     quota = _QuotaReservations(None)
     history = MagicMock()
+    history.tenant_history = AsyncMock(return_value=([], b"snapshot"))
+    if cache_current is None:
+        history.tenant_history.side_effect = RuntimeError("synthetic authority unavailable")
+    history.add_tenant_history = AsyncMock(return_value=cache_current)
     orch = MagicMock()
     orch.orchestrate = AsyncMock(return_value=OrchestrationOutput(
         response_text="Salve", source="test", intent="faq", richiede_umano=False,
@@ -116,17 +121,27 @@ async def test_simulator_history_key_includes_org_user_and_client_session():
          patch("src.whatsapp.inbound_processor._profile_from_dict", return_value=ProfiloAttivita(
              nome="Org", tipo_attivita="ristorante", tono="cordiale", orari="",
          )):
-        await ricevi_messaggio(
-            _request(repo),
-            MessaggioInput(testo="Ciao", id_conversazione="page-session-123"),
-            Response(),
-            str(uuid.uuid4()),
+        args = (
+            _request(repo), MessaggioInput(testo="Ciao", id_conversazione="page-session-123"),
+            Response(), str(uuid.uuid4()),
         )
-    key = history.recupera_cronologia.call_args.args[0]
+        if cache_current:
+            await ricevi_messaggio(*args)
+        else:
+            with pytest.raises(HTTPException) as exc:
+                await ricevi_messaggio(*args)
+            assert exc.value.status_code == (503 if cache_current is None else 409)
+    key = history.tenant_history.await_args.args[2]
     assert key == f"{user['organization_id']}:{user['user_id']}:page-session-123"
-    assert orch.orchestrate.await_args.args[0].record_billing_usage is True
     assert len(quota.reserve_calls) == 1
+    if cache_current is None:
+        orch.orchestrate.assert_not_awaited()
+        assert quota.commit_calls == []
+        assert len(quota.release_calls) == 1
+        return
+    assert orch.orchestrate.await_args.args[0].record_billing_usage is True
     assert len(quota.commit_calls) == 1
+    assert quota.release_calls == []
 
 
 @pytest.mark.asyncio
@@ -164,7 +179,8 @@ async def test_idempotency_conflict_in_progress_and_quota_fail_before_orchestrat
 
 
 @pytest.mark.asyncio
-async def test_completed_same_key_returns_cached_response_without_orchestration():
+@pytest.mark.parametrize("replay_current", [True, False])
+async def test_completed_same_key_returns_cached_response_without_orchestration(replay_current):
     user = _user()
     repo = MagicMock()
     repo.get_organization = AsyncMock(return_value={"name": "Org", "business_profile": {"nome": "Org"}})
@@ -180,16 +196,22 @@ async def test_completed_same_key_returns_cached_response_without_orchestration(
              "subscription_status": "active", "messages_limit": 1, "messages_used_this_period": 1,
          })), \
          patch("src.api.routes.simulator.get_orchestrator", return_value=orch), \
+         patch("src.api.routes.simulator._simulator_replay_current", new=AsyncMock(return_value=replay_current)), \
          patch("src.core.billing.quota_reservations.QuotaReservations", return_value=quota), \
          patch("src.whatsapp.inbound_processor._profile_from_dict", return_value=ProfiloAttivita(
              nome="Org", tipo_attivita="ristorante", tono="cordiale", orari="",
          )):
         response = Response()
-        result = await ricevi_messaggio(
-            _request(repo), MessaggioInput(testo="Ciao"), response, str(uuid.uuid4())
-        )
-    assert result.risposta == "Risposta già salvata"
-    assert response.headers["Idempotency-Replayed"] == "true"
+        args = (_request(repo), MessaggioInput(testo="Ciao"), response, str(uuid.uuid4()))
+        if replay_current:
+            result = await ricevi_messaggio(*args)
+            assert result.risposta == "Risposta già salvata"
+            assert response.headers["Idempotency-Replayed"] == "true"
+        else:
+            with pytest.raises(HTTPException) as exc:
+                await ricevi_messaggio(*args)
+            assert exc.value.status_code == 409
+            assert "Idempotency-Replayed" not in response.headers
     orch.orchestrate.assert_not_called()
     assert quota.commit_calls == []
 
