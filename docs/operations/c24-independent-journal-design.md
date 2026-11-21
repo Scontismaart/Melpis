@@ -337,6 +337,60 @@ Sources: [R2 conditional operations](https://developers.cloudflare.com/r2/api/s3
 [R2 jurisdiction](https://developers.cloudflare.com/r2/reference/data-location/),
 [Cloudflare customer DPA](https://www.cloudflare.com/cloudflare-customer-dpa/).
 
+### Contract and cost verification (2026-11-21)
+
+The connected Cloudflare account was verified through the Account Details
+API as a standard account. The existing R2 usage confirms an account service
+is in use. The public Self-Serve Subscription Agreement, last updated
+12 September 2025, governs account-based services and states that use or
+acceptance makes the agreement effective. Section 6.1 incorporates the DPA
+for covered personal data. The current published DPA is version 6.4,
+effective 3 April 2026; it forms part of the main agreement and requires
+the customer's agreement and the authority to bind that customer.
+
+This establishes the public contractual mechanism. Account-specific
+applicability remains conditional: the connected API token received HTTP 403
+on both Billing Profile and List Subscriptions, so the exact contracting legal
+name, address, actual main agreement and acceptance/notification evidence
+could not be verified. The account display name is insufficient proof. The
+founder must supply a restricted verification of the contractual party and
+applicable terms, without exposing payment information or account secrets.
+Targeted searches of connected mail and documents did not locate an
+account-specific DPA, agreement or billing receipt. This is an evidence gap
+requiring account-owner verification.
+Where Melpis acts for a client controller, obtain that controller's
+authorization of the subprocessing chain as required by the DPA.
+
+The proposed bucket must use explicit `eu` jurisdiction, not a location hint.
+The read-only EU bucket listing did not find `melpis-staging-gdpr-journal`.
+Its S3 endpoint must be jurisdiction-specific, with object storage and
+processing restricted accordingly. DPA clauses 4 and 6 recognize
+subprocessors and potential international processing, including transfer
+mechanisms and obligations for restricted onward transfers. EU R2 object
+residency does not alone establish residency of administrative metadata,
+support or account information. Record the applicable transfer safeguards
+and subprocessor review before handling real personal data.
+
+Read-only account analytics from 1 November through 21 November 2026
+04:03 UTC returned 31 Class A requests, 9 Class B requests, and a maximum
+observed daily aggregate of 469,043 bytes (three observed storage days).
+The current Standard payload consists of two objects and 468,965 bytes
+plus 78 metadata bytes. Modelled beta storage plus observed current storage
+is under 3 MB before expansion, retention, archive packs and versions.
+The current Standard allowance (10 GB-month, one million Class A and
+ten million Class B operations a month) provides substantial headroom for
+the modeled synthetic drill. Expected incremental R2 cost at this measured
+load is USD 0, conditional on account-wide usage staying within included
+limits. Standard overage prices are USD 0.015/GB-month, USD 4.50/million
+Class A and USD 0.36/million Class B requests. Usage is rounded for billing.
+The user's USD 1 notification threshold is not a billing cap.
+
+References: [Self-Serve Subscription Agreement](https://www.cloudflare.com/terms/),
+[DPA v6.4](https://www.cloudflare.com/cloudflare-customer-dpa/),
+[subprocessors](https://www.cloudflare.com/gdpr/subprocessors/),
+[R2 EU jurisdiction](https://developers.cloudflare.com/r2/reference/data-location/),
+[R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+
 Activation prerequisites are explicit approval, verified bucket jurisdiction,
 private access and scoped credentials, key custody and recovery, approved
 backup/journal retention, signed publication/readback drill, restore/replay

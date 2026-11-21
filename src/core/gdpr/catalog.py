@@ -167,10 +167,15 @@ CATEGORIES: tuple[Category, ...] = (
         WHERE organization_id = $1::uuid AND contact_id = $2::uuid
     """),
     Category("messages", """
-        SELECT id, conversation_id, wam_id, direction, message_type, content_text,
-               status, handling_type, sent_at, delivered_at, read_at, created_at,
-               updated_at, deleted_at, replied_at, billed_at
-        FROM messages WHERE organization_id = $1::uuid
+        SELECT m.id, m.conversation_id, m.wam_id, m.direction, m.message_type, m.content_text,
+               m.status, m.handling_type, m.sent_at, m.delivered_at, m.read_at, m.created_at,
+               m.updated_at, m.deleted_at, m.replied_at, m.billed_at
+        FROM messages AS m
+        JOIN conversations AS c ON c.id=m.conversation_id AND c.organization_id=$1::uuid
+        JOIN contacts AS ct ON ct.id=c.contact_id AND ct.organization_id=$1::uuid
+        WHERE m.organization_id=$1::uuid
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=clock_timestamp()
     """, contact_query="""
         SELECT m.id, m.conversation_id, m.wam_id, m.direction, m.message_type,
                m.status, m.handling_type, m.sent_at, m.delivered_at, m.read_at,
@@ -178,10 +183,13 @@ CATEGORIES: tuple[Category, ...] = (
         FROM messages AS m
         JOIN conversations AS c ON c.id = m.conversation_id
                                 AND c.organization_id = m.organization_id
+        JOIN contacts AS ct ON ct.id=c.contact_id AND ct.organization_id=$1::uuid
         WHERE m.organization_id = $1::uuid
           AND c.organization_id = $1::uuid AND c.contact_id = $2::uuid
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=clock_timestamp()
     """, exclusion_reason=
-             "Unstructured message content is included for organization export only; subject export omits it because of third-party text risk."),
+             "Organization export includes only verified message lineage; unresolved rows are quarantined. Subject export also omits unstructured text because of third-party risk."),
     Category("message_delivery_attempts", """
         SELECT a.id, a.message_id, a.attempt_number, a.status, a.next_retry_at,
                a.claimed_at, a.created_at
@@ -195,8 +203,11 @@ CATEGORIES: tuple[Category, ...] = (
         JOIN messages AS m ON m.id = a.message_id
         JOIN conversations AS c ON c.id = m.conversation_id
                                 AND c.organization_id = m.organization_id
+        JOIN contacts AS ct ON ct.id=c.contact_id AND ct.organization_id=$1::uuid
         WHERE m.organization_id = $1::uuid
           AND c.organization_id = $1::uuid AND c.contact_id = $2::uuid
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=clock_timestamp()
     """, exclusion_reason="Unreviewed error_details JSON is excluded."),
     Category("contact_consent_log", """
         SELECT l.id, l.contact_id, l.event_type, l.method,
@@ -365,8 +376,13 @@ CATEGORIES: tuple[Category, ...] = (
         SELECT f.id, f.message_id, f.conversation_id, f.source, f.value, f.created_at
         FROM message_feedback AS f
         JOIN conversations AS c ON c.id = f.conversation_id
+        JOIN contacts AS ct ON ct.id=c.contact_id AND ct.organization_id=$1::uuid
+        JOIN messages AS m ON m.id=f.message_id AND m.conversation_id=c.id
+                           AND m.organization_id=$1::uuid
         WHERE f.organization_id = $1::uuid
           AND c.organization_id = $1::uuid AND c.contact_id = $2::uuid
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=clock_timestamp()
     """, account_query="""
         SELECT f.id, f.source, f.value, f.created_at
         FROM message_feedback AS f
@@ -392,9 +408,12 @@ CATEGORIES: tuple[Category, ...] = (
         FROM outbound_dedup AS d
         JOIN messages AS m ON m.id = d.message_id
         JOIN conversations AS c ON c.id = m.conversation_id
+        JOIN contacts AS ct ON ct.id=c.contact_id AND ct.organization_id=$1::uuid
         WHERE d.organization_id = $1::uuid
           AND m.organization_id = $1::uuid AND c.organization_id = $1::uuid
           AND c.contact_id = $2::uuid
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=clock_timestamp()
     """, exclusion_reason="Cached response_text is free text and excluded."),
     Category("external_booking_credentials", """
         SELECT provider, is_active, created_at, updated_at

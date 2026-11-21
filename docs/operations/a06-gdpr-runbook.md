@@ -82,6 +82,20 @@ Independently authorized global account disposition, provider identity and
 receipt verification, and session revocation and backup/replay arrangements
 remain required even when no additional local dependency is observed.
 
+For an approved organization-scope erasure, the tenant links authorizing
+access are revoked and its pending invitations removed in the same committed
+local stage. Candidate SQL114 prevents new membership grants for an erased
+organization and blocks visibility of stale legacy grants. It does not
+delete a global Auth identity, disable sessions for other organizations or
+transfer another tenant's ownership. If a pre-SQL114 committed erasure still
+has tenant access links, reconciliation requires the exact persisted case,
+current policy, no applicable active hold and the authorized execution
+cutover. A quarantined restore must reconcile those links before acceptance.
+The original requester receives the immediate local partial outcome, and
+subsequent review of a revoked tenant is performed by a separately
+authorized operator against the exact persisted operation. Ordinary tenant
+access remains revoked.
+
 Candidate SQL113 discloses only verified completion and inbound receipt
 summaries through the existing encrypted organization or contact snapshot.
 The backend function checks the running export, exact requester, organization
@@ -288,14 +302,18 @@ payment or provider-linked bookings. No application or scheduler role is
 granted execution, and actual owner credentials, independent custody,
 operational verification and authorization are still required.
 
-### Proposed legacy-message provenance review (read-only)
+### Historical message quarantine and provenance review
 
-This is a review protocol only. It neither authorizes retention or erasure nor
-closes the legacy coverage gap. No verified application route currently
-provides a complete legacy-message provenance inventory. Until the controller
-adopts this workflow, names an authorized reviewer, and approves a restricted
-evidence channel, no manual review is considered complete. Do not improvise a
-service-role query or use the retention worker as an inventory endpoint.
+With the lifecycle schema installed, ordinary message views and new exports
+exclude records with missing or inconsistent source lineage. Exports built
+before the quarantine filter are unavailable through the current reader.
+The database owner can run `inventory_quarantined_messages` in a read-only,
+read-committed transaction for one exact tenant and a controller case.
+Each page contains opaque identifiers, reason codes, the supplied review
+date, overdue status and a report digest. Keep the page and its digest in
+the restricted controller case channel. Escalate overdue reviews to the
+responsible controller for a dated disposition. The reconciliation report
+does not authorize destructive retention or a historical timestamp change.
 
 1. Open a review for one organization from an authenticated owner-and-MFA
    request. Bind every inventory request and evidence reference to that

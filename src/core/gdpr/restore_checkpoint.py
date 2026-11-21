@@ -366,6 +366,10 @@ async def _verify_replayed_erasures(conn, org, entries, sequence, *, fingerprint
               AND subject_id IS NOT DISTINCT FROM $4::uuid)''', org, operation, scope, subject)
         if not present:
             raise RestoreBlocked('Newer erasure journal has not been replayed')
+        if scope == 'organization':
+            from src.core.gdpr.deletion import tenant_access_remains
+            if await tenant_access_remains(conn, org):
+                raise RestoreBlocked('Erased organization access links remain')
         if require_committed and not await conn.fetchval('''SELECT EXISTS(SELECT FROM gdpr_operations o
             JOIN gdpr_operation_steps s ON s.organization_id=o.organization_id AND s.operation_id=o.id
             WHERE o.organization_id=$1 AND s.organization_id=$1 AND o.id=$2 AND o.kind='erase'

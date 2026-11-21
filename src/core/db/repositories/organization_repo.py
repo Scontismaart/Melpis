@@ -174,6 +174,8 @@ class OrganizationRepository(TenantScopedRepository):
                 FROM organization_memberships om
                 JOIN user_profiles up ON up.id = om.user_id
                 WHERE up.auth_user_id = $1 AND om.organization_id = $2::uuid
+                  AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                    WHERE b.organization_id=$2::uuid AND b.scope='organization')
             """, auth_user_id, organization_id)
             return dict(row) if row else None
 
@@ -188,6 +190,8 @@ class OrganizationRepository(TenantScopedRepository):
                 FROM organization_memberships om
                 JOIN user_profiles up ON up.id = om.user_id
                 WHERE up.auth_user_id = $1
+                  AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                    WHERE b.organization_id=om.organization_id AND b.scope='organization')
             """, auth_user_id)
             return [dict(r) for r in rows]
 
@@ -197,7 +201,9 @@ class OrganizationRepository(TenantScopedRepository):
                 """SELECT up.id, up.email, up.nome
                    FROM user_profiles up
                    JOIN organization_memberships om ON om.user_id = up.id
-                   WHERE om.organization_id = $1::uuid AND om.ruolo = 'owner'""",
+                   WHERE om.organization_id = $1::uuid AND om.ruolo = 'owner'
+                     AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                       WHERE b.organization_id=$1::uuid AND b.scope='organization')""",
                 org_id
             )
             return [dict(r) for r in rows]
@@ -210,6 +216,8 @@ class OrganizationRepository(TenantScopedRepository):
                 JOIN user_profiles up ON up.id = om.user_id
                 WHERE om.organization_id = $1::uuid
                   AND om.ruolo IN ('owner', 'manager', 'staff')
+                  AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                    WHERE b.organization_id=$1::uuid AND b.scope='organization')
                 ORDER BY
                   CASE om.ruolo WHEN 'owner' THEN 0 WHEN 'manager' THEN 1 ELSE 2 END,
                   up.nome
@@ -253,6 +261,8 @@ class OrganizationRepository(TenantScopedRepository):
                 FROM organization_memberships om
                 JOIN user_profiles up ON up.id = om.user_id
                 WHERE up.auth_user_id = $1
+                  AND NOT EXISTS (SELECT 1 FROM gdpr_erasure_barriers b
+                    WHERE b.organization_id=om.organization_id AND b.scope='organization')
                 LIMIT 1
             """, uid)
             if existing:

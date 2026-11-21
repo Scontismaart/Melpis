@@ -749,7 +749,7 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
 async def _complete_checkout_intent(conn, org_id, intent_id, session_id, subscription_id):
     await conn.execute("""
         UPDATE billing_checkout_intents
-        SET session_id = COALESCE(session_id, $2), expires_at = NOW(),
+        SET session_id = COALESCE(session_id, $2), expires_at = NOW(), session_url = NULL,
             payload = payload || jsonb_build_object(
                 '_resolved', true, '_resolution', 'completed', '_subscription_id', $4::text
             )
@@ -772,7 +772,7 @@ async def _handle_checkout_expired(conn, repo, data, event_id):
         return {"action": "checkout_already_completed", "organization_id": org_id}
     await conn.execute("""
         UPDATE billing_checkout_intents
-        SET session_id = COALESCE(session_id, $2), expires_at = NOW(),
+        SET session_id = COALESCE(session_id, $2), expires_at = NOW(), session_url = NULL,
             payload = payload || '{"_resolved": true, "_resolution": "expired"}'::jsonb
         WHERE id = $1::uuid AND organization_id = $3::uuid
           AND (session_id IS NULL OR session_id = $2)

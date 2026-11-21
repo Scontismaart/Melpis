@@ -119,3 +119,64 @@ async def reconcile_legacy_message(conn, org, message, *, audit_at=None, attesta
     return dict(common, state=state, missing=(), received_at=received.astimezone(timezone.utc).isoformat(),
                 policy_version=policy["version"] if policy else None, held=held,
                 due_under_current_policy=received <= audit_at - timedelta(days=policy["retention_days"]) if applicable else None)
+
+
+async def inventory_quarantined_messages(conn, org, *, case_id, review_by, authority_reference,
+                                         after=None, limit=100):
+    """Return a bounded tenant-specific review queue without reading message content.
+
+    The owner retains this in the restricted case channel and reconciles each
+    exact record against independently held evidence. Eligibility remains
+    blocked until the necessary lineage has been established.
+    """
+    if (type(org) is not UUID or not org.int
+            or type(case_id) is not UUID or not case_id.int
+            or type(review_by) is not datetime or review_by.utcoffset() != timedelta(0)
+            or type(authority_reference) is not str
+            or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", authority_reference)
+            or (after is not None and (type(after) is not UUID or not after.int))
+            or type(limit) is not int or not 1 <= limit <= 1000
+            or not conn.is_in_transaction() or not await conn.fetchval("""
+                SELECT current_user=session_user
+                  AND current_setting('transaction_read_only')='on'
+                  AND current_setting('transaction_isolation')='read committed'
+                  AND EXISTS(SELECT FROM pg_class WHERE oid='public.messages'::regclass
+                             AND relowner=current_user::regrole)
+            """)):
+        raise RestoreBlocked("Quarantine inventory requires exact scope and a read-only owner transaction")
+    if not await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,606))", str(org)):
+        raise RestoreBlocked("Historical message scope is busy")
+    observed_at = await conn.fetchval("SELECT clock_timestamp()")
+    rows = await conn.fetch("""
+        SELECT m.id,m.c24_original_subject_id IS NULL AS subject_missing,
+               m.c24_received_at IS NULL AS receipt_missing,
+               c.id IS NULL AS conversation_missing,
+               ct.id IS NULL AS contact_missing,
+               (m.c24_original_subject_id IS NOT NULL AND ct.id IS NOT NULL
+                AND m.c24_original_subject_id IS DISTINCT FROM ct.id) AS subject_conflict,
+               m.c24_received_at>$4 AS future_receipt
+        FROM public.messages m
+        LEFT JOIN public.conversations c ON c.id=m.conversation_id AND c.organization_id=$1
+        LEFT JOIN public.contacts ct ON ct.id=c.contact_id AND ct.organization_id=$1
+        WHERE m.organization_id=$1 AND ($2::uuid IS NULL OR m.id>$2::uuid)
+          AND (m.c24_original_subject_id IS NULL OR m.c24_received_at IS NULL
+               OR ct.id IS NULL OR m.c24_original_subject_id IS DISTINCT FROM ct.id
+               OR m.c24_received_at>$4)
+        ORDER BY m.id LIMIT $3
+    """, org, after, limit+1, observed_at)
+    records = [
+        {"message_id": str(row["id"]), "reasons": [
+            name for name in ("subject_missing", "receipt_missing", "conversation_missing",
+                              "contact_missing", "subject_conflict", "future_receipt")
+            if row[name]
+        ]}
+        for row in rows[:limit]
+    ]
+    report = {"organization_id": str(org), "case_id": str(case_id),
+              "authority_reference": authority_reference,
+              "state": "controller_reconciliation_required",
+              "observed_at": observed_at.astimezone(timezone.utc).isoformat(),
+              "review_by": review_by.isoformat(), "review_overdue": review_by <= observed_at,
+              "deletion_authorized": False, "records": records,
+              "next": records[-1]["message_id"] if len(rows) > limit else None}
+    return dict(report, report_sha256=sha256(_canonical(report)).hexdigest())

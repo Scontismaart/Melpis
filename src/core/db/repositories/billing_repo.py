@@ -84,6 +84,8 @@ class BillingRepository(TenantScopedRepository):
                 WHERE lifecycle.auth_user_id=$1 AND lifecycle.disabled_at IS NULL
                   AND om.organization_id=$2 AND om.joined_at IS NOT NULL
                   AND om.ruolo IN ('owner','manager')
+                  AND NOT EXISTS (SELECT FROM gdpr_erasure_barriers b
+                      WHERE b.organization_id=$2 AND b.scope='organization')
                 FOR SHARE OF lifecycle, up, om""",
             actor_auth_user_id, organization_id,
         )

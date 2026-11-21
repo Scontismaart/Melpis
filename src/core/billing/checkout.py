@@ -262,10 +262,19 @@ async def create_durable_checkout(repo, org_id, request_key, payload, stripe, st
         raise
     async with repo.pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute("""
-                UPDATE billing_checkout_intents SET session_id = $3, session_url = $4
+            # A signed webhook may resolve this intent before the API response
+            # returns. Retain provider correlation, but never restore its
+            # short-lived checkout URL after verified resolution.
+            status = await conn.execute("""
+                UPDATE billing_checkout_intents
+                SET session_id = $3,
+                    session_url = CASE WHEN payload->'_resolved' = 'true'::jsonb
+                                       THEN NULL ELSE $4 END
                 WHERE id = $1 AND organization_id = $2::uuid
+                  AND (session_id IS NULL OR session_id = $3)
             """, intent["id"], str(org_id), session.id, session.url)
+            if status == "UPDATE 0":
+                raise HTTPException(409, "Checkout session binding changed; reconciliation required")
             await conn.execute("""
                 INSERT INTO audit_log(id, organization_id, action, details)
                 VALUES ($1, $2::uuid, 'billing.checkout_session_created', $3::jsonb)
@@ -279,7 +288,7 @@ async def _resolve_intent_without_session(repo, org_id, intent_id):
     async with repo.pool.acquire() as conn:
         await conn.execute("""
             UPDATE billing_checkout_intents
-            SET expires_at = NOW(),
+            SET expires_at = NOW(), session_url = NULL,
                 payload = jsonb_set(payload, '{_resolved}', 'true'::jsonb, true)
             WHERE id = $1::uuid AND organization_id = $2::uuid AND session_id IS NULL
         """, intent_id, str(org_id))
