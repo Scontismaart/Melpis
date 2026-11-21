@@ -3,6 +3,99 @@
 Baseline [4631cc1](https://github.com/Scontismaart/Melpis/commit/4631cc193c1b27b3f1ea7ea06649a9e5cd32de7c).
 The approved product decision is [Privacy V1.0](../governance/privacy-data-governance-v1.0.md).
 The issue remains open. This record tracks implementation and proof separately.
+The [Staging SQL115 postflight and updated issue matrix](https://github.com/Scontismaart/Melpis/issues/91#a06-staging-115-postflight)
+supersede the pending commissioning statements in the historical evidence below.
+
+### Final technical acceptance candidate
+
+- The Staging cutover committed SQL105–115 and exact enrollment of 42
+  historical bookings in one transaction. Independent postflight confirmed
+  61 migration records, the preserved 18 messages including three billed
+  messages, unchanged usage/accounting fingerprints, and tenant-scoped
+  visibility. The next booking review is due 21 December 2026.
+- The protected main revision was `142ce6d0108e19612f38fb8592b8c922eb63f43b`.
+  [Main CI](https://github.com/Scontismaart/Melpis/actions/runs/44923853294)
+  and [Migration Check](https://github.com/Scontismaart/Melpis/actions/runs/44923853290)
+  passed. The published API and web multi-architecture image configurations
+  matched that revision. The new encrypted C01 backup was authenticated
+  from R2 EU using the Drive recovery envelope and a separate 1Password
+  passphrase. The R2 synthetic v5 publication/replay and independent custody
+  receipts are recorded in the [operational evidence](https://github.com/Scontismaart/Melpis/issues/91#issuecomment-7065451594).
+- The final export candidate excludes uncertain message derivatives from
+  organization exports, requires the immutable subject anchor for contact
+  request metadata, makes omissions and oversized records visible in the
+  manifest, and invalidates snapshots produced by earlier export formats.
+  The controller review path continues to require exact evidence; unknown
+  timestamps and subject links remain withheld. Individual exports exclude
+  unstructured text absent a safe subject attribution.
+- The provider candidate refreshes coverage on claim and transitions expired
+  claims to uncertainty before authenticated receipt lookup. No timer or
+  expired lease authorizes another delete. Local simulated provider tests
+  cover known unsent retries, uncertain sends, dead letters and correlated
+  receipts. The lifecycle owner can record a separately verified exact
+  inventory review, including previously undiscovered provider stages,
+  without claiming those copies were deleted. Active-provider specific
+  adapters and authorization remain deployment-dependent.
+- The backup candidate detects overdue ordinary backups at the exact 30-day
+  boundary. The seven-day ordinary backup rotation validates the full
+  expired-object listing and confirms exact remote ciphertext and manifest
+  readback before deleting old objects. A failed inventory or a missing
+  replacement is an error. Independent journal inventory retirement still
+  requires its signed exact-unrecoverable evidence before advancing the
+  authoritative coverage floor. The deployed backup job and monitoring
+  remain subject to the operational gate.
+- The bounded ordinary-booking owner selection advances across examined
+  evidence and returns only eligible exact plans. The isolated encrypted
+  restore test uses that selection as input to the existing authenticated
+  checkpoint and inventory-covered source purge, then replays it under v5.
+  The old global webhook dedup age-only deletion and the legacy completed
+  inbox hard-delete method are explicitly retired. The scoped C2.4 sweep
+  retains the completed inbox receipt and scrubs its payload; a synthetic
+  retry exercises the actual repository and verifies that the receipt is
+  not re-enqueued. Creation time is not verified conclusion. Other global receipts
+  still require an independently supported conclusion and safe replay
+  disposition; no arbitrary time or tenant attribution is inferred.
+
+### Subsequent local lifecycle extensions (not commissioned)
+
+- SQL116 extends the ordinary booking plan only to a Dashboard booking with
+  no source message, human allocation receipts and the exact conversation
+  identity captured at completion. The new typed candidate binds that
+  conversation in the existing v5 envelope; previous source-less plans are
+  unchanged. Quarantine, holds, provider/financial/worker dependencies and
+  exact replay fences remain fail-closed. PostgreSQL 17 passed 34 focused
+  plan, purge and codec tests and the signed encrypted older-backup v5 replay
+  with the linked conversation preserved. This does not infer historical
+  completion or authorize any source-linked AI or external-provider purge.
+- SQL117 replaces the global webhook receipt tuple with its deterministic
+  length-framed SHA-256 digest, preserving exact duplicate suppression and
+  historical creation timestamps without storing raw provider identifiers or
+  status text. The digest is pseudonymized, not anonymous; it is the minimum
+  necessary replay proof until a verified conclusion and safe replay horizon
+  are established. A 90-day age-only deletion remains prohibited. Stripe
+  event receipts stay in the separate accounting category subject to the
+  specific documented obligation, not the ordinary technical-receipt clock.
+  Thirteen focused PostgreSQL 16 and worker tests passed, including legacy
+  upgrade, repeated migration, duplicate suppression, transactional rollback
+  and failed writes on incompatible application/schema pairings. A release
+  requires coordinated worker quiescence and migration before restarting
+  ingress; neither new migration has been applied to Staging.
+- A genuinely source-linked ordinary booking needs the exact source-message
+  and worker/copy disposition, independently verified on every recoverable
+  backup or reproducible by authenticated replay. The inventory manifest and
+  a checkpoint captured from the current source alone do not prove the
+  actual preimages in older backup images. Ordinary source purge now requires
+  a rehearsal signature from the approved journal key bound to the current
+  tenant, inventory, authority tip, and exact per-backup checkpoint and policy
+  pins. An encrypted image captured before completion failed isolated replay
+  without creating purge bindings. Three PostgreSQL 17 tests covered replay
+  before signing, rejection of an unapproved key and altered or incomplete
+  proof, signed source purge, and replay after the purge. The new gate applies
+  to both supported plan kinds. Source-linked booking eligibility also needs
+  typed proof of source and dependency disposition and a source replay fence.
+  Financial and provider-linked bookings also need separate evidence of the
+  accounting and provider disposition. These technical limitations remain
+  in A06; actual provider commissioning is tracked separately.
 
 | Requirement | Evidence on the baseline or candidate | Remaining acceptance work |
 | --- | --- | --- |

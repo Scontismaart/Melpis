@@ -1,13 +1,16 @@
 WEBHOOK_IDEMPOTENCY_SQL = """
-    INSERT INTO webhook_idempotency (wam_id, resource_type, status_value)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (wam_id, resource_type, status_value) DO NOTHING
-    RETURNING wam_id
+    INSERT INTO public.webhook_idempotency (receipt_key_sha256)
+    VALUES (public.webhook_receipt_key_sha256($1, $2, $3))
+    ON CONFLICT (receipt_key_sha256) DO NOTHING
+    RETURNING receipt_key_sha256
 """
 
 
 async def dedup_check(pool, wam_id: str, resource_type: str, status_value: str) -> bool:
     """Atomic idempotency check via INSERT ON CONFLICT DO NOTHING.
+
+    The database stores only the framed tuple's digest, never raw provider IDs
+    or status text. The digest remains pseudonymized replay evidence.
     Returns True if this is a new event (lock acquired), False if duplicate."""
     row = await pool.fetchrow(
         WEBHOOK_IDEMPOTENCY_SQL, wam_id, resource_type, status_value
@@ -16,13 +19,5 @@ async def dedup_check(pool, wam_id: str, resource_type: str, status_value: str) 
 
 
 async def purge_webhook_idempotency(pool, days: int = 7) -> int:
-    """Purge webhook idempotency records older than retention window (default 7 days)."""
-    async with pool.acquire() as conn:
-        result = await conn.execute("""
-            DELETE FROM webhook_idempotency
-            WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
-        """, str(days))
-        try:
-            return int(result.split(" ")[1])
-        except Exception:
-            return 0
+    """Retired age-only path; creation is not verified request conclusion."""
+    raise RuntimeError("Webhook receipt expiry requires verified conclusion and replay protection")

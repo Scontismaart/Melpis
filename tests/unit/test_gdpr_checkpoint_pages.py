@@ -171,6 +171,36 @@ def test_checkpoint_scope_and_keys_are_exact(recovery):
             read_checkpoint_pages(store, args[0], args[1], args[2], pin, **args[3])
 
 
+def test_conversation_ordinary_plan_preserves_exact_signed_identity(recovery):
+    from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, read_checkpoint_pages
+    from src.core.gdpr.restore_checkpoint import _parse_ordinary_purges
+
+    store, installation, org, keys = recovery
+    old = dict(kind="ordinary_managed_booking_candidate_v1", organization_id=str(org),
+               booking_id=str(uuid4()), subject_id=str(uuid4()), policy_version="synthetic",
+               completed_at="2024-01-01T12:00:00.000000Z", timezone="Europe/Rome",
+               allocation_revision=2, request_ids=[str(uuid4())], deletion_authorized=False)
+    linked = dict(old, kind="ordinary_managed_booking_conversation_candidate_v1", booking_id=str(uuid4()),
+                  request_ids=[str(uuid4())], conversation_id=str(uuid4()))
+    plans = sorted([old, linked], key=lambda plan: plan['booking_id'])
+    payload = dict(_payload(org), ordinary_booking_purges=plans)
+    pin = publish_checkpoint_pages(store, installation, payload, **keys)
+    assert read_checkpoint_pages(store, installation, org, "synthetic", pin, **keys) == payload
+    assert _parse_ordinary_purges(org, plans) == plans
+    for plan in (
+        dict(linked, conversation_id=None), dict(linked, conversation_id="invalid"),
+        dict(linked, source_message_id=str(uuid4())), dict(old, conversation_id=str(uuid4())),
+        {key: value for key, value in linked.items() if key != "conversation_id"},
+    ):
+        with pytest.raises(ValueError):
+            _parse_ordinary_purges(org, [plan])
+    changed = sorted([old, dict(linked, conversation_id=str(uuid4()))], key=lambda plan: plan['booking_id'])
+    with pytest.raises(RestoreBlocked):
+        publish_checkpoint_pages(store, installation,
+                                 dict(_payload(org, sequence=2), ordinary_booking_purges=changed),
+                                 previous_pin=pin, **keys)
+
+
 def test_v5_successor_preserves_legacy_and_paged_commitments(recovery):
     from src.core.gdpr.checkpoint_pages import publish_checkpoint_pages, read_checkpoint_pages
 

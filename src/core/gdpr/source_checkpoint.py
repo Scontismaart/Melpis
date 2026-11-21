@@ -4,17 +4,78 @@ from datetime import datetime, timezone
 import os
 from uuid import UUID
 
+from cryptography.exceptions import InvalidSignature
+
 from src.core.gdpr.checkpoint_pages import (
     _MAX_AGGREGATE_BYTES, _MAX_RECORDS, _assert_global_uniqueness, _normalize,
     decode_receipt_prunes, read_any_checkpoint,
 )
-from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args
+from src.core.gdpr.journal_publication import CheckpointPin, _canonical, _previous_key_args, _resolve_key_epochs
 from src.core.gdpr.restore_checkpoint import (
     RestoreBlocked, _bind_verified_receipt_prunes, _parse_receipt_prunes, _parse_ordinary_purges, _receipt_prune_digest,
 )
 from src.core.gdpr.backup_coverage import _backups, assess_backup_coverage
+from src.core.gdpr.restore_journal import RestoreJournalInvalid
 
 _LIMIT = 10000
+_ORDINARY_REHEARSAL_DOMAIN = b"melpis.gdpr.ordinary-rehearsal.v1\0"
+
+
+def ordinary_rehearsal_statement(org, inventory_sha256, tip, pins):
+    """Bytes for the custodian to sign after rehearsing each exact encrypted backup."""
+    backups = [
+        {"backup_id": backup, "checkpoint": {"sequence": pin.sequence, "sha256": pin.sha256},
+         "policy": {"sequence": policy.sequence, "sha256": policy.sha256}}
+        for backup, (pin, policy) in sorted(pins.items())
+    ]
+    return _ORDINARY_REHEARSAL_DOMAIN + _canonical({
+        "organization_id": str(org), "inventory_sha256": inventory_sha256,
+        "tip": {"sequence": tip.sequence, "sha256": tip.sha256}, "backups": backups,
+    })
+
+
+def _verify_ordinary_rehearsal_proof(proof, *, org, inventory_sha256, tip, pins, authority, trust):
+    if type(proof) is not bytes or len(proof) != 64:
+        raise RestoreBlocked("Independent ordinary replay rehearsal required")
+    try:
+        epoch = _resolve_key_epochs(
+            trust.get("key_epochs"), trust["trusted_public_key"], trust["journal_encryption_key"], tip,
+        )[-1]
+        authority.assert_current_segment_key(tip, epoch.public_key, epoch.encryption_key)
+        epoch.public_key.verify(proof, ordinary_rehearsal_statement(org, inventory_sha256, tip, pins))
+    except (InvalidSignature, RestoreJournalInvalid):
+        raise RestoreBlocked("Independent ordinary replay rehearsal signature invalid") from None
+
+
+async def capture_due_ordinary_bookings(conn, org, *, after=None, limit=100):
+    """Select one bounded owner-only batch for signed ordinary-booking plans.
+
+    The cursor advances over examined evidence even if a booking is held or
+    lacks a complete plan. A new sweep restarts at the beginning. Selection
+    never authorizes deletion; the existing checkpoint promotion and
+    inventory-covered purge must succeed before any source mutation.
+    """
+    if (type(org) is not UUID or not org.int
+            or (after is not None and (type(after) is not UUID or not after.int))
+            or type(limit) is not int or not 1 <= limit <= 1000
+            or not conn.is_in_transaction()
+            or await conn.fetchval("SHOW transaction_isolation") != "read committed"
+            or not await conn.fetchval("""SELECT current_setting('transaction_read_only')='on'
+                AND EXISTS(SELECT FROM pg_class WHERE oid=to_regclass('public.ordinary_booking_completion_evidence')
+                AND relowner=current_user::regrole)""")):
+        raise RestoreBlocked("Ordinary booking selection requires a read-only lifecycle-owner transaction")
+    if not await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,606))", str(org)):
+        raise RestoreBlocked("Ordinary booking selection deferred by tenant contention")
+    rows = await conn.fetch("""SELECT booking_id FROM public.ordinary_booking_completion_evidence
+        WHERE organization_id=$1 AND ($2::uuid IS NULL OR booking_id>$2)
+        ORDER BY booking_id LIMIT $3""", org, after, limit + 1)
+    batch = rows[:limit]
+    due = []
+    for row in batch:
+        if await conn.fetchval("SELECT public.ordinary_completed_booking_retention_plan($1,$2)",
+                               org, row["booking_id"]) is not None:
+            due.append(UUID(str(row["booking_id"])))
+    return tuple(due), UUID(str(batch[-1]["booking_id"])) if len(rows) > limit else None
 
 
 async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *,
@@ -338,8 +399,9 @@ async def bind_inventory_covered_receipts(conn, authority, store, org, inventory
     return result
 
 
-async def purge_inventory_covered_ordinary_bookings(
-    conn, authority, store, org, inventory_bytes, *, latest_inventory_sha256, **trust,
+async def _purge_inventory_covered_ordinary_bookings(
+    conn, authority, store, org, inventory_bytes, *, latest_inventory_sha256,
+    rehearsal_proof=None, quarantine_database=None, **trust,
 ):
     """Owner-only maintenance operation for independently covered SQL109 plans.
 
@@ -347,6 +409,7 @@ async def purge_inventory_covered_ordinary_bookings(
     the separate operational authorization before connecting to a live source.
     SQL109 rechecks the exact eligible preimage and policy on each mutation.
     """
+    replay = quarantine_database is not None
     if os.getenv("GDPR_RETENTION_EXECUTION_ENABLED")!="true":
         raise RestoreBlocked("Ordinary retention is not operationally enabled")
     if (type(org) is not UUID or not org.int or not conn.is_in_transaction()
@@ -398,6 +461,11 @@ async def purge_inventory_covered_ordinary_bookings(
         raise RestoreBlocked("No independently covered backup for ordinary purge")
     if requires_paged_inventory and not active_inventory:
         raise RestoreBlocked("Paged inventory changed before ordinary purge")
+    if not replay:
+        _verify_ordinary_rehearsal_proof(
+            rehearsal_proof, org=org, inventory_sha256=latest_inventory_sha256,
+            tip=tip, pins=pins, authority=authority, trust=trust,
+        )
     pin,plans=selected
     async with conn.transaction():
         for plan in plans:
@@ -414,4 +482,37 @@ async def purge_inventory_covered_ordinary_bookings(
             raise RestoreBlocked("Independent recovery evidence changed during purge")
         if authority.assert_paged_inventory(latest_inventory_sha256, required=requires_paged_inventory) != active_inventory:
             raise RestoreBlocked("Paged inventory changed during ordinary purge")
+        if not replay:
+            _verify_ordinary_rehearsal_proof(
+                rehearsal_proof, org=org, inventory_sha256=latest_inventory_sha256,
+                tip=tip, pins=pins, authority=authority, trust=trust,
+            )
     return len(plans)
+
+
+async def purge_inventory_covered_ordinary_bookings(
+    conn, authority, store, org, inventory_bytes, *, latest_inventory_sha256,
+    rehearsal_proof=None, **trust,
+):
+    """Live-source purge; requires an independent signed replay rehearsal."""
+    if "quarantine_database" in trust:
+        raise RestoreBlocked("Source purge cannot use quarantine replay")
+    return await _purge_inventory_covered_ordinary_bookings(
+        conn, authority, store, org, inventory_bytes,
+        latest_inventory_sha256=latest_inventory_sha256,
+        rehearsal_proof=rehearsal_proof, **trust,
+    )
+
+
+async def _purge_inventory_covered_ordinary_bookings_replay(
+    conn, authority, store, org, inventory_bytes, *, latest_inventory_sha256,
+    quarantine_database, **trust,
+):
+    """Restore-only purge in a verified isolated quarantine."""
+    from src.core.gdpr.restore_coordinator import _assert_quarantine
+    await _assert_quarantine(conn, quarantine_database)
+    return await _purge_inventory_covered_ordinary_bookings(
+        conn, authority, store, org, inventory_bytes,
+        latest_inventory_sha256=latest_inventory_sha256,
+        quarantine_database=quarantine_database, **trust,
+    )

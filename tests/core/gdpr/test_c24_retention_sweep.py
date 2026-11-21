@@ -1,5 +1,6 @@
 """Bounded automated retention on a disposable PostgreSQL database."""
 import asyncio
+from hashlib import sha256
 import os
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -46,11 +47,11 @@ async def approve_messages(pool, org, days=90):
         clock_timestamp()-interval '1 minute',clock_timestamp()+interval '1 day')""",org,days)
 
 
-async def completed_inbox(pool, org, *, age_days=91):
+async def completed_inbox(pool, org, *, age_days=91, event_key=None):
     inbox=uuid4()
     await pool.execute("""INSERT INTO meta_webhook_inbox(id,organization_id,channel,event_key,payload,
         trace_id,status) VALUES($1,$2,'whatsapp',$3,'{\"synthetic\":\"content\"}'::jsonb,'qa','completed')""",
-        inbox,org,str(uuid4()))
+        inbox,org,event_key or str(uuid4()))
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute('ALTER TABLE meta_webhook_inbox DISABLE TRIGGER c24_inbox_lifecycle_guard')
         await conn.execute("UPDATE meta_webhook_inbox SET c24_completed_at=clock_timestamp()-make_interval(days=>$3) WHERE organization_id=$1 AND id=$2",org,inbox,age_days)
@@ -67,12 +68,14 @@ async def shorten_sweep_deadline(pool, function_name):
 
 
 async def test_scheduler_uses_dedicated_connection_and_distributed_lock(pg_pool, retention_operator):
+    from src.core.db.repositories.webhook_inbox_repo import WebhookInboxRepository
     from src.core.jobs.base import compute_advisory_lock_id
     from src.core.scheduler import _run_c24_retention_sweep_async
 
     org = (await _organization(pg_pool))['id']
     await approve_messages(pg_pool, org)
-    inbox = await completed_inbox(pg_pool, org)
+    event_key = sha256(b'{"synthetic":"content"}').hexdigest()
+    inbox = await completed_inbox(pg_pool, org, event_key=event_key)
     dsn = os.environ['GDPR_C24_OWNER_RETENTION_DSN']
     lock_id = compute_advisory_lock_id('c24_retention_sweep')
     async with retention_operator.acquire() as blocker:
@@ -88,6 +91,11 @@ async def test_scheduler_uses_dedicated_connection_and_distributed_lock(pg_pool,
     await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
     assert await pg_pool.fetchval("SELECT c24_payload_purged_at IS NOT NULL AND payload='{}'::jsonb FROM meta_webhook_inbox WHERE id=$1", inbox)
     await asyncio.wait_for(_run_c24_retention_sweep_async(dsn), timeout=10)
+    await WebhookInboxRepository(pg_pool).enqueue(org, 'whatsapp', {'synthetic': 'content'}, 'synthetic-replay')
+    assert await pg_pool.fetchval("""SELECT count(*) FROM meta_webhook_inbox
+        WHERE organization_id=$1 AND event_key=$2""", org, event_key) == 1
+    assert await pg_pool.fetchval("""SELECT status='completed' AND payload='{}'::jsonb
+        FROM meta_webhook_inbox WHERE organization_id=$1 AND id=$2""", org, inbox)
 
 
 async def test_scheduler_drains_beta_backlog_with_continued_arrivals_and_hold(pg_pool, retention_operator):

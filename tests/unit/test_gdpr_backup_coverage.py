@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
 import hmac
@@ -62,6 +62,15 @@ def test_coverage_requires_every_independently_pinned_backup_and_reports_headroo
     assert proof["backup_objects_verified"] is False
     assert proof["checkpoint_source_commitments_verified"] is False
     assert proof["overdue_backups"] == ("old",)
+    deadline = datetime(2026, 10, 31, 12, tzinfo=timezone.utc)
+    # Both entries must exist at audit time, so use the old backup alone for
+    # the precise 30-day boundary check.
+    boundary_inventory = json.dumps(dict(inventory, backups=[old_backup])).encode()
+    boundary_args = dict(args, latest_inventory_sha256=sha256(boundary_inventory).hexdigest())
+    assert assess_backup_coverage(authority, store, boundary_inventory,
+        **dict(boundary_args, audit_at=deadline - timedelta(seconds=1)))["overdue_backups"] == ()
+    assert assess_backup_coverage(authority, store, boundary_inventory,
+        **dict(boundary_args, audit_at=deadline))["overdue_backups"] == ("old",)
     assert proof["minimum_checkpoint_entries_remaining"] == 10000
     assert proof["minimum_checkpoint_bytes_remaining"] > 0
     assert proof["deletion_authorized"] is False

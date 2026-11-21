@@ -102,7 +102,7 @@ def _backups(raw, expected_sha256, installation, audit_at):
         reviewed = exception is not None and _timestamp(exception["review_by"]) > audit_at
         known.add(backup)
         manifests.add(digest)
-        yield backup, orgs, anchor, audit_at - completed > timedelta(days=30) and not reviewed
+        yield backup, orgs, anchor, audit_at - completed >= timedelta(days=30) and not reviewed
 
 
 def assess_backup_coverage(

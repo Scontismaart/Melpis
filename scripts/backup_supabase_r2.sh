@@ -14,7 +14,10 @@ die() { printf 'backup: %s\n' "$*" >&2; exit 1; }
 require_env() { [[ -n "${!1:-}" ]] || die "$1 is required"; }
 require_binary() { [[ -x "$1" ]] || die "required trusted binary not found: $1"; }
 cleanup() { [[ -z "$work_dir" ]] || /usr/bin/rm -rf -- "$work_dir"; }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Database credentials are deliberately supplied as libpq environment variables,
 # never interpolated into a connection string or command-line argument.
@@ -41,6 +44,7 @@ require_binary /usr/bin/rm
 require_binary /usr/bin/awk
 require_binary /usr/bin/wc
 require_binary /usr/bin/tr
+require_binary /usr/bin/cmp
 [[ -r "$BACKUP_AGE_IDENTITY_FILE" ]] || die "BACKUP_AGE_IDENTITY_FILE is not readable"
 identity_mode=$(/usr/bin/stat -c '%a' "$BACKUP_AGE_IDENTITY_FILE")
 (( (8#$identity_mode & 077) == 0 )) || die "BACKUP_AGE_IDENTITY_FILE must not be group/world readable"
@@ -91,16 +95,28 @@ remote_sha=$(/usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api head-object --buck
 local_sha=$(/usr/bin/awk '{print $1}' "$manifest_file")
 [[ "$remote_size" == "$local_size" && "$remote_sha" == "$local_sha" ]] || die "R2 post-upload verification failed"
 
-# Delete only our generated artifact/manifest names older than seven UTC days.
+# Metadata alone does not establish integrity of the stored bytes.
+/usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api get-object --bucket "$R2_BUCKET" --key "$artifact_key" "$work_dir/readback.age" >/dev/null
+/usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api get-object --bucket "$R2_BUCKET" --key "$manifest_key" "$work_dir/readback.sha256" >/dev/null
+/usr/bin/cmp -s "$artifact_file" "$work_dir/readback.age" &&
+  /usr/bin/cmp -s "$manifest_file" "$work_dir/readback.sha256" || die "R2 ciphertext or manifest readback mismatch"
+
+# Preserve a recoverable backup during an outage. Inventory and validate the
+# complete rotation set only after the replacement has been verified.
 cutoff=$(/usr/bin/date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+old_keys=$(/usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$prefix/" \
+  --query "Contents[?LastModified<=\`${cutoff}\`].Key" --output text) || die "R2 retention inventory listing failed"
+rotation_keys=()
 while IFS= read -r old_key; do
   [[ -z "$old_key" || "$old_key" == "None" ]] && continue
   old_base=${old_key##*/}
   [[ "$old_key" == "$prefix/$old_base" ]] || die "refusing to delete nested R2 key"
   [[ "$old_base" =~ ^supabase-[0-9]{8}T[0-9]{6}Z-[0-9]+\.dump\.age(\.sha256)?$ ]] \
     || die "refusing to delete unexpected R2 key"
+  rotation_keys+=("$old_key")
+done <<< "$(/usr/bin/tr '\t' '\n' <<< "$old_keys")"
+for old_key in "${rotation_keys[@]}"; do
   /usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api delete-object --bucket "$R2_BUCKET" --key "$old_key" >/dev/null
-done < <(/usr/bin/aws --endpoint-url "$R2_ENDPOINT" s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "$prefix/" \
-  --query "Contents[?LastModified<=\`${cutoff}\`].Key" --output text | /usr/bin/tr '\t' '\n')
+done
 
 printf 'backup: verified encrypted artifact uploaded: s3://%s/%s\n' "$R2_BUCKET" "$artifact_key"

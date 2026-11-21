@@ -293,6 +293,21 @@ postconditions. The receipt and ordinary-booking SQL receives the independently
 promoted root digest and sequence. Legacy v3/v4 remains readable before promotion.
 Actual backup bytes, operational custody and the separate traffic reopening gate
 remain part of operational acceptance.
+
+Before ordinary booking retention changes the live source, the independent
+custodian rehearses the exact pending checkpoint against every recoverable
+backup for that tenant. Match each encrypted backup and manifest to the pinned
+inventory, restore into quarantine, and require successful replay under the
+same checkpoint and policy pins. Keep the rehearsal results in the custodian's
+restricted evidence store. Once the complete set passes, sign the bytes from
+`ordinary_rehearsal_statement` with the currently approved Ed25519 journal
+key. Supply only the detached signature to
+`purge_inventory_covered_ordinary_bookings`. The source verifies the exact
+inventory digest, tenant, tip, checkpoint and policy pins before and after
+mutation. A changed pin, newly recoverable backup, or failed rehearsal blocks
+source mutation until the complete current set has been rehearsed. The archive
+and isolated database checks remain the evidence for successful rehearsal.
+Replay inside quarantine can run ahead of the signed source authorization.
 Establish monitored beta capacity and a signed
 rotation/compaction protocol tied to verified backup inventory before these
 bounds are approached. No recovery artifact may expire while an authorized

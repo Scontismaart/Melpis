@@ -55,10 +55,6 @@ class WebhookInboxRepository(TenantScopedRepository):
                 WHERE id = $1 AND organization_id = $2 AND lease_token = $3
             """, row["id"], row["organization_id"], row["lease_token"], error_type[:100])
 
-    @system_scope("retention: purge completed raw payloads after seven days; retain unresolved inbox")
     async def purge_completed(self):
-        async with self.pool.acquire() as conn:
-            await conn.execute("""
-                DELETE FROM meta_webhook_inbox
-                WHERE status = 'completed' AND completed_at < NOW() - INTERVAL '7 days'
-            """)
+        """Retired destructive path; C2.4 scrubs payload and retains replay keys."""
+        raise RuntimeError("Webhook inbox expiry requires the scoped C2.4 retention path")

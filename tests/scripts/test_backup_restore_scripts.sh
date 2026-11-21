@@ -71,3 +71,35 @@ expect_fail 'target configuration is not marked non-production' /usr/bin/env -i 
   RESTORE_NON_PRODUCTION_CONFIRMATION=RESTORE_drill-safe \
   /usr/bin/bash "$test_restore" --target drill-safe --artifact-key supabase-backups/supabase-20260920T010203Z-1.dump.age
 printf 'backup/restore script guard tests passed\n'
+
+# Isolate the rotation block with a simulated expired-object inventory.
+# A failed list or unexpected key must never trigger a deletion.
+rotation="$tmp/rotation.sh"
+rotation_log="$tmp/rotation.log"
+rotation_aws="$fake_bin/aws"
+/usr/bin/awk '/^# Preserve a recoverable backup/{capture=1} /^printf '\''backup: verified encrypted artifact uploaded/{capture=0} capture' \
+  "$root/scripts/backup_supabase_r2.sh" | /usr/bin/sed "s|/usr/bin/aws|$rotation_aws|g" > "$rotation"
+/usr/bin/printf '%s\n' '#!/usr/bin/env bash' \
+  'if [[ "$3" == "s3api" && "$4" == "list-objects-v2" ]]; then printf "%s" "$TEST_KEYS"; exit "$TEST_LIST_STATUS"; fi' \
+  'if [[ "$3" == "s3api" && "$4" == "delete-object" ]]; then printf "%s\n" "$8" >> "$TEST_LOG"; exit 0; fi' \
+  'exit 99' > "$rotation_aws"
+/usr/bin/chmod 700 "$rotation_aws"
+run_rotation() {
+  TEST_KEYS="$1" TEST_LIST_STATUS="$2" TEST_LOG="$rotation_log" /usr/bin/bash -c '
+    set -euo pipefail
+    die() { printf "%s\n" "$*" >&2; exit 1; }
+    RETENTION_DAYS=7
+    R2_ENDPOINT=https://test.invalid
+    R2_BUCKET=synthetic-backups
+    prefix=synthetic
+    source "$1"
+  ' _ "$rotation"
+}
+old_key=synthetic/supabase-20261001T010203Z-1.dump.age
+expect_fail 'R2 retention inventory listing failed' run_rotation "$old_key" 1
+[[ ! -e "$rotation_log" ]]
+expect_fail 'refusing to delete unexpected R2 key' run_rotation "$old_key"$'\n'synthetic/foreign-object 0
+[[ ! -e "$rotation_log" ]]
+run_rotation "$old_key"$'\t'"$old_key.sha256" 0
+[[ "$(/usr/bin/wc -l < "$rotation_log")" -eq 2 ]]
+printf 'backup rotation inventory guard tests passed\n'

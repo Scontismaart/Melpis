@@ -26,7 +26,7 @@ _PRIVATE_EXPORT_PROJECTIONS = {
     'booking_stay_completion_evidence', 'ordinary_booking_completion_evidence', 'inbound_worker_receipts',
 }
 _PRIVATE_EXPORT_MAX_ROWS = 50000
-_EXPORT_VERSION = 'a06-v3'
+_EXPORT_VERSION = 'a06-v4'
 _BOOKING_PROJECTIONS = {
     'bookings': 'id',
     'booking_stays': 'booking_id',
@@ -40,6 +40,22 @@ _BOOKING_CONFIRMATION_PROJECTIONS = {
     'messages': 'id', 'message_delivery_attempts': 'message_id',
     'message_feedback': 'message_id', 'outbound_dedup': 'message_id',
 }
+_MESSAGE_DERIVATIVE_PROJECTIONS = {
+    'message_delivery_attempts': 'message_id',
+    'message_feedback': 'message_id',
+    'outbound_dedup': 'message_id',
+    'event_log': 'source_id',
+}
+_VERIFIED_MESSAGE = """
+    EXISTS (
+        SELECT FROM public.messages m
+        JOIN public.conversations c ON c.organization_id=$1 AND c.id=m.conversation_id
+        JOIN public.contacts ct ON ct.organization_id=$1 AND ct.id=c.contact_id
+        WHERE m.organization_id=$1 AND m.id={message_id}
+          AND ct.id::text=to_jsonb(m)->>'c24_original_subject_id'
+          AND (to_jsonb(m)->>'c24_received_at')::timestamptz<=transaction_timestamp()
+          {conversation_match})
+"""
 _PRIVATE_BOOKING_EXPORT_QUERY = '''
     SELECT receipt.record FROM public.gdpr_private_export_records($1,$2,$3,$4) WITH ORDINALITY AS receipt(record, position)
     WHERE receipt.record IS NULL OR NOT public.booking_provenance_is_quarantined(
@@ -49,12 +65,9 @@ _PRIVATE_BOOKING_EXPORT_QUERY = '''
 _PRIVATE_EXPORT_QUERY = 'SELECT record FROM public.gdpr_private_export_records($1,$2,$3,$4)'
 _INBOUND_RECEIPT_EXPORT_QUERY = '''
     SELECT receipt.record FROM public.gdpr_private_export_records($1,$2,$3,$4) WITH ORDINALITY AS receipt(record, position)
-    WHERE receipt.record IS NULL OR EXISTS (
-        SELECT FROM public.messages m
-        JOIN public.conversations c ON c.organization_id=$1 AND c.id=m.conversation_id
-        JOIN public.contacts ct ON ct.organization_id=$1 AND ct.id=c.contact_id
-        WHERE m.organization_id=$1 AND m.id=(receipt.record::jsonb->>'message_id')::uuid
-          AND m.c24_original_subject_id=ct.id AND m.c24_received_at<=statement_timestamp())
+    WHERE receipt.record IS NULL OR ''' + _VERIFIED_MESSAGE.format(
+        message_id="(receipt.record::jsonb->>'message_id')::uuid", conversation_match='',
+    ) + '''
     ORDER BY receipt.position
 '''
 _LEGACY_SIMULATION_QUERY = """
@@ -242,26 +255,38 @@ class Exporter:
                     await append((',' + encode(name) + ':[').encode())
                     # Query comes exclusively from the frozen server catalogue.
                     # Size is checked inside PG before any record enters Python.
-                    quarantine_filter = ''
+                    filters = []
+                    message_column = _MESSAGE_DERIVATIVE_PROJECTIONS.get(category.name)
+                    if scope == 'organization' and message_column:
+                        verified_message = _VERIFIED_MESSAGE.format(
+                            message_id=f'g.{message_column}',
+                            conversation_match='AND m.conversation_id=g.conversation_id'
+                            if category.name == 'message_feedback' else '',
+                        )
+                        if category.name == 'event_log':
+                            verified_message = "(g.source_table IS DISTINCT FROM 'messages' OR " + verified_message + ')'
+                        filters.append(verified_message)
                     if booking_quarantine_available:
                         booking_column = _BOOKING_PROJECTIONS.get(category.name)
                         confirmation_column = _BOOKING_CONFIRMATION_PROJECTIONS.get(category.name)
                         if booking_column:
-                            quarantine_filter = f' WHERE NOT public.booking_provenance_is_quarantined($1,g.{booking_column})'
+                            filters.append(f'NOT public.booking_provenance_is_quarantined($1,g.{booking_column})')
                         elif confirmation_column and not (category.name == 'message_feedback' and scope == 'account'):
-                            quarantine_filter = f' WHERE NOT public.booking_provenance_confirmation_is_quarantined($1,g.{confirmation_column})'
+                            filters.append(f'NOT public.booking_provenance_confirmation_is_quarantined($1,g.{confirmation_column})')
                         elif category.name == 'audit_log':
-                            quarantine_filter = (" WHERE CASE WHEN g.target_table='bookings' THEN NOT EXISTS ("
+                            filters.append("CASE WHEN g.target_table='bookings' THEN NOT EXISTS ("
                                 "SELECT FROM public.booking_provenance_quarantine q WHERE q.organization_id=$1 "
                                 "AND q.booking_id::text=g.target_id::text AND public.booking_provenance_is_quarantined($1,q.booking_id)) "
                                 "ELSE true END")
                         elif category.name == 'event_log':
-                            quarantine_filter = (" WHERE (g.source_table<>'bookings' OR "
+                            filters.append("(g.source_table<>'bookings' OR "
                                 "NOT public.booking_provenance_is_quarantined($1,g.source_id)) AND "
                                 "(g.source_table<>'messages' OR NOT public.booking_provenance_confirmation_is_quarantined($1,g.source_id))")
+                    predicate = ' AND '.join(filters)
                     bounded = ('SELECT CASE WHEN octet_length(row_to_json(g)::text)<=$' +
                                ('2' if scope == 'organization' else '3') +
-                               ' THEN row_to_json(g)::text ELSE NULL END AS record FROM (' + query + ') AS g' + quarantine_filter)
+                               ' THEN row_to_json(g)::text ELSE NULL END AS record FROM (' + query + ') AS g' +
+                               (' WHERE ' + predicate if predicate else ''))
                     values = ([org] if scope == 'organization' else
                               [org, UUID(str(subject_id))] if scope == 'contact' else [org, str(requester)])
                     values.append(_MAX_ROW)
@@ -284,18 +309,25 @@ class Exporter:
                     if category.name == 'bookings' and scope == 'organization' and booking_quarantine_available:
                         quarantined = await conn.fetchval('''SELECT count(*) FROM public.booking_provenance_quarantine q
                             WHERE q.organization_id=$1 AND public.booking_provenance_is_quarantined($1,q.booking_id)''', org)
+                    if scope == 'organization' and message_column:
+                        quarantined = await conn.fetchval(
+                            'SELECT count(*) FROM (' + query + ') AS g WHERE (' + predicate + ') IS NOT TRUE', org,
+                        )
+                    if category.exclusion_reason:
+                        item['omitted'] = category.exclusion_reason
                     if quarantined:
                         item.update(status='partial', quarantined_records=quarantined,
-                                    reason=('message_provenance_or_linked_booking_requires_controller_reconciliation' if category.name == 'messages'
+                                    reason=('message_provenance_or_linked_booking_requires_controller_reconciliation'
+                                            if category.name == 'messages' or message_column
                                             else 'unverified_booking_provenance_requires_controller_reconciliation'))
                         partial = True
+                    elif item.get('oversize_records'):
+                        item.update(status='partial', reason='records_exceed_export_row_size_limit')
                     elif scope != 'organization' and category.exclusion_reason:
                         item.update(status='partial', reason=category.exclusion_reason)
                         partial = True
                     else:
                         item['status'] = 'included'
-                        if category.exclusion_reason:
-                            item['omitted'] = category.exclusion_reason
                     manifest['categories'].append(item)
                 manifest['status'] = 'partial' if partial else 'complete_for_catalogue'
                 await append((',"manifest":' + encode(manifest) + '}').encode(), flush=True)
