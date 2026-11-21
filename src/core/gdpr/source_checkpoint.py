@@ -17,6 +17,37 @@ from src.core.gdpr.backup_coverage import _backups, assess_backup_coverage
 _LIMIT = 10000
 
 
+async def capture_due_ordinary_bookings(conn, org, *, after=None, limit=100):
+    """Select one bounded owner-only batch for signed ordinary-booking plans.
+
+    The cursor advances over examined evidence even if a booking is held or
+    lacks a complete plan. A new sweep restarts at the beginning. Selection
+    never authorizes deletion; the existing checkpoint promotion and
+    inventory-covered purge must succeed before any source mutation.
+    """
+    if (type(org) is not UUID or not org.int
+            or (after is not None and (type(after) is not UUID or not after.int))
+            or type(limit) is not int or not 1 <= limit <= 1000
+            or not conn.is_in_transaction()
+            or await conn.fetchval("SHOW transaction_isolation") != "read committed"
+            or not await conn.fetchval("""SELECT current_setting('transaction_read_only')='on'
+                AND EXISTS(SELECT FROM pg_class WHERE oid=to_regclass('public.ordinary_booking_completion_evidence')
+                AND relowner=current_user::regrole)""")):
+        raise RestoreBlocked("Ordinary booking selection requires a read-only lifecycle-owner transaction")
+    if not await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,606))", str(org)):
+        raise RestoreBlocked("Ordinary booking selection deferred by tenant contention")
+    rows = await conn.fetch("""SELECT booking_id FROM public.ordinary_booking_completion_evidence
+        WHERE organization_id=$1 AND ($2::uuid IS NULL OR booking_id>$2)
+        ORDER BY booking_id LIMIT $3""", org, after, limit + 1)
+    batch = rows[:limit]
+    due = []
+    for row in batch:
+        if await conn.fetchval("SELECT public.ordinary_completed_booking_retention_plan($1,$2)",
+                               org, row["booking_id"]) is not None:
+            due.append(UUID(str(row["booking_id"])))
+    return tuple(due), UUID(str(batch[-1]["booking_id"])) if len(rows) > limit else None
+
+
 async def capture_committed_checkpoint(conn, authority, store, org, backup_id, *,
                                        sequence, verification_key, encryption_key,
                                        prior_pin=None, prior_keys=None, pending_requests=(),

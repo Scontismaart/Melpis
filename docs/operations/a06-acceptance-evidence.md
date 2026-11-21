@@ -32,8 +32,10 @@ supersede the pending commissioning statements in the historical evidence below.
   claims to uncertainty before authenticated receipt lookup. No timer or
   expired lease authorizes another delete. Local simulated provider tests
   cover known unsent retries, uncertain sends, dead letters and correlated
-  receipts. Active-provider specific adapters and authorization remain
-  deployment-dependent.
+  receipts. The lifecycle owner can record a separately verified exact
+  inventory review, including previously undiscovered provider stages,
+  without claiming those copies were deleted. Active-provider specific
+  adapters and authorization remain deployment-dependent.
 - The backup candidate detects overdue ordinary backups at the exact 30-day
   boundary. The seven-day ordinary backup rotation validates the full
   expired-object listing and confirms exact remote ciphertext and manifest
@@ -42,6 +44,14 @@ supersede the pending commissioning statements in the historical evidence below.
   requires its signed exact-unrecoverable evidence before advancing the
   authoritative coverage floor. The deployed backup job and monitoring
   remain subject to the operational gate.
+- The bounded ordinary-booking owner selection advances across examined
+  evidence and returns only eligible exact plans. The isolated encrypted
+  restore test uses that selection as input to the existing authenticated
+  checkpoint and inventory-covered source purge, then replays it under v5.
+  The old global webhook dedup age-only deletion is explicitly retired
+  because creation time is not verified conclusion. Other global receipts
+  still require an independently supported conclusion and safe replay
+  disposition; no arbitrary time or tenant attribution is inferred.
 
 | Requirement | Evidence on the baseline or candidate | Remaining acceptance work |
 | --- | --- | --- |

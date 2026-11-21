@@ -48,6 +48,9 @@ async def _plan(pool, org, booking):
 
 
 async def test_plan_is_specific_repeatable_and_read_only(pg_pool, other_org):
+    from src.core.gdpr.restore_checkpoint import RestoreBlocked
+    from src.core.gdpr.source_checkpoint import capture_due_ordinary_bookings
+
     env, booking, request_ids = await _candidate(pg_pool)
     subject = await pg_pool.fetchval('SELECT contact_id FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)
     plan = await _plan(pg_pool, env.org, booking)
@@ -61,6 +64,13 @@ async def test_plan_is_specific_repeatable_and_read_only(pg_pool, other_org):
     assert plan['deletion_authorized'] is False
     assert await _plan(pg_pool, env.org, booking) == plan
     assert await _plan(pg_pool, other_org['id'], booking) is None
+    async with pg_pool.acquire() as conn:
+        with pytest.raises(RestoreBlocked, match="read-only"):
+            await capture_due_ordinary_bookings(conn, env.org)
+        async with conn.transaction(readonly=True):
+            assert await capture_due_ordinary_bookings(conn, env.org, limit=1) == ((booking,), None)
+            assert await capture_due_ordinary_bookings(conn, env.org, after=booking) == ((), None)
+            assert await capture_due_ordinary_bookings(conn, other_org['id']) == ((), None)
     assert await pg_pool.fetchval('SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking) == 1
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_allocation_requests WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 2
     assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_purge_fences WHERE organization_id=$1 AND booking_id=$2', env.org, booking) == 0

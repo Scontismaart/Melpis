@@ -92,15 +92,10 @@ async def test_execute_with_advisory_lock_unlocks_on_job_exception():
 @pytest.mark.asyncio
 async def test_purge_webhook_idempotency():
     mock_pool = MagicMock()
-    mock_conn = MagicMock()
-    mock_conn.execute = AsyncMock(return_value="DELETE 15")
-    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
-
-    deleted = await purge_webhook_idempotency(mock_pool, days=7)
-    assert deleted == 15
-    mock_conn.execute.assert_called_once()
-    assert "DELETE FROM webhook_idempotency" in mock_conn.execute.call_args[0][0]
+    for days in (7, 90):
+        with pytest.raises(RuntimeError, match="verified conclusion and replay protection"):
+            await purge_webhook_idempotency(mock_pool, days=days)
+    mock_pool.acquire.assert_not_called()
 
 
 @pytest.mark.asyncio

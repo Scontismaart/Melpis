@@ -404,6 +404,25 @@ async def test_inventory_review_cannot_be_claimed_or_overridden_by_provider_conf
     assert {step["name"]: step["status"] for step in final["steps"]}["provider.inventory_review"] == "held"
     assert final["manifest"]["external_copies"] == "pending_verified_receipts"
 
+    # An explicit operator review can add discovered providers without
+    # silently removing a recorded provider or confirming its deletion.
+    from src.core.gdpr.operations import OperationUnavailable
+    ops = Operations(pg_pool)
+    recorded = sorted(step['name'] for step in final['steps']
+                      if step['name'].startswith('provider.') and step['name'] != 'provider.inventory_review')
+    digest = 'a' * 64
+    monkeypatch.setenv('GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED', 'true')
+    with pytest.raises(OperationUnavailable, match='omits'):
+        await ops.reconcile_provider_inventory(org, oid, [], evidence_digest=digest)
+    reviewed = recorded + ['provider.synthetic_history']
+    await ops.reconcile_provider_inventory(org, oid, reviewed, evidence_digest=digest)
+    await ops.reconcile_provider_inventory(org, oid, reviewed, evidence_digest=digest)
+    final = await ops.get(org, oid, 'owner-inventory-hold')
+    states = {step['name']: step['status'] for step in final['steps']}
+    assert states['provider.inventory_review'] == 'confirmed'
+    assert states['provider.synthetic_history'] == 'pending'
+    assert final['manifest']['external_copies'] == 'pending_verified_receipts'
+
 
 @pytest.mark.asyncio
 async def test_deletion_purges_terminal_hotel_stay_under_scoped_barrier(

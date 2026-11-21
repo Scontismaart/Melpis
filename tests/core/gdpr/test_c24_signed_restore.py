@@ -572,7 +572,9 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
 @pytest.mark.parametrize("published_v5", [False, True], ids=["v4", "v5"])
 async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch, published_v5):
     from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_paged_restore_candidates
-    from src.core.gdpr.source_checkpoint import capture_committed_checkpoint, purge_inventory_covered_ordinary_bookings
+    from src.core.gdpr.source_checkpoint import (
+        capture_committed_checkpoint, capture_due_ordinary_bookings, purge_inventory_covered_ordinary_bookings,
+    )
     from tests.core.gdpr.test_ordinary_booking_retention_plan import _candidate
 
     container, dsn, principal, source_db = restore_target
@@ -592,8 +594,10 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
     backup_id="synthetic-ordinary-v4"
     anchor=authority.current()
     async with pg_pool.acquire() as conn, conn.transaction(readonly=True):
+        due, cursor = await capture_due_ordinary_bookings(conn, org, limit=1)
+        assert due == (booking,) and cursor is None
         payload=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
-            sequence=1,verification_key=key,encryption_key=checkpoint_cipher,pending_ordinary_bookings=[booking])
+            sequence=1,verification_key=key,encryption_key=checkpoint_cipher,pending_ordinary_bookings=due)
         policy_pin,policy_data=await capture_policy_state(conn,org,installation_id=installation,
             backup_id=backup_id,sequence=1,verification_key=policy_key,encryption_key=policy_cipher)
     assert payload["version"]=="c24-restore-v4"
