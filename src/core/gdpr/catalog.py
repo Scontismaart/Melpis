@@ -53,6 +53,10 @@ CATEGORIES: tuple[Category, ...] = (
              "Private replay evidence for expired proposals. No proposal text is stored in the evidence."),
     Category("ordinary_booking_purge_bindings", "", exclusion_reason=
              "Private ordinary booking recovery commitments need scoped controller review; no direct application grant."),
+    Category("booking_provenance_quarantine", "", exclusion_reason=
+             "Restricted controller review evidence; historical subject attribution is unresolved."),
+    Category("booking_provenance_quarantine_releases", "", exclusion_reason=
+             "Restricted controller release evidence; review authority must be confirmed separately."),
     Category("booking_stay_tombstones", """
         SELECT request_id,booking_id,original_subject_id,purpose,operation_id,policy_version,created_at
         FROM booking_stay_tombstones WHERE organization_id=$1::uuid

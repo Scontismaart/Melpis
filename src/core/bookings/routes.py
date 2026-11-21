@@ -258,12 +258,14 @@ async def booking_c24_context(booking_id: str, request: Request,
         if not isinstance(service.repo, BookingRepository) or service.repo.pool is None:
             raise HTTPException(503, "Booking context unavailable")
         async with service.repo.pool.acquire() as conn:
-            row = await conn.fetchrow('''SELECT b.data,b.ora,b.coperti,b.stato,
+            from src.core.bookings.provenance_quarantine import quarantine_predicate
+            visible = await quarantine_predicate(conn, "b")
+            row = await conn.fetchrow(f'''SELECT b.data,b.ora,b.coperti,b.stato,
                 a.allocation_revision,a.state,a.catalog_revision,a.service_id,a.temporal_kind,
                 a.arrival_date,a.departure_date,s.revision AS stay_revision FROM bookings b
                 JOIN booking_allocation_sets a ON a.organization_id=b.organization_id AND a.organization_id=$1 AND a.booking_id=b.id
                 LEFT JOIN booking_stays s ON s.organization_id=b.organization_id AND s.organization_id=$1 AND s.booking_id=b.id
-                WHERE b.organization_id=$1 AND b.id=$2''', org, target)
+                WHERE b.organization_id=$1 AND b.id=$2 AND {visible}''', org, target)
             if not row:
                 raise HTTPException(404, "Managed booking not found")
             claims = await conn.fetch('''SELECT resource_id,resource_kind,exclusive,quantity

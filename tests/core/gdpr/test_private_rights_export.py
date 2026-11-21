@@ -150,3 +150,18 @@ async def test_private_booking_completion_export_has_only_verified_dates(pg_pool
         )
         unrelated = await _snapshot(pg_pool, env.org, env.auth, scope="contact", subject_id=other_subject)
         assert unrelated[category] == []
+
+        await pg_pool.execute("""INSERT INTO booking_provenance_quarantine
+            (organization_id,booking_id,review_reference,reason_code,reviewed_at,review_due_at)
+            VALUES($1,$2,'synthetic-private-review','historical_provenance_unverified',
+                clock_timestamp(),clock_timestamp()+interval '30 days')""", env.org, key)
+        operation = await Operations(pg_pool).create(
+            env.org, env.auth, uuid4(), kind="export", scope="contact", subject_id=contact,
+        )
+        async with pg_pool.acquire() as conn, conn.transaction():
+            await conn.execute("UPDATE gdpr_operations SET status='running' WHERE organization_id=$1 AND id=$2",
+                               env.org, operation)
+            await conn.execute("SET LOCAL ROLE service_role")
+            rows = await conn.fetch("SELECT record FROM public.gdpr_private_export_records($1,$2,$3,$4)",
+                                    env.org, operation, str(env.auth), category)
+            assert [row['record'] for row in rows] == [None]

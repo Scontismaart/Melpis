@@ -271,6 +271,9 @@ class GoogleCalendarService:
             return None
         await self.process_pending(1, organization_id=org_id, booking_id=booking["id"])
         async with self.repo.pool.acquire() as conn:
+            from src.core.bookings.provenance_quarantine import booking_is_quarantined
+            if await booking_is_quarantined(conn, UUID(str(org_id)), UUID(str(booking["id"]))):
+                return None
             return await conn.fetchval("""SELECT b.google_event_id FROM bookings b JOIN external_booking_sync s
                 ON s.internal_booking_id=b.id AND s.organization_id=$1
                 WHERE b.organization_id=$1 AND b.id=$2 AND s.provider='google'
@@ -280,6 +283,10 @@ class GoogleCalendarService:
     async def request_booking_retry(self, org_id, booking_id):
         if not google_calendar_enabled():
             return False
+        from src.core.bookings.provenance_quarantine import booking_is_quarantined
+        async with self.repo.pool.acquire() as conn:
+            if await booking_is_quarantined(conn, UUID(str(org_id)), UUID(str(booking_id))):
+                return False
         if await self.queue.retry(org_id, booking_id):
             return True
         current = await self.connection.row(org_id)

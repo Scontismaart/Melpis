@@ -20,6 +20,7 @@ from src.core.crew_runner_report import genera_report as genera_report_completo
 from src.core.scheduler import get_report_cache, set_report_cache
 from src.core.provider_accounting import ProviderAccountingContext
 from src.models.schemas import EventoDashboard, ReportOutput
+from src.core.bookings.provenance_quarantine import quarantine_predicate, confirmation_visibility_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,9 @@ DASHBOARD_EVENTI_MAX = 500
 
 # CTE condiviso Panoramica: eventi unificati event_log + messages + reviews,
 # con finestra temporale $2 (giorni). Parametri: $1 = organization_id, $2 = giorni.
-_DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
+_DASHBOARD_VISIBLE_MESSAGES = """\nWITH visible_messages AS (
+    SELECT * FROM messages WHERE organization_id=$1 AND """
+_DASHBOARD_EVENTI_CTE_PREFIX = """), raw_events AS (
         -- 1. Eventi già registrati in event_log (con arricchimento risposta outbound se vuota)
         SELECT
             e.id::text AS id,
@@ -46,7 +49,7 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
             COALESCE(
                 NULLIF(e.risposta_ai, ''),
                 (SELECT out_m.content_text 
-                 FROM messages out_m 
+                 FROM visible_messages out_m
                  WHERE e.dettagli->>'conversation_id' IS NOT NULL
                    AND out_m.organization_id = $1
                    AND out_m.conversation_id = (e.dettagli->>'conversation_id')::uuid 
@@ -70,11 +73,16 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
             e.dettagli
         FROM event_log e
         WHERE e.organization_id = $1
+          AND (e.source_table IS DISTINCT FROM 'bookings' OR """
+_DASHBOARD_EVENTI_CTE_SUFFIX = """)
+          AND (e.source_table IS DISTINCT FROM 'messages' OR e.source_id IS NULL OR
+               EXISTS (SELECT 1 FROM visible_messages source_event
+                       WHERE source_event.organization_id=$1 AND source_event.id=e.source_id))
           AND e.created_at >= NOW() - make_interval(days => $2)
           AND e.tipo_evento IN ('messaggio', 'recensione')
           AND (e.tipo_evento <> 'messaggio' OR (
               e.created_at > NOW() - INTERVAL '60 days'
-              AND EXISTS (SELECT 1 FROM messages source_m
+              AND EXISTS (SELECT 1 FROM visible_messages source_m
                           WHERE source_m.organization_id = e.organization_id
                             AND source_m.id = e.source_id
                             AND source_m.deleted_at IS NULL
@@ -104,7 +112,7 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
             m.content_text AS testo_originale,
             COALESCE(
                 (SELECT out_m.content_text 
-                 FROM messages out_m 
+                 FROM visible_messages out_m
                  WHERE out_m.conversation_id = m.conversation_id 
                    AND out_m.organization_id = $1
                    AND out_m.direction = 'outbound' 
@@ -129,7 +137,7 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
                 ELSE true
             END AS gestito_da_ai,
             jsonb_build_object('conversation_id', m.conversation_id::text, 'status', m.status) AS dettagli
-        FROM messages m
+        FROM visible_messages m
         WHERE m.organization_id = $1
           AND m.direction = 'inbound'
           AND m.deleted_at IS NULL
@@ -179,6 +187,8 @@ _DASHBOARD_EVENTI_CTE = """\nWITH raw_events AS (
     )
 """
 
+_DASHBOARD_EVENTI_CTE = _DASHBOARD_VISIBLE_MESSAGES + "TRUE" + _DASHBOARD_EVENTI_CTE_PREFIX + "TRUE" + _DASHBOARD_EVENTI_CTE_SUFFIX
+
 
 async def recupera_eventi_dashboard(pool, org_id: str | None) -> list[EventoDashboard]:
     """Recupera la lista unificata degli eventi per la dashboard del tenant (event_log + messages + reviews)."""
@@ -192,8 +202,10 @@ async def recupera_eventi_dashboard(pool, org_id: str | None) -> list[EventoDash
 
     try:
         async with pool.acquire() as conn:
+            visible = await quarantine_predicate(conn, "e", "source_id")
+            visible_messages = await confirmation_visibility_predicate(conn)
             rows = await conn.fetch(
-                _DASHBOARD_EVENTI_CTE + """
+                _DASHBOARD_VISIBLE_MESSAGES + visible_messages + _DASHBOARD_EVENTI_CTE_PREFIX + visible + _DASHBOARD_EVENTI_CTE_SUFFIX + """
                 SELECT * FROM (
                     SELECT DISTINCT ON (id) *
                     FROM raw_events
@@ -236,8 +248,10 @@ async def recupera_eventi_prioritari(pool, org_id: str | None, limite: int) -> l
     limite = max(1, min(int(limite or 5), 50))
     try:
         async with pool.acquire() as conn:
+            visible = await quarantine_predicate(conn, "e", "source_id")
+            visible_messages = await confirmation_visibility_predicate(conn)
             rows = await conn.fetch(
-                _DASHBOARD_EVENTI_CTE + """
+                _DASHBOARD_VISIBLE_MESSAGES + visible_messages + _DASHBOARD_EVENTI_CTE_PREFIX + visible + _DASHBOARD_EVENTI_CTE_SUFFIX + """
                 SELECT * FROM (
                     SELECT DISTINCT ON (id) *
                     FROM raw_events

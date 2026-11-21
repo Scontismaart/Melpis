@@ -9,6 +9,7 @@ from datetime import date, time
 import asyncpg
 
 from src.core.db.scoping import TenantScopedRepository
+from src.core.bookings.provenance_quarantine import booking_is_quarantined, quarantine_predicate
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,8 @@ class BookingRepository(TenantScopedRepository):
                     row = await conn.fetchrow("""
                         SELECT * FROM bookings WHERE organization_id = $1 AND source_message_id = $2
                     """, organization_id, source_message_id)
+                if row and await booking_is_quarantined(conn, organization_id, row["id"]):
+                    raise ValueError("Booking unavailable")
                 return dict(row) if row else None
             else:
                 row = await conn.fetchrow("""
@@ -373,8 +376,9 @@ class BookingRepository(TenantScopedRepository):
 
     async def get_booking(self, organization_id, booking_id):
         async with self._connection() as conn:
+            visible = await quarantine_predicate(conn, "b")
             row = await conn.fetchrow(
-                """SELECT b.*,x.provider AS external_sync_provider,
+                f"""SELECT b.*,x.provider AS external_sync_provider,
                           x.sync_status AS external_sync_status,
                           CASE WHEN x.sync_status='failed' THEN 'sync_failed'
                                WHEN x.sync_status='pending_retry' THEN 'retry_pending'
@@ -385,7 +389,7 @@ class BookingRepository(TenantScopedRepository):
                        AND e.internal_booking_id=b.id
                      ORDER BY e.created_at DESC LIMIT 1
                    ) x ON TRUE
-                   WHERE b.organization_id=$1 AND b.id=$2""",
+                   WHERE b.organization_id=$1 AND b.id=$2 AND {visible}""",
                 organization_id, booking_id,
             )
             return dict(row) if row else None
@@ -394,9 +398,10 @@ class BookingRepository(TenantScopedRepository):
         if data is not None and isinstance(data, str):
             data = date.fromisoformat(data)
         async with self._connection() as conn:
+            visible = await quarantine_predicate(conn, "b")
             if data is not None:
                 rows = await conn.fetch(
-                    """SELECT b.*,x.provider AS external_sync_provider,
+                    f"""SELECT b.*,x.provider AS external_sync_provider,
                               x.sync_status AS external_sync_status,
                               CASE WHEN x.sync_status='failed' THEN 'sync_failed'
                                    WHEN x.sync_status='pending_retry' THEN 'retry_pending'
@@ -407,12 +412,12 @@ class BookingRepository(TenantScopedRepository):
                            AND e.internal_booking_id=b.id
                          ORDER BY e.created_at DESC LIMIT 1
                        ) x ON TRUE
-                       WHERE b.organization_id=$1 AND b.data=$2 ORDER BY b.ora""",
+                       WHERE b.organization_id=$1 AND b.data=$2 AND {visible} ORDER BY b.ora""",
                     organization_id, data,
                 )
             else:
                 rows = await conn.fetch(
-                    """SELECT b.*,x.provider AS external_sync_provider,
+                    f"""SELECT b.*,x.provider AS external_sync_provider,
                               x.sync_status AS external_sync_status,
                               CASE WHEN x.sync_status='failed' THEN 'sync_failed'
                                    WHEN x.sync_status='pending_retry' THEN 'retry_pending'
@@ -423,10 +428,23 @@ class BookingRepository(TenantScopedRepository):
                            AND e.internal_booking_id=b.id
                          ORDER BY e.created_at DESC LIMIT 1
                        ) x ON TRUE
-                       WHERE b.organization_id=$1 ORDER BY b.data DESC,b.ora""",
+                       WHERE b.organization_id=$1 AND {visible} ORDER BY b.data DESC,b.ora""",
                     organization_id,
                 )
             return [dict(r) for r in rows]
+
+    async def booking_capacity_by_hour(self, organization_id, data, free_statuses, exclude_booking_id=None):
+        """Preserve physical slot occupancy without exposing held booking records."""
+        if isinstance(data, str):
+            data = date.fromisoformat(data)
+        async with self._connection() as conn:
+            rows = await conn.fetch("""SELECT EXTRACT(HOUR FROM ora)::int AS hour,
+                COALESCE(SUM(coperti), 0) AS occupied
+                FROM bookings WHERE organization_id=$1 AND data=$2
+                AND ($3::uuid IS NULL OR id<>$3) AND stato<>ALL($4::text[])
+                GROUP BY EXTRACT(HOUR FROM ora)::int""", organization_id, data,
+                exclude_booking_id, list(free_statuses))
+            return {r["hour"]: r["occupied"] for r in rows}
 
     @asynccontextmanager
     async def _legacy_mutation_connection(self, organization_id, booking_id):
@@ -444,6 +462,8 @@ class BookingRepository(TenantScopedRepository):
                 "SELECT id FROM bookings WHERE organization_id=$1 AND id=$2 FOR UPDATE",
                 organization_id, booking_id,
             )
+            if row and await booking_is_quarantined(conn, org, uuid.UUID(str(booking_id))):
+                raise ValueError("Booking unavailable")
             if row and await self._has_managed_allocation(conn, organization_id, booking_id):
                 raise ManagedBookingMutationRequired()
             yield conn
@@ -527,18 +547,21 @@ class BookingRepository(TenantScopedRepository):
 
     async def list_bookings_by_stato(self, organization_id, stato):
         async with self.pool.acquire() as conn:
+            visible = await quarantine_predicate(conn)
             rows = await conn.fetch(
-                "SELECT * FROM bookings WHERE organization_id = $1 AND stato = $2 ORDER BY data, ora",
+                f"SELECT * FROM bookings WHERE organization_id = $1 AND stato = $2 AND {visible} ORDER BY data, ora",
                 organization_id, stato,
             )
             return [dict(r) for r in rows]
 
     async def list_bookings_for_reminder(self, organization_id, target_date):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            visible = await quarantine_predicate(conn)
+            rows = await conn.fetch(f"""
                 SELECT * FROM bookings
                 WHERE organization_id = $1 AND data = $2
                   AND stato = 'confermata' AND reminder_status = 'none'
+                  AND {visible}
                 ORDER BY ora
             """, organization_id, target_date)
             return [dict(r) for r in rows]
@@ -563,10 +586,12 @@ class BookingRepository(TenantScopedRepository):
 
     async def list_pending_reminders_for_phone(self, organization_id, phone):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            visible = await quarantine_predicate(conn)
+            rows = await conn.fetch(f"""
                 SELECT * FROM bookings
                 WHERE organization_id = $1 AND telefono = $2
                   AND stato = 'confermata' AND reminder_status = 'sent'
+                  AND {visible}
                 ORDER BY data, ora
             """, organization_id, phone)
             return [dict(row) for row in rows]
@@ -574,10 +599,12 @@ class BookingRepository(TenantScopedRepository):
     async def list_reminder_replies_for_phone(self, organization_id, phone,
                                               reminder_status):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            visible = await quarantine_predicate(conn)
+            rows = await conn.fetch(f"""
                 SELECT * FROM bookings
                 WHERE organization_id = $1 AND telefono = $2
                   AND reminder_status = $3
+                  AND {visible}
                 ORDER BY reminder_responded_at DESC NULLS LAST, data, ora
             """, organization_id, phone, reminder_status)
             return [dict(row) for row in rows]
@@ -607,32 +634,46 @@ class BookingRepository(TenantScopedRepository):
 
     async def mark_reminder_sent(self, organization_id, booking_id):
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            visible = await quarantine_predicate(conn)
+            row = await conn.fetchrow(f"""
                 UPDATE bookings SET reminder_status = 'sent',
                     reminder_sent_at = NOW(), updated_at = NOW()
-                WHERE organization_id = $1 AND id = $2
+                WHERE organization_id = $1 AND id = $2 AND {visible}
                 RETURNING *
             """, organization_id, booking_id)
             return dict(row) if row else None
 
+    @asynccontextmanager
+    async def reminder_delivery_guard(self, organization_id, booking_id):
+        """A quarantine review cannot cross an in-progress provider handoff."""
+        async with self.pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(organization_id))
+            row = await conn.fetchrow("""SELECT id FROM bookings
+                WHERE organization_id=$1 AND id=$2 FOR UPDATE""", organization_id, booking_id)
+            yield bool(row) and not await booking_is_quarantined(conn, organization_id, booking_id)
+
     async def list_reminders_timed_out(self, organization_id, cutoff, min_date):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            visible = await quarantine_predicate(conn)
+            rows = await conn.fetch(f"""
                 SELECT * FROM bookings
                 WHERE organization_id = $1
                   AND reminder_status = 'sent'
                   AND reminder_sent_at <= $2
                   AND data >= $3::date
+                  AND {visible}
             """, organization_id, cutoff, min_date)
             return [dict(r) for r in rows]
 
     async def list_bookings_da_verificare(self, organization_id, target_date):
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            visible = await quarantine_predicate(conn)
+            rows = await conn.fetch(f"""
                 SELECT * FROM bookings
                 WHERE organization_id = $1 AND data = $2
                   AND stato = 'confermata'
                   AND completata_at IS NULL AND no_show_at IS NULL
+                  AND {visible}
                 ORDER BY ora
             """, organization_id, target_date)
             return [dict(r) for r in rows]
@@ -773,6 +814,8 @@ class BookingRepository(TenantScopedRepository):
                 "SELECT * FROM bookings WHERE organization_id = $1 AND source_message_id = $2",
                 organization_id, str(source_message_id),
             )
+            if row and await booking_is_quarantined(conn, organization_id, row["id"]):
+                raise ValueError("Booking unavailable")
             return dict(row) if row else None
 
     async def mark_booking_requires_intervention(self, organization_id, booking_id, expected=None):

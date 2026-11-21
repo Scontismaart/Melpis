@@ -1,6 +1,7 @@
 import uuid
 
 from src.core.db.scoping import TenantScopedRepository
+from src.core.bookings.provenance_quarantine import confirmation_visibility_predicate
 
 
 class ConversationRepository(TenantScopedRepository):
@@ -37,8 +38,9 @@ class ConversationRepository(TenantScopedRepository):
 
     async def list_tickets(self, org_id: str, status: str | None = None, priorita: str | None = None, limit: int | None = None, offset: int = 0) -> list[dict]:
         async with self.pool.acquire() as conn:
+            visible = await confirmation_visibility_predicate(conn, "m")
             rows = await conn.fetch(
-                """WITH enriched AS (
+                f"""WITH enriched AS (
                        SELECT c.*, u.nome AS assigned_nome, u.email AS assigned_email,
                               ct.phone_number AS phone_number,
                               o.sla_minutes,
@@ -75,6 +77,7 @@ class ConversationRepository(TenantScopedRepository):
                            FROM messages m
                            WHERE m.organization_id = $1::uuid
                              AND m.conversation_id = c.id AND m.deleted_at IS NULL
+                             AND {visible}
                              AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
                                   WHEN EXISTS (
                                       SELECT 1 FROM conversations lineage_c
@@ -104,8 +107,9 @@ class ConversationRepository(TenantScopedRepository):
 
     async def get_conversation(self, conversation_id: str, organization_id) -> dict | None:
         async with self.scoped_conn(organization_id) as conn:
+            visible = await confirmation_visibility_predicate(conn, "m")
             row = await conn.fetchrow(
-                """WITH enriched AS (
+                f"""WITH enriched AS (
                        SELECT c.*, u.nome AS assigned_nome, u.email AS assigned_email,
                               ct.phone_number AS phone_number,
                               o.sla_minutes,
@@ -142,6 +146,7 @@ class ConversationRepository(TenantScopedRepository):
                            FROM messages m
                            WHERE m.organization_id = $2::uuid
                              AND m.conversation_id = c.id AND m.deleted_at IS NULL
+                             AND {visible}
                              AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
                                   WHEN EXISTS (
                                       SELECT 1 FROM conversations lineage_c
@@ -167,8 +172,9 @@ class ConversationRepository(TenantScopedRepository):
     ) -> list[dict]:
         """Storico messaggi di una conversazione per l'inbox HITL."""
         async with self.pool.acquire() as conn:
+            visible = await confirmation_visibility_predicate(conn, "m")
             rows = await conn.fetch(
-                """SELECT m.id, m.direction, m.message_type, m.content_text, m.status,
+                f"""SELECT m.id, m.direction, m.message_type, m.content_text, m.status,
                           m.handling_type, m.created_at,
                           fc.feedback_customer,
                           COALESCE(fs.up, 0) AS feedback_staff_up,
@@ -194,6 +200,7 @@ class ConversationRepository(TenantScopedRepository):
                    WHERE m.conversation_id = $1::uuid
                      AND m.organization_id = $2::uuid
                      AND m.deleted_at IS NULL
+                     AND {visible}
                      AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN m.created_at
                           WHEN EXISTS (
                               SELECT 1 FROM conversations lineage_c

@@ -51,7 +51,8 @@ class MultiChannelRetryWorker:
             except Exception as e:
                 logger.error("Error processing delivery attempt %s: %s", attempt["id"], e)
 
-    async def _process_one(self, attempt: dict, *, confirmation_guarded=False, prompt_guarded=False):
+    async def _process_one(self, attempt: dict, *, confirmation_guarded=False, prompt_guarded=False,
+                           quarantine_guarded_org=None):
         message_id = attempt["message_id"]
         payload = await self.repo.reconstruct_payload_for_retry(message_id)
         if not payload:
@@ -59,6 +60,28 @@ class MultiChannelRetryWorker:
             return
 
         org_id = payload["organization_id"]
+        if quarantine_guarded_org is None:
+            # Durable provenance is the exact outbox link, NOT mutable legacy
+            # handling_type. Every retry must cross the quarantine fence.
+            guard = getattr(self.repo, "outbound_quarantine_delivery_guard", None)
+            if not callable(guard):
+                await self.repo.update_delivery_attempt(
+                    attempt["id"], "failed", {"error": "outbound_quarantine_guard_unavailable"},
+                )
+                return
+            async with guard(org_id, message_id) as eligible:
+                if not eligible:
+                    await self.repo.update_delivery_attempt(
+                        attempt["id"], "failed", {"error": "outbound_quarantine_denied"},
+                    )
+                    return
+                return await self._process_one(attempt, quarantine_guarded_org=org_id,
+                                               confirmation_guarded=confirmation_guarded, prompt_guarded=prompt_guarded)
+        if str(quarantine_guarded_org) != str(org_id):
+            await self.repo.update_delivery_attempt(
+                attempt["id"], "failed", {"error": "outbound_quarantine_scope_changed"},
+            )
+            return
         if payload.get("handling_type") == "booking_confirmation" and not confirmation_guarded:
             guard = getattr(self.repo, "booking_confirmation_delivery_guard", None)
             if not callable(guard):
@@ -72,7 +95,8 @@ class MultiChannelRetryWorker:
                         attempt["id"], "failed", {"error": "booking_no_longer_confirmed"},
                     )
                     return
-                return await self._process_one(attempt, confirmation_guarded=True)
+                return await self._process_one(attempt, confirmation_guarded=True,
+                                               quarantine_guarded_org=quarantine_guarded_org)
         # P1.2 — mai reinviare alla cieca: la riga puo' essere gia' stata
         # inviata (mark arrivato dopo il claim) o in attesa webhook.
         from src.whatsapp.service import _row_awaiting_webhook, _row_is_delivered
@@ -101,7 +125,8 @@ class MultiChannelRetryWorker:
                     org_id, payload.get("conversation_id"), message_id,
                 ) as eligible:
                     if eligible:
-                        return await self._process_one(attempt, prompt_guarded=True)
+                        return await self._process_one(attempt, prompt_guarded=True,
+                                                       quarantine_guarded_org=quarantine_guarded_org)
             except (ConversationStateDenied, ConversationStateUnavailable, AllocationDenied, AllocationUnavailable):
                 pass
             await self.repo.update_delivery_attempt(

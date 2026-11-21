@@ -297,6 +297,13 @@ class BookingAdapterRouter:
             medical_dpa_signed=medical_dpa_signed,
         )
         try:
+            from src.core.db.repositories.external_booking_repo import ExternalBookingRepository
+            from src.core.bookings.provenance_quarantine import booking_provider_guard
+            if isinstance(self.repo, ExternalBookingRepository) and req.internal_booking_id:
+                async with booking_provider_guard(self.repo.pool, org_uuid, req.internal_booking_id) as allowed:
+                    if not allowed:
+                        raise ValueError("Booking unavailable")
+                    return await adapter.create_booking(org_uuid, minimized_req)
             return await adapter.create_booking(org_uuid, minimized_req)
         except asyncio.CancelledError:
             # The provider may have accepted the request before cancellation.

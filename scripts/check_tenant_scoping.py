@@ -43,10 +43,127 @@ DEFAULT_TARGETS = sorted(
 # It can never exempt another SQL literal in the same function. The hash is
 # surfaced by the checker when a new exact exception needs review.
 ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
+    # These exact query literals interpolate only quarantine_predicate's two
+    # schema-compatible outcomes (TRUE or the protected, tenant-bound ID test).
+    # Relation/ID column pairs are enumerated by that helper, not user inputs.
+    (
+        "src/api/routes/dashboard.py::recupera_eventi_dashboard",
+        "5791b6719f3b4040cf1c9ec9475d7ca8d40f510641c1612b3a18ae9b323a0fe9",
+    ): "tenant-bounded dashboard event projection excludes exact held booking sources and linked outbound confirmations",
+    (
+        "src/api/routes/dashboard.py::recupera_eventi_prioritari",
+        "c9f87e1a4a6fd78d0b44a041b83c347e56a29cb18e8ae3b6ca2ed27f278f3370",
+    ): "tenant-bounded priority event projection excludes exact held booking sources and linked outbound confirmations",
+    (
+        "src/core/db/repositories/conversation_repo.py::list_tickets",
+        "0a1a84daf70d1d2dcb2cf67b76a5535ed6af6d9329810f3aefefb33b2a1fddcc",
+    ): "tenant ticket preview uses fixed exact confirmation visibility predicate",
+    (
+        "src/core/db/repositories/conversation_repo.py::get_conversation",
+        "90f2fa2b103603b4e035c89d38f0bc099ee5a6ca4f7a93ceef653b570d327173",
+    ): "tenant conversation preview uses fixed exact confirmation visibility predicate",
+    (
+        "src/core/db/repositories/conversation_repo.py::list_conversation_messages",
+        "c64126a73b2241649c49dc9d113a100d561d47478b4726601c8ce3bf47c63f1c",
+    ): "tenant conversation history uses fixed exact confirmation visibility predicate",
+    (
+        "src/core/db/repositories/message_repo.py::get_last_ai_outbound_message",
+        "398b5646258a7f26183c9fbd6765286a286edda63e791788431377eea26b3e15",
+    ): "tenant latest outbound excludes exact held confirmation",
+    (
+        "src/core/db/repositories/message_repo.py::get_message_org_scoped",
+        "e934b53cf9312b0102419b7b56cb76f7881d1e45b151182a2f110185b714961c",
+    ): "tenant message detail excludes exact held confirmation",
+    (
+        "src/core/db/repositories/message_repo.py::get_messages_by_org",
+        "e8f944e06ea526b50cb723dafd8270425126a4e76b4a9c7456045f716b561813",
+    ): "tenant message list excludes exact held confirmation",
+    (
+        "src/core/bookings/routes.py::booking_c24_context",
+        "6da9a388757ad0852e8702bb86c53f0ec2884566e7fa1043278a17b2f3c0146b",
+    ): "exact same-tenant booking and allocation context visibility",
+    (
+        "src/core/calendar/repository.py::claim",
+        "2feee09f853ad50379428944457c300ec8d20767d02bbdf7b84f05cf13e959d6",
+    ): "bounded system claim excluding quarantined exact booking IDs",
+    (
+        "src/core/calendar/repository.py::current",
+        "c7a52d42e86a3547995feca3b1aa200ec94ab34242bb0a35c384eeb683e81fa7",
+    ): "tenant and lease ownership check with booking visibility",
+    (
+        "src/core/calendar/repository.py::dispatch",
+        "8f5212c586140acecf760d235b163056ec87d091c1ce343c5ce7ef77340aa696",
+    ): "tenant, lease and revision checked dispatch with booking visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::get_booking",
+        "c0f2a177734597284c25584e5142b3e3e8fe3768bd7e78dbe0ea2ec84c9cf525",
+    ): "exact tenant booking detail visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_bookings",
+        "b54fd1d1cd325ec6d4e7c2a4b1d9a4aa63655298b6bade9b2fb66391ec64cfa9",
+    ): "tenant/date booking list visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_bookings",
+        "f6998ac4715b1cf1bf8d955d9e09966ebbbf456ff446e1bf621d969dfc6785d3",
+    ): "tenant booking list visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_bookings_by_stato",
+        "1740a36767cd3502babbe1488c1796cdb795901b5543ba39e29dbdc16e832b58",
+    ): "tenant booking status list visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_bookings_for_reminder",
+        "1db2f2bd0b6ff2023830054b90a5faa1b3b0b21269db908d40c4d77755a1f686",
+    ): "tenant reminder eligible list visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_pending_reminders_for_phone",
+        "8b026550a309bb79530f57469c0b0e679e7860b5d254dc40e573309084e5d8b3",
+    ): "tenant pending reminder visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_reminder_replies_for_phone",
+        "a154c91239cc8234a9209b721c2b4d81d195f2ed56869cd5efc268486b49c854",
+    ): "tenant prior reminder reply visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::mark_reminder_sent",
+        "9c074482858cc23e86e4bf366819cdca617cd950bde4d43fefd5958bb4a7391a",
+    ): "exact tenant reminder dispatch mark visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_reminders_timed_out",
+        "65d8c0c2b85d69c0831b1a60a0cd5311e8bda0dc5437fa4df7af9a63741147b1",
+    ): "tenant timed-out reminder visibility",
+    (
+        "src/core/db/repositories/booking_repo.py::list_bookings_da_verificare",
+        "64e788218081b814b7ef4f42d1beff5fc148e4d53e3e9db9b733cfff3c7928af",
+    ): "tenant scheduled review list visibility",
+    (
+        "src/core/db/repositories/external_booking_repo.py::get_latest_sync",
+        "cfbfb73ba29db98eced65ed3a170345d35d5c7c6856c511785198dc2d77853bb",
+    ): "tenant latest sync visibility",
+    (
+        "src/core/db/repositories/external_booking_repo.py::get_sync_record",
+        "a6d0d3b875f54c799a067363bcb595784cf66143c284a4991a3145a4e5c50abc",
+    ): "tenant exact idempotency record visibility",
+    (
+        "src/core/db/repositories/external_booking_repo.py::get_pending_syncs",
+        "c0daa4cd6186871cedd463bcd0725b44a60134fd2213e30468df78bad885900c",
+    ): "bounded system sync sweep excluding held booking IDs",
+    (
+        "src/core/db/repositories/message_repo.py::enqueue_ready_booking_confirmations",
+        "687c0fe1ce55b7e3a35d6b9d03d6aab844e2a72db2e584d8ae8e93aa3560cac7",
+    ): "bounded system confirmation enqueue with exact confirmed booking revision and visibility",
+    (
+        "src/core/db/repositories/message_repo.py::booking_confirmation_delivery_guard",
+        "5c9ae14469883dad165dcc0024678f15361eca95fe9c76d3268cf4b94a969260",
+    ): "tenant exact locked booking revision delivery visibility",
+    (
+        "src/core/report/csv_export.py::get_prenotazioni_completate",
+        "c5ac5cef29e40bcbea6c6469d23e046a5fe4e1624b79a675edcf634b833e801b",
+    ): "tenant bounded period/status CSV visibility",
     ("src/core/bookings/privacy_boundary.py::booking_note_classification_from_connection", "fecf5dbd08454a6dc999049ef2bd54b0151abd3128e5cb5a0bfddc4384b8f77d"):
         "exact tenant lookup filters organizations.id=$1 and joins the protected reader on organization_id; the caller holds the shared classification lock and FOR SHARE of organizations stabilizes the profile during the decision",
-    ("src/core/gdpr/exporter.py::prepare", "d0d8e62096589fe82dc9a337a61b98164148449106aa71f93d09e1929b927089"):
-        "bounded row wrapper over frozen catalogue only; runtime catalogue_query proves classified sources and every tenant bind; all variants and rejected mutations tested",
+    (
+        "src/core/gdpr/exporter.py::prepare",
+        "4eddc60a274ebc571076499b0c2887de3cab50e8cb88ffc784699471317faf7c",
+    ): "bounded row wrapper over frozen catalogue and fixed booking quarantine projections; catalogue_query proves classified sources and every tenant bind",
     ("src/core/gdpr/deletion.py::advance", "f9a258519e3fa406f40097d69d11998cfd74a40e5319170972e11d64c84a1b56"):
         "parent-derived consent deletion: exact child contact_id=contacts.id join, contacts.organization_id=$1 and optional subject=$2; parser supports derived SELECT only",
     ("src/core/gdpr/deletion.py::advance", "bb690d4a5d40fbbd2a3bcb80dffd00368028d46b26ed7b9eb2e9ce9a0588440b"):

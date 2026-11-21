@@ -136,6 +136,9 @@ async def apply_booking_mutation(pool: Any, organization_id: Any, auth_user_id: 
             OR EXISTS(SELECT 1 FROM booking_stay_tombstones WHERE organization_id=$1 AND request_id=$3)''', org, request.booking_id, request.request_id):
             raise AllocationDenied('Purged booking or request cannot be replayed')
         actor = await engine._actor(conn, org, auth)
+        from src.core.bookings.provenance_quarantine import booking_is_quarantined
+        if await booking_is_quarantined(conn, org, request.booking_id):
+            raise AllocationDenied('Booking unavailable')
         before = await conn.fetchrow('SELECT * FROM bookings WHERE organization_id=$1 AND id=$2', org, request.booking_id)
         owner_stay_create = (mutation.operation == 'create_stay' and new_booking is not None
                              and new_booking.contact_id is None and new_booking.conversation_id is None

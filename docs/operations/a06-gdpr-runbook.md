@@ -273,6 +273,47 @@ does not by itself establish policy approval.
 | Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
 
 SQL108 adds a separate owner-only preflight for the manual Dashboard subset.
+Historical booking provenance quarantine (candidate migration 115) is not a
+retention deadline or deletion authority. Keep Staging traffic, delivery and
+calendar/booking workers drained and external dispatch disabled until the
+controller approves the exact original cutover inventory and validates all
+relevant application and direct-client visibility gates. Counts, absent
+contact references, a current timestamp, or a later audit marker alone are
+not proof of historical identity, creation, completion, or synthetic origin.
+New contactless manual guest bookings must not be classified by null contact.
+
+An authorized database owner (not the API/service role) must reconcile the
+original inventory in a read-only session, verify each organization/booking
+pair still exists, and record an opaque controller review reference, actual
+review time, reason `historical_provenance_unverified`, and approved finite
+next review deadline (no more than 90 days after review). Keep identifiers
+and source evidence in the restricted controller case, not logs, tickets,
+or this document. In an explicit read committed transaction, insert only
+those approved exact pairs into `booking_provenance_quarantine`; assert
+the enrolled rows and expected inventory match exactly before committing.
+On lock contention, ambiguous evidence, an unexpected row or failed gate,
+roll back and escalate. A migration or aggregate count never authorizes
+enrollment. Verify held records cannot be read or mutated through ordinary
+tenant interfaces; confirm valid newly created manual guest bookings remain
+visible. Retain only aggregate results outside the restricted case.
+
+The review date is an escalation deadline, never automatic release or
+permission to continue a forgotten hold. At or before it, obtain a new
+controller disposition with current applicable policy and independent
+evidence. For an affirmatively authorized exact release, the database owner
+appends the same pair, a distinct review reference and its actual later
+review time to `booking_provenance_quarantine_releases` in a read committed
+transaction. The original hold record is immutable. Recheck current lawful
+processing, downstream copies and access before allowing traffic; unresolved
+records remain isolated and require documented controller remediation, not a
+silent deadline extension or a generic purge.
+
+Before authorizing traffic after any restore, reconcile the exact current
+quarantine and release inventory from the restricted controller record. An
+older backup may predate the provenance registry or its enrollment. Keep the
+restored database isolated until this independent review matches the current
+inventory and authoritative journal verification succeeds.
+
 Run `ordinary_completed_booking_retention_plan` with the exact organization
 and booking IDs in a read-only read committed transaction. A busy tenant lock,
 missing completion or current policy, any applicable hold, a source or

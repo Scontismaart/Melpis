@@ -306,7 +306,9 @@ class MessageRepository(TenantScopedRepository):
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                rows = await conn.fetch("""
+                from src.core.bookings.provenance_quarantine import quarantine_predicate
+                visible = await quarantine_predicate(conn, "b")
+                rows = await conn.fetch(f"""
                     SELECT o.id,o.outbound_message_id
                     FROM booking_confirmation_outbox o
                     LEFT JOIN messages inbound ON inbound.id=o.inbound_message_id
@@ -320,6 +322,7 @@ class MessageRepository(TenantScopedRepository):
                       AND b.stato='confermata'
                       AND b.calendar_revision=o.booking_revision
                       AND outbound.status='queued'
+                      AND {visible}
                     ORDER BY o.created_at LIMIT $1
                     FOR UPDATE OF o SKIP LOCKED
                 """, limit)
@@ -337,6 +340,20 @@ class MessageRepository(TenantScopedRepository):
                 return len(rows)
 
     @asynccontextmanager
+    async def outbound_quarantine_delivery_guard(self, organization_id, message_id):
+        """Revalidate an exact outbound link, regardless of handling_type.
+
+        Hold the enrollment fence across the provider handoff, not merely the
+        initial queue read. Any database/lookup failure propagates fail closed.
+        """
+        from src.core.bookings.provenance_quarantine import confirmation_is_quarantined
+        org, message = uuid.UUID(str(organization_id)), uuid.UUID(str(message_id))
+        async with self.pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(org))
+            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM messages WHERE organization_id=$1 AND id=$2)", org, message)
+            yield bool(exists) and not await confirmation_is_quarantined(conn, org, message)
+
+    @asynccontextmanager
     async def booking_confirmation_delivery_guard(self, organization_id, message_id):
         """Serialize an A05 confirmation send with booking cancellation.
 
@@ -346,12 +363,15 @@ class MessageRepository(TenantScopedRepository):
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                state = await conn.fetchval("""
+                from src.core.bookings.provenance_quarantine import quarantine_predicate
+                visible = await quarantine_predicate(conn, "b")
+                state = await conn.fetchval(f"""
                     SELECT b.stato FROM booking_confirmation_outbox o
                     JOIN bookings b ON b.id=o.booking_id
                       AND b.organization_id=o.organization_id
                     WHERE o.organization_id=$1 AND b.organization_id=$1 AND o.outbound_message_id=$2
                       AND b.calendar_revision=o.booking_revision
+                      AND {visible}
                     FOR UPDATE OF b
                 """, uuid.UUID(str(organization_id)), uuid.UUID(str(message_id)))
                 yield state == "confermata"
@@ -437,13 +457,16 @@ class MessageRepository(TenantScopedRepository):
     async def get_last_ai_outbound_message(self, organization_id,
                                            conversation_id) -> dict | None:
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            from src.core.bookings.provenance_quarantine import confirmation_visibility_predicate
+            visible = await confirmation_visibility_predicate(conn)
+            row = await conn.fetchrow(f"""
                 SELECT * FROM messages
                 WHERE organization_id = $1::uuid
                   AND conversation_id = $2::uuid
                   AND direction = 'outbound'
                   AND handling_type = 'ai_handled'
                   AND deleted_at IS NULL
+                  AND {visible}
                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
                        WHEN EXISTS (
                            SELECT 1 FROM conversations lineage_c
@@ -461,10 +484,13 @@ class MessageRepository(TenantScopedRepository):
 
     async def get_message_org_scoped(self, organization_id, message_id) -> dict | None:
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            from src.core.bookings.provenance_quarantine import confirmation_visibility_predicate
+            visible = await confirmation_visibility_predicate(conn)
+            row = await conn.fetchrow(f"""
                 SELECT * FROM messages
                 WHERE id = $2::uuid AND organization_id = $1::uuid
                   AND deleted_at IS NULL
+                  AND {visible}
                   AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
                        WHEN EXISTS (
                            SELECT 1 FROM conversations lineage_c
@@ -537,8 +563,11 @@ class MessageRepository(TenantScopedRepository):
         if isinstance(organization_id, str):
             organization_id = uuid.UUID(organization_id)
         async with self.pool.acquire() as conn:
+            from src.core.bookings.provenance_quarantine import confirmation_visibility_predicate
+            visible = await confirmation_visibility_predicate(conn)
             rows = await conn.fetch(
-                """SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL
+                f"""SELECT * FROM messages WHERE organization_id = $1 AND deleted_at IS NULL
+                   AND {visible}
                    AND (CASE WHEN to_regclass('public.c24_idle_watermarks') IS NULL THEN created_at
                         WHEN EXISTS (
                             SELECT 1 FROM conversations lineage_c
