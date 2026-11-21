@@ -238,8 +238,6 @@ SYSTEM_SCOPE_ALLOWLIST: dict[str, str] = {
         "pre-auth webhook resolution uses the globally unique provider webhook id before tenant assignment",
     "src/core/db/repositories/webhook_inbox_repo.py::claim":
         "trusted worker claims the durable Meta inbox globally with SKIP LOCKED",
-    "src/core/db/repositories/webhook_inbox_repo.py::purge_completed":
-        "trusted retention worker purges completed raw webhook payloads after seven days",
 }
 # Exact literal exceptions: the function still scans every other SQL literal.
 SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
@@ -289,7 +287,6 @@ SYSTEM_SCOPE_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
     ("src/integrations/airtable/repository.py::get_subscription_by_webhook_id", "9fac9734a127f4f89d521c91c873754428a637b920dadc9d6a31b1e80088593f"): "pre-auth webhook resolution by provider-unique webhook id",
     ("src/integrations/airtable/repository.py::reap_stale_processing", "265bbdcffdcb619cfce2a4e967685582dc50fd8f46e197af27173912d1d6da71"): "trusted Airtable worker locks bounded stale claims; UPDATE correlates selected id and organization_id",
     ("src/core/db/repositories/webhook_inbox_repo.py::claim", "a72d6bfaa56e4423b4aa169cae408e790ae480c58dc5c0d1128e28908faeb2b1"): "trusted worker claims the durable Meta inbox globally with SKIP LOCKED",
-    ("src/core/db/repositories/webhook_inbox_repo.py::purge_completed", "da0121e8a54d90132082510cf95a4bb1dde88485d3e3a1ec7909b7e26308ff86"): "trusted retention worker purges completed webhook payloads after seven days",
 }
 ALLOWLISTED_SQL_FINGERPRINTS.update({
     ("src/core/gdpr/independent_tip.py::initialize", "02f968861007c0f4b57bb1fd9a248386df734d8f0fd4d94533bc3bef0ac68e62"): "operator-only SQLite authority schema, never executed against PostgreSQL",

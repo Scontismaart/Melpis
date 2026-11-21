@@ -48,8 +48,11 @@ supersede the pending commissioning statements in the historical evidence below.
   evidence and returns only eligible exact plans. The isolated encrypted
   restore test uses that selection as input to the existing authenticated
   checkpoint and inventory-covered source purge, then replays it under v5.
-  The old global webhook dedup age-only deletion is explicitly retired
-  because creation time is not verified conclusion. Other global receipts
+  The old global webhook dedup age-only deletion and the legacy completed
+  inbox hard-delete method are explicitly retired. The scoped C2.4 sweep
+  retains the completed inbox receipt and scrubs its payload; a synthetic
+  retry exercises the actual repository and verifies that the receipt is
+  not re-enqueued. Creation time is not verified conclusion. Other global receipts
   still require an independently supported conclusion and safe replay
   disposition; no arbitrary time or tenant attribution is inferred.
 
