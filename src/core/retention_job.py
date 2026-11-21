@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 _EXPORT_EXPIRY_BATCH = 100
 _EXPORT_EXPIRY_MAX_BATCHES = 10
 _EXPORT_EXPIRY_BUDGET_SECONDS = 20
+_WORKER_CAPABILITY_SCRUB_BATCH = 100
+_WORKER_CAPABILITY_SCRUB_MAX_BATCHES = 10
+_WORKER_CAPABILITY_SCRUB_BUDGET_SECONDS = 20
 
 
 @system_scope('scheduled expiry of encrypted time-limited GDPR snapshots only')
@@ -84,8 +87,9 @@ async def _retention_policies(pool):
         )
 
 
-@system_scope('bounded purge of expired private booking capability payloads; retain only lineage and digest')
-async def _scrub_expired_worker_capability_payloads(pool):
+@system_scope('bounded removal of expired unused capability payloads and aggregate-only backlog monitoring')
+async def scrub_expired_worker_capability_payloads(pool):
+    deadline = time.monotonic() + _WORKER_CAPABILITY_SCRUB_BUDGET_SECONDS
     async with pool.acquire() as conn:
         owner = await conn.fetchval(
             "SELECT session_user='postgres' AND current_user='postgres'"
@@ -96,21 +100,32 @@ async def _scrub_expired_worker_capability_payloads(pool):
         if owner is not True or available is not True:
             logger.warning('gdpr_retention worker_capability_payload_scrub=unavailable')
             return None
-        return await conn.fetchval(
-            'SELECT c24_private.c24_worker_scrub_expired_capabilities($1)', 100,
+        total = 0
+        for _ in range(_WORKER_CAPABILITY_SCRUB_MAX_BATCHES):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            scrubbed = await conn.fetchval(
+                'SELECT c24_private.c24_worker_scrub_expired_capabilities($1)',
+                _WORKER_CAPABILITY_SCRUB_BATCH, timeout=remaining,
+            )
+            total += scrubbed
+            if scrubbed < _WORKER_CAPABILITY_SCRUB_BATCH:
+                break
+        oldest = await conn.fetchval(
+            '''SELECT FLOOR(EXTRACT(EPOCH FROM (statement_timestamp()-MIN(expires_at))))::bigint
+               FROM c24_private.worker_capabilities
+               WHERE payload IS NOT NULL AND consumed_at IS NULL AND completed_at IS NULL
+                 AND expires_at<=statement_timestamp()''',
         )
+    return {'worker_capability_payloads_scrubbed': total, 'oldest_overdue_seconds': oldest}
 
 
 async def run_retention(pool):
     expired = await _expired_exports(pool)
-    worker_payloads_scrubbed = await _scrub_expired_worker_capability_payloads(pool)
     counts = {'exports_expired': expired, 'messages_redacted': 0, 'simulator_purged': 0}
     if os.getenv('GDPR_RETENTION_EXECUTION_ENABLED') != 'true':
-        logger.info(
-            'gdpr_retention primary_data=disabled exports_expired=%d '
-            'worker_capability_payloads_scrubbed=%s',
-            expired, worker_payloads_scrubbed,
-        )
+        logger.info('gdpr_retention primary_data=disabled exports_expired=%d', expired)
         return counts
     for policy in await _retention_policies(pool):
         if (not policy['valid'] or policy['legal_hold'] or not policy['erasure_allowed']
@@ -190,8 +205,7 @@ async def run_retention(pool):
                 )
                 counts['simulator_purged'] += int(result.split()[-1])
     logger.info(
-        'gdpr_retention exports_expired=%d messages_redacted=%d simulator_purged=%d '
-        'worker_capability_payloads_scrubbed=%s',
-        *counts.values(), worker_payloads_scrubbed,
+        'gdpr_retention exports_expired=%d messages_redacted=%d simulator_purged=%d',
+        *counts.values(),
     )
     return counts

@@ -148,6 +148,22 @@ async def _export_expiry_job(pool):
         outcome["exports_expired"], age)
 
 
+def _run_worker_capability_scrub():
+    asyncio.run(_con_pool_esimero(_worker_capability_scrub_job))
+
+
+async def _worker_capability_scrub_job(pool):
+    from src.core.retention_job import scrub_expired_worker_capability_payloads
+
+    outcome = await scrub_expired_worker_capability_payloads(pool)
+    if outcome is None:
+        return
+    age = outcome["oldest_overdue_seconds"]
+    log = logger.warning if age is not None and age >= 60 else logger.info
+    log("scheduler=gdpr_worker_capability_scrub scrubbed=%d oldest_overdue_seconds=%s",
+        outcome["worker_capability_payloads_scrubbed"], age)
+
+
 def _run_c24_retention_sweep():
     """Run C2.4 retention only with its isolated, explicitly enabled identity."""
     if (os.getenv("GDPR_RETENTION_EXECUTION_ENABLED") != "true"
@@ -430,6 +446,15 @@ def avvia_scheduler():
         IntervalTrigger(minutes=1),
         id="gdpr_export_expiry",
         name="Expiry of encrypted GDPR export artifacts",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+    )
+    _scheduler.add_job(
+        _run_worker_capability_scrub,
+        IntervalTrigger(minutes=1),
+        id="gdpr_worker_capability_scrub",
+        name="Scrub expired unused booking worker capability payloads",
         replace_existing=True,
         coalesce=True,
         max_instances=1,

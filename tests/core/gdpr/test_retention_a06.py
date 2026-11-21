@@ -202,9 +202,12 @@ async def test_snapshot_expiry_survives_unrelated_capability_scrub_failure(pg_po
     async def failed_scrub(_pool):
         raise RuntimeError("synthetic capability scrub failure")
 
-    monkeypatch.setattr(retention_job, "_scrub_expired_worker_capability_payloads", failed_scrub)
+    from src.core import scheduler
+
+    monkeypatch.setattr(retention_job, "scrub_expired_worker_capability_payloads", failed_scrub)
     with pytest.raises(RuntimeError, match="synthetic capability"):
-        await run_retention(pg_pool)
+        await scheduler._worker_capability_scrub_job(pg_pool)
+    assert (await run_retention(pg_pool))["exports_expired"] == 1
     async with pg_pool.acquire() as conn:
         assert await conn.fetchval(
             "SELECT status FROM gdpr_operations WHERE organization_id=$1 AND id=$2", org, expired,
@@ -212,6 +215,48 @@ async def test_snapshot_expiry_survives_unrelated_capability_scrub_failure(pg_po
         assert await conn.fetchval(
             "SELECT count(*) FROM gdpr_export_chunks WHERE organization_id=$1 AND operation_id=$2", org, expired,
         ) == 0
+
+
+@pytest.mark.asyncio
+async def test_worker_capability_scrub_drains_due_batches_and_keeps_replay_evidence(pg_pool, sample_org):
+    org = sample_org["id"]
+    async with pg_pool.acquire() as conn:
+        assert await conn.fetchval("""SELECT bool_and(NOT has_function_privilege(role,
+                'c24_private.c24_worker_scrub_expired_capabilities(integer)','EXECUTE')
+              AND NOT has_table_privilege(role,'c24_private.worker_capabilities','SELECT'))
+            FROM unnest(ARRAY['anon','authenticated','service_role','melpis_c24_booking_worker']) role""")
+        due = await conn.fetch("""INSERT INTO c24_private.worker_capabilities
+                (organization_id,message_id,claim_id,generation,booking_id,payload,payload_hash,issued_at,expires_at)
+            SELECT $1,gen_random_uuid(),gen_random_uuid(),1,gen_random_uuid(),
+                '{"synthetic":true}'::jsonb,repeat('a',64),now()-interval '6 minutes',now()-interval '3 minutes'
+            FROM generate_series(1,102) RETURNING capability_id""", org)
+        pending = await conn.fetchval("""INSERT INTO c24_private.worker_capabilities
+                (organization_id,message_id,claim_id,generation,booking_id,payload,payload_hash,expires_at)
+            VALUES($1,gen_random_uuid(),gen_random_uuid(),1,gen_random_uuid(),
+                '{"synthetic":true}'::jsonb,repeat('b',64),now()+interval '1 minute')
+            RETURNING capability_id""", org)
+    due_ids = [row["capability_id"] for row in due]
+    try:
+        locked = due_ids[0]
+        async with pg_pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT 1 FROM c24_private.worker_capabilities WHERE capability_id=$1 FOR UPDATE", locked)
+            outcome = await retention_job.scrub_expired_worker_capability_payloads(pg_pool)
+            assert outcome["worker_capability_payloads_scrubbed"] == 101
+            assert outcome["oldest_overdue_seconds"] >= 180
+        assert await retention_job.scrub_expired_worker_capability_payloads(pg_pool) == {
+            "worker_capability_payloads_scrubbed": 1, "oldest_overdue_seconds": None,
+        }
+        async with pg_pool.acquire() as conn:
+            assert await conn.fetchval("""SELECT count(*) FROM c24_private.worker_capabilities
+                WHERE organization_id=$1 AND payload IS NULL AND payload_hash=repeat('a',64)
+                  AND claim_id IS NOT NULL AND generation=1 AND consumed_at IS NULL AND completed_at IS NULL""", org) == 102
+            assert await conn.fetchval("SELECT payload IS NOT NULL FROM c24_private.worker_capabilities WHERE capability_id=$1",
+                                       pending)
+    finally:
+        # The private table deliberately has no organizations FK. Resetting the
+        # synthetic public tables cannot remove these specific test capabilities.
+        await pg_pool.execute("""DELETE FROM c24_private.worker_capabilities
+            WHERE organization_id=$1 AND capability_id=ANY($2::uuid[])""", org, [*due_ids, pending])
 
 
 async def insert_message_policy(pool, org, *, version, days=1, hold=False, valid=True,
