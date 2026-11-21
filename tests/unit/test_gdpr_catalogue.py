@@ -36,7 +36,9 @@ def test_conversation_categories_have_verified_subject_scope_without_account_con
     assert exporter.catalogue_query(category, 'organization')
     assert exporter.catalogue_query(category, 'contact')
     if name == 'booking_conversation_requests':
-        assert "COALESCE((to_jsonb(r)->>'original_subject_id')::uuid, s.subject_id) = $2::uuid" in category.contact_query
+        assert "(to_jsonb(r)->>'original_subject_id')::uuid = $2::uuid" in category.contact_query
+        assert 'COALESCE' not in category.contact_query
+        assert 'JOIN' not in category.contact_query
     else:
         assert re.search(r'subject_id\s*=\s*\$2::uuid', category.contact_query)
     assert exporter.catalogue_query(category, 'account') is None
