@@ -1,4 +1,4 @@
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, date, time, timedelta, timezone
 import logging
 import unicodedata
@@ -113,6 +113,10 @@ class BookingService:
     # ── Disponibilità ──────────────────────────────────────────
 
     async def _coperti_prenotati(self, org_id, data, ora, exclude_booking_id=None):
+        from src.core.db.repositories.booking_repo import BookingRepository
+        if isinstance(self.repo, BookingRepository):
+            hourly = await self.repo.booking_capacity_by_hour(org_id, data, STATI_LIBERI, exclude_booking_id)
+            return hourly.get(int(ora[:2]), 0)
         bookings = await self.repo.list_bookings(org_id, data)
         fascia = f"{int(ora[:2]):02d}:00"
         occupati = 0
@@ -166,12 +170,18 @@ class BookingService:
 
     async def semaforo_giorno(self, org_id, data):
         capienze = await self._get_capienze(org_id)
-        bookings = await self.repo.list_bookings(org_id, data)
+        from src.core.db.repositories.booking_repo import BookingRepository
+        if isinstance(self.repo, BookingRepository):
+            hourly = await self.repo.booking_capacity_by_hour(org_id, data, STATI_LIBERI)
+            bookings = []
+        else:
+            hourly = {}
+            bookings = await self.repo.list_bookings(org_id, data)
         slots = []
         for fascia in SLOT_ORE:
             if capienze.get(fascia, 0) <= 0:
                 continue
-            prenotati = 0
+            prenotati = hourly.get(int(fascia[:2]), 0)
             for b in bookings:
                 if b["stato"] in STATI_LIBERI:
                     continue
@@ -507,6 +517,22 @@ class BookingService:
                 raise
             return False
 
+    @asynccontextmanager
+    async def _booking_provider_guard(self, org_id, booking_id):
+        from src.core.db.repositories.booking_repo import BookingRepository
+        from src.core.bookings.provenance_quarantine import booking_provider_guard
+        if isinstance(self.repo, BookingRepository):
+            async with booking_provider_guard(self.repo.pool, org_id, booking_id) as allowed:
+                yield allowed
+        else:
+            yield True
+
+    async def _send_booking_whatsapp(self, org_id, booking_id, to_number, text, **kwargs):
+        async with self._booking_provider_guard(org_id, booking_id) as allowed:
+            if not allowed:
+                return False
+            return await self._send_whatsapp(org_id, to_number, text, **kwargs)
+
     async def send_booking_reconfirmation(self, org_id, booking):
         booking_id = str(booking["id"])
         data = self._format_date(booking["data"])
@@ -517,8 +543,8 @@ class BookingService:
             "Per confermarla, rispondi SI."
         )
         key = f"booking-reconfirmation:{booking_id}:{data}:{ora}:{booking['coperti']}"
-        return await self._send_whatsapp(
-            org_id, booking.get("telefono", ""), text,
+        return await self._send_booking_whatsapp(
+            org_id, booking_id, booking.get("telefono", ""), text,
             idempotency_key=key, raise_on_error=True,
         )
 
@@ -568,7 +594,7 @@ class BookingService:
             if has_notice and await has_notice(org_id, booking_id, updated.get("calendar_revision", 0)):
                 return updated
         msg = f"La tua prenotazione del {b['data']} alle {b['ora']} per {b['coperti']} persone e' confermata!"
-        await self._send_whatsapp(org_id, b["telefono"], msg,
+        await self._send_booking_whatsapp(org_id, booking_id, b["telefono"], msg,
             idempotency_key=f"booking-confirm-manual:{org_id}:{booking_id}:{updated.get('calendar_revision', 0)}")
         if b.get("richiede_deposito"):
             cfg = await self._get_deposito_config(org_id)
@@ -584,7 +610,7 @@ class BookingService:
                     """, org_id, booking_id, link)
                 updated["payment_link"] = link
                 updated["payment_status"] = "pending"
-                await self._send_whatsapp(org_id, b["telefono"],
+                await self._send_booking_whatsapp(org_id, booking_id, b["telefono"],
                     f"Per confermare, versa il deposito di {valuta} {importo:.2f}: {link}",
                     idempotency_key=f"booking-deposit:{org_id}:{booking_id}:{valuta.lower()}:{importo}",
                 )
@@ -603,7 +629,7 @@ class BookingService:
         msg = f"La tua prenotazione del {b['data']} alle {b['ora']} non puo' essere confermata."
         if motivo:
             msg += f" Motivo: {motivo}"
-        await self._send_whatsapp(org_id, b["telefono"], msg)
+        await self._send_booking_whatsapp(org_id, booking_id, b["telefono"], msg)
         if self.calendar_service:
             try:
                 await self.calendar_service.sync_booking_state(updated, org_id)
@@ -624,7 +650,10 @@ class BookingService:
                     idempotency_key=f"ext-cancel:{org_id}:{booking_id}",
                     external_booking_id=str(booking["external_booking_id"]),
                 )
-                result = await self.booking_router.dispatch_cancel_booking(org_id, cancel_req)
+                async with self._booking_provider_guard(org_id, booking_id) as allowed:
+                    if not allowed:
+                        return None
+                    result = await self.booking_router.dispatch_cancel_booking(org_id, cancel_req)
                 if not result.success or result.sync_status == "uncertain":
                     await self.repo.mark_booking_requires_intervention(org_id, booking_id)
                     booking["richiede_intervento"] = True
@@ -781,8 +810,8 @@ class BookingService:
         text = ("Grazie, la tua prenotazione e' confermata! Ti aspettiamo."
                 if status == "confirmed" else
                 "Prenotazione cancellata. Per qualsiasi altra richiesta, siamo a disposizione.")
-        return await self._send_whatsapp(
-            org_id, phone, text,
+        return await self._send_booking_whatsapp(
+            org_id, booking_id, phone, text,
             idempotency_key=f"reminder-response:{org_id}:{booking_id}:{status}",
         )
 
@@ -821,6 +850,12 @@ class BookingService:
         return False
 
     async def _genera_payment_link(self, org_id, booking_id, importo, valuta="EUR"):
+        async with self._booking_provider_guard(org_id, booking_id) as allowed:
+            if not allowed:
+                raise BookingNotFoundError("Booking unavailable")
+            return await self._genera_payment_link_guarded(org_id, booking_id, importo, valuta)
+
+    async def _genera_payment_link_guarded(self, org_id, booking_id, importo, valuta):
         from decimal import Decimal, ROUND_HALF_UP
         import os
         from src.core.billing.routes import _get_stripe, _stripe_call

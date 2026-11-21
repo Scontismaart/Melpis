@@ -74,6 +74,8 @@ TABLE_SCOPE_CLASSIFICATION: dict[str, tuple[str, str]] = {
     "booking_completion_erasure_markers": ("direct", "Private erasure markers are bound to the tenant and transaction."),
     "ordinary_booking_completion_evidence": ("direct", "Verified managed booking completion evidence is bound to its tenant and subject."),
     "ordinary_booking_purge_bindings": ("direct", "Independently retained ordinary booking purge evidence is bound to its tenant and subject."),
+    "booking_provenance_quarantine": ("direct", "Exact owner-reviewed historical booking containment records carry organization_id."),
+    "booking_provenance_quarantine_releases": ("direct", "Exact reviewed releases refer to the original scoped quarantine record."),
     "c24_account_response_receipts": ("direct", "Account response provenance is tied to the original committed tenant."),
     "c24_orphan_proposal_expirations": ("direct", "Orphan proposal replay evidence is bound to the original tenant and source."),
     "booking_stays": ("direct", "Canonical civil stays retain verified original-subject scope."),

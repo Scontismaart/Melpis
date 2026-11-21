@@ -1,5 +1,6 @@
 import uuid
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timedelta
 from src.whatsapp.retry_worker import RetryWorker
@@ -45,6 +46,10 @@ def mock_repo():
     repo.update_message_status = AsyncMock()
     repo.update_delivery_attempt = AsyncMock()
     repo.insert_delivery_attempt = AsyncMock()
+    @asynccontextmanager
+    async def allow_unheld_confirmation(org_id, message_id):
+        yield True
+    repo.outbound_quarantine_delivery_guard = allow_unheld_confirmation
     return repo
 
 

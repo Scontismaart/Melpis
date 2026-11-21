@@ -262,6 +262,7 @@ def test_get_booking_status_configured_without_leaking_secrets(client):
             return None
 
         conn.fetchrow = AsyncMock(side_effect=mock_fetchrow_side_effect)
+        conn.fetchval = AsyncMock(return_value=True)  # Quarantine schema exists.
 
         resp = client.get("/api/v1/integrations/booking/status")
         assert resp.status_code == 200

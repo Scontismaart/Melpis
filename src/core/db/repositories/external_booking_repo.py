@@ -16,6 +16,7 @@ from typing import Any
 from cryptography.fernet import Fernet
 
 from src.core.db.scoping import TenantScopedRepository, system_scope
+from src.core.bookings.provenance_quarantine import quarantine_predicate, booking_is_quarantined
 
 logger = logging.getLogger(__name__)
 
@@ -222,13 +223,14 @@ class ExternalBookingRepository(TenantScopedRepository):
             organization_id = uuid.UUID(organization_id)
 
         async with self.pool.acquire() as conn:
+            visible = await quarantine_predicate(conn, "external_booking_sync", "internal_booking_id")
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, organization_id, idempotency_key, sync_status,
                        external_booking_id, sync_error, retry_count,
                        created_at, updated_at
                 FROM external_booking_sync
-                WHERE organization_id = $1
+                WHERE organization_id = $1 AND {visible}
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -286,6 +288,8 @@ class ExternalBookingRepository(TenantScopedRepository):
             internal_booking_id = uuid.UUID(internal_booking_id)
 
         async with self.pool.acquire() as conn:
+            if internal_booking_id is not None and await booking_is_quarantined(conn, organization_id, internal_booking_id):
+                raise ValueError("Booking unavailable")
             row = await conn.fetchrow(
                 """
                 INSERT INTO external_booking_sync (
@@ -407,10 +411,12 @@ class ExternalBookingRepository(TenantScopedRepository):
             organization_id = uuid.UUID(organization_id)
 
         async with self.pool.acquire() as conn:
+            visible = await quarantine_predicate(conn, "external_booking_sync", "internal_booking_id")
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT * FROM external_booking_sync
                 WHERE organization_id = $1 AND idempotency_key = $2
+                  AND {visible}
                 """,
                 organization_id,
                 idempotency_key,
@@ -426,10 +432,12 @@ class ExternalBookingRepository(TenantScopedRepository):
     async def get_pending_syncs(self, older_than_seconds: int = 60, limit: int = 50) -> list[dict[str, Any]]:
         """Recupera le sincronizzazioni rimaste in sospeso per riconciliazione da parte del worker."""
         async with self.pool.acquire() as conn:
+            visible = await quarantine_predicate(conn, "external_booking_sync", "internal_booking_id")
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT * FROM external_booking_sync
                 WHERE sync_status IN ('pending', 'pending_retry')
+                  AND {visible}
                   AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - make_interval(secs => $1))
                 ORDER BY created_at ASC
                 LIMIT $2

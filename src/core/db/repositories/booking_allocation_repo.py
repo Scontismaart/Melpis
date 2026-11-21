@@ -20,6 +20,7 @@ from src.core.bookings.catalog_contracts import (
     validate_catalog_json,
 )
 from src.core.calendar.availability import local_instant
+from src.core.bookings.provenance_quarantine import booking_is_quarantined
 from src.core.db.repositories.booking_catalog_repo import (
     BookingCatalogRepository,
     CatalogUnavailable,
@@ -174,6 +175,14 @@ class BookingAllocationRepository:
             OR EXISTS(SELECT 1 FROM booking_stay_tombstones WHERE organization_id=$1 AND request_id=$3)''', org, request.booking_id, request.request_id):
             raise AllocationDenied('Purged booking or request cannot be replayed')
         actor = await self._actor(conn, org, auth) if worker is None else None
+        # The dedicated worker's protected bookings view enforces exact
+        # operation/lease/lineage scope, including quarantine. Do not grant it
+        # the broader owner/service-only quarantine lookup.
+        private_worker = worker is not None and await conn.fetchval(
+            "SELECT COALESCE(NULLIF(current_setting('role'),'none'),session_user)='melpis_c24_booking_worker'"
+        )
+        if not private_worker and await booking_is_quarantined(conn, org, request.booking_id):
+            raise AllocationDenied('Booking unavailable')
         booking = await conn.fetchrow(
             "SELECT * FROM bookings WHERE organization_id=$1 AND id=$2", org, request.booking_id)
         if not booking:

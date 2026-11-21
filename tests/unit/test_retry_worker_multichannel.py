@@ -41,6 +41,10 @@ def mock_repo():
     repo.update_delivery_attempt = AsyncMock()
     repo.insert_delivery_attempt = AsyncMock()
     repo.update_message_status = AsyncMock()
+    @asynccontextmanager
+    async def allow_unheld_confirmation(org_id, message_id):
+        yield True
+    repo.outbound_quarantine_delivery_guard = allow_unheld_confirmation
     return repo
 
 
@@ -114,6 +118,69 @@ async def test_booking_confirmation_checks_current_state_before_delivery(
         mock_repo.update_delivery_attempt.assert_awaited_once_with(
             attempt_id, "failed", {"error": "booking_no_longer_confirmed"},
         )
+
+
+@pytest.mark.parametrize("held", [True, False])
+@pytest.mark.asyncio
+async def test_generic_retry_enforces_exact_confirmation_quarantine_even_when_handling_type_null(
+    app_config, mock_repo, mock_tenant, held,
+):
+    msg_id, attempt_id = uuid.uuid4(), uuid.uuid4()
+    mock_repo.reconstruct_payload_for_retry.return_value = {
+        "id": msg_id, "organization_id": mock_tenant.organization_id,
+        "handling_type": None, "channel": "whatsapp",
+        "content": {"to": "39123456789", "text": {"body": "Stale confirmation"}},
+    }
+    active = False
+
+    @asynccontextmanager
+    async def guard(org_id, message_id):
+        nonlocal active
+        assert org_id == mock_tenant.organization_id and message_id == msg_id
+        active = True
+        try:
+            yield not held
+        finally:
+            active = False
+
+    mock_repo.outbound_quarantine_delivery_guard = guard
+    service = AsyncMock()
+
+    async def send(**kwargs):
+        assert active, "Exact quarantine check must remain fenced across provider handoff"
+        return {"status": "sent", "wam_id": "wamid.123"}
+
+    service.attempt_delivery.side_effect = send
+    worker = MultiChannelRetryWorker(app_config, mock_repo, service=service)
+    with patch("src.whatsapp.config.load_tenant_config", AsyncMock(return_value=mock_tenant)):
+        await worker._process_one({"id": attempt_id, "message_id": msg_id, "attempt_number": 1})
+    if held:
+        service.attempt_delivery.assert_not_awaited()
+        mock_repo.update_delivery_attempt.assert_awaited_once_with(attempt_id, "failed", {"error": "outbound_quarantine_denied"})
+    else:
+        service.attempt_delivery.assert_awaited_once()
+        mock_repo.update_delivery_attempt.assert_awaited_once_with(attempt_id, "succeeded")
+
+
+@pytest.mark.asyncio
+async def test_generic_retry_quarantine_lookup_failure_is_fail_closed(app_config, mock_repo, mock_tenant):
+    msg_id, attempt_id = uuid.uuid4(), uuid.uuid4()
+    mock_repo.claim_delivery_attempts.return_value = [{"id": attempt_id, "message_id": msg_id, "attempt_number": 1}]
+    mock_repo.reconstruct_payload_for_retry.return_value = {
+        "id": msg_id, "organization_id": mock_tenant.organization_id,
+        "handling_type": None, "channel": "whatsapp", "content": {},
+    }
+
+    @asynccontextmanager
+    async def unavailable(org_id, message_id):
+        raise OSError("registry unavailable")
+        yield False
+
+    mock_repo.outbound_quarantine_delivery_guard = unavailable
+    service = AsyncMock()
+    await MultiChannelRetryWorker(app_config, mock_repo, service=service).process_next_batch()
+    service.attempt_delivery.assert_not_awaited()
+    mock_repo.insert_delivery_attempt.assert_not_awaited()
 
 
 @pytest.mark.asyncio

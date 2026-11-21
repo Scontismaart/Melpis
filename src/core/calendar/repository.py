@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from src.core.db.scoping import system_scope
 from src.core.calendar.connection import CalendarUnavailable
+from src.core.bookings.provenance_quarantine import booking_is_quarantined, quarantine_predicate
 
 
 class CalendarQueue:
@@ -22,7 +23,8 @@ class CalendarQueue:
     @system_scope("bounded Calendar worker; every claim carries its tenant and connection epoch")
     async def claim(self, limit=10, *, organization_id=None, booking_id=None):
         async with self.pool.acquire() as conn, conn.transaction():
-            rows = await conn.fetch("""SELECT s.* FROM external_booking_sync s
+            visible = await quarantine_predicate(conn, "s", "internal_booking_id")
+            rows = await conn.fetch(f"""SELECT s.* FROM external_booking_sync s
                 JOIN google_calendar_credentials c ON c.organization_id=s.organization_id
                 WHERE s.provider='google' AND s.calendar_connection_epoch=c.connection_epoch
                   AND c.connection_status='connected' AND c.sync_enabled
@@ -32,6 +34,7 @@ class CalendarQueue:
                     OR (s.sync_status IN ('pending_retry','uncertain') AND s.updated_at<NOW()-INTERVAL '30 seconds')
                     OR (s.sync_status='processing' AND s.calendar_lease_until<clock_timestamp()))
                   AND s.retry_count<20
+                  AND {visible}
                 ORDER BY s.updated_at LIMIT $1 FOR UPDATE OF s SKIP LOCKED""",
                 min(max(int(limit), 1), 50), UUID(str(organization_id)) if organization_id else None,
                 UUID(str(booking_id)) if booking_id else None)
@@ -40,6 +43,8 @@ class CalendarQueue:
                 # Never wait for erasure while holding a queue row it needs.
                 if not await conn.fetchval("SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1::text,606))",
                                            str(row["organization_id"])):
+                    continue
+                if await booking_is_quarantined(conn, row["organization_id"], row["internal_booking_id"]):
                     continue
                 recovery = row["calendar_dispatch_state"] == "possibly_sent"
                 token = uuid4()
@@ -59,15 +64,17 @@ class CalendarQueue:
 
     async def current(self, claim, *, require_revision=True):
         async with self.pool.acquire() as conn:
-            return bool(await conn.fetchval("""SELECT EXISTS(SELECT 1 FROM external_booking_sync s
+            visible = await quarantine_predicate(conn, "b")
+            return bool(await conn.fetchval(f"""SELECT EXISTS(SELECT 1 FROM external_booking_sync s
                 JOIN google_calendar_credentials c ON c.organization_id=s.organization_id
                 JOIN bookings b ON b.organization_id=s.organization_id AND b.id=s.internal_booking_id
                 JOIN booking_settings bs ON bs.organization_id=s.organization_id
                 WHERE s.organization_id=$1 AND s.id=$2 AND s.calendar_lease_token=$3
                   AND s.calendar_fence=$4 AND s.calendar_lease_until>clock_timestamp() AND s.sync_status='processing'
                   AND c.organization_id=$1 AND b.organization_id=$1 AND bs.organization_id=$1
+                  AND {visible}
                   AND c.connection_epoch=s.calendar_connection_epoch AND c.connection_status='connected' AND c.sync_enabled
-                  AND (NOT $5 OR s.calendar_claimed_action='delete' OR bs.config#>>'{a05,authority}'=
+                  AND (NOT $5 OR s.calendar_claimed_action='delete' OR bs.config#>>'{{a05,authority}}'=
                       CASE WHEN s.calendar_authoritative THEN 'google_authoritative' ELSE 'internal_calendar_sync' END)
                   AND (NOT $5 OR b.calendar_revision=s.calendar_claimed_revision))""",
                 claim["organization_id"], claim["id"], claim["calendar_lease_token"], claim["calendar_fence"], require_revision))
@@ -79,17 +86,19 @@ class CalendarQueue:
             # connection. An unresolved earlier HTTP write blocks another write.
             await conn.fetchrow("SELECT organization_id FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE",
                                 claim["organization_id"])
-            return bool(await conn.fetchval("""UPDATE external_booking_sync s SET
+            visible = await quarantine_predicate(conn, "b")
+            return bool(await conn.fetchval(f"""UPDATE external_booking_sync s SET
                 calendar_dispatch_state='possibly_sent',calendar_payload_hash=$5,updated_at=NOW()
                 FROM bookings b JOIN google_calendar_credentials c ON c.organization_id=b.organization_id
                   JOIN booking_settings bs ON bs.organization_id=b.organization_id
                 WHERE s.organization_id=$1 AND s.id=$2 AND s.calendar_lease_token=$3 AND s.calendar_fence=$4
                   AND s.calendar_lease_until>clock_timestamp() AND s.sync_status='processing'
                   AND b.id=s.internal_booking_id AND b.organization_id=$1 AND c.organization_id=$1 AND bs.organization_id=$1
+                  AND {visible}
                   AND b.calendar_revision=s.calendar_claimed_revision
                   AND c.organization_id=$1 AND c.connection_epoch=s.calendar_connection_epoch
                   AND c.connection_status='connected' AND c.sync_enabled
-                  AND bs.organization_id=s.organization_id AND (s.calendar_claimed_action='delete' OR bs.config#>>'{a05,authority}'=
+                  AND bs.organization_id=s.organization_id AND (s.calendar_claimed_action='delete' OR bs.config#>>'{{a05,authority}}'=
                       CASE WHEN s.calendar_authoritative THEN 'google_authoritative' ELSE 'internal_calendar_sync' END)
                   AND NOT EXISTS(SELECT 1 FROM external_booking_sync other
                       WHERE other.organization_id=$1 AND other.provider='google' AND other.id<>s.id
@@ -112,6 +121,8 @@ class CalendarQueue:
             # rows. Share that order, then follow A05's conversation/capacity locks.
             await conn.fetchrow("SELECT organization_id FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE",
                                 claim["organization_id"])
+            if await booking_is_quarantined(conn, claim["organization_id"], claim["internal_booking_id"]):
+                return False
             before = await conn.fetchrow("SELECT id_conversazione,data,ora FROM bookings WHERE organization_id=$1 AND id=$2",
                                         claim["organization_id"], claim["internal_booking_id"])
             if not before:
@@ -184,6 +195,8 @@ class CalendarQueue:
     async def retry(self, org_id, booking_id):
         # An owner's retry never changes an uncertain dispatch into a fresh POST.
         async with self._write(org_id) as conn:
+            if await booking_is_quarantined(conn, UUID(str(org_id)), UUID(str(booking_id))):
+                return False
             return bool(await conn.fetchval("""UPDATE external_booking_sync s SET
                 sync_status=CASE WHEN calendar_dispatch_state='possibly_sent' THEN 'uncertain' ELSE 'pending' END,
                 retry_count=0,updated_at=NOW()-INTERVAL '31 seconds',
@@ -204,6 +217,8 @@ class CalendarQueue:
         receipt. No request body or claimed receipt comes from an API client.
         """
         async with self._write(old["organization_id"], lock_organization=True) as conn:
+            if await booking_is_quarantined(conn, old["organization_id"], old["internal_booking_id"]):
+                return False
             await conn.fetchrow("SELECT organization_id FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE",
                                 old["organization_id"])
             return bool(await conn.fetchval("""UPDATE external_booking_sync s SET

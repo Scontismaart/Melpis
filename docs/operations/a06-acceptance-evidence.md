@@ -247,6 +247,35 @@ encrypted restore fixtures. All 32 tests passed with zero skips, including
 the signed v5 organization replay and the future-dated private receipt
 regression. The only warnings were the existing HTTPX cookie deprecation.
 
+### Conditional Staging commissioning record (2026-11-21)
+
+| Gate | Verified evidence | Disposition |
+| --- | --- | --- |
+| Candidate release | [PR #243](https://github.com/Scontismaart/Melpis/pull/243). Independent review covered `0913f00a` and the exact corrected head `14de1929b474e47e5ac04ec9dc24563ac98f7b31`. The first CI secret scan flagged the deterministic SHA-256 fingerprint of a tenant-scoping query. Splitting the tuple over multiple lines preserved its exact value and kept the scanner and review controls intact. PR [CI](https://github.com/Scontismaart/Melpis/actions/runs/44892800562) and [Migration Check](https://github.com/Scontismaart/Melpis/actions/runs/44892800611) passed. | Protected merge `1ca339cd3c262121a5ac34e95ac834126dd6dcc0` has the same tree as the reviewed head. [Main CI and GHCR](https://github.com/Scontismaart/Melpis/actions/runs/44896262045) and [main Migration Check](https://github.com/Scontismaart/Melpis/actions/runs/44896262038) both passed. GHCR registry readback confirmed both `linux/amd64` and `linux/arm64` for API `sha256:3fa5077bade39d57baab46558097e6650697df68950a0bac8de1c3d32de75588` and web `sha256:a6e4c88983ba5e5999f6105a8b2eecec02c723e210fd93d44bfc9361d53ddc40`. |
+| Staging drift and historical evidence | Read-only project checks reconfirmed migration 104, 18 messages missing receipt and original subject including three billed, 43 bookings including 42 contactless, and zero invalid public/private application indexes. The 18 lacked exact worker receipts and message audit references. Eight contactless bookings had an exact audit record. Seven had a manual-creation marker, six with an exact staff profile and an event within five minutes of the stored creation record. | Message source and subject remain unresolved. The booking audit records corroborate manual origination for a subset. Customer attribution, completion and synthetic provenance remain unverified. Keep the historical corpus outside any transferred backup or replay until authorized review. |
+| Non-destructive upgrade and booking access | A disposable PostgreSQL 17 104-to-114 rehearsal used the same counts with wholly synthetic fixtures. An injected rollback restored the SQL104 catalogue and data fingerprints. On successful reapplication the row fingerprints, counts and billed markers still matched byte-for-byte. The authenticated role could read none of the 18 unverified messages. | The same role could still read its 42 contactless bookings in the rehearsal. Booking quarantine remains unresolved. A nullable contact is valid on new manual guest bookings. Keep Staging traffic and booking workers isolated unless exact controller-classified records can be protected without destructive changes. |
+| Dedicated journal container and spend | R2 account analytics showed 32 Standard Class A and 9 Class B operations this month and a 469,043-byte Standard daily peak, within current included usage. The authorized empty `melpis-staging-gdpr-journal` bucket was created Standard with `eu` jurisdiction on 21 November. Readback verified `eu`, the disabled managed domain and an empty custom-domain list. It is separate from the backup bucket. | The journal remains empty. Operational credentials await commissioning. Recheck account-wide usage before the drill. |
+| Contract and independent custody | The individual account holder confirmed personal use for Melpis and acceptance of the [Self-Serve terms](https://www.cloudflare.com/terms/) dated 12 September 2025 and the incorporated [DPA v6.4](https://www.cloudflare.com/cloudflare-customer-dpa/) effective 3 April 2026. The API confirmed a Standard account, a single administrator consistent with the declaration and active R2. See [contract evidence and transfer safeguards](c24-independent-journal-design.md#contract-and-cost-verification-2026-11-21). The custodian independently recovered synthetic keys and a sealed checkpoint from a private 1Password vault using hidden input and an offline Linux container. The local receipt `verify OK` records journal verification and rollback rejection. | Account acceptance is evidenced by the holder's declaration and observed service use. Verify actual processing scope, controller authorization where applicable and transfer safeguards before any real-data upload. Commission fresh operational keys and the independent authoritative tip separately. |
+| Hosted backup, drill and migrations | Staging remains at 104. Hosted backup, data changes, scheduler and traffic release remain gated. | A fresh encrypted backup and its R2 copy require a verified source and transfer basis. Complete the independent synthetic journal drill and verify the backup and rehearsal before the authorized 105–115 cutover, exact cohort enrollment and independent postflight. |
+
+The 21 November follow-up read-only exact scoped inventory again identified 42
+contactless bookings, all within a single organization. It computed a server-side
+sorted scoped-pair digest without returning individual identifiers. This binds the
+observed cohort at that inspection time without asserting historical attribution.
+SQL115 is a separate candidate requirement for exact non-destructive booking
+quarantine after the earlier release demonstrated the remaining read path.
+The candidate provides an immutable exact-pair enrollment and separately
+reviewed release, a finite review deadline, direct-client and application
+visibility gates, preserved occupancy and accounting, revoked stale export
+snapshots and linked confirmation containment through delivery. Independent
+review found and verified corrections for the raw confirmation message,
+private completion RPC and generic retry path with missing handling type.
+Focused synthetic PostgreSQL 16 and 17 regressions and the expanded booking,
+calendar, CSV and authorization regression passed; the candidate has not been
+applied to Staging. The new 115 migration and exact cohort enrollment require
+an explicitly scoped extension to the existing migration GO after the other
+operational gates. No remote record has been changed or deleted.
+
 Public legal references for professional confirmation: [Italian accounting
 records, Civil Code Article 2220 as reproduced in Law 772/1986](https://www.normattiva.it/atto/caricaDettaglioAtto?atto.codiceRedazionale=086U0772&atto.dataPubblicazioneGazzetta=1986-11-25&bloccoAggiornamentoBreadCrumb=true&dataVigenza=&generaTabId=true&qId=&tabID=&tipoDettaglio=originario&title=lbl.dettaglioAtto),
 [electronic invoice preservation](https://agenziaentrate.gov.it/portale/web/guest/aree-tematiche/fatturazione-elettronica/guida-fatturazione-elettronica/come-predisporre-inviare-ricevere-fe/come-si-conservano-fe).

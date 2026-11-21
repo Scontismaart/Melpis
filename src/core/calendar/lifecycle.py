@@ -33,7 +33,16 @@ class CalendarLifecycle:
                         await self.queue.fail(claim, "worker_busy", uncertain=claim["recovery"])
                         continue
                     try:
-                        await self.run(claim)
+                        # Enrollment takes this exact organization fence
+                        # exclusively. Keep it through the entire provider cycle.
+                        org = str(claim["organization_id"])
+                        if not await conn.fetchval("SELECT pg_try_advisory_lock_shared(hashtextextended($1::text,606))", org):
+                            continue
+                        try:
+                            await self.run(claim)
+                        finally:
+                            if not conn.is_closed():
+                                await asyncio.shield(conn.execute("SELECT pg_advisory_unlock_shared(hashtextextended($1::text,606))", org))
                     finally:
                         if not conn.is_closed():
                             await asyncio.shield(conn.execute("SELECT pg_advisory_unlock(hashtextextended($1,605))", key))
@@ -68,6 +77,9 @@ class CalendarLifecycle:
             await self.queue.fail(claim, "context_changed", uncertain=claim["recovery"], blocked=not claim["recovery"])
             return
         async with s.repo.pool.acquire() as conn:
+            from src.core.bookings.provenance_quarantine import booking_is_quarantined
+            if await booking_is_quarantined(conn, claim["organization_id"], claim["internal_booking_id"]):
+                return
             booking = await conn.fetchrow("""SELECT b.*,
                     f.organization_id IS NOT NULL AS c24_sector_fenced
                 FROM bookings b

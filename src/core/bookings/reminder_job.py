@@ -1,10 +1,21 @@
 from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
 import logging
+from contextlib import asynccontextmanager
+from src.core.db.repositories.booking_repo import BookingRepository
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT_HOURS = 12
+
+
+@asynccontextmanager
+async def _delivery_guard(repo, org_id, booking_id):
+    if isinstance(repo, BookingRepository):
+        async with repo.reminder_delivery_guard(org_id, booking_id) as allowed:
+            yield allowed
+    else:
+        yield True
 
 
 async def send_reminders_for_org(service, org_id, org_timezone: str = "Europe/Rome"):
@@ -15,7 +26,9 @@ async def send_reminders_for_org(service, org_id, org_timezone: str = "Europe/Ro
     for b in bookings:
         try:
             if hasattr(service.repo, "mark_reminder_sent"):
-                await service.repo.mark_reminder_sent(org_id, b["id"])
+                marked = await service.repo.mark_reminder_sent(org_id, b["id"])
+                if isinstance(service.repo, BookingRepository) and not marked:
+                    continue
             else:
                 async with service.repo.pool.acquire() as conn:
                     await conn.execute("""
@@ -26,8 +39,10 @@ async def send_reminders_for_org(service, org_id, org_timezone: str = "Europe/Ro
             msg = (f"Ciao {b['nome_cliente']}! Confermi la prenotazione di domani "
                    f"alle {b['ora']} per {b['coperti']} persone? "
                    f"Rispondi 'Si' per confermare o 'No' per annullare.")
-            await service._send_whatsapp(org_id, b["telefono"], msg)
-            sent.append(b)
+            async with _delivery_guard(service.repo, org_id, b["id"]) as allowed:
+                if allowed:
+                    await service._send_whatsapp(org_id, b["telefono"], msg)
+                    sent.append(b)
         except Exception as e:
             logger.error("Reminder failed for booking %s: %s", b["id"], e)
     return sent

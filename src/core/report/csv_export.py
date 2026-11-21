@@ -7,6 +7,7 @@ Encoding UTF-8 con BOM per apertura diretta in Excel.
 import csv
 import io
 from datetime import date
+from src.core.bookings.provenance_quarantine import quarantine_predicate
 
 # BOM UTF-8 per Excel
 _BOM = "\ufeff"
@@ -34,13 +35,15 @@ async def get_prenotazioni_completate(
         return []
 
     async with pool.acquire() as conn:
-        rows = await conn.fetch("""
+        visible = await quarantine_predicate(conn)
+        rows = await conn.fetch(f"""
             SELECT data, ora, coperti, nome_cliente, stato
             FROM bookings
             WHERE organization_id = $1
               AND data >= $2
               AND data <= $3
               AND stato = ANY($4::text[])
+              AND {visible}
             ORDER BY data, ora
         """, org_id, inizio, fine, stati)
     return [dict(r) for r in rows]

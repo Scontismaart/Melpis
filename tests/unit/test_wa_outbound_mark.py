@@ -275,11 +275,16 @@ class TestRankLateral:
 class TestWorkerGuard:
     def _worker(self, payload, service=None):
         from src.core.workers.retry_worker import MultiChannelRetryWorker
+        from contextlib import asynccontextmanager
 
         repo = MagicMock()
         repo.reconstruct_payload_for_retry = AsyncMock(return_value=payload)
         repo.update_delivery_attempt = AsyncMock()
         repo.insert_delivery_attempt = AsyncMock()
+        @asynccontextmanager
+        async def allow_unheld_confirmation(org_id, message_id):
+            yield True
+        repo.outbound_quarantine_delivery_guard = allow_unheld_confirmation
         worker = MultiChannelRetryWorker(
             app_config=SimpleNamespace(max_retry_attempts=5), repo=repo,
             service=service, channel_router=MagicMock())

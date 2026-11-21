@@ -95,9 +95,10 @@ class _Provider:
 
 
 class _DBConnection:
-    def __init__(self, booking, *, worker_lock=True):
+    def __init__(self, booking, *, worker_lock=True, quarantined=False):
         self.booking = booking
         self.worker_lock = worker_lock
+        self.quarantined = quarantined
         self.execute = AsyncMock()
         self.fetchrow = AsyncMock(side_effect=self._fetchrow)
         self.fetchval = AsyncMock(side_effect=self._fetchval)
@@ -119,6 +120,14 @@ class _DBConnection:
         raise AssertionError(f"Unexpected DB fetchrow: {query}")
 
     async def _fetchval(self, query, *_args):
+        if query == "SELECT to_regclass('public.booking_provenance_quarantine') IS NOT NULL":
+            return True
+        if query == "SELECT public.booking_provenance_is_quarantined($1,$2)":
+            assert _args == (ORG_ID, BOOKING_ID)
+            return self.quarantined
+        if "pg_try_advisory_lock_shared" in query:
+            assert _args == (str(ORG_ID),)
+            return True
         if "pg_try_advisory_lock" in query:
             return self.worker_lock
         raise AssertionError(f"Unexpected DB fetchval: {query}")
@@ -268,6 +277,27 @@ async def _run(claim, *, current=True, dispatch=True):
     lifecycle = CalendarLifecycle(service)
     await lifecycle.run(claim)
     return lifecycle, service
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["upsert", "delete", "authoritative"])
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_quarantined_booking_never_dispatches_or_reads_provider(action, recovery):
+    claim = _claim(action, recovery=recovery)
+    service = _Service(claim)
+    service.pool_connection.quarantined = True
+
+    await CalendarLifecycle(service).process(1)
+
+    service.pool_connection.fetchval.assert_any_await(
+        "SELECT public.booking_provenance_is_quarantined($1,$2)", ORG_ID, BOOKING_ID
+    )
+    service.pool_connection.fetchrow.assert_not_awaited()
+    service._build_service.assert_not_awaited()
+    assert service.provider.calls == []
+    assert service.queue.dispatched_hashes == []
+    assert service.queue.verified_rows == []
+    assert service.queue.failures == []
 
 
 @pytest.mark.asyncio

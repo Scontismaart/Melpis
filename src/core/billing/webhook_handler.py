@@ -656,6 +656,11 @@ async def _handle_checkout_completed(conn, repo, data, event_id, trial_days):
                 SELECT deposit_amount_minor, deposit_currency, deposit_session_id
                 FROM bookings WHERE id = $1::uuid AND organization_id = $2::uuid FOR UPDATE
             """, booking_id, org_id)
+            from src.core.bookings.provenance_quarantine import booking_is_quarantined
+            if booking and await booking_is_quarantined(conn, uuid.UUID(str(org_id)), uuid.UUID(str(booking_id))):
+                # Keep the Stripe event unconsumed and retryable; a verified
+                # payment on a held booking requires owner reconciliation.
+                raise HTTPException(503, "Booking payment requires reconciliation")
             session_id = data.get("id")
             if (not booking or not isinstance(session_id, str) or not session_id
                     or (booking["deposit_session_id"] is not None
