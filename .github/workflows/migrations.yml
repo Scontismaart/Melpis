@@ -51,7 +51,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check migration versions across the catalog
         run: python3 -c 'from scripts.c01_migration_preflight import migration_files; migration_files(1, 999, require_contiguous=False)'
