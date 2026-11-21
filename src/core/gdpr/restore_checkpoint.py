@@ -138,8 +138,16 @@ def _parse_ordinary_purges(org, plans):
         raise ValueError
     bookings, all_requests = set(), set()
     for plan in plans:
-        if (type(plan) is not dict or set(plan)!=fields or plan["kind"]!="ordinary_managed_booking_candidate_v1"
-                or _uuid(plan["organization_id"])!=org or plan["deletion_authorized"] is not False
+        if type(plan) is not dict:
+            raise ValueError
+        kind = plan.get("kind")
+        if kind == "ordinary_managed_booking_conversation_candidate_v1":
+            if set(plan) != fields | {"conversation_id"}:
+                raise ValueError
+            _uuid(plan["conversation_id"])
+        elif kind != "ordinary_managed_booking_candidate_v1" or set(plan) != fields:
+            raise ValueError
+        if (_uuid(plan["organization_id"])!=org or plan["deletion_authorized"] is not False
                 or type(plan["allocation_revision"]) is not int or not 1<=plan["allocation_revision"]<2**63
                 or type(plan["policy_version"]) is not str or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}",plan["policy_version"])
                 or type(plan["timezone"]) is not str or not re.fullmatch(r"[A-Za-z0-9_+./-]{1,100}",plan["timezone"])

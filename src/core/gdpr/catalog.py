@@ -344,7 +344,7 @@ CATEGORIES: tuple[Category, ...] = (
         WHERE organization_id = $1::uuid
     """),
     Category("webhook_idempotency", "", exclusion_reason=
-             "Global table has no organization or verified subject key; event identifiers are excluded."),
+             "Global table has no organization or verified subject key; pseudonymized replay digests are excluded."),
     Category("google_calendar_credentials", """
         SELECT calendar_id, sync_enabled, last_sync_at, created_at, updated_at
         FROM google_calendar_credentials WHERE organization_id = $1::uuid

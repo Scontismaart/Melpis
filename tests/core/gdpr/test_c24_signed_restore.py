@@ -569,8 +569,11 @@ async def test_ordinary_retention_is_reapplied_after_older_encrypted_snapshot(re
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("published_v5", [False, True], ids=["v4", "v5"])
-async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch, published_v5):
+@pytest.mark.parametrize(("published_v5", "conversation_linked"),
+                         [(False, False), (True, False), (True, True)],
+                         ids=["v4", "v5", "v5-conversation"])
+async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_pool, tmp_path, monkeypatch,
+                                                         published_v5, conversation_linked):
     from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_paged_restore_candidates
     from src.core.gdpr.source_checkpoint import (
         capture_committed_checkpoint, capture_due_ordinary_bookings, purge_inventory_covered_ordinary_bookings,
@@ -579,7 +582,7 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
 
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
-    env, booking, request_ids = await _candidate(pg_pool)
+    env, booking, request_ids = await _candidate(pg_pool, conversation_linked=conversation_linked)
     org = env.org
     monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED","true")
     installation = uuid4()
@@ -602,6 +605,8 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
             backup_id=backup_id,sequence=1,verification_key=policy_key,encryption_key=policy_cipher)
     assert payload["version"]=="c24-restore-v4"
     assert payload["ordinary_booking_purges"][0]["request_ids"]==sorted(map(str,request_ids))
+    conversation = payload["ordinary_booking_purges"][0].get("conversation_id")
+    assert (conversation is not None) == conversation_linked
     backup_plain=await _docker("exec",container,"pg_dump","-U",principal,"-d",source_db,
                                "--no-owner","--no-privileges","--format=plain")
     backup_cipher=Fernet(Fernet.generate_key())
@@ -664,6 +669,8 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
             assert (await replay_primary_published_erasures(restored,authority,store,**replay_args))["traffic_authorized"] is False
         assert not await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
         assert await restored.fetchval("SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2",org,booking)==len(request_ids)
+        if conversation_linked:
+            assert await restored.fetchval("SELECT EXISTS(SELECT FROM conversations WHERE organization_id=$1 AND id=$2)", org, conversation)
         if not published_v5:
             async with restored.acquire() as conn, conn.transaction(readonly=True):
                 proof = await verify_paged_restore_candidates(conn, authority, store, **candidate_args)

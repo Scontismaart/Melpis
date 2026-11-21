@@ -87,6 +87,30 @@ async def test_unexecuted_binding_cannot_commit_or_be_reused(pg_pool):
         assert not await _purge(conn, env, booking, plan)
 
 
+async def test_conversation_binding_requires_exact_conversation_and_keeps_conversation(pg_pool):
+    env, booking, requests = await _candidate(pg_pool, conversation_linked=True)
+    plan = await _plan(pg_pool, env.org, booking)
+    conversation = plan['conversation_id']
+    sibling = uuid4()
+    async with pg_pool.acquire() as conn, conn.transaction():
+        assert not await _bind(conn, env, booking, dict(plan, conversation_id=str(sibling)))
+        old_kind = {key: value for key, value in plan.items() if key != 'conversation_id'}
+        old_kind['kind'] = 'ordinary_managed_booking_candidate_v1'
+        assert not await _bind(conn, env, booking, old_kind)
+        assert await _bind(conn, env, booking, plan)
+        assert await _purge(conn, env, booking, plan)
+    assert await pg_pool.fetchval('SELECT ordinary_verify_booking_retention_purge($1,$2,$3::jsonb)',
+                                  env.org, booking, json.dumps(plan))
+    assert await pg_pool.fetchval('SELECT count(*) FROM conversations WHERE organization_id=$1 AND id=$2',
+                                  env.org, conversation) == 1
+    assert await pg_pool.fetchval('SELECT count(*) FROM booking_stay_tombstones WHERE organization_id=$1 AND booking_id=$2',
+                                  env.org, booking) == len(requests)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        assert await _bind(conn, env, booking, plan)
+        assert await _purge(conn, env, booking, plan)
+        assert not await _bind(conn, env, booking, dict(plan, conversation_id=str(sibling)))
+
+
 async def test_new_dependency_after_binding_rolls_back_the_transaction(pg_pool):
     env, booking, _ = await _candidate(pg_pool)
     plan = await _plan(pg_pool, env.org, booking)

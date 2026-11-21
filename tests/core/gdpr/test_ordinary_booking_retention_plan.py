@@ -12,13 +12,14 @@ from tests.core.gdpr.test_ordinary_booking_completion_evidence import _approve, 
 pytestmark = pytest.mark.asyncio
 
 
-async def _candidate(pool):
+async def _candidate(pool, *, conversation_linked=False):
     env = await create_environment(pool)
     booking = await env.booking()
     day = '2024-01-10'
     # Manual booking retains a verified contact, with no conversation/source.
-    await pool.execute('''UPDATE bookings SET data=$3::text::date,id_conversazione=NULL
-        WHERE organization_id=$1 AND id=$2''', env.org, booking, day)
+    await pool.execute('''UPDATE bookings SET data=$3::text::date,
+        id_conversazione=CASE WHEN $4 THEN id_conversazione ELSE NULL END
+        WHERE organization_id=$1 AND id=$2''', env.org, booking, day, conversation_linked)
     request = env.request(booking, appointment_date=day)
     await env.apply(request)
     completed, _ = await _complete(env, booking, day=day)
@@ -97,6 +98,44 @@ async def test_plan_refuses_a_technical_receipt_hold(pg_pool):
         VALUES($1,$2,'technical_receipts','record',$3,'litigation','test:receipt-hold','qa',
                clock_timestamp(),clock_timestamp()+interval '1 day')''', env.org, uuid4(), requests[0])
     assert await _plan(pg_pool, env.org, booking) is None
+
+
+async def test_conversation_candidate_requires_exact_verified_lineage(pg_pool, other_org):
+    env, booking, requests = await _candidate(pg_pool, conversation_linked=True)
+    plan = await _plan(pg_pool, env.org, booking)
+    evidence = await pg_pool.fetchrow('''SELECT subject_id,conversation_id
+        FROM ordinary_booking_completion_evidence WHERE organization_id=$1 AND booking_id=$2''', env.org, booking)
+    assert plan['kind'] == 'ordinary_managed_booking_conversation_candidate_v1'
+    assert plan['conversation_id'] == str(evidence['conversation_id'])
+    assert plan['subject_id'] == str(evidence['subject_id'])
+    assert plan['request_ids'] == sorted(map(str, requests))
+    assert plan['deletion_authorized'] is False
+    assert await _plan(pg_pool, other_org['id'], booking) is None
+    sibling, different_subject = uuid4(), uuid4()
+    await pg_pool.execute('INSERT INTO contacts(id,organization_id,phone_number) VALUES($1,$2,$3)',
+                          different_subject, env.org, str(uuid4()))
+    await pg_pool.execute('''INSERT INTO conversations(id,organization_id,contact_id)
+        VALUES($1,$2,$3)''', sibling, env.org, different_subject)
+    await pg_pool.execute('''UPDATE bookings SET id_conversazione=$3
+        WHERE organization_id=$1 AND id=$2''', env.org, booking, str(sibling))
+    assert await _plan(pg_pool, env.org, booking) is None
+
+
+async def test_conversation_candidate_respects_hold_and_quarantine(pg_pool):
+    env, booking, _ = await _candidate(pg_pool, conversation_linked=True)
+    plan = await _plan(pg_pool, env.org, booking)
+    await pg_pool.execute('''INSERT INTO gdpr_retention_holds(organization_id,hold_id,category,scope,scope_id,
+        reason_code,authority_reference,approved_by,approved_at,review_by)
+        VALUES($1,$2,'technical_receipts','conversation',$3,'litigation','test:conversation-hold','qa',
+               clock_timestamp(),clock_timestamp()+interval '1 day')''', env.org, uuid4(), plan['conversation_id'])
+    assert await _plan(pg_pool, env.org, booking) is None
+    other, other_booking, _ = await _candidate(pg_pool, conversation_linked=True)
+    assert await _plan(pg_pool, other.org, other_booking) is not None
+    await pg_pool.execute('''INSERT INTO booking_provenance_quarantine
+        (organization_id,booking_id,review_reference,reason_code,reviewed_at,review_due_at)
+        VALUES($1,$2,'synthetic-review','historical_provenance_unverified',
+               clock_timestamp()-interval '1 minute',clock_timestamp()+interval '30 days')''', other.org, other_booking)
+    assert await _plan(pg_pool, other.org, other_booking) is None
 
 
 async def test_plan_refuses_linked_accounting_and_never_mutates_it(pg_pool, other_org):

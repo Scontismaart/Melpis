@@ -56,6 +56,40 @@ supersede the pending commissioning statements in the historical evidence below.
   still require an independently supported conclusion and safe replay
   disposition; no arbitrary time or tenant attribution is inferred.
 
+### Subsequent local lifecycle extensions (not commissioned)
+
+- SQL116 extends the ordinary booking plan only to a Dashboard booking with
+  no source message, human allocation receipts and the exact conversation
+  identity captured at completion. The new typed candidate binds that
+  conversation in the existing v5 envelope; previous source-less plans are
+  unchanged. Quarantine, holds, provider/financial/worker dependencies and
+  exact replay fences remain fail-closed. PostgreSQL 17 passed 34 focused
+  plan, purge and codec tests and the signed encrypted older-backup v5 replay
+  with the linked conversation preserved. This does not infer historical
+  completion or authorize any source-linked AI or external-provider purge.
+- SQL117 replaces the global webhook receipt tuple with its deterministic
+  length-framed SHA-256 digest, preserving exact duplicate suppression and
+  historical creation timestamps without storing raw provider identifiers or
+  status text. The digest is pseudonymized, not anonymous; it is the minimum
+  necessary replay proof until a verified conclusion and safe replay horizon
+  are established. A 90-day age-only deletion remains prohibited. Stripe
+  event receipts stay in the separate accounting category subject to the
+  specific documented obligation, not the ordinary technical-receipt clock.
+  Thirteen focused PostgreSQL 16 and worker tests passed, including legacy
+  upgrade, repeated migration, duplicate suppression, transactional rollback
+  and failed writes on incompatible application/schema pairings. A release
+  requires coordinated worker quiescence and migration before restarting
+  ingress; neither new migration has been applied to Staging.
+- A genuinely source-linked ordinary booking needs the exact source-message
+  and worker/copy disposition, independently verified on every recoverable
+  backup or reproducible by authenticated replay. The inventory manifest and
+  a checkpoint captured from the current source alone do not prove the
+  actual preimages in older backup images. The existing narrow purge must
+  not be widened for this category until that recovery condition is met.
+  Financial and provider-linked bookings also need separate evidence of the
+  accounting and provider disposition. These technical limitations remain
+  in A06; actual provider commissioning is tracked separately.
+
 | Requirement | Evidence on the baseline or candidate | Remaining acceptance work |
 | --- | --- | --- |
 | Inventory and export completeness | [A06 inventory](a06-data-inventory.md), `catalog.py`, `test_gdpr_catalogue.py`, `test_exports_a06.py`. #240 covers exact tenant-staff author feedback metadata in account exports. SQL113 adds a bounded, operation/requester/owner-authorized projection of verified inbound receipt dates and hotel/ordinary booking completion metadata. | Verify active and historical external stores. Controller review is required for remaining private, ambiguous or unstructured subject attribution, including worker authorization and financial records. |
