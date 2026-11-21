@@ -37,3 +37,22 @@ def test_erasure_clears_tenant_simulator_cache_without_touching_other_scopes():
     assert store.recupera_cronologia("org-a:staff-a:conversation") == []
     assert store.recupera_cronologia("org-b:staff-b:conversation") == [("other", "response")]
     assert store.recupera_cronologia("demo:session") == [("anonymous", "response")]
+
+
+def test_counter_only_sessions_share_capacity_and_expiry_with_history(monkeypatch):
+    now = [1.0]
+    monkeypatch.setattr("src.core.conversation_store.time.monotonic", lambda: now[0])
+    store = ConversationStore(max_conversations=2, ttl_seconds=10)
+    store.incrementa_tentativi_prenotazione("org-a:counter")
+    now[0] += 1
+    store.aggiungi("org-b:history", "synthetic", "response")
+    now[0] += 1
+    store.incrementa_tentativi_prenotazione("org-a:other")
+    assert store.tentativi_prenotazione("org-a:counter") == 0
+    assert store.erase_organization("org-a") == 1
+    assert store.tentativi_prenotazione("org-a:other") == 0
+    assert store.recupera_cronologia("org-b:history") == [("synthetic", "response")]
+    store.incrementa_tentativi_prenotazione("org-b:counter")
+    now[0] += 11
+    assert store.tentativi_prenotazione("org-b:counter") == 0
+    assert store.recupera_cronologia("org-b:history") == []

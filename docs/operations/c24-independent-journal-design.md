@@ -314,6 +314,29 @@ tier is not a guaranteed cost cap.
 
 Source: [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/).
 
+### Read-only commissioning preflight (2026-11-20)
+
+The connected account's R2 account-level capacity metrics returned two
+published Standard objects containing 468,965 payload bytes and 78 metadata
+bytes; Infrequent Access reported zero objects and bytes. This is a point-in-time
+capacity observation, without billing-period Class A/Class B totals. The local
+five-tenant v5 workload used 2,283,960 bytes across 630 encrypted objects.
+Together these measurements imply approximately 2.8 MB of current and
+modeled payload storage before retained versions, archive packs and growth.
+The published Standard free allowance is shared by the account. An existing
+USD 1 budget alert is notification only. Confirm month-to-date operations,
+approved DPA applicability and projected retained evidence growth just before
+commissioning; no provisioning action was performed for this preflight.
+
+The current Cloudflare documentation confirms conditional create-once PUT and
+EU jurisdictional storage restrictions. The public customer DPA is available;
+the actual account's contract acceptance and controller authorization must
+be independently recorded.
+
+Sources: [R2 conditional operations](https://developers.cloudflare.com/r2/api/s3/conditional-operations/),
+[R2 jurisdiction](https://developers.cloudflare.com/r2/reference/data-location/),
+[Cloudflare customer DPA](https://www.cloudflare.com/cloudflare-customer-dpa/).
+
 Activation prerequisites are explicit approval, verified bucket jurisdiction,
 private access and scoped credentials, key custody and recovery, approved
 backup/journal retention, signed publication/readback drill, restore/replay
