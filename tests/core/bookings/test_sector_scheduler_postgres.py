@@ -53,11 +53,18 @@ async def test_scheduler_read_only_missing_booking_allows_stronger_isolation(pg_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('isolation', ['repeatable_read', 'serializable'])
-async def test_external_stronger_isolation_capacity_write_without_opt_in(pg_pool, isolation):
+async def test_external_capacity_write_requires_fresh_provenance_snapshot(pg_pool, isolation):
     env = await create_environment(pg_pool, 'ristorante')
     booking = await env.booking()
     async with pg_pool.acquire() as conn, conn.transaction(isolation=isolation):
-        await conn.execute("UPDATE bookings SET data='2027-01-12' WHERE organization_id=$1 AND id=$2", env.org, booking)
+        # The sector is unfenced, but mutating a pre-existing booking must
+        # consult a fresh provenance/quarantine snapshot (SQL115).
+        with pytest.raises(asyncpg.InvalidTransactionStateError, match='Booking mutations require read committed'):
+            async with conn.transaction():
+                await conn.execute("UPDATE bookings SET data='2027-01-12' WHERE organization_id=$1 AND id=$2", env.org, booking)
         await conn.execute("""INSERT INTO bookings(id,organization_id,nome_cliente,telefono,data,ora,coperti,stato)
             VALUES($1,$2,'Synthetic','','2027-01-13','10:00',1,'in_attesa')""", uuid4(), env.org)
+    assert str(await pg_pool.fetchval('SELECT data FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)) != '2027-01-12'
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1 AND data='2027-01-13'", env.org) == 1
+    await pg_pool.execute("UPDATE bookings SET data='2027-01-12' WHERE organization_id=$1 AND id=$2", env.org, booking)
     assert str(await pg_pool.fetchval('SELECT data FROM bookings WHERE organization_id=$1 AND id=$2', env.org, booking)) == '2027-01-12'

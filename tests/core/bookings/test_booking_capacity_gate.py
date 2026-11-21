@@ -315,19 +315,21 @@ async def test_closing_capacity_serializes_with_inflight_admission(repo, sample_
         await _create(close_service, sample_org["id"], name="After close")
 
 
-async def test_booking_hour_and_date_key_equivalence(repo, sample_org):
+async def test_booking_hour_and_date_key_equivalence(repo, sample_org, monkeypatch):
     from src.core.bookings.service import BookingService
 
     await _set_capacity(repo, sample_org["id"], 1)
     services = [BookingService(repo, None, None), BookingService(repo, None, None)]
-    original = repo.booking_repo.list_bookings
+    # Admission reads the aggregate (including held bookings), not the
+    # visibility-filtered list of booking records.
+    original = repo.booking_repo.booking_capacity_by_hour
     first_read = asyncio.Event()
     second_read = asyncio.Event()
     release_first = asyncio.Event()
     compact_task = None
 
-    async def synchronized_list(org_id, data=None):
-        rows = await original(org_id, data)
+    async def synchronized_read(org_id, data, free_statuses, exclude_booking_id=None):
+        rows = await original(org_id, data, free_statuses, exclude_booking_id)
         if asyncio.current_task() is compact_task and not first_read.is_set():
             first_read.set()
             await release_first.wait()
@@ -335,7 +337,7 @@ async def test_booking_hour_and_date_key_equivalence(repo, sample_org):
             second_read.set()
         return rows
 
-    repo.booking_repo.list_bookings = synchronized_list
+    monkeypatch.setattr(repo.booking_repo, "booking_capacity_by_hour", synchronized_read)
     compact = asyncio.create_task(_create(services[0], sample_org["id"], day="20261021", name="Compact"))
     compact_task = compact
     canonical = None
@@ -349,9 +351,9 @@ async def test_booking_hour_and_date_key_equivalence(repo, sample_org):
             second_read_before_release = False
     finally:
         release_first.set()
-    outcomes = await asyncio.gather(
-        compact, *( [canonical] if canonical is not None else []), return_exceptions=True,
-    )
+        outcomes = await asyncio.gather(
+            compact, *([canonical] if canonical is not None else []), return_exceptions=True,
+        )
 
     assert not second_read_before_release
     assert sum(not isinstance(item, BaseException) for item in outcomes) == 1

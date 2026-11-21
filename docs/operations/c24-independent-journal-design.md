@@ -328,10 +328,9 @@ USD 1 budget alert is notification only. Confirm month-to-date operations,
 approved DPA applicability and projected retained evidence growth just before
 commissioning; no provisioning action was performed for this preflight.
 
-The current Cloudflare documentation confirms conditional create-once PUT and
-EU jurisdictional storage restrictions. The public customer DPA is available;
-the actual account's contract acceptance and controller authorization must
-be independently recorded.
+The Cloudflare documentation confirms conditional create-once PUT and
+EU jurisdictional storage restrictions. The account holder's acceptance and
+the remaining data-specific authorization checks are recorded below.
 
 Sources: [R2 conditional operations](https://developers.cloudflare.com/r2/api/s3/conditional-operations/),
 [R2 jurisdiction](https://developers.cloudflare.com/r2/reference/data-location/),
@@ -348,28 +347,31 @@ for covered personal data. The current published DPA is version 6.4,
 effective 3 April 2026; it forms part of the main agreement and requires
 the customer's agreement and the authority to bind that customer.
 
-This establishes the public contractual mechanism. Account-specific
-applicability remains conditional: the connected API token received HTTP 403
-on both Billing Profile and List Subscriptions, so the exact contracting legal
-name, address, actual main agreement and acceptance/notification evidence
-could not be verified. The account display name is insufficient proof. The
-founder must supply a restricted verification of the contractual party and
-applicable terms, without exposing payment information or account secrets.
-Targeted searches of connected mail and documents did not locate an
-account-specific DPA, agreement or billing receipt. This is an evidence gap
-requiring account-owner verification.
-Where Melpis acts for a client controller, obtain that controller's
-authorization of the subprocessing chain as required by the DPA.
+On 21 November 2026 the account holder privately confirmed use of the
+account in an individual capacity for Melpis, expressly accepted the
+current Self-Serve Subscription Agreement and incorporated DPA v6.4, and
+reported no known separate Enterprise agreement. The Account Details API
+returned a Standard account. The account membership check found one
+member with an administrator role consistent with the account holder's
+declaration. R2 account activity corroborates use of the service. Billing
+Profile and List Subscriptions returned HTTP 403 with the connected
+credential, so the record relies on the holder's declaration and observed
+service use for account-specific applicability. It contains no independent
+Cloudflare acceptance log. Payment details are not evidence of the identity
+of the contracting party. Where Melpis acts for a client controller, record
+that controller's authorization for the subprocessing chain under DPA §2.4.
 
-The proposed bucket must use explicit `eu` jurisdiction, not a location hint.
-The read-only EU bucket listing did not find `melpis-staging-gdpr-journal`.
-Its S3 endpoint must be jurisdiction-specific, with object storage and
-processing restricted accordingly. DPA clauses 4 and 6 recognize
-subprocessors and potential international processing, including transfer
-mechanisms and obligations for restricted onward transfers. EU R2 object
-residency does not alone establish residency of administrative metadata,
-support or account information. Record the applicable transfer safeguards
-and subprocessor review before handling real personal data.
+The dedicated Standard journal bucket was created with explicit jurisdiction
+`eu` on 21 November 2026. Readback confirmed `eu`, a disabled managed domain
+and no custom domains. The journal uses the EU-specific S3 endpoint.
+Cloudflare documents that R2 objects in that jurisdiction are stored and
+processed within the EU. DPA §§4 and 6 cover subprocessors and restricted
+transfers, including adequacy decisions and the applicable EU Standard
+Contractual Clauses (modules 2 and 3). The UK and Swiss provisions apply
+where relevant. These terms describe available safeguards. The bucket
+readback does not establish the handling of administrative metadata,
+support access, or onward transfers for a particular operation. Record the
+actual data scope, authorization and safeguards before any real-data upload.
 
 Read-only account analytics from 1 November through 21 November 2026
 04:03 UTC returned 31 Class A requests, 9 Class B requests, and a maximum
@@ -394,5 +396,5 @@ References: [Self-Serve Subscription Agreement](https://www.cloudflare.com/terms
 Activation prerequisites are explicit approval, verified bucket jurisdiction,
 private access and scoped credentials, key custody and recovery, approved
 backup/journal retention, signed publication/readback drill, restore/replay
-drill, and measured beta capacity. This document is a proposal; it does not
-establish a live signer, bucket, credential, or journal.
+drill, and measured beta capacity. The account and bucket observations above
+do not attest commissioning of a live signer, credential, or journal.

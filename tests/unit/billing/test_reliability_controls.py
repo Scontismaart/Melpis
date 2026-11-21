@@ -1164,6 +1164,13 @@ async def test_paid_deposit_adopts_session_after_send_then_mark_crash():
         def __init__(self):
             self.execute = AsyncMock()
 
+        async def fetchval(self, query, *args):
+            if "to_regclass" in query:
+                return True
+            if "booking_provenance_is_quarantined" in query:
+                return False
+            raise AssertionError(f"Unexpected query: {query}")
+
         async def fetchrow(self, query, *args):
             return {
                 "deposit_amount_minor": 2500,

@@ -74,16 +74,44 @@ async def test_stale_legacy_insert_cannot_cross_activation(pg_pool, isolation):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('isolation', ['repeatable_read', 'serializable'])
 @pytest.mark.parametrize('operation', ['capacity_update', 'insert'])
-async def test_unfenced_booking_admission_remains_allowed_at_stronger_isolation(pg_pool, isolation, operation):
+async def test_unfenced_booking_admission_and_provenance_isolation(pg_pool, isolation, operation):
     env = await create_environment(pg_pool, 'ristorante')
     booking = await env.booking()
     async with pg_pool.acquire() as conn, conn.transaction(isolation=isolation):
         if operation == 'capacity_update':
-            await conn.execute("UPDATE bookings SET data='2026-10-29' WHERE organization_id=$1 AND id=$2", env.org, booking)
+            # SQL115 requires a fresh quarantine snapshot on existing-record
+            # writes even when the sector admission fence is not active.
+            with pytest.raises(asyncpg.InvalidTransactionStateError, match='Booking mutations require read committed'):
+                async with conn.transaction():
+                    await conn.execute("UPDATE bookings SET data='2026-10-29' WHERE organization_id=$1 AND id=$2", env.org, booking)
         else:
             await conn.execute("""INSERT INTO bookings(id,organization_id,nome_cliente,telefono,data,ora,coperti,stato)
                 VALUES($1,$2,'Synthetic','','2026-10-29','10:00',1,'in_attesa')""", uuid4(), env.org)
+    if operation == 'capacity_update':
+        assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1 AND data='2026-10-29'", env.org) == 0
+        await pg_pool.execute("UPDATE bookings SET data='2026-10-29' WHERE organization_id=$1 AND id=$2", env.org, booking)
     assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1 AND data='2026-10-29'", env.org) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('isolation', ['repeatable_read', 'serializable'])
+async def test_stale_existing_booking_mutation_cannot_cross_quarantine(pg_pool, isolation):
+    env = await create_environment(pg_pool, 'ristorante')
+    booking = await env.booking()
+    async with pg_pool.acquire() as stale, stale.transaction(isolation=isolation):
+        assert not await stale.fetchval("SELECT EXISTS(SELECT 1 FROM booking_provenance_quarantine WHERE organization_id=$1 AND booking_id=$2)", env.org, booking)
+        # Enrollment deliberately leaves the booking row intact. A snapshot
+        # taken beforehand would otherwise miss the newly committed hold.
+        await pg_pool.execute("""INSERT INTO booking_provenance_quarantine
+            (organization_id,booking_id,review_reference,reason_code,reviewed_at,review_due_at)
+            VALUES($1,$2,'synthetic-stale-review','historical_provenance_unverified',
+                clock_timestamp(),clock_timestamp()+interval '30 days')""", env.org, booking)
+        with pytest.raises(asyncpg.InvalidTransactionStateError, match='Booking mutations require read committed'):
+            async with stale.transaction():
+                await stale.execute("UPDATE bookings SET data='2026-10-29' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    with pytest.raises(asyncpg.ObjectNotInPrerequisiteStateError, match='Booking provenance review required'):
+        await pg_pool.execute("UPDATE bookings SET data='2026-10-29' WHERE organization_id=$1 AND id=$2", env.org, booking)
+    assert await pg_pool.fetchval("SELECT count(*) FROM bookings WHERE organization_id=$1 AND id=$2 AND data<>'2026-10-29'", env.org, booking) == 1
 
 @pytest.mark.asyncio
 async def test_sector_admission_private_tables_have_rls_and_no_client_privileges(pg_pool):

@@ -15,7 +15,16 @@ BOOKING_ID = "00000000-0000-0000-0000-000000000002"
 def _service(monkeypatch):
     monkeypatch.setattr("src.core.calendar.service.google_calendar_enabled", lambda: True)
     connection = MagicMock()
-    connection.fetchval = AsyncMock(return_value="existing-event")
+    async def fetchval(query, *args):
+        if "to_regclass" in query:
+            return True
+        if "booking_provenance_is_quarantined" in query:
+            return False
+        if "google_event_id" in query:
+            return "existing-event"
+        raise AssertionError(f"Unexpected query: {query}")
+
+    connection.fetchval = AsyncMock(side_effect=fetchval)
     pool = MagicMock()
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=connection)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -45,7 +54,7 @@ async def test_all_legacy_event_entry_points_process_only_persisted_queue_intent
     service.process_pending.assert_awaited_once_with(
         1, organization_id=ORG_ID, booking_id=BOOKING_ID
     )
-    conn.fetchval.assert_awaited_once()
+    assert conn.fetchval.await_count == 3
     # Provider mutations are exclusively performed by CalendarLifecycle.
     service._build_service.assert_not_awaited()
 
