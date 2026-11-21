@@ -90,7 +90,18 @@ corrections are retained; the final test asserts complete bounded catch-up
 while fresh arrivals continue. Twelve focused repeated load runs passed
 across PostgreSQL 16 and PostgreSQL 17.
 
-Subsequent integration evidence as of 20 November 2026:
+The consolidated candidate implementing SQL112–113, exact blocked-account
+review, synchronized simulator histories across API replicas and fenced
+durable replay passed **409 tests, zero skipped** in 696.57 seconds on
+21 November 2026. The run includes PostgreSQL 16, Valkey, both encrypted
+synthetic restore fixtures, GDPR APIs, access revocation, booking and inbound
+workers, document routes and simulator tests. It ran the booking-worker
+suites before the GDPR suite to exercise the corrected private-schema
+fixture isolation. The same HTTPX cookie deprecation warning remained.
+Independent focused tests passed on PostgreSQL 17 (15) and unit/API paths
+(44); the CI-order fixture regression passed 44 tests on PostgreSQL 16.
+
+Subsequent integration evidence as of 21 November 2026:
 
 | Pull request | Merge commit | Main CI / Migration Check |
 | --- | --- | --- |
@@ -114,6 +125,29 @@ runs for #239–241 found a private capability fixture retained across tests
 that recreate the public schema. The subsequent fixture reset clears the
 private test schema at the same disposable database boundary. The production
 scrub retains its exact eligibility and batch limits.
+
+### Inputs required for remaining dispositions
+
+- Historical messages: authenticated contemporaneous evidence of the same
+  organization, source, conversation, original subject and actual server
+  receipt date, plus exact billed-operation and response lineage where
+  relevant. Review by the controller is required where those facts are absent.
+- Technical watermarks, revocations and global idempotency: verified request
+  conclusion and category, and demonstrated independent replay protection
+  for every still recoverable backup. Creation and suppression timestamps
+  alone cannot establish the 90-day anchor.
+- AI/provider-linked and financial bookings: verified original completion and
+  attribution, treatment of retained claims, invoices, usage, provider
+  synchronization and redaction duties. The controller must identify the
+  exact applicable obligation and minimum retained fields.
+- Shared Auth and unstructured data: independent controller disposition,
+  authorized account ownership and session arrangements, verified provider
+  receipts, and scoped attribution of text and other derived copies.
+- Operational commissioning: documented DPA applicability and account-wide
+  R2 usage, dedicated EU journal bucket, distinct credentials, independent
+  key and tip custody, synthetic drill, new backup and rehearsal, and
+  authorized Staging migration. Recheck actual provider and backup inventory
+  before certifying external copies or restoring traffic.
 
 The original [issue #91](https://github.com/Scontismaart/Melpis/issues/91) also records prior
 integration and Staging migration 104 evidence. Record CI, Migration Check, commit,
