@@ -12,7 +12,7 @@ from tests.core.gdpr.test_ordinary_booking_completion_evidence import _approve, 
 pytestmark = pytest.mark.asyncio
 
 
-async def _candidate(pool, *, conversation_linked=False):
+async def _candidate(pool, *, conversation_linked=False, before_completion=None):
     env = await create_environment(pool)
     booking = await env.booking()
     day = '2024-01-10'
@@ -22,8 +22,10 @@ async def _candidate(pool, *, conversation_linked=False):
         WHERE organization_id=$1 AND id=$2''', env.org, booking, day, conversation_linked)
     request = env.request(booking, appointment_date=day)
     await env.apply(request)
-    completed, _ = await _complete(env, booking, day=day)
     await _approve(pool, env.org)
+    if before_completion is not None:
+        await before_completion()
+    completed, _ = await _complete(env, booking, day=day)
     async with pool.acquire() as conn, conn.transaction():
         # Synthetic age fixture; the installed lifecycle still protects all
         # updates to completion evidence outside this isolated database.

@@ -576,13 +576,28 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
                                                          published_v5, conversation_linked):
     from src.core.gdpr.restore_coordinator import replay_primary_published_erasures, verify_paged_restore_candidates
     from src.core.gdpr.source_checkpoint import (
-        capture_committed_checkpoint, capture_due_ordinary_bookings, purge_inventory_covered_ordinary_bookings,
+        capture_committed_checkpoint, capture_due_ordinary_bookings, ordinary_rehearsal_statement,
+        purge_inventory_covered_ordinary_bookings,
     )
     from tests.core.gdpr.test_ordinary_booking_retention_plan import _candidate
 
     container, dsn, principal, source_db = restore_target
     await _verify_restore_target(container)
-    env, booking, request_ids = await _candidate(pg_pool, conversation_linked=conversation_linked)
+    backup_cipher = Fernet(Fernet.generate_key())
+    early_backup = None
+
+    async def dump_image():
+        plaintext = await _docker("exec", container, "pg_dump", "-U", principal, "-d", source_db,
+                                  "--no-owner", "--no-privileges", "--format=plain")
+        return backup_cipher.encrypt(plaintext), sha256(plaintext).digest()
+
+    async def capture_early_backup():
+        nonlocal early_backup
+        early_backup = await dump_image()
+
+    env, booking, request_ids = await _candidate(
+        pg_pool, conversation_linked=conversation_linked,
+        before_completion=capture_early_backup if conversation_linked else None)
     org = env.org
     monkeypatch.setenv("GDPR_RETENTION_EXECUTION_ENABLED","true")
     installation = uuid4()
@@ -607,16 +622,15 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
     assert payload["ordinary_booking_purges"][0]["request_ids"]==sorted(map(str,request_ids))
     conversation = payload["ordinary_booking_purges"][0].get("conversation_id")
     assert (conversation is not None) == conversation_linked
-    backup_plain=await _docker("exec",container,"pg_dump","-U",principal,"-d",source_db,
-                               "--no-owner","--no-privileges","--format=plain")
-    backup_cipher=Fernet(Fernet.generate_key())
-    encrypted=backup_cipher.encrypt(backup_plain)
-    plain_digest=sha256(backup_plain).digest()
-    del backup_plain
-    inventory=json.dumps(dict(version=1,installation_id=str(installation),backups=[
-        dict(backup_id=backup_id,manifest_sha256=sha256(encrypted).hexdigest(),
-             completed_at=datetime.now(timezone.utc).isoformat(),organizations=[str(org)],
-             anchor=dict(sequence=anchor.sequence,sha256=anchor.sha256),exception=None)])).encode()
+    encrypted, plain_digest = await dump_image()
+
+    def inventory_for(image):
+        return json.dumps(dict(version=1, installation_id=str(installation), backups=[
+            dict(backup_id=backup_id, manifest_sha256=sha256(image).hexdigest(),
+                 completed_at=datetime.now(timezone.utc).isoformat(), organizations=[str(org)],
+                 anchor=dict(sequence=anchor.sequence, sha256=anchor.sha256), exception=None)])).encode()
+
+    inventory = inventory_for(encrypted)
     inventory_digest=sha256(inventory).hexdigest()
     pin=publish_checkpoint(store,installation,payload,verification_key=key,encryption_key=checkpoint_cipher)
     authority.advance_checkpoint(store,None,pin,verification_key=key,encryption_key=checkpoint_cipher)
@@ -624,9 +638,87 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
     trust=dict(trusted_public_key=signer.public_key(),journal_encryption_key=journal_key,
         checkpoint_verification_key=key,checkpoint_encryption_key=checkpoint_cipher,
         policy_verification_key=policy_key,policy_encryption_key=policy_cipher)
+
+    async def restore_backup_image(image=encrypted, digest=plain_digest, inventory_bytes=inventory):
+        assert sha256(image).hexdigest() == json.loads(inventory_bytes)["backups"][0]["manifest_sha256"]
+        target = "melpis_c24_restore_dst_" + uuid4().hex[:12]
+        await _docker("exec", container, "createdb", "-U", principal, target)
+        await _docker("exec", container, "psql", "-U", principal, "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                      "-c", f'REVOKE CONNECT ON DATABASE "{target}" FROM PUBLIC')
+        plaintext = backup_cipher.decrypt(image)
+        assert sha256(plaintext).digest() == digest
+        await _docker("exec", "-i", container, "psql", "-X", "-v", "ON_ERROR_STOP=1",
+                      "-U", principal, "-d", target, input_bytes=plaintext)
+        return target
+
     async with pg_pool.acquire() as conn, conn.transaction():
+        with pytest.raises(RestoreBlocked, match="rehearsal required"):
+            await purge_inventory_covered_ordinary_bookings(
+                conn, authority, store, org, inventory, latest_inventory_sha256=inventory_digest, **trust)
+    assert await pg_pool.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)", org, booking)
+
+    if early_backup is not None:
+        early_inventory = inventory_for(early_backup[0])
+        early_db = await restore_backup_image(*early_backup, early_inventory)
+        try:
+            early_pool = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + early_db, min_size=1, max_size=1)
+            try:
+                assert await early_pool.fetchval(
+                    "SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)", org, booking)
+                assert not await early_pool.fetchval(
+                    """SELECT EXISTS(SELECT FROM ordinary_booking_completion_evidence
+                    WHERE organization_id=$1 AND booking_id=$2)""", org, booking)
+                with pytest.raises(RestoreBlocked, match="binding rejected"):
+                    await replay_primary_published_erasures(
+                        early_pool, authority, store, backup_checkpoint=anchor, backup_id=backup_id,
+                        expected_organizations=[org], quarantine_database=early_db,
+                        ordinary_inventory_bytes=early_inventory,
+                        latest_inventory_sha256=sha256(early_inventory).hexdigest(), **trust)
+                assert await early_pool.fetchval("SELECT count(*) FROM ordinary_booking_purge_bindings") == 0
+            finally:
+                await early_pool.close()
+        finally:
+            await _docker("exec", container, "dropdb", "-U", principal, early_db)
+        async with pg_pool.acquire() as conn, conn.transaction():
+            with pytest.raises(RestoreBlocked, match="rehearsal required"):
+                await purge_inventory_covered_ordinary_bookings(
+                    conn, authority, store, org, early_inventory,
+                    latest_inventory_sha256=sha256(early_inventory).hexdigest(), **trust)
+
+    rehearsal_db = await restore_backup_image()
+    try:
+        rehearsal = await asyncpg.create_pool(dsn.rsplit("/", 1)[0] + "/" + rehearsal_db, min_size=1, max_size=1)
+        try:
+            result = await replay_primary_published_erasures(
+                rehearsal, authority, store, backup_checkpoint=anchor, backup_id=backup_id,
+                expected_organizations=[org], quarantine_database=rehearsal_db,
+                ordinary_inventory_bytes=inventory, latest_inventory_sha256=inventory_digest, **trust)
+            assert result["traffic_authorized"] is False
+            assert not await rehearsal.fetchval(
+                "SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)", org, booking)
+        finally:
+            await rehearsal.close()
+    finally:
+        await _docker("exec", container, "dropdb", "-U", principal, rehearsal_db)
+
+    statement_args = (org, inventory_digest, anchor, {backup_id: (pin, policy_pin)})
+    rehearsal_signature = signer.sign(ordinary_rehearsal_statement(*statement_args))
+    wrong_inventory_signature = signer.sign(ordinary_rehearsal_statement(org, "0"*64, anchor, {backup_id: (pin, policy_pin)}))
+    omitted_backup_signature = signer.sign(ordinary_rehearsal_statement(org, inventory_digest, anchor, {}))
+    async with pg_pool.acquire() as conn, conn.transaction():
+        with pytest.raises(RestoreBlocked, match="signature invalid"):
+            await purge_inventory_covered_ordinary_bookings(
+                conn, authority, store, org, inventory, latest_inventory_sha256=inventory_digest,
+                rehearsal_proof=rehearsal_signature, **trust)
+    authority.approve_segment_epoch(anchor, signer.public_key(), journal_key)
+    async with pg_pool.acquire() as conn, conn.transaction():
+        for invalid in (wrong_inventory_signature, omitted_backup_signature):
+            with pytest.raises(RestoreBlocked, match="signature invalid"):
+                await purge_inventory_covered_ordinary_bookings(
+                    conn, authority, store, org, inventory, latest_inventory_sha256=inventory_digest,
+                    rehearsal_proof=invalid, **trust)
         assert await purge_inventory_covered_ordinary_bookings(conn,authority,store,org,inventory,
-            latest_inventory_sha256=inventory_digest,**trust)==1
+            latest_inventory_sha256=inventory_digest,rehearsal_proof=rehearsal_signature,**trust)==1
     assert not await pg_pool.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)
     async with pg_pool.acquire() as conn,conn.transaction(readonly=True):
         committed=await capture_committed_checkpoint(conn,authority,store,org,backup_id,
@@ -641,15 +733,7 @@ async def test_managed_ordinary_booking_older_backup_replay(restore_target, pg_p
         authority.promote_paged_checkpoints(store, inventory, latest_inventory_sha256=inventory_digest,
                                            candidates={(org, backup_id): candidate}, **trust)
         assert authority.checkpoint_pin(org, backup_id) == candidate
-    restored_db="melpis_c24_restore_dst_"+uuid4().hex[:12]
-    await _docker("exec",container,"createdb","-U",principal,restored_db)
-    await _docker("exec",container,"psql","-U",principal,"-d","postgres","-v","ON_ERROR_STOP=1",
-                  "-c",f'REVOKE CONNECT ON DATABASE "{restored_db}" FROM PUBLIC')
-    plaintext=backup_cipher.decrypt(encrypted)
-    assert sha256(plaintext).digest()==plain_digest
-    await _docker("exec","-i",container,"psql","-X","-v","ON_ERROR_STOP=1",
-                  "-U",principal,"-d",restored_db,input_bytes=plaintext)
-    del plaintext
+    restored_db = await restore_backup_image()
     restored=await asyncpg.create_pool(dsn.rsplit("/",1)[0]+"/"+restored_db,min_size=1,max_size=1)
     try:
         assert await restored.fetchval("SELECT EXISTS(SELECT FROM bookings WHERE organization_id=$1 AND id=$2)",org,booking)

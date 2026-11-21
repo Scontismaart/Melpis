@@ -84,8 +84,15 @@ supersede the pending commissioning statements in the historical evidence below.
   and worker/copy disposition, independently verified on every recoverable
   backup or reproducible by authenticated replay. The inventory manifest and
   a checkpoint captured from the current source alone do not prove the
-  actual preimages in older backup images. The existing narrow purge must
-  not be widened for this category until that recovery condition is met.
+  actual preimages in older backup images. Ordinary source purge now requires
+  a rehearsal signature from the approved journal key bound to the current
+  tenant, inventory, authority tip, and exact per-backup checkpoint and policy
+  pins. An encrypted image captured before completion failed isolated replay
+  without creating purge bindings. Three PostgreSQL 17 tests covered replay
+  before signing, rejection of an unapproved key and altered or incomplete
+  proof, signed source purge, and replay after the purge. The new gate applies
+  to both supported plan kinds. Source-linked booking eligibility also needs
+  typed proof of source and dependency disposition and a source replay fence.
   Financial and provider-linked bookings also need separate evidence of the
   accounting and provider disposition. These technical limitations remain
   in A06; actual provider commissioning is tracked separately.

@@ -351,6 +351,20 @@ class IndependentTipStore:
             if actual != trusted and (actual or tip != _GENESIS):
                 raise RestoreJournalInvalid("independent_segment_key_not_approved")
 
+    def assert_current_segment_key(self, tip, public_key, encryption_key):
+        """Require an explicit key approval, including at the genesis boundary."""
+        if not _checkpoint(tip):
+            raise RestoreJournalInvalid("independent_authority_invalid")
+        fingerprints = _key_fingerprints(public_key, encryption_key)
+        with self._connection() as conn:
+            if self._current(conn) != tip:
+                raise RestoreJournalInvalid("independent_authority_conflict")
+            row = conn.execute("""SELECT signing_key_sha,encryption_key_sha
+                FROM segment_key_epochs WHERE sequence<=? ORDER BY sequence DESC LIMIT 1""",
+                               (tip.sequence,)).fetchone()
+            if row != fingerprints:
+                raise RestoreJournalInvalid("independent_segment_key_not_approved")
+
     def _checkpoint(self, conn, org, backup):
         row = conn.execute(
             "SELECT sequence, digest FROM checkpoints WHERE org=? AND backup=?",

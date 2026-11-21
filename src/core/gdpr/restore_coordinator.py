@@ -397,11 +397,12 @@ async def replay_primary_published_erasures(
             await _replay_stay_retention(conn, org, purges)
             await _replay_receipt_prunes(conn, org, prunes, pins[org])
             if ordinary:
-                from src.core.gdpr.source_checkpoint import purge_inventory_covered_ordinary_bookings
+                from src.core.gdpr.source_checkpoint import _purge_inventory_covered_ordinary_bookings_replay
                 _assert_recovery_inventory(authority, ordinary_inventory_bytes, latest_inventory_sha256,
                                            backup_id, set(trust["expected_organizations"]), trust["backup_checkpoint"])
-                await purge_inventory_covered_ordinary_bookings(conn,authority,store,org,ordinary_inventory_bytes,
+                await _purge_inventory_covered_ordinary_bookings_replay(conn,authority,store,org,ordinary_inventory_bytes,
                     latest_inventory_sha256=latest_inventory_sha256,
+                    quarantine_database=quarantine_database,
                     trusted_public_key=trust["trusted_public_key"],journal_encryption_key=trust["journal_encryption_key"],
                     checkpoint_verification_key=trust["checkpoint_verification_key"],
                     checkpoint_encryption_key=trust["checkpoint_encryption_key"],

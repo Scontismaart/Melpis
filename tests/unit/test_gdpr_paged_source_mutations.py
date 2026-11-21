@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.core.gdpr import restore_policy_state, source_checkpoint
+from src.core.gdpr import restore_coordinator, restore_policy_state, source_checkpoint
 from src.core.gdpr.journal_publication import CheckpointPin
 from src.core.gdpr.restore_checkpoint import RestoreBlocked
 
@@ -26,6 +26,8 @@ class Connection:
     async def fetchval(self, sql, *args):
         if sql == 'SHOW transaction_isolation':
             return 'read committed'
+        if sql == 'SELECT current_database()':
+            return 'synthetic-restore'
         if 'public.ordinary_bind_booking_retention_checkpoint' in sql:
             self.events.append(('bind_booking', args))
         elif 'public.ordinary_admin_purge_booking' in sql:
@@ -101,6 +103,10 @@ def scenario(monkeypatch):
         conn.events.append(('bind_receipts', (tuple(prunes), sequence, checkpoint_sha256)))
         return len(prunes)
 
+    async def assert_quarantine(_conn, name):
+        assert name == 'synthetic-restore'
+
+    monkeypatch.setattr(restore_coordinator, '_assert_quarantine', assert_quarantine)
     monkeypatch.setattr(source_checkpoint, 'read_any_checkpoint', read)
     monkeypatch.setattr(source_checkpoint, 'assess_backup_coverage', lambda *_a, **_kw: None)
     monkeypatch.setattr(source_checkpoint, '_backups', lambda *_a: [('old', {org}, None, None), ('paged', {org}, None, None)])
@@ -146,9 +152,10 @@ async def test_changed_paged_inventory_rolls_back_source_mutation(scenario, mode
     args, trust, _, _ = scenario
     args[1].fail_at = 2
     operation = (source_checkpoint.bind_inventory_covered_receipts if mode == 'receipts'
-                 else source_checkpoint.purge_inventory_covered_ordinary_bookings)
+                 else source_checkpoint._purge_inventory_covered_ordinary_bookings_replay)
+    options = {'quarantine_database': 'synthetic-restore'} if mode == 'ordinary' else {}
     with pytest.raises(RestoreBlocked, match='inventory changed'):
-        await operation(*args, **trust)
+        await operation(*args, **options, **trust)
     assert not {'bind_receipts', 'bind_booking', 'purge_booking'}.intersection(action for action, _ in args[0].events)
 
 
@@ -157,7 +164,8 @@ async def test_mixed_ordinary_purge_rejects_a_v3_pin_even_if_v5_is_complete(scen
     args, trust, payloads, _ = scenario
     payloads['old']['version'] = 'c24-restore-v3'
     with pytest.raises(RestoreBlocked, match='v4 or v5'):
-        await source_checkpoint.purge_inventory_covered_ordinary_bookings(*args, **trust)
+        await source_checkpoint._purge_inventory_covered_ordinary_bookings_replay(
+            *args, quarantine_database='synthetic-restore', **trust)
     assert not {'bind_receipts', 'bind_booking', 'purge_booking'}.intersection(action for action, _ in args[0].events)
 
 
@@ -168,9 +176,10 @@ async def test_legacy_only_inventory_cannot_bypass_commissioned_pins(scenario, m
     payloads['paged']['version'] = 'c24-restore-v4'
     args[1].fail_at = 1
     operation = (source_checkpoint.bind_inventory_covered_receipts if mode == 'receipts'
-                 else source_checkpoint.purge_inventory_covered_ordinary_bookings)
+                 else source_checkpoint._purge_inventory_covered_ordinary_bookings_replay)
+    options = {'quarantine_database': 'synthetic-restore'} if mode == 'ordinary' else {}
     with pytest.raises(RestoreBlocked, match='inventory changed'):
-        await operation(*args, **trust)
+        await operation(*args, **options, **trust)
     assert args[0].events == []
 
 
@@ -186,7 +195,16 @@ async def test_receipt_mutation_rejects_missing_tuple_on_any_recoverable_backup(
 @pytest.mark.asyncio
 async def test_ordinary_purge_accepts_exact_mixed_v4_v5_plans(scenario):
     args, trust, _, _ = scenario
-    assert await source_checkpoint.purge_inventory_covered_ordinary_bookings(*args, **trust) == 1
+    assert await source_checkpoint._purge_inventory_covered_ordinary_bookings_replay(
+        *args, quarantine_database='synthetic-restore', **trust) == 1
     mutations = [value for action, value in args[0].events if action in {'bind_booking', 'purge_booking'}]
     assert len(mutations) == 2 and mutations[0] == mutations[1]
     assert mutations[0][-3:] == ('b' * 64, 6, 'f' * 64)
+
+
+@pytest.mark.asyncio
+async def test_live_ordinary_purge_requires_external_rehearsal_attestation(scenario):
+    args, trust, _payloads, _ = scenario
+    with pytest.raises(RestoreBlocked, match='rehearsal'):
+        await source_checkpoint.purge_inventory_covered_ordinary_bookings(*args, **trust)
+    assert not {'bind_booking', 'purge_booking'}.intersection(action for action, _ in args[0].events)
