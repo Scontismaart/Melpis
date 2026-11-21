@@ -164,6 +164,10 @@ ALLOWLISTED_SQL_FINGERPRINTS: dict[tuple[str, str], str] = {
         "src/core/gdpr/exporter.py::prepare",
         "4eddc60a274ebc571076499b0c2887de3cab50e8cb88ffc784699471317faf7c",
     ): "bounded row wrapper over frozen catalogue and fixed booking quarantine projections; catalogue_query proves classified sources and every tenant bind",
+    (
+        "src/core/gdpr/exporter.py::prepare",
+        "680763164da5d1f54816828e2bff72a57244b63a491b9dbf9d78a11ad870d36d",
+    ): "count excluded derivative records using the same frozen tenant catalogue and fixed provenance predicates as the export",
     ("src/core/gdpr/deletion.py::advance", "f9a258519e3fa406f40097d69d11998cfd74a40e5319170972e11d64c84a1b56"):
         "parent-derived consent deletion: exact child contact_id=contacts.id join, contacts.organization_id=$1 and optional subject=$2; parser supports derived SELECT only",
     ("src/core/gdpr/deletion.py::advance", "bb690d4a5d40fbbd2a3bcb80dffd00368028d46b26ed7b9eb2e9ce9a0588440b"):

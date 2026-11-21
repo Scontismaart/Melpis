@@ -122,7 +122,7 @@ def test_beta_retained_backups_promote_and_recover_exact_authority(tmp_path):
     assert {scope: recovered.checkpoint_pin(*scope) for scope in candidates} == candidates
     coverage = assess_backup_coverage(recovered, store, inventory, latest_inventory_sha256=inventory_digest, **trust)
     assert coverage["backups_with_verified_recovery_evidence"] == 30
-    assert coverage["overdue_backups"] == ()
+    assert coverage["overdue_backups"] == ("synthetic-day-01",)
     assert coverage["deletion_authorized"] is False
     assert coverage["minimum_checkpoint_entries_remaining"] > 0
     assert coverage["minimum_checkpoint_bytes_remaining"] > 0

@@ -3,6 +3,45 @@
 Baseline [4631cc1](https://github.com/Scontismaart/Melpis/commit/4631cc193c1b27b3f1ea7ea06649a9e5cd32de7c).
 The approved product decision is [Privacy V1.0](../governance/privacy-data-governance-v1.0.md).
 The issue remains open. This record tracks implementation and proof separately.
+The [Staging SQL115 postflight and updated issue matrix](https://github.com/Scontismaart/Melpis/issues/91#a06-staging-115-postflight)
+supersede the pending commissioning statements in the historical evidence below.
+
+### Final technical acceptance candidate
+
+- The Staging cutover committed SQL105–115 and exact enrollment of 42
+  historical bookings in one transaction. Independent postflight confirmed
+  61 migration records, the preserved 18 messages including three billed
+  messages, unchanged usage/accounting fingerprints, and tenant-scoped
+  visibility. The next booking review is due 21 December 2026.
+- The protected main revision was `142ce6d0108e19612f38fb8592b8c922eb63f43b`.
+  [Main CI](https://github.com/Scontismaart/Melpis/actions/runs/44923853294)
+  and [Migration Check](https://github.com/Scontismaart/Melpis/actions/runs/44923853290)
+  passed. The published API and web multi-architecture image configurations
+  matched that revision. The new encrypted C01 backup was authenticated
+  from R2 EU using the Drive recovery envelope and a separate 1Password
+  passphrase. The R2 synthetic v5 publication/replay and independent custody
+  receipts are recorded in the [operational evidence](https://github.com/Scontismaart/Melpis/issues/91#issuecomment-7065451594).
+- The final export candidate excludes uncertain message derivatives from
+  organization exports, requires the immutable subject anchor for contact
+  request metadata, makes omissions and oversized records visible in the
+  manifest, and invalidates snapshots produced by earlier export formats.
+  The controller review path continues to require exact evidence; unknown
+  timestamps and subject links remain withheld. Individual exports exclude
+  unstructured text absent a safe subject attribution.
+- The provider candidate refreshes coverage on claim and transitions expired
+  claims to uncertainty before authenticated receipt lookup. No timer or
+  expired lease authorizes another delete. Local simulated provider tests
+  cover known unsent retries, uncertain sends, dead letters and correlated
+  receipts. Active-provider specific adapters and authorization remain
+  deployment-dependent.
+- The backup candidate detects overdue ordinary backups at the exact 30-day
+  boundary. The seven-day ordinary backup rotation validates the full
+  expired-object listing and confirms exact remote ciphertext and manifest
+  readback before deleting old objects. A failed inventory or a missing
+  replacement is an error. Independent journal inventory retirement still
+  requires its signed exact-unrecoverable evidence before advancing the
+  authoritative coverage floor. The deployed backup job and monitoring
+  remain subject to the operational gate.
 
 | Requirement | Evidence on the baseline or candidate | Remaining acceptance work |
 | --- | --- | --- |

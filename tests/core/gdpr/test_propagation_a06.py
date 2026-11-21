@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 
 from src.core.gdpr import propagation
-from src.core.gdpr.operations import OperationUnavailable, Operations
+from src.core.gdpr.operations import OperationUnavailable, Operations, RequestConflict
 
 
 @dataclass
@@ -244,6 +244,41 @@ async def test_uncertain_delete_is_not_retried_and_get_receipt_reconciles(
     assert adapter.secret not in caplog.text
     assert "synthetic provider verification" not in str(event)
     assert adapter.secret not in str(event)
+
+
+@pytest.mark.asyncio
+async def test_expired_worker_can_reconcile_without_reentering_dispatch(
+    pg_pool, sample_org, local_provider, monkeypatch,
+):
+    state, url = local_provider
+    adapter = LocalSyntheticAdapter(url)
+    org = sample_org["id"]
+    oid = await make_partial_operation(pg_pool, org)
+    ops = Operations(pg_pool)
+    monkeypatch.setenv("GDPR_PROVIDER_ERASURE_EXECUTION_ENABLED", "true")
+    fence = await ops.claim_provider(org, oid, adapter.provider)
+    durable = await ops.get(org, oid, "provider-qa")
+    assert durable["manifest"]["provider_status"][adapter.provider] == "running"
+    receipt = await adapter.delete(org, oid, idempotency_key=str(oid))
+
+    with pytest.raises(OperationUnavailable, match="not reconcilable"):
+        await propagation.reconcile_operation(pg_pool, org, oid, adapter.provider, adapter)
+    assert state.lookups == 0
+    async with pg_pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE gdpr_operation_steps SET lease_until=NOW()-INTERVAL '1 second'
+               WHERE organization_id=$1 AND operation_id=$2 AND name=$3""",
+            org, oid, adapter.provider,
+        )
+
+    await propagation.reconcile_operation(pg_pool, org, oid, adapter.provider, adapter)
+    assert (state.deletes, state.lookups) == (1, 1)
+    durable = await ops.get(org, oid, "provider-qa")
+    assert durable["manifest"]["provider_status"][adapter.provider] == "confirmed"
+    step = next(step for step in durable["steps"] if step["name"] == adapter.provider)
+    assert step["fence"] == fence + 2
+    with pytest.raises(RequestConflict, match="Stale provider worker"):
+        await ops.provider_result(org, oid, adapter.provider, fence, receipt=receipt)
 
 
 @pytest.mark.asyncio

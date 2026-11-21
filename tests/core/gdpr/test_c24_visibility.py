@@ -152,6 +152,15 @@ async def test_missing_conflicting_and_future_lineage_is_quarantined_and_reviewa
     assert {UUID(msg['id']) for msg in document['messages']}.isdisjoint(blocked)
     category = next(item for item in document['manifest']['categories'] if item['category']=='messages')
     assert category['status'] == 'partial' and category['quarantined_records'] == len(blocked)
+    feedback = {UUID(row['message_id']) for row in document['message_feedback']}
+    assert recent in feedback and feedback.isdisjoint(blocked)
+    event_sources = {UUID(row['source_id']) for row in document['event_log']
+                     if row['source_table'] == 'messages'}
+    assert recent in event_sources and event_sources.isdisjoint(blocked)
+    categories = {row['category']: row for row in document['manifest']['categories']}
+    for name in ('message_feedback', 'event_log'):
+        assert categories[name]['status'] == 'partial'
+        assert categories[name]['quarantined_records'] >= len(blocked)
     export_id = UUID(snapshot['export_id'])
     await pool.execute("""UPDATE gdpr_operations
         SET manifest=jsonb_set(manifest,'{version}','"a06-v1"'::jsonb)

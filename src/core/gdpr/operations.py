@@ -153,7 +153,7 @@ class Operations:
         async with self.pool.acquire() as conn, conn.transaction():
             await self._lock_provider_operation(conn, org, oid)
             row = await conn.fetchrow(
-                '''SELECT status,fence,attempts,evidence,lease_until,lease_until>NOW() AS live FROM gdpr_operation_steps
+                '''SELECT status,attempts,evidence FROM gdpr_operation_steps
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 FOR UPDATE''', org, oid, name,
             )
             # Only the inventory captured during authorized local erasure can
@@ -161,13 +161,7 @@ class Operations:
             if row is None:
                 return None
             if row['status'] == 'running':
-                if not row['live']:
-                    await conn.execute(
-                        '''UPDATE gdpr_operation_steps SET status='uncertain',fence=fence+1,updated_at=NOW()
-                           WHERE organization_id=$1 AND operation_id=$2 AND name=$3''', org, oid, name,
-                    )
-                    await event(conn, org, oid, 'provider.uncertain', provider=name)
-                    await refresh_provider_coverage(conn, org, oid)
+                await self._expire_provider_claim(conn, org, oid, name)
                 return None
             if row['status'] != 'pending':
                 return None
@@ -181,7 +175,19 @@ class Operations:
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3 RETURNING fence''', org, oid, name,
             )
             await event(conn, org, oid, 'provider.claimed', provider=name, fence=fence)
+            await refresh_provider_coverage(conn, org, oid)
             return fence
+
+    @staticmethod
+    async def _expire_provider_claim(conn, org, oid, name):
+        result = await conn.execute(
+            '''UPDATE gdpr_operation_steps SET status='uncertain',fence=fence+1,lease_until=NULL,updated_at=NOW()
+               WHERE organization_id=$1 AND operation_id=$2 AND name=$3 AND status='running'
+                 AND (lease_until IS NULL OR lease_until<=NOW())''', org, oid, name,
+        )
+        if result == 'UPDATE 1':
+            await event(conn, org, oid, 'provider.uncertain', provider=name)
+            await refresh_provider_coverage(conn, org, oid)
 
     async def provider_result(self, org, operation_id, name, fence, *, receipt=None, not_sent=False):
         """Trusted adapter boundary; bare HTTP success is NOT a deletion receipt."""
@@ -257,6 +263,7 @@ class Operations:
             return False
         async with self.pool.acquire() as conn, conn.transaction():
             await self._lock_provider_operation(conn, org, oid)
+            await self._expire_provider_claim(conn, org, oid, name)
             return await conn.fetchval(
                 '''SELECT EXISTS (SELECT 1 FROM gdpr_operation_steps
                    WHERE organization_id=$1 AND operation_id=$2 AND name=$3

@@ -149,6 +149,7 @@ jobs:
           PUBLIC_HOST: temporary.example.test
         run: |
           bash tests/scripts/test_oracle_vm_bootstrap.sh
+          bash tests/scripts/test_backup_restore_scripts.sh
           docker compose -f compose.production.yml config --quiet
           # Candidate overlay: validate wiring only; do not start services,
           # load model assets, or activate an operational environment.
