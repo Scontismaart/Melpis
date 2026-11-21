@@ -230,6 +230,7 @@ async def test_reassignment_rejected_before_first_apply(state_env):
     assert await subject(env) != other
 
 
+@pytest.mark.migration_limit(74)
 async def test_export_projections_bind_original_subject_and_exclude_account(state_env):
     env = state_env
     request = await populated(env)
@@ -259,6 +260,21 @@ async def test_export_projections_bind_original_subject_and_exclude_account(stat
             assert str(request).encode() not in raw
         else:
             assert str(request).encode() in raw
+
+
+async def test_legacy_request_without_immutable_subject_is_not_exported_to_contact(state_env):
+    env = state_env
+    request = await populated(env)
+    contact = await subject(env)
+    category = next(cat for cat in CATEGORIES if cat.name == 'booking_conversation_requests')
+    assert await env['pool'].fetch(category.query, env['org'])
+    assert not await env['pool'].fetch(category.contact_query, env['org'], contact)
+    exporter = Exporter(env['pool'])
+    result = await exporter.prepare(env['org'], 'synthetic-export', scope='contact',
+                                    subject_id=contact, request_id=uuid4())
+    raw = await export_bytes(exporter, env['org'], result['export_id'], 'synthetic-export')
+    assert str(request).encode() not in raw
+    assert result['manifest']['status'] == 'partial'
 
 
 async def test_approved_policy_cannot_age_messages_without_verified_receipt(state_env, monkeypatch):
