@@ -22,6 +22,10 @@ _C24_ONLY = {
 _C24_RETENTION_ONLY = {'c24_idle_watermarks', 'c24_source_fences', 'c24_suppression_lifecycle_audit'}
 _STAY_ONLY = {'booking_stays', 'booking_stay_purge_fences', 'booking_stay_tombstones'}
 _RECEIPT_PROJECTIONS = {'document_index_requests', 'booking_catalog_requests', 'booking_allocation_requests'}
+_PRIVATE_EXPORT_PROJECTIONS = {
+    'booking_stay_completion_evidence', 'ordinary_booking_completion_evidence', 'inbound_worker_receipts',
+}
+_PRIVATE_EXPORT_MAX_ROWS = 50000
 _LEGACY_SIMULATION_QUERY = """
     SELECT request_id, status, created_at, reserved_at, completed_at
     FROM simulation_requests WHERE organization_id = $1::uuid
@@ -135,9 +139,42 @@ class Exporter:
                             'legal_policy_approval': 'C05-100-pending'}
                 schema = await conversation_schema(conn)
                 partial = schema == 'partial'
+                private_export_available = (
+                    scope != 'account' and await conn.fetchval(
+                        "SELECT to_regprocedure('public.gdpr_private_export_records(uuid,uuid,text,text)') IS NOT NULL"
+                    )
+                )
                 await append(('{"organization_id":' + encode(str(org)) + ',"exported_at":' +
                               encode(datetime.now(timezone.utc).isoformat())).encode())
                 for category in CATEGORIES:
+                    if category.name in _PRIVATE_EXPORT_PROJECTIONS and scope != 'account':
+                        item = {'category': category.name, 'count': 0, 'status': 'excluded',
+                                'reason': 'private_export_authority_unavailable'}
+                        allowed = False
+                        if private_export_available:
+                            async for row in conn.cursor(
+                                '''SELECT record FROM public.gdpr_private_export_records($1,$2,$3,$4)''',
+                                org, oid, str(requester), category.name, prefetch=32,
+                            ):
+                                if not allowed:
+                                    if row['record'] is not None:
+                                        raise OperationUnavailable('Private export authorization record missing')
+                                    allowed = True
+                                    await append((',' + encode(category.name) + ':[').encode())
+                                    continue
+                                if item['count'] >= _PRIVATE_EXPORT_MAX_ROWS:
+                                    item['bounded_records'] = True
+                                    break
+                                if row['record'] is None or len(row['record'].encode('utf-8')) > _MAX_ROW:
+                                    raise OperationUnavailable('Invalid private export record')
+                                await append((('' if item['count'] == 0 else ',') + row['record']).encode('utf-8'))
+                                item['count'] += 1
+                        if allowed:
+                            await append(b']')
+                            item.update(status='partial', reason=category.exclusion_reason)
+                        partial = True
+                        manifest['categories'].append(item)
+                        continue
                     relation_missing = (
                         category.name in (_STAY_ONLY | _C24_RETENTION_ONLY | _RECEIPT_PROJECTIONS)
                         and not await conn.fetchval(

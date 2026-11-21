@@ -20,7 +20,8 @@ async def test_capability_scrub_requires_postgres_and_installed_function():
     }
     assert connection.fetchval.await_count == 5
     assert "c24_worker_scrub_expired_capabilities" in connection.fetchval.await_args_list[2].args[0]
-    assert "MIN(expires_at)" in connection.fetchval.await_args.args[0]
+    assert "MIN(capability.expires_at)" in connection.fetchval.await_args.args[0]
+    assert "context.capability_id=capability.capability_id" in connection.fetchval.await_args.args[0]
 
 
 @pytest.mark.asyncio

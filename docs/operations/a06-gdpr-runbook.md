@@ -72,6 +72,24 @@ erasure remains blocked for owner-transfer and identity-provider review.
 Erasure is currently supported for organization and contact scopes subject
 to policy and cutover gates.
 
+For a blocked account-scope erasure, the controller can call
+`review_account_erasure` with the exact persisted organization, operation
+and requester UUIDs from a read-only owner transaction at repeatable-read
+isolation. It reports fixed blocker codes for the current observed account
+profile, membership, ownership, assignment, invitation and audit dependencies.
+It never discloses foreign tenant identities or grants execution authority.
+Independently authorized global account disposition, provider identity and
+receipt verification, and session revocation and backup/replay arrangements
+remain required even when no additional local dependency is observed.
+
+Candidate SQL113 discloses only verified completion and inbound receipt
+summaries through the existing encrypted organization or contact snapshot.
+The backend function checks the running export, exact requester, organization
+and current joined owner membership, including the active Auth lifecycle.
+The existing API supplies owner and MFA authorization, and download access
+remains independently rechecked. The function exposes neither raw private
+tables nor provider payloads, and unknown historical relations are excluded.
+
 The download ticket is a short-lived, HttpOnly, Secure-when-configured,
 SameSite=Strict cookie with a 15-minute lifetime. Redis and the export
 encryption key are required. There is no bearer download URL; the response
@@ -236,7 +254,7 @@ does not by itself establish policy approval.
 | C2.4 replay and suppression metadata | SQL100 records verified immutable receipt conclusions. SQL103–104 expire only source fences with that conclusion, exact purged-source lineage, receipt-cleanup evidence and an independently retained checkpoint binding. Derived retention audit records inherit the same conclusion. SQL102/104 bound target lock waits and yield at batch boundaries. | Current policy and holds remain authoritative. Unknown historical dates, idle watermarks, and separate erasure audit evidence still require reconciliation. Checkpoint availability, independent recovery-store operation, and throughput at actual load remain operational gates. |
 | `booking_stay_content` | Migration 089's hotel sweep and migration 091's hotel lifecycle functions archive completed allocation state or purge eligible stay content after completion/lineage checks. | The 12-month period applies to eligible content only. It does not set a period for outbox, audit, or replay fences/tombstones; the reviewed source has no cleanup path for the stay purge fences and tombstones. Current approved policy, no matching hold, valid completion/allocation evidence, and safe terminal state are required. Schedule and tenant policy are unverified. |
 | `completed_bookings_and_stays` for ordinary managed bookings | Candidate SQL106 records immutable evidence for a new typed human completion of a finished managed minute allocation with corroborating receipt, tenant and subject. The private date check uses the allocation timezone and current approved retention of 1–12 calendar months. | Owner-only planning check. The application role retains privileged booking write capabilities, so validate actual writer roles and independent evidence before giving this record destructive authority. Review unmanaged and historical records using contemporaneous proof. Build scoped redaction or removal, billing separation, dependent-copy reconciliation, replay protection, and restore verification before scheduling expiry. |
-| Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload containing booking/customer and confirmation details. Merged PR #179 (`f5f5040`) adds migration 094 and transactional scrubbing: successful completion clears the payload; a PostgreSQL-only bounded cleanup nulls expired unconsumed payloads while retaining hashes and replay tombstones. The independent minute job applies the same restricted cleanup with at most ten batches of 100 and reports only aggregate overdue age. Migration check [run #43741180457](https://github.com/Scontismaart/Melpis/actions/runs/43741180457) applied all migrations in order through 094 in a disposable database. | Verify an authorized runtime principal and actual scheduled execution. Expired consumed-but-unfinished payloads require verified reconciliation, as do backup and process caches. Capability tombstones remain subject to their accounting and replay obligations. |
+| Worker capability payload (`c24_private.worker_capabilities`) | Migration 093 stores a short-lived JSON payload containing booking/customer and confirmation details. Migration 094 scrubs completed and expired unused payloads. Candidate SQL112 extends the owner-only bounded cleanup to an expired consumed orphan when neither exact capability nor transaction context remains, preserving hashes and replay tombstones. The independent minute job runs at most ten batches of 100 and reports only aggregate overdue age. | Verify an authorized runtime principal and actual scheduled execution. Matching active or uncertain contexts are preserved for reconciliation. Backup and external copies require separate evidence. Capability tombstones remain subject to their accounting and replay obligations. |
 | Encrypted export snapshots | Snapshot access expires at 15 minutes. The dedicated minute job deletes chunks for expired operations independently of primary-data flags. | Verify schedule, throughput and overdue age in the target environment. Failed or locked work remains due for retry. |
 | Other account, organization, consent, billing, audit, provider, log, cache, and backup records | No universal automatic expiry is established by this runbook. Their category and legal-hold rules require the approved controller schedule and specific owner workflow. | Do not infer a retention period from code defaults, technical receipt maxima, or the DPA draft. Keep records with a hold or unresolved legal/accounting basis until the authorized owner resolves it. |
 

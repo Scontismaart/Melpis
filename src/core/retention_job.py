@@ -87,7 +87,7 @@ async def _retention_policies(pool):
         )
 
 
-@system_scope('bounded removal of expired unused capability payloads and aggregate-only backlog monitoring')
+@system_scope('bounded removal of expired unused and orphan capability payloads and aggregate-only backlog monitoring')
 async def scrub_expired_worker_capability_payloads(pool):
     deadline = time.monotonic() + _WORKER_CAPABILITY_SCRUB_BUDGET_SECONDS
     async with pool.acquire() as conn:
@@ -113,10 +113,15 @@ async def scrub_expired_worker_capability_payloads(pool):
             if scrubbed < _WORKER_CAPABILITY_SCRUB_BATCH:
                 break
         oldest = await conn.fetchval(
-            '''SELECT FLOOR(EXTRACT(EPOCH FROM (statement_timestamp()-MIN(expires_at))))::bigint
-               FROM c24_private.worker_capabilities
-               WHERE payload IS NOT NULL AND consumed_at IS NULL AND completed_at IS NULL
-                 AND expires_at<=statement_timestamp()''',
+            '''SELECT FLOOR(EXTRACT(EPOCH FROM (statement_timestamp()-MIN(capability.expires_at))))::bigint
+               FROM c24_private.worker_capabilities AS capability
+               WHERE capability.payload IS NOT NULL AND capability.completed_at IS NULL
+                 AND capability.expires_at<=statement_timestamp()
+                 AND NOT EXISTS (
+                     SELECT 1 FROM c24_private.worker_context AS context
+                     WHERE context.capability_id=capability.capability_id
+                        OR (context.backend_pid=capability.consumed_backend_pid
+                            AND context.transaction_id=capability.consumed_transaction_id))''',
         )
     return {'worker_capability_payloads_scrubbed': total, 'oldest_overdue_seconds': oldest}
 

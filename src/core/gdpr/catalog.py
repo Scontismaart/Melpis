@@ -36,13 +36,17 @@ CATEGORIES: tuple[Category, ...] = (
     Category("gdpr_retention_hold_events", "", exclusion_reason=
              "Private hold decisions require scoped controller review; no direct application grant."),
     Category("booking_stay_completion_evidence", "", exclusion_reason=
-             "Private stay completion lineage requires scoped controller review; no direct application grant."),
+             "Only completion evidence with a verified stay relation can be disclosed."),
     Category("worker_capabilities", "", exclusion_reason=
              "Private worker authorization payload and replay evidence are excluded from automated exports."),
     Category("worker_context", "", exclusion_reason=
              "Transaction-bound worker authorization is excluded from automated exports."),
     Category("ordinary_booking_completion_evidence", "", exclusion_reason=
-             "Private, subject-linked completion evidence needs controller review; no direct application grant."),
+             "Only completion evidence with a verified subject relation can be disclosed."),
+    Category("inbound_worker_receipts", "", exclusion_reason=
+             "Only verified inbound receipt dates and message identifiers can be disclosed."),
+    Category("inbound_worker_operations", "", exclusion_reason=
+             "Private worker and accounting linkage needs controller review."),
     Category("c24_account_response_receipts", "", exclusion_reason=
              "Private integrity evidence for a tenant account response. The approved export contains separately scoped business data."),
     Category("c24_orphan_proposal_expirations", "", exclusion_reason=
