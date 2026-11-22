@@ -1977,6 +1977,21 @@ async def test_openrouter_generation_evidence_recovers_without_persisted_request
             # defense in depth; the public verifier rejects this receipt too.
             assert await finalize(claim, replace(evidence, provider_cost_usd="0.01")) is False
 
+            # Access may be revoked while the provider lookup is in progress.
+            async with pg_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE auth_access_lifecycle SET disabled_at=now() WHERE auth_user_id=$1", actor,
+                )
+            with pytest.raises(PermissionError, match="Active owner or manager"):
+                await finalize(claim)
+            async with pg_pool.acquire() as conn:
+                assert await conn.fetchval(
+                    "SELECT ai_accounting_blocked FROM organizations WHERE id=$1", org_id,
+                ) is True
+                await conn.execute(
+                    "UPDATE auth_access_lifecycle SET disabled_at=NULL WHERE auth_user_id=$1", actor,
+                )
+
         # A replacement recovery worker advances the fencing epoch. The stale
         # claimant cannot finalize, while the current claimant can.
         async with pg_pool.acquire() as conn:

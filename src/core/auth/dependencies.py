@@ -239,6 +239,20 @@ async def get_token(
     return None
 
 
+def _totp_verified_at(amr: object) -> int | None:
+    if not isinstance(amr, list):
+        return None
+    return max(
+        (
+            entry["timestamp"] for entry in amr
+            if isinstance(entry, dict)
+            and entry.get("method") in ("totp", "mfa/totp")
+            and type(entry.get("timestamp")) is int
+        ),
+        default=None,
+    )
+
+
 async def get_current_user(
     request: Request,
     token: str | None = Depends(get_token),
@@ -273,9 +287,8 @@ async def get_current_user(
         # estraiamo dal JWT qui, una sola volta, e require_mfa lo legge dal
         # dict utente: evita di rivalutare il claim su ogni endpoint.
         "aal": payload.get("aal"),
-        # Used only by narrowly scoped privileged recovery routes which require
-        # a fresh MFA step-up; the claim is trusted only after JWT verification.
-        "auth_time": payload.get("auth_time"),
+        # A03 recovery requires the second factor's time from signed Supabase AMR.
+        "mfa_verified_at": _totp_verified_at(payload.get("amr")),
     }
 
 
