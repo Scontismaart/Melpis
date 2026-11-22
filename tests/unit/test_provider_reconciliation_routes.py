@@ -101,7 +101,7 @@ def _client(monkeypatch, payload=None, *, with_store=True):
         "organization_id": _ORG_ID,
         "ruolo": "owner",
         "aal": "aal2",
-        "auth_time": int(time.time()),
+        "mfa_verified_at": int(time.time()),
     }
     app.dependency_overrides[deps.get_current_user] = lambda: active_user
     app.dependency_overrides[deps.get_organization_context] = lambda: active_user
@@ -206,7 +206,7 @@ def test_provider_recovery_list_and_pre_dispatch_recovery_are_tenant_scoped(monk
     assert args == (active_user["organization_id"], attempt_id)
     assert kwargs == {
         "actor_auth_user_id": active_user["auth_user_id"],
-        "aal": "aal2", "auth_time": active_user["auth_time"],
+        "aal": "aal2", "auth_time": active_user["mfa_verified_at"],
     }
 
 

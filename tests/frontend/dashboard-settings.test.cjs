@@ -278,6 +278,40 @@ test("single owner can inspect and safely recover an unresolved provider attempt
   assert.equal(section.hidden, true);
   assert.match(settings.dom.window.document.getElementById("account-status").textContent,
     /la richiesta non era stata inviata/);
+  assert.doesNotMatch(settings.dom.window.document.getElementById("account-status").textContent,
+    /il servizio AI è ripristinato/);
+  settings.dom.window.close();
+});
+
+test("provider verification reports the attempt result while another hold is visible", async () => {
+  const attempt = {
+    attempt_id: "attempt-verified", created_at: "2026-10-19T09:00:00Z",
+    provider: "openrouter", dispatch_state: "uncertain", can_recover: true,
+  };
+  const remaining = { ...attempt, attempt_id: "attempt-still-blocked", can_recover: false };
+  let verified = false;
+  const settings = createSettings("owner", async (url) => {
+    if (url.endsWith("/api/billing/provider-attempts/recovery")) {
+      return response({ attempts: verified ? [remaining] : [attempt, remaining] });
+    }
+    if (url.endsWith("/api/billing/provider-attempts/attempt-verified/recover")) {
+      verified = true;
+      return response({ state: "verified" });
+    }
+    return response({ plan: "starter", subscription_status: "active" });
+  });
+  settings.module.onEnter("piano");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const document = settings.dom.window.document;
+  const section = document.getElementById("account-provider-recovery");
+  section.querySelector("button").click();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(section.hidden, false);
+  assert.equal(section.querySelector("button").textContent, "Aggiorna stato");
+  assert.equal(document.getElementById("account-status").textContent,
+    "Metriche del tentativo verificate e contabilizzate.");
   settings.dom.window.close();
 });
 

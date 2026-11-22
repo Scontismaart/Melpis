@@ -87,11 +87,11 @@ async def recover_provider_attempt(
     billing_repo = getattr(repo, "billing_repo", repo)
     actor = user.get("auth_user_id")
     aal = mfa_user.get("aal")
-    auth_time = mfa_user.get("auth_time")
+    mfa_verified_at = mfa_user.get("mfa_verified_at")
     try:
         result = await billing_repo.recover_provider_attempt(
             user["organization_id"], attempt_uuid,
-            actor_auth_user_id=actor, aal=aal, auth_time=auth_time,
+            actor_auth_user_id=actor, aal=aal, auth_time=mfa_verified_at,
         )
         if result.get("state") == "lookup_required":
             from src.core.provider_recovery import (
@@ -109,7 +109,7 @@ async def recover_provider_attempt(
             )
             reconciled = await billing_repo.finalize_openrouter_recovery(
                 user["organization_id"], attempt_uuid,
-                actor_auth_user_id=actor, aal=aal, auth_time=auth_time,
+                actor_auth_user_id=actor, aal=aal, auth_time=mfa_verified_at,
                 recovery_worker_id=result["recovery_worker_id"],
                 lease_epoch=result["lease_epoch"], evidence=evidence,
             )

@@ -49,15 +49,73 @@ def _install_signed_test_tokens(monkeypatch):
     monkeypatch.setattr(deps, "_get_supabase_jwks", jwks)
     monkeypatch.setattr(deps, "is_token_revoked", not_revoked)
 
-    def token(sub, *, aal="aal2", iss="https://myproj.supabase.co/auth/v1", exp_offset=600):
+    def token(sub, *, aal="aal2", iss="https://myproj.supabase.co/auth/v1", exp_offset=600, **claims):
         now = int(time.time())
         return jwt.encode(
             {"sub": sub, "aal": aal, "aud": "authenticated", "iss": iss,
-             "iat": now, "exp": now + exp_offset},
+             "iat": now, "exp": now + exp_offset, **claims},
             key, algorithm="ES256", headers={"kid": jwk["kid"]},
         )
 
     return token
+
+
+@pytest.mark.parametrize(
+    ("aal", "proof", "status"),
+    [
+        ("aal2", "totp", 200),
+        ("aal2", "mfa/totp", 200),
+        ("aal2", "stale", 403),
+        ("aal2", "primary_only", 403),
+        ("aal2", "missing", 403),
+        ("aal2", "malformed", 403),
+        ("aal2", "future", 403),
+        ("aal1", "totp", 403),
+    ],
+)
+def test_recovery_requires_recent_totp_from_verified_session_cookie(monkeypatch, aal, proof, status):
+    from src.core.auth.bff import access_cookie_name
+    from src.core.billing.routes import router as billing_router
+    from src.core.db.repositories.billing_repo import BillingRepository
+
+    actor_id, org_id, attempt_id = (str(uuid.uuid4()) for _ in range(3))
+    now = int(time.time())
+    primary = {"method": "password", "timestamp": now}
+    claims = {
+        "totp": {"amr": [primary, {"method": "totp", "timestamp": now}]},
+        "mfa/totp": {"amr": [primary, {"method": "mfa/totp", "timestamp": now}]},
+        "stale": {"amr": [primary, {"method": "totp", "timestamp": now - 301}], "auth_time": now},
+        "primary_only": {"amr": [primary], "auth_time": now},
+        "missing": {"auth_time": now},
+        "malformed": {"amr": [{"method": "totp", "timestamp": str(now)}], "auth_time": now},
+        "future": {"amr": [{"method": "totp", "timestamp": now + 120}], "auth_time": now},
+    }
+
+    async def recover(organization_id, recovered_attempt_id, *, actor_auth_user_id, aal, auth_time):
+        BillingRepository._require_recent_aal2(aal, auth_time)
+        assert organization_id == org_id
+        assert str(recovered_attempt_id) == attempt_id
+        assert actor_auth_user_id == actor_id
+        assert auth_time == now
+        return {"state": "not_sent"}
+
+    app = FastAPI()
+    app.include_router(billing_router)
+    app.state.repo = SimpleNamespace(
+        get_auth_access_allowed=AsyncMock(return_value=True),
+        get_memberships_by_auth=AsyncMock(return_value=[{
+            "organization_id": org_id, "ruolo": "owner", "user_id": str(uuid.uuid4()),
+        }]),
+        billing_repo=SimpleNamespace(recover_provider_attempt=recover),
+    )
+    token = _install_signed_test_tokens(monkeypatch)(actor_id, aal=aal, **claims[proof])
+    client = TestClient(app)
+    client.cookies.set(access_cookie_name(), token)
+    response = client.post(f"/api/billing/provider-attempts/{attempt_id}/recover")
+
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert response.json() == {"state": "not_sent"}
 
 
 # ── Fixture: mini-app con un endpoint Tier-1 fittizio ──────────────────

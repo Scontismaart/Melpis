@@ -365,8 +365,8 @@
             accountStatus("Verifica non disponibile. Il blocco resta attivo; riprova più tardi.");
           } else if (data.state === "verified" || data.state === "not_sent") {
             accountStatus(data.state === "verified"
-              ? "Metriche verificate: il servizio AI è ripristinato."
-              : "Confermato: la richiesta non era stata inviata. Il servizio AI è ripristinato.");
+              ? "Metriche del tentativo verificate e contabilizzate."
+              : "Confermato: la richiesta non era stata inviata.");
             if (status) status.style.color = "var(--green-deep)";
           } else if (data.state === "verified_cost_unavailable") {
             accountStatus("Metriche verificate, ma la stima costo non è disponibile. Il blocco resta attivo.");
