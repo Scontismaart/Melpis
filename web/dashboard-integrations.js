@@ -813,7 +813,10 @@ const CALENDAR_MODE_LABELS = Object.freeze({
 
 const CALENDAR_STATUS_LABELS = Object.freeze({
   not_connected: ["not_connected", "Non collegato", "Google Calendar non è collegato."],
-  connected: ["connected", "Connesso", "Google Calendar è collegato."],
+  connected: ["connected", "Connesso", "Google Calendar è collegato e verificato."],
+  verification_required: ["connecting", "Da verificare", "Google Calendar è collegato. Esegui la verifica prima di usarlo."],
+  paused: ["disabled", "In pausa", "L'account Google è collegato e la sincronizzazione è sospesa."],
+  worker_disabled: ["disabled", "Sincronizzazione disabilitata", "La connessione è verificata. Il worker Calendar è disabilitato."],
   syncing: ["connecting", "Sincronizzazione in corso", "La verifica è in corso."],
   sync_failed: ["error", "Sincronizzazione non riuscita", "La sincronizzazione non è riuscita. I dati Melpis restano disponibili."],
   revoked: ["requires_reauth", "Accesso revocato", "L'accesso Google è stato revocato. Ricollega l'account per continuare."],
@@ -853,7 +856,7 @@ function mostraStatoCalendar(data, elements) {
   const shouldConnect = data.integration_status === "not_connected"
     || data.integration_status === "revoked" || data.integration_status === "reconnect_required";
   if (elements.btnConnect) elements.btnConnect.hidden = !shouldConnect;
-  if (elements.btnCheck) elements.btnCheck.hidden = data.enabled === false || data.connected !== true;
+  if (elements.btnCheck) elements.btnCheck.hidden = data.enabled === false || data.connected !== true || data.integration_status === "paused";
   if (elements.btnDisconnect) elements.btnDisconnect.hidden = !data.connected;
 }
 

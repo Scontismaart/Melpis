@@ -43,6 +43,8 @@ class _Request:
             if self.event_id not in self.provider.event_store:
                 raise _not_found()
             return deepcopy(self.provider.event_store[self.event_id])
+        if self.method == "LIST":
+            return {"kind": "calendar#events", "accessRole": self.provider.calendar_role}
         if self.method == "POST":
             self.provider.post_count += 1
             value = {**deepcopy(self.body), "etag": "etag-created", "status": "confirmed"}
@@ -69,6 +71,11 @@ class _Events:
         assert calendarId == "stage@example.test"
         return _Request(self.provider, "GET", event_id=eventId)
 
+    def list(self, *, calendarId, maxResults, fields):
+        assert calendarId == "stage@example.test"
+        assert maxResults == 1 and fields == "kind,accessRole"
+        return _Request(self.provider, "LIST")
+
     def insert(self, *, calendarId, body):
         assert calendarId == "stage@example.test"
         return _Request(self.provider, "POST", event_id=body["id"], body=body)
@@ -89,6 +96,7 @@ class _Provider:
         self.post_count = 0
         self.timeout_after_post = False
         self.get_override = None
+        self.calendar_role = "owner"
 
     def events(self):
         return _Events(self)
@@ -603,3 +611,52 @@ async def test_authoritative_busy_or_unknown_never_inserts_or_finalizes(status, 
     assert service.queue.failures[0]["code"] == expected_code
     assert service.queue.failures[0]["blocked"] is True
     service.availability_excluding_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", [False, True])
+@pytest.mark.parametrize("event_id", [EVENT_ID, "unrelated-event"])
+async def test_delete_reconciles_only_the_exact_google_tombstone(recovery, event_id):
+    claim = _claim("delete", recovery=recovery)
+    service = _Service(claim)
+    service.provider.get_override = {"id": event_id, "status": "cancelled"}
+
+    await CalendarLifecycle(service).run(claim)
+
+    assert [method for method, *_ in service.provider.calls] == ["GET"]
+    if event_id == EVENT_ID:
+        assert service.queue.verified_rows == [(claim, None, None)]
+        assert not service.queue.failures
+    else:
+        assert not service.queue.verified_rows
+        assert service.queue.failures[0]["code"] == "event_ownership_conflict"
+
+
+def test_transparent_event_cannot_prove_booking_occupancy():
+    claim = _claim("authoritative")
+    body = _event_body(claim)
+    event = {**body, "status": "confirmed", "etag": "etag"}
+    digest = body["extendedProperties"]["private"]["payload_hash"]
+
+    assert GoogleCalendarService.matches(event, claim, digest)
+    assert GoogleCalendarService.matches({**event, "transparency": "opaque"}, claim, digest)
+    assert not GoogleCalendarService.matches({**event, "transparency": "transparent"}, claim, digest)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["writer", "reader", None])
+async def test_google_delete_404_requires_write_access_to_the_same_calendar(role):
+    from src.core.calendar.connection import CalendarUnavailable
+
+    claim = _claim("delete", recovery=True)
+    service = _Service(claim)
+    service.provider.calendar_role = role
+
+    if role == "writer":
+        await CalendarLifecycle(service).run(claim)
+        assert service.queue.verified_rows == [(claim, None, None)]
+    else:
+        with pytest.raises(CalendarUnavailable, match="delete_unverified"):
+            await CalendarLifecycle(service).run(claim)
+        assert not service.queue.verified_rows
+    assert [method for method, *_ in service.provider.calls] == ["GET", "LIST"]

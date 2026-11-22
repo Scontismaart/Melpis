@@ -73,3 +73,42 @@ def test_calendar_activation_rejects_invalid_or_non_boolean_enable_flag():
     assert calendar_production_readiness_errors({"GOOGLE_CALENDAR_ENABLED": "yes"}) == [
         "GOOGLE_CALENDAR_ENABLED: must be false or fully approved true"
     ]
+
+
+@pytest.mark.asyncio
+async def test_enabled_calendar_cannot_start_without_database(monkeypatch):
+    from unittest.mock import Mock
+    from fastapi import FastAPI
+
+    from src.api import main
+
+    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("MELPIS_BACKGROUND_JOBS_ENABLED", "false")
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("src.core.startup_guard.assert_production_safe", Mock())
+
+    with pytest.raises(RuntimeError, match="Calendar enabled requires verified database"):
+        async with main.lifespan(FastAPI()):
+            pytest.fail("Calendar entered service without database readiness")
+
+
+@pytest.mark.asyncio
+async def test_calendar_worker_honors_flag_accepted_by_readiness(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.core.calendar.lifecycle import CalendarLifecycle
+    from src.core.calendar.service import GoogleCalendarService
+
+    config = valid_calendar_config()
+    config["GOOGLE_CALENDAR_WORKER_ENABLED"] = " True "
+    assert calendar_production_readiness_errors(config) == []
+    for name, value in config.items():
+        monkeypatch.setenv(name, value)
+    service = GoogleCalendarService(SimpleNamespace(pool=None), config["ENCRYPTION_KEY"])
+    process = AsyncMock(return_value=1)
+    monkeypatch.setattr(CalendarLifecycle, "process", process)
+
+    assert await service.process_pending() == 1
+    process.assert_awaited_once()

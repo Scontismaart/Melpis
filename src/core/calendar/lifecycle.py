@@ -7,7 +7,17 @@ from uuid import UUID
 from googleapiclient.errors import HttpError
 
 from src.core.calendar.availability import AvailabilityStatus, aware_utc
-from src.core.calendar.connection import CalendarUnavailable, authority_from
+from src.core.calendar.connection import CalendarUnavailable, authority_from, calendar_worker_fence
+from src.core.calendar.service import event_id_for, google_authorization_unavailable
+
+
+def _deletion_verified(event, claim):
+    # Google may omit ownership properties from a cancelled event. Match the
+    # exact ID requested on the claim's calendar before accepting the tombstone.
+    return event is None or (
+        event.get("status") == "cancelled"
+        and event.get("id") == event_id_for(claim["organization_id"], claim["internal_booking_id"])
+    )
 
 
 class CalendarLifecycle:
@@ -39,7 +49,8 @@ class CalendarLifecycle:
                         if not await conn.fetchval("SELECT pg_try_advisory_lock_shared(hashtextextended($1::text,606))", org):
                             continue
                         try:
-                            await self.run(claim)
+                            with calendar_worker_fence(org):
+                                await self.run(claim)
                         finally:
                             if not conn.is_closed():
                                 await asyncio.shield(conn.execute("SELECT pg_advisory_unlock_shared(hashtextextended($1::text,606))", org))
@@ -50,14 +61,7 @@ class CalendarLifecycle:
                 # A potentially dispatched request is left durable for GET-only recovery.
                 raise
             except HttpError as exc:
-                reasons = set()
-                try:
-                    payload = json.loads(exc.content)
-                    reasons = {item.get("reason") for item in payload.get("error", {}).get("errors", [])}
-                except (ValueError, TypeError, AttributeError):
-                    pass
-                unauthorized = exc.resp.status == 401 or (exc.resp.status == 403 and
-                    bool(reasons & {"insufficientPermissions", "forbidden", "authError"}))
+                unauthorized = google_authorization_unavailable(exc)
                 if unauthorized:
                     await self.service.connection.mark_error(claim["organization_id"], claim["calendar_connection_epoch"],
                                                              "authorization_unavailable", reconnect=True)
@@ -109,6 +113,9 @@ class CalendarLifecycle:
             return
         event = await s.read_event(provider, claim)
         action = claim["calendar_claimed_action"]
+        if action == "delete" and _deletion_verified(event, claim):
+            await self.queue.verified(claim, None, None)
+            return
         if event is not None and not s.owned(event, claim):
             await self.queue.fail(claim, "event_ownership_conflict", uncertain=claim["recovery"], blocked=not claim["recovery"])
             return
@@ -116,9 +123,6 @@ class CalendarLifecycle:
         digest = body["extendedProperties"]["private"]["payload_hash"] if body else None
         if claim["recovery"]:
             if action == "delete":
-                if event is None or event.get("status") == "cancelled":
-                    await self.queue.verified(claim, None, None)
-                    return
                 if event.get("status") != "confirmed":
                     await self.queue.fail(claim, "event_status_unverified", uncertain=True)
                     return
@@ -139,7 +143,7 @@ class CalendarLifecycle:
                     if exc.resp.status not in (404, 409, 412):
                         raise
                 observed = await s.read_event(provider, claim)
-                if observed and observed.get("status") != "cancelled":
+                if not _deletion_verified(observed, claim):
                     await self.queue.fail(claim, "delete_unverified", uncertain=True)
                     return
                 await self.queue.verified(claim, None, None)
@@ -186,9 +190,6 @@ class CalendarLifecycle:
             await self.queue.verified(claim, event["id"], event["etag"], self.finalize)
             return
         if action == "delete":
-            if event is None or event.get("status") == "cancelled":
-                await self.queue.verified(claim, None, None)
-                return
             if not event.get("etag"):
                 await self.queue.fail(claim, "event_etag_missing", blocked=True)
                 return
@@ -199,7 +200,7 @@ class CalendarLifecycle:
             claim["dispatched"] = True
             await s.execute(request)
             observed = await s.read_event(provider, claim)
-            if observed and observed.get("status") != "cancelled":
+            if not _deletion_verified(observed, claim):
                 await self.queue.fail(claim, "delete_unverified", uncertain=True)
                 return
             await self.queue.verified(claim, None, None)

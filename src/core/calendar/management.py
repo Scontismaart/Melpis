@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from src.core.bookings.auto_policy import validate_auto_booking_configuration
 from src.core.calendar.connection import MODES, SCOPES, authority_from, connection_lock, resources_for
-from src.core.google_feature_flags import google_calendar_enabled
+from src.core.google_feature_flags import google_calendar_enabled, google_calendar_worker_enabled
 
 
 async def calendar_status_payload(pool, org_id):
@@ -23,7 +23,7 @@ async def calendar_status_payload(pool, org_id):
     scopes = row["granted_scopes"] if row else []
     if isinstance(scopes, str):
         scopes = json.loads(scopes)
-    connected = bool(row and row["connection_status"] == "connected" and row["sync_enabled"]
+    connected = bool(row and row["connection_status"] == "connected"
                      and set(SCOPES).issubset(scopes) and row["access_token"] and row["refresh_token"])
     error = "sync_failed" if counts["failed_count"] or counts["uncertain_count"] else None
     if row and row["last_error_code"]:
@@ -32,10 +32,18 @@ async def calendar_status_payload(pool, org_id):
         status = "disabled"
     elif row and row["connection_status"] in {"revoked", "reconnect_required"}:
         status = row["connection_status"]
-    elif mode == "google_authoritative" and (not connected or error or not row["last_verified_at"]):
+    elif row and row["connection_status"] == "disconnected":
+        status = "not_connected"
+    elif connected and not row["sync_enabled"]:
+        status = "paused"
+    elif connected and not error and not row["last_verified_at"]:
+        status = "verification_required"
+    elif mode == "google_authoritative" and (not connected or error):
         status = "authoritative_unavailable"
     elif error:
         status = "sync_failed"
+    elif connected and mode != "internal" and not google_calendar_worker_enabled():
+        status = "worker_disabled"
     elif counts["pending_count"]:
         status = "syncing"
     else:
@@ -56,7 +64,8 @@ async def save_calendar_settings(service, org_id, body):
         raise HTTPException(503, "Google Calendar disabled")
     org = UUID(str(org_id))
     before = await service.connection.row(org)
-    candidate = dict(before or {"calendar_id": "primary"})
+    baseline = before or {"calendar_id": "primary"}
+    candidate = dict(baseline)
     for field in ("calendar_id", "resource_calendar_ids", "sync_enabled"):
         if field in values:
             candidate[field] = values[field]
@@ -64,18 +73,28 @@ async def save_calendar_settings(service, org_id, body):
         resources_for(candidate)
     except (ValueError, TypeError):
         raise HTTPException(400, "Invalid Calendar resources") from None
-    needs_provider = body.mode in {"internal_calendar_sync", "google_authoritative"} or any(
-        key in values for key in ("calendar_id", "resource_calendar_ids"))
+    resources_changed = resources_for(candidate) != resources_for(baseline)
+    sync_toggled = bool(before and not resources_changed and body.sync_enabled is not None
+                        and body.sync_enabled != before["sync_enabled"])
+    needs_provider = not sync_toggled and (resources_changed or body.mode in {
+        "internal_calendar_sync", "google_authoritative"
+    })
     if needs_provider:
         if not before or before["connection_status"] != "connected" or not before["sync_enabled"]:
             raise HTTPException(409, "Reconnect Calendar before choosing this mode")
         now = datetime.now(timezone.utc)
-        probe = await service.availability(org, now, now + timedelta(minutes=1), connection=candidate)
+        probe = await service.availability(org, now, now + timedelta(minutes=1), connection=candidate,
+                                           persist_health=False)
         if not probe.verified:
             raise HTTPException(409, "Calendar resources could not be verified")
     async with connection_lock(service.repo.pool, org) as conn, conn.transaction():
         current = await conn.fetchrow("SELECT * FROM google_calendar_credentials WHERE organization_id=$1 FOR UPDATE", org)
-        if before and (not current or current["connection_epoch"] != before["connection_epoch"]):
+        if (current is None) != (before is None) or (before and (
+            current["connection_epoch"] != before["connection_epoch"]
+            or current["connection_status"] != before["connection_status"]
+            or current["sync_enabled"] != before["sync_enabled"]
+            or resources_for(dict(current)) != resources_for(before)
+        )):
             raise HTTPException(409, "Calendar connection changed; retry")
         organization = await conn.fetchrow("SELECT timezone,business_profile FROM organizations WHERE id=$1 FOR KEY SHARE", org)
         if not organization:
@@ -83,6 +102,8 @@ async def save_calendar_settings(service, org_id, body):
         await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"booking-capacity|{org}")
         settings = await conn.fetchrow("SELECT * FROM booking_settings WHERE organization_id=$1 FOR UPDATE", org)
         old_mode = authority_from(dict(settings) if settings else None)
+        if sync_toggled and body.mode not in (None, old_mode, "internal"):
+            raise HTTPException(409, "Verify Calendar before changing authority")
         config = settings["config"] if settings else {}
         if isinstance(config, str):
             config = json.loads(config)
@@ -108,8 +129,12 @@ async def save_calendar_settings(service, org_id, body):
             ON CONFLICT(organization_id) DO UPDATE SET config=EXCLUDED.config,updated_at=NOW()""", org, json.dumps(config))
         if current:
             await conn.execute("""UPDATE google_calendar_credentials SET calendar_id=$2,
-                resource_calendar_ids=$3::jsonb,sync_enabled=$4,oauth_sync_enabled=$4,updated_at=NOW() WHERE organization_id=$1""",
-                org, candidate["calendar_id"], json.dumps(list(resources_for(candidate))[1:]), candidate.get("sync_enabled", True))
+                resource_calendar_ids=$3::jsonb,sync_enabled=$4,oauth_sync_enabled=$4,
+                last_verified_at=CASE WHEN NOT $4 OR NOT sync_enabled THEN NULL
+                                      WHEN $5 THEN NOW() ELSE last_verified_at END,
+                last_error_code=CASE WHEN $5 THEN NULL ELSE last_error_code END,updated_at=NOW()
+                WHERE organization_id=$1""", org, candidate["calendar_id"],
+                json.dumps(list(resources_for(candidate))[1:]), candidate.get("sync_enabled", True), needs_provider)
         # Mode changes do not opt historical bookings in. Existing jobs are frozen,
         # with uncertainty preserved, until explicitly reconciled or cancelled.
         if body.mode is not None and body.mode != old_mode:

@@ -321,3 +321,20 @@ test("integration scope invalidation clears organization A credentials before or
   assert.equal(harness.document.getElementById("integ-wa-connected-title").textContent, "WhatsApp Business");
   assert.equal(harness.document.body.textContent.includes("Organization A"), false);
 });
+
+
+test("configured Calendar keeps verification and disconnect available without prompting for OAuth again", async (t) => {
+  const harness = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=calendar",
+    overrides: {
+      "/api/calendar/status": { enabled: true, connected: true, integration_status: "verification_required" },
+    },
+  });
+  t.after(harness.dispose);
+  await harness.ready();
+  await harness.settle();
+  assert.equal(harness.document.querySelector("#integ-calendar-stato .badge-status-label").textContent, "Da verificare");
+  assert.equal(harness.document.getElementById("integ-calendar-connect").hidden, true);
+  assert.equal(harness.document.getElementById("integ-calendar-check").hidden, false);
+  assert.equal(harness.document.getElementById("integ-calendar-disconnect").hidden, false);
+});
