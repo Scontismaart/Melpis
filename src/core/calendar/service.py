@@ -9,12 +9,14 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from cryptography.fernet import Fernet
+from google.oauth2.credentials import Credentials
 from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import httplib2
+import requests
 
-from src.core.google_feature_flags import google_calendar_enabled
+from src.core.google_feature_flags import google_calendar_enabled, google_calendar_worker_enabled
 from src.core.calendar.availability import AvailabilityStatus, CalendarAvailability, aware_utc, local_instant, parse_freebusy
 from src.core.calendar.connection import CalendarConnection, CalendarUnavailable, resources_for, connection_lock
 from src.core.calendar.repository import CalendarQueue
@@ -22,6 +24,19 @@ from src.core.calendar.connection import SCOPES as SCOPES
 
 logger = logging.getLogger(__name__)
 DEFAULT_SLOT_MINUTES = 60
+
+
+def google_authorization_unavailable(error):
+    if error.resp.status == 401:
+        return True
+    if error.resp.status != 403:
+        return False
+    try:
+        payload = json.loads(error.content)
+        reasons = {item.get("reason") for item in payload.get("error", {}).get("errors", [])}
+        return bool(reasons & {"insufficientPermissions", "forbidden", "authError"})
+    except (ValueError, TypeError, AttributeError):
+        return False
 
 
 def event_id_for(org_id, booking_id):
@@ -36,6 +51,17 @@ def event_hash(body):
                   "start": aware_utc(body["start"]["dateTime"]).isoformat(),
                   "end": aware_utc(body["end"]["dateTime"]).isoformat()}
     return hashlib.sha256(json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+class CalendarHttp(httplib2.Http):
+    def request(self, uri, method="GET", body=None, headers=None, **kwargs):
+        if method == "GET":
+            return super().request(uri, method, body=body, headers=headers, **kwargs)
+        # httplib2 can resend a request after an ambiguous socket response.
+        # Writes belong to the ledger's recovery path. Never replay or redirect them here.
+        response = requests.request(method, uri, data=body, headers=headers,
+                                    timeout=self.timeout, allow_redirects=False)
+        return httplib2.Response({**response.headers, "status": str(response.status_code)}), response.content
 
 
 class GoogleCalendarService:
@@ -61,7 +87,7 @@ class GoogleCalendarService:
                 AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.bookings'::regclass
                     AND tgname='calendar_track_booking' AND tgenabled='O')""")
         if not ready:
-            raise CalendarUnavailable("calendar_schema_072_required")
+            raise CalendarUnavailable("calendar_schema_088_required")
 
     def encrypt_secret(self, value):
         return self.fernet.encrypt(value.encode()).decode()
@@ -99,14 +125,17 @@ class GoogleCalendarService:
         if not google_calendar_enabled():
             raise CalendarUnavailable("disabled")
         creds, _ = await self.connection.credentials(org_id, expected_epoch)
-        http = AuthorizedHttp(creds, http=httplib2.Http(timeout=10), max_refresh_attempts=0)
+        # The Calendar SDK may refresh before a request even with zero retry attempts.
+        # Only CalendarConnection may refresh, after recording its durable dispatch.
+        http = AuthorizedHttp(Credentials(token=creds.token), http=CalendarHttp(timeout=10),
+                              max_refresh_attempts=0)
         return await asyncio.to_thread(build, "calendar", "v3", http=http, static_discovery=True, cache_discovery=False)
 
     @staticmethod
     async def execute(request):
         return await asyncio.to_thread(request.execute, num_retries=0)
 
-    async def availability(self, org_id, starts_at, ends_at, *, connection=None, service=None):
+    async def availability(self, org_id, starts_at, ends_at, *, connection=None, service=None, persist_health=True):
         if not google_calendar_enabled():
             return CalendarAvailability(AvailabilityStatus.DISABLED, reason_code="disabled")
         row = None
@@ -122,18 +151,28 @@ class GoogleCalendarService:
                     "items": [{"id": resource} for resource in resources]}
             result = parse_freebusy(await self.execute(service.freebusy().query(body=body)), resources,
                                     starts_at, ends_at, connection_epoch=str(row["connection_epoch"]))
+            if not persist_health:
+                return result
             async with connection_lock(self.repo.pool, org_id) as conn:
                 current = await conn.fetchval("""UPDATE google_calendar_credentials SET last_verified_at=
                     CASE WHEN $3 THEN NOW() ELSE last_verified_at END,last_error_code=$4
                     WHERE organization_id=$1 AND connection_epoch=$2 AND connection_status='connected'
-                      AND sync_enabled RETURNING TRUE""", UUID(str(org_id)), row["connection_epoch"], result.verified,
-                    None if result.verified else result.reason_code)
+                      AND sync_enabled AND calendar_id=$5 AND resource_calendar_ids=$6::jsonb
+                    RETURNING TRUE""", UUID(str(org_id)), row["connection_epoch"], result.verified,
+                    None if result.verified else result.reason_code, row["calendar_id"],
+                    row["resource_calendar_ids"] if isinstance(row["resource_calendar_ids"], str)
+                    else json.dumps(row["resource_calendar_ids"]))
             return result if current else CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="connection_changed")
-        except Exception:
+        except Exception as exc:
             logger.warning("calendar=availability_unknown organization_id=%s", org_id)
-            if row and row.get("connection_epoch"):
+            if persist_health and row and row.get("connection_epoch"):
                 try:
-                    await self.connection.mark_error(org_id, row["connection_epoch"], "provider_unavailable")
+                    reconnect = isinstance(exc, HttpError) and google_authorization_unavailable(exc)
+                    if reconnect:
+                        await self.connection.mark_error(org_id, row["connection_epoch"],
+                                                         "authorization_unavailable", reconnect=True)
+                    else:
+                        await self.connection.mark_error(org_id, row["connection_epoch"], "provider_unavailable")
                 except Exception:
                     pass  # No success claim when health persistence is also unavailable.
             return CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="provider_unavailable")
@@ -242,6 +281,7 @@ class GoogleCalendarService:
         try:
             private = event["extendedProperties"]["private"]
             return (cls.owned(event, claim) and event.get("status") == "confirmed"
+                    and event.get("transparency", "opaque") == "opaque"
                     and private.get("revision") == str(claim["calendar_claimed_revision"])
                     and private.get("connection_epoch") == str(claim["calendar_connection_epoch"])
                     and private.get("payload_hash") == payload_hash == event_hash(event)
@@ -254,12 +294,20 @@ class GoogleCalendarService:
             return await self.execute(service.events().get(calendarId=claim["calendar_id"],
                 eventId=event_id_for(claim["organization_id"], claim["internal_booking_id"])))
         except HttpError as exc:
-            if exc.resp.status in (404, 410):
-                return None
-            raise
+            if exc.resp.status not in (404, 410):
+                raise
+        if claim["calendar_claimed_action"] == "delete":
+            # Google also returns 404 for inaccessible calendars. Verify that
+            # we can still inspect private events on the exact calendar.
+            access = await self.execute(service.events().list(calendarId=claim["calendar_id"],
+                                        maxResults=1, fields="kind,accessRole"))
+            if (not isinstance(access, dict) or access.get("kind") != "calendar#events"
+                    or access.get("accessRole") not in ("writer", "owner")):
+                raise CalendarUnavailable("delete_unverified")
+        return None
 
     async def process_pending(self, limit=10, *, organization_id=None, booking_id=None):
-        if not google_calendar_enabled() or os.getenv("GOOGLE_CALENDAR_WORKER_ENABLED", "false").lower() != "true":
+        if not google_calendar_enabled() or not google_calendar_worker_enabled():
             return 0
         from src.core.calendar.lifecycle import CalendarLifecycle
         return await CalendarLifecycle(self).process(limit, organization_id=organization_id, booking_id=booking_id)

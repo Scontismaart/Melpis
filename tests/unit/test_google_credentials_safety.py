@@ -157,3 +157,62 @@ async def test_cross_tenant_ciphertext_key_is_not_accepted(credentials_env):
                        for call in conn.execute.await_args_list)
     else:
         conn.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_calendar_transport_cannot_refresh_between_build_and_request(monkeypatch):
+    import httplib2
+
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    calls = []
+
+    class Transport:
+        def request(self, uri, method, **kwargs):
+            calls.append((uri, method, kwargs["headers"]["authorization"]))
+            return httplib2.Response({"status": "401"}), b'{"error":{"message":"expired"}}'
+
+    from googleapiclient.errors import HttpError
+
+    creds = Credentials(token="synthetic-access", refresh_token="synthetic-refresh")
+    service = GoogleCalendarService(SimpleNamespace(pool=None), Fernet.generate_key())
+    get_credentials = AsyncMock(return_value=(creds, None))
+    monkeypatch.setattr(service.connection, "credentials", get_credentials)
+    monkeypatch.setattr(httplib2.Http, "request", lambda self, *args, **kwargs: Transport().request(*args, **kwargs))
+    monkeypatch.setattr(Credentials, "refresh", MagicMock(side_effect=AssertionError("unfenced refresh")))
+
+    client = await service._build_service("synthetic-org")
+    creds.expiry = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=1)
+    with pytest.raises(HttpError) as exc:
+        await service.execute(client.events().get(calendarId="primary", eventId="synthetic-event"))
+    assert exc.value.resp.status == 401
+    get_credentials.assert_awaited_once()
+    assert len(calls) == 1
+    assert calls[0][1:] == ("GET", "Bearer synthetic-access")
+
+
+@pytest.mark.asyncio
+async def test_calendar_insert_does_not_follow_redirect_or_retry_uncertain_transport(monkeypatch):
+    import requests
+    from googleapiclient.errors import HttpError
+
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    service = GoogleCalendarService(SimpleNamespace(pool=None), Fernet.generate_key())
+    monkeypatch.setattr(service.connection, "credentials", AsyncMock(
+        return_value=(Credentials(token="synthetic-access"), None)
+    ))
+    send = MagicMock(side_effect=[
+        requests.ConnectionError("synthetic ambiguous response"),
+        SimpleNamespace(headers={"location": "https://example.test/"}, status_code=307, content=b"{}"),
+    ])
+    monkeypatch.setattr(requests, "request", send)
+    client = await service._build_service("synthetic-org")
+
+    with pytest.raises(requests.ConnectionError):
+        await service.execute(client.events().insert(calendarId="primary", body={}))
+    assert send.call_count == 1
+    with pytest.raises(HttpError) as redirected:
+        await service.execute(client.events().insert(calendarId="primary", body={}))
+    assert redirected.value.resp.status == 307
+    assert send.call_count == 2
+    assert all(call.args[0] == "POST" and call.kwargs["allow_redirects"] is False
+               for call in send.call_args_list)

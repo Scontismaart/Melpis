@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from contextlib import asynccontextmanager
 
 from src.core.db.scoping import system_scope
-from src.core.calendar.connection import CalendarUnavailable
+from src.core.calendar.connection import CalendarFenceBusy, CalendarUnavailable, under_calendar_worker_fence
 from src.core.bookings.provenance_quarantine import booking_is_quarantined, quarantine_predicate
 
 
@@ -14,10 +14,22 @@ class CalendarQueue:
     @asynccontextmanager
     async def _write(self, org_id, *, lock_organization=False):
         async with self.pool.acquire() as conn, conn.transaction():
+            nested = under_calendar_worker_fence(org_id)
             if lock_organization:
-                # A06 erasure locks the organization before its exclusive fence.
-                await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR SHARE", UUID(str(org_id)))
-            await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(org_id))
+                # A06 takes the row first. A worker already holding the session
+                # fence must yield if it cannot acquire the row immediately.
+                if nested:
+                    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR SHARE NOWAIT",
+                                        UUID(str(org_id)))
+                else:
+                    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR SHARE",
+                                        UUID(str(org_id)))
+            if nested:
+                if not await conn.fetchval("SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1::text,606))",
+                                           str(org_id)):
+                    raise CalendarFenceBusy
+            else:
+                await conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text,606))", str(org_id))
             yield conn
 
     @system_scope("bounded Calendar worker; every claim carries its tenant and connection epoch")

@@ -55,6 +55,7 @@ def test_valid_empty_freebusy_is_verified_free_for_every_requested_resource():
         }), RESOURCES),
         (freebusy_payload(calendars={"primary": {"busy": []}, "room-1": {}}), RESOURCES),
         (freebusy_payload(calendars={"primary": {"busy": []}, "room-1": {"busy": ""}}), RESOURCES),
+        (freebusy_payload(timeMin="2026-01-15T09:00:00+00:99"), RESOURCES),
         (freebusy_payload(), ()),
         (freebusy_payload(), ("primary", "primary")),
     ],

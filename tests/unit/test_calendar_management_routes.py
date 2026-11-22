@@ -118,6 +118,7 @@ def _test_app(pool, service=None):
     [
         ("false", "connected", "disabled", "google_authoritative"),
         ("true", "revoked", "revoked", "google_authoritative"),
+        ("true", "disconnected", "not_connected", "google_authoritative"),
         ("true", "reconnect_required", "reconnect_required", "google_authoritative"),
     ],
 )
@@ -293,3 +294,36 @@ async def test_authority_mode_change_does_not_auto_enable_a05(monkeypatch):
 
     assert pool.config["a05"] == {"enabled": False, "authority": "internal"}
     assert any("INSERT INTO booking_settings" in query for query, _args in pool.write_queries)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["internal", "internal_calendar_sync", "google_authoritative"])
+async def test_configured_calendar_is_distinct_from_verified_readiness(monkeypatch, mode):
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    pool = _Pool(_credential_row(last_verified_at=None), {"a05": {"authority": mode}})
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pool)))
+
+    payload = await routes.calendar_status(request, {"organization_id": ORG})
+
+    assert payload["connected"] is True
+    assert payload["integration_status"] == "verification_required"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["reconnect_required", "revoked"])
+async def test_failed_check_preserves_reconnect_state_discovered_by_probe(monkeypatch, state):
+    from src.core.calendar.availability import AvailabilityStatus, CalendarAvailability
+
+    monkeypatch.setenv("GOOGLE_CALENDAR_ENABLED", "true")
+    pool = _Pool(_credential_row())
+
+    async def availability(*_args):
+        pool.credentials["connection_status"] = state
+        return CalendarAvailability(AvailabilityStatus.UNKNOWN, reason_code="provider_unavailable")
+
+    service = SimpleNamespace(availability=availability)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pool, calendar_service=service)))
+    payload = await routes.calendar_check(request, {"organization_id": ORG})
+
+    assert payload["integration_status"] == state
+    assert payload["connected"] is False

@@ -2,6 +2,7 @@
 
 No Google SDK request is executed: only the transport boundary is substituted.
 """
+import asyncio
 import json
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -98,7 +99,7 @@ class Google:
 
     def list(self, **kwargs):
         return Request("LIST", lambda _: {"kind": "calendar#events", "timeZone": "Europe/Rome",
-                                          "items": deepcopy(list(self.rows.values()))})
+                                          "accessRole": "owner", "items": deepcopy(list(self.rows.values()))})
 
 
 async def setup(pool, org, monkeypatch, mode="internal_calendar_sync", *, create_booking=True):
@@ -400,3 +401,117 @@ async def test_reconnect_404_cannot_clear_uncertain_write(pg_pool, sample_org, m
     assert not await service.request_booking_retry(org, booking["id"])
     assert (await ledger(pg_pool, org, booking))["calendar_dispatch_state"] == "possibly_sent"
     assert google.calls.count("POST") == 1
+
+
+@pytest.mark.parametrize("lock_organization", [True, False])
+async def test_erasure_waiting_for_worker_does_not_deadlock_calendar_finalization(
+    pg_pool, sample_org, monkeypatch, lock_organization
+):
+    org = sample_org["id"]
+    service, google, _repo, booking = await setup(pg_pool, org, monkeypatch)
+    post_returned = asyncio.Event()
+    continue_worker = asyncio.Event()
+    execute = service.execute
+
+    async def pause_after_post(request):
+        result = await execute(request)
+        if request.method == "POST":
+            post_returned.set()
+            await continue_worker.wait()
+        return result
+
+    service.execute = pause_after_post
+    worker = asyncio.create_task(service.process_pending())
+    try:
+        await asyncio.wait_for(post_returned.wait(), 5)
+        async with pg_pool.acquire() as erasure_conn, erasure_conn.transaction():
+            # Erasure takes the organization first. Retention can take only the fence.
+            if lock_organization:
+                await erasure_conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR NO KEY UPDATE", org)
+            fence = asyncio.create_task(erasure_conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1::text,606))", str(org), timeout=3
+            ))
+            try:
+                async with pg_pool.acquire() as observer:
+                    for _ in range(100):
+                        waiting = await observer.fetchval(
+                            "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted)",
+                            erasure_conn.get_server_pid(),
+                        )
+                        if waiting:
+                            break
+                        await asyncio.sleep(.01)
+                    assert waiting
+                continue_worker.set()
+            finally:
+                await fence
+        await asyncio.wait_for(worker, 5)
+    finally:
+        if not worker.done():
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
+
+    before = await ledger(pg_pool, org, booking)
+    assert before["sync_status"] == "uncertain"
+    assert before["calendar_dispatch_state"] == "possibly_sent"
+    assert await service.queue.retry(org, booking["id"])
+    await service.process_pending()
+    assert (await ledger(pg_pool, org, booking))["sync_status"] == "succeeded"
+    assert google.calls.count("POST") == 1
+
+
+async def test_calendar_readiness_tracks_only_persisted_resources_and_explicit_pause(
+    pg_pool, sample_org, monkeypatch
+):
+    from fastapi import HTTPException
+
+    from src.core.calendar.management import save_calendar_settings
+    from src.core.calendar.routes import CalendarSettingsInput
+
+    org = sample_org["id"]
+    service, google, _repo, booking = await setup(pg_pool, org, monkeypatch)
+    await service.process_pending()
+    async with pg_pool.acquire() as conn:
+        await conn.execute("UPDATE google_calendar_credentials SET last_verified_at=NULL WHERE organization_id=$1", org)
+
+    with pytest.raises(HTTPException, match="Reconcile existing Calendar events"):
+        await save_calendar_settings(service, org, CalendarSettingsInput(calendar_id="other@example.test"))
+    assert google.calls.count("FREEBUSY") == 1
+    assert (await service.connection.row(org))["last_verified_at"] is None
+    assert (await ledger(pg_pool, org, booking))["sync_status"] == "succeeded"
+
+    selection = {"mode": "internal_calendar_sync", "calendar_id": "stage@example.test"}
+    paused = await save_calendar_settings(service, org, CalendarSettingsInput(**selection, sync_enabled=False))
+    assert paused["connected"] and paused["integration_status"] == "paused"
+    assert not paused["sync_enabled"]
+    resumed = await save_calendar_settings(service, org, CalendarSettingsInput(**selection, sync_enabled=True))
+    assert resumed["connected"] and resumed["integration_status"] == "verification_required"
+    assert resumed["sync_enabled"]
+    assert resumed["mode"] == selection["mode"]
+    assert google.calls.count("FREEBUSY") == 1
+
+    now = datetime.now(timezone.utc)
+    availability = await service.availability(org, now, now + timedelta(minutes=1))
+    assert availability.verified
+    assert (await service.connection.row(org))["last_verified_at"] is not None
+
+
+@pytest.mark.parametrize(("provider_status", "expected"), [(401, "reconnect_required"), (429, "sync_failed")])
+async def test_calendar_probe_distinguishes_revoked_access_from_provider_limits(
+    pg_pool, sample_org, monkeypatch, provider_status, expected
+):
+    from src.core.calendar.routes import calendar_check
+
+    org = sample_org["id"]
+    service, google, _repo, _booking = await setup(pg_pool, org, monkeypatch, create_booking=False)
+    monkeypatch.setattr(google, "query", lambda **kwargs: _raise_provider_status(provider_status))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=pg_pool, calendar_service=service)))
+
+    payload = await calendar_check(request, {"organization_id": org})
+
+    assert payload["integration_status"] == expected
+    assert payload["connected"] is (provider_status == 429)
+
+
+def _raise_provider_status(status):
+    raise _http(status)

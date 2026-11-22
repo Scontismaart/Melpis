@@ -27,7 +27,7 @@ class CalendarAvailability:
         return self.status in (AvailabilityStatus.FREE, AvailabilityStatus.BUSY)
 
 
-_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$")
 
 
 def aware_utc(value):

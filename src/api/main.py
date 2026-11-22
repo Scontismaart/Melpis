@@ -128,6 +128,9 @@ async def lifespan(app: FastAPI):
     from src.core.startup_guard import assert_production_safe
     assert_production_safe()
     background_jobs_enabled = _background_jobs_enabled_from_env()
+    dsn = os.getenv("DATABASE_URL")
+    if google_calendar_enabled() and not dsn:
+        raise RuntimeError("Calendar enabled requires verified database and worker readiness")
     app.state.background_jobs_enabled = background_jobs_enabled
     # Config globale — settato incondizionatamente, prima di qualsiasi
     # dipendenza dal DB, cosi' e' disponibile anche in modalita' demo
@@ -146,7 +149,6 @@ async def lifespan(app: FastAPI):
     app.state.private_booking_pool = None
     from src.core.db.inbound_worker_provenance import private_booking_worker_enabled
     private_booking_enabled = background_jobs_enabled and private_booking_worker_enabled()
-    dsn = os.getenv("DATABASE_URL")
     if private_booking_enabled and not dsn:
         stop_email_worker()
         raise RuntimeError("Private booking worker requires its database")

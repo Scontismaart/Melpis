@@ -24,7 +24,9 @@ payload hash, event ETag, verification time, and authoritative-finalization
 metadata. It does not create a second booking store or opt historical bookings
 into synchronization. `src/core/db/migrations/064_calendar_lifecycle.sql`
 marks unresolved legacy Google work without a verified connection epoch as
-blocked rather than inferring consent or connection state.
+blocked. The refresh fencing reviewed in draft PR #157 landed via PR #160 and
+is carried by migration 088 after PR #168. Calendar requests receive access-token
+credentials, so only the durable refresh path can send a token refresh.
 
 OAuth requests the `calendar.events` and `calendar.events.freebusy` scopes
 (`src/core/calendar/connection.py::SCOPES`). Calendar auth is owner/MFA scoped,
@@ -46,9 +48,12 @@ nonexistent DST wall times are rejected.
 delete. A request that may have reached Google is marked as possibly sent.
 Expired recovery keeps the original claimed revision, action, and payload hash;
 it performs an exact GET reconciliation and does not repeat the write merely
-because GET returned 404. Lease/fence/revision checks prevent stale workers
-from finalizing newer intent. Stable event IDs and ownership metadata prevent
-cross-tenant adoption and cancellation resurrection.
+because GET returned 404. A cancelled event with the exact requested ID can
+settle a deletion. A not-found response requires a separate access check on
+that calendar before the worker records absence. Event read-back checks that
+the event blocks time. Lease/fence/revision checks prevent stale workers from
+finalizing newer intent. Stable IDs and ownership metadata prevent cross-tenant
+adoption and cancellation resurrection.
 
 There is no atomic transaction spanning Google free/busy and local booking
 insert/finalization. Availability can change between the free/busy read and the
@@ -75,8 +80,8 @@ assumed present from checkout state or CI:
    tables.
 
 The local readiness configuration's `GOOGLE_CALENDAR_SCHEMA_VERSION=064` is an
-operator assertion only. The runtime database path must verify actual schema
-064 before enabling the worker. The preflight requires Calendar disabled by
+operator assertion. The runtime database path checks the schema from 064 and
+the refresh dispatch column from 088. The preflight requires Calendar disabled by
 default and, to enable it, affirmative operational approval, a non-placeholder
 certification reference, schema assertion `064`, worker enablement, OAuth
 client values, a valid Fernet key, and a strict HTTPS redirect on the
@@ -87,8 +92,10 @@ certification; see `docs/operations/calendar-production-readiness.md`.
 ## Booking UI status handling
 
 `web/dashboard-integrations.js` presents the three modes, connection states,
-queue counts, and safe error labels. Saving is explicit; onboarding does not
-require Calendar or opt it in. The booking list in
+queue counts, and safe error labels. An OAuth connection starts as unverified,
+and a paused connection remains visible and disconnectable. A settings probe is
+published only with the configuration it verified. Saving is explicit, and
+onboarding leaves Calendar optional. The booking list in
 `web/dashboard-bookings.js` renders the actual `p.stato`, so an authoritative
 booking whose backend state is `in_attesa` is not displayed as confirmed.
 

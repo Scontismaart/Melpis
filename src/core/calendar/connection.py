@@ -1,6 +1,7 @@
 """Server-only Calendar credentials and explicit owner-selected authority."""
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import json
 import os
@@ -15,6 +16,26 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events",
           "https://www.googleapis.com/auth/calendar.events.freebusy"]
 MODES = {"internal", "internal_calendar_sync", "google_authoritative"}
 _CALENDAR_ID = re.compile(r"^[A-Za-z0-9._@#-]{1,254}$")
+
+
+_worker_fence = ContextVar("calendar_worker_fence", default=None)
+
+
+@contextmanager
+def calendar_worker_fence(org_id):
+    token = _worker_fence.set(str(org_id))
+    try:
+        yield
+    finally:
+        _worker_fence.reset(token)
+
+
+def under_calendar_worker_fence(org_id):
+    return _worker_fence.get() == str(org_id)
+
+
+class CalendarFenceBusy(RuntimeError):
+    """A different session queued an exclusive tenant fence during this cycle."""
 
 
 class CalendarUnavailable(RuntimeError):
@@ -47,7 +68,11 @@ async def connection_lock(pool, org_id):
     """Cross-worker serialization. Never an application-wide credential lock."""
     async with pool.acquire() as conn:
         key = f"calendar-credentials:{org_id}"
-        await conn.execute("SELECT pg_advisory_lock_shared(hashtextextended($1::text,606))", str(org_id))
+        if under_calendar_worker_fence(org_id):
+            if not await conn.fetchval("SELECT pg_try_advisory_lock_shared(hashtextextended($1::text,606))", str(org_id)):
+                raise CalendarFenceBusy
+        else:
+            await conn.execute("SELECT pg_advisory_lock_shared(hashtextextended($1::text,606))", str(org_id))
         try:
             await conn.execute("SELECT pg_advisory_lock(hashtextextended($1,604))", key)
             try:
