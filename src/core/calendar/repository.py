@@ -18,10 +18,12 @@ class CalendarQueue:
             if lock_organization:
                 # A06 takes the row first. A worker already holding the session
                 # fence must yield if it cannot acquire the row immediately.
-                query = "SELECT id FROM organizations WHERE id=$1 FOR SHARE"
                 if nested:
-                    query += " NOWAIT"
-                await conn.fetchrow(query, UUID(str(org_id)))
+                    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR SHARE NOWAIT",
+                                        UUID(str(org_id)))
+                else:
+                    await conn.fetchrow("SELECT id FROM organizations WHERE id=$1 FOR SHARE",
+                                        UUID(str(org_id)))
             if nested:
                 if not await conn.fetchval("SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1::text,606))",
                                            str(org_id)):
