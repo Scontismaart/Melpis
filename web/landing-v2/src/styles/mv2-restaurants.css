@@ -880,7 +880,7 @@
 .mv2-rest-scenario-desc {
   font-size: 13.5px;
   line-height: 1.55;
-  color: #626b76;
+  color: #263449;
   margin: 0;
 }
 
@@ -1596,7 +1596,7 @@
 
 .mv2-scen-dark-time {
   font-size: 9px;
-  color: #64748B;
+  color: #94A3B8;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -1661,7 +1661,7 @@
 .mv2-scen-voucher-foot {
   text-align: right;
   font-size: 8.5px;
-  color: #64748B;
+  color: #94A3B8;
   margin-top: 2px;
 }
 
