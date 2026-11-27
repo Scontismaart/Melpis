@@ -50,6 +50,8 @@ def mock_deps(monkeypatch):
         return_value={"status": "claimed", "ai_reply_cache": None}
     )
     repo.get_outbound_dedup = AsyncMock(return_value=None)
+    repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4(), "ai_disclosure_sent_at": "sent"})
+    repo.check_idempotency = AsyncMock(return_value=None)
     repo.check_booking_exists = AsyncMock(return_value=False)
     repo.save_ai_reply = AsyncMock()
     repo.save_outbound_dedup = AsyncMock()

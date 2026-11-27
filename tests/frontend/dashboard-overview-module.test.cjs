@@ -91,7 +91,7 @@ test("setup checks show unavailable on failed or invalid channel responses inste
     await h.module.aggiornaPrioritari();
     const setupArea = h.document.getElementById("priority-list");
     assert.match(setupArea.textContent, /Impossibile verificare la configurazione/);
-    assert.equal(setupArea.querySelector("[data-action='setup-wizard']"), null);
+    assert.equal(setupArea.querySelector("[data-action='setup-ai']"), null);
     assert.doesNotMatch(setupArea.textContent, /Completato|pronto a rispondere/);
   }
 });
@@ -154,4 +154,23 @@ test("Overview review navigation targets the new route and cancels stale-org det
   h.context.selectedOrganizationId = "org-2";
   [...h.timers.values()][0]();
   assert.deepEqual(h.opened, ["review-1"]);
+});
+
+test("Overview treats saved WhatsApp credentials as configuration only", async (t) => {
+  for (const connesso of [false, true]) {
+    const h = fixture(async (url) => {
+      if (url.endsWith("conteggio")) return response(200, { chunk_indicizzati: 0 });
+      if (url.endsWith("/bookings/settings")) return response(200, { capienze_orarie: { "12:00": 1 } });
+      if (url.endsWith("/whatsapp/settings")) {
+        return response(200, { connesso, phone_number_id: "stored-number", configured: true, webhook_active: true });
+      }
+      return response(200, []);
+    }, null);
+    t.after(() => h.dom.window.close());
+    await h.module.aggiornaPrioritari();
+    const setup = h.document.getElementById("priority-list");
+    assert.ok(setup.querySelector("[data-action='setup-wa']"), "Settings remains available to check WhatsApp");
+    assert.doesNotMatch(setup.textContent, /pronto a rispondere|attivare l.assistente/);
+    assert.equal(setup.textContent.includes("Ricezione da verificare"), connesso);
+  }
 });

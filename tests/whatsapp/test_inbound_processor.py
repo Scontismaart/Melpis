@@ -189,6 +189,21 @@ class TestInboundProcessor:
         assert body == "Ti passo una persona dello staff, un attimo!"
         mock_repo.try_mark_replied.assert_awaited_with(sample_msg["id"], handling_type="escalated", organization_id=sample_msg["organization_id"])
 
+    async def test_english_operator_request_handoffs_before_ai(
+        self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg
+    ):
+        sample_msg["content_text"] = "operator please"
+        fake_tenant_config.business_profile["lingue_supportate"] = ["it", "en"]
+        mock_service.check_human_request.side_effect = [False, True]
+        mock_repo.escalate_to_human = AsyncMock(return_value=None)
+        with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)):
+            await InboundProcessor(app_config, mock_repo, mock_service).process_next_batch()
+
+        mock_service.fast_path_match.assert_not_called()
+        mock_repo.escalate_to_human.assert_awaited_once_with(str(sample_msg["conversation_id"]), sample_msg["organization_id"])
+        sent = mock_service.send_whatsapp_message.call_args.kwargs["payload"]["text"]["body"]
+        assert "member of our staff" in sent
+
     async def test_claimed_ticket_skips_ai_response(
         self, app_config, mock_repo, mock_service, sample_msg
     ):
@@ -288,7 +303,9 @@ class TestInboundProcessor:
     async def test_ai_reply_no_disclosure_on_second_contact(
         self, app_config, mock_repo, mock_service, fake_tenant_config, sample_msg
     ):
-        mock_repo.mark_ai_disclosure_sent = AsyncMock(return_value=False)
+        mock_repo.get_or_create_contact = AsyncMock(
+            return_value={"id": uuid.uuid4(), "ai_disclosure_sent_at": "sent"}
+        )
         with patch("src.whatsapp.inbound_processor.load_tenant_config", AsyncMock(return_value=fake_tenant_config)), \
              patch("src.whatsapp.inbound_processor.genera_risposta_async", AsyncMock(return_value=RispostaOutput(
                  risposta="Siamo aperti.", richiede_umano=False, motivo="orari", categoria="info",
@@ -424,24 +441,28 @@ class TestInboundProcessor:
         from src.whatsapp.inbound_processor import decorate_with_disclosure, DISCLOSURE_TEXT
         mock_repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4()})
         mock_repo.mark_ai_disclosure_sent = AsyncMock(return_value=True)
-        out = await decorate_with_disclosure(
+        out, contact_id = await decorate_with_disclosure(
             str(uuid.uuid4()), "391234567890", "Siamo aperti.",
             mock_repo, nome_attivita="Trattoria Test",
         )
         assert out.startswith("Ciao! Sono l'assistente automatico di Trattoria Test")
         assert DISCLOSURE_TEXT.format(nome="Trattoria Test") in out
         assert out.endswith("Siamo aperti.")
+        assert contact_id == mock_repo.get_or_create_contact.return_value["id"]
+        mock_repo.mark_ai_disclosure_sent.assert_not_awaited()
 
     async def test_decorate_with_disclosure_second_contact(
         self, app_config, mock_repo, mock_service
     ):
         from src.whatsapp.inbound_processor import decorate_with_disclosure
-        mock_repo.get_or_create_contact = AsyncMock(return_value={"id": uuid.uuid4()})
-        mock_repo.mark_ai_disclosure_sent = AsyncMock(return_value=False)
-        out = await decorate_with_disclosure(
+        mock_repo.get_or_create_contact = AsyncMock(
+            return_value={"id": uuid.uuid4(), "ai_disclosure_sent_at": "sent"}
+        )
+        out, contact_id = await decorate_with_disclosure(
             str(uuid.uuid4()), "391234567890", "Gia' vista.", mock_repo, nome_attivita="X"
         )
         assert out == "Gia' vista."
+        assert contact_id is None
 
 
 class TestInstagramDispatch:
@@ -1000,3 +1021,85 @@ class TestRagContestoWhatsapp:
 
         assert captured["contesto"] == ""
         mock_service.send_whatsapp_message.assert_awaited_once()
+
+
+async def test_disclosure_is_committed_only_after_provider_acceptance(app_config, mock_repo, sample_msg):
+    from src.core.inbound.service import DISCLOSURE_TEXT, InboundProcessingService
+
+    marker = {"id": uuid.uuid4(), "ai_disclosure_sent_at": None}
+    mock_repo.get_or_create_contact = AsyncMock(return_value=marker)
+
+    async def mark(*_args):
+        marker["ai_disclosure_sent_at"] = "confirmed"
+
+    mock_repo.mark_ai_disclosure_sent = AsyncMock(side_effect=mark)
+    send = AsyncMock(side_effect=[TimeoutError("uncertain"), {"wam_id": "accepted"}, {"wam_id": "later"}])
+    service = InboundProcessingService(app_config, mock_repo, send_reply_fn=send)
+    org = sample_msg["organization_id"]
+    content = {"from": "391234567890"}
+    text = "Risposta sintetica"
+
+    with pytest.raises(TimeoutError):
+        await service._send_automated_reply(org, sample_msg, content, None, text, "Test")
+    mock_repo.mark_ai_disclosure_sent.assert_not_awaited()
+
+    await service._send_automated_reply(org, sample_msg, content, None, text, "Test")
+    mock_repo.mark_ai_disclosure_sent.assert_awaited_once_with(marker["id"], org)
+    await service._send_automated_reply(org, sample_msg, content, None, text, "Test")
+    prefix = DISCLOSURE_TEXT.format(nome="Test")
+    assert [call.args[4] for call in send.await_args_list] == [f"{prefix}\n\n{text}", f"{prefix}\n\n{text}", text]
+
+
+async def test_ai_handoff_notice_includes_disclosure(app_config, mock_repo, sample_msg):
+    from src.core.inbound.service import DISCLOSURE_TEXT, InboundProcessingService
+
+    mock_repo.escalate_to_human = AsyncMock(return_value=None)
+    send = AsyncMock(return_value={"wam_id": "accepted"})
+    finalize = AsyncMock()
+    service = InboundProcessingService(app_config, mock_repo, send_reply_fn=send, finalize_fn=finalize)
+    org = sample_msg["organization_id"]
+    outcome = await service._escalate(
+        org, sample_msg, {"from": "391234567890"}, None, "Un operatore risponderà.", ai_name="Test",
+    )
+
+    assert outcome.richiede_umano
+    assert send.await_args.args[4].startswith(DISCLOSURE_TEXT.format(nome="Test"))
+    assert send.await_args.args[5] == "escalated"
+
+
+async def test_disclosure_replay_preserves_the_outbound_payload_after_provider_acceptance(app_config, mock_repo, sample_msg):
+    from src.core.inbound.service import InboundProcessingService
+
+    marker = {"id": uuid.uuid4(), "ai_disclosure_sent_at": None}
+    mock_repo.get_or_create_contact = AsyncMock(return_value=marker)
+    stored = {}
+
+    async def mark(*_args):
+        marker["ai_disclosure_sent_at"] = "confirmed"
+
+    async def lookup(org, key):
+        assert org == str(sample_msg["organization_id"])
+        assert key == f"reply:{sample_msg['id']}"
+        return stored or None
+
+    provider = AsyncMock(return_value={"wam_id": "accepted"})
+
+    async def idempotent_send(_org, _msg, _content, _config, body, _kind):
+        if stored:
+            assert body == stored["content_text"]
+            return {"wam_id": "accepted"}
+        result = await provider()
+        stored.update(direction="outbound", content_text=body)
+        return result
+
+    mock_repo.mark_ai_disclosure_sent = AsyncMock(side_effect=mark)
+    mock_repo.check_idempotency = AsyncMock(side_effect=lookup)
+    service = InboundProcessingService(app_config, mock_repo, send_reply_fn=idempotent_send)
+    args = (sample_msg["organization_id"], sample_msg, {"from": "391234567890"}, None, "Risposta", "Test")
+    first = await service._send_automated_reply(*args)
+    # The contact is already marked and the business name can change before retry.
+    replay = await service._send_automated_reply(*args[:-1], "Nome aggiornato")
+
+    assert replay == first
+    provider.assert_awaited_once()
+    mock_repo.mark_ai_disclosure_sent.assert_awaited_once()

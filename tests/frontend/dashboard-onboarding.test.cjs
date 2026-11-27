@@ -32,13 +32,15 @@ function onboardingOverrides(organizationId, userId = `user-${organizationId}`) 
 
 async function openWizard(t, organizationId, { storageSeed = {}, userId, overrides = {} } = {}) {
   const harness = createDashboardHarness({
-    url: "https://melpis.test/app/onboarding",
+    url: "https://melpis.test/app/overview",
     selectedOrganization: organizationId,
     storageSeed,
     overrides: { ...onboardingOverrides(organizationId, userId), ...overrides },
   });
   t.after(harness.dispose);
   await harness.ready();
+  // Exercise the retained wizard internals without exposing an application route.
+  void harness.window.eval("inizializzaOnboarding()");
   await harness.waitFor(
     () => harness.document.querySelector("#vertical-grid")?.children.length === 1
       || /permessi/i.test(harness.document.getElementById("onboarding-status")?.textContent || ""),
@@ -47,18 +49,24 @@ async function openWizard(t, organizationId, { storageSeed = {}, userId, overrid
   return harness;
 }
 
-test("the seven-step wizard resolves directly and from the overview guide", async (t) => {
-  const h = await openWizard(t, "org-A");
-  assert.equal(h.window.location.pathname, "/app/onboarding");
-  assert.equal(h.document.querySelector('[data-view-panel="onboarding"]').classList.contains("view-hidden"), false);
-  assert.equal(h.document.querySelectorAll("[data-onboarding-page]").length, 7);
-  assert.equal(h.document.querySelectorAll("[data-onboarding-step]").length, 7);
+test("old onboarding URLs and the overview CTA lead to the only AI configuration editor", async (t) => {
+  const h = createDashboardHarness({
+    url: "https://melpis.test/app/onboarding",
+    overrides: { ...onboardingOverrides("org-A"), "/api/whatsapp/settings": { connesso: false } },
+  });
+  t.after(h.dispose);
+  await h.ready();
+  await h.settle();
+  assert.equal(h.window.location.pathname, "/app/ai-settings");
+  assert.equal(h.document.querySelector('[data-view-panel="onboarding"]').classList.contains("view-hidden"), true);
+  assert.equal(h.document.querySelector('[data-view-panel="configurazione-ai"]').classList.contains("view-hidden"), false);
+  assert.equal(h.requests.some((request) => request.pathname === "/api/onboarding/verticali"), false);
 
   await h.navigate("panoramica");
-  await h.waitFor(() => h.document.querySelector('[data-action="setup-wizard"]'), "overview setup guide did not render");
-  h.document.querySelector('[data-action="setup-wizard"]').click();
-  await h.waitFor(() => h.window.location.pathname === "/app/onboarding", "setup guide did not open the wizard route");
-  assert.equal(h.document.querySelector('[data-view-panel="onboarding"]').classList.contains("view-hidden"), false);
+  await h.waitFor(() => h.document.querySelector('[data-action="setup-ai"]'));
+  h.document.querySelector('[data-action="setup-ai"]').click();
+  await h.waitFor(() => h.window.location.pathname === "/app/ai-settings");
+  assert.equal(h.document.querySelector('[data-view-panel="onboarding"]').classList.contains("view-hidden"), true);
 });
 
 test("onboarding drafts stay scoped to their organization across A to B to A and reload", async (t) => {

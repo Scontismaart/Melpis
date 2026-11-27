@@ -465,7 +465,7 @@ async def test_outbound_dedup_replay_uses_committed_a04_response_not_cached_text
     ai_service.fast_path_match.return_value = "Risposta fast path diversa."
 
     async def no_disclosure(_org, _from, response_text, *_args):
-        return response_text
+        return response_text, None
 
     message = {
         "id": message_id, "organization_id": org["id"],

@@ -61,8 +61,8 @@ async def _worker(pool, monkeypatch, *, legacy=False, text=None):
     service, repo, _ai, _, send, config = _inbound_service_with_real_quota(pool, org, None)
     repo.list_conversation_messages.return_value = []
     repo.escalate_to_human.return_value = None
-    repo.mark_ai_disclosure_sent.return_value = False
-    repo.get_or_create_contact.return_value = {"id": uuid4()}
+    repo.get_or_create_contact.return_value = {"id": uuid4(), "ai_disclosure_sent_at": "sent"}
+    repo.check_idempotency.return_value = None
     booking = BookingService(booking_repo=BookingRepository(pool))
     booking.handle_reminder_reply = AsyncMock(return_value=None)
     service.booking_service = booking

@@ -76,3 +76,25 @@ class TestMarkAiDisclosureSent:
     async def test_missing_contact_returns_false(self, repo):
         result = await repo.mark_ai_disclosure_sent(uuid.uuid4(), uuid.uuid4())
         assert result is False
+
+
+async def test_first_disclosure_guard_does_not_consume_a_slot_from_a_single_slot_pool(repo, postgres_container):
+    contact = await _make_contact(repo)
+    org, contact_id = contact["organization_id"], contact["id"]
+    dsn = postgres_container.get_connection_url().replace("+psycopg2", "")
+    pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=1)
+    from src.whatsapp.repository import Repository
+
+    single_slot_repo = Repository(pool=pool)
+    try:
+        async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as first:
+            assert first
+            async with pool.acquire(timeout=1):
+                async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as concurrent:
+                    assert not concurrent
+                async with single_slot_repo.ai_disclosure_guard(org, uuid.uuid4(), postgres_dsn=dsn) as independent:
+                    assert independent
+        async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as retry:
+            assert retry
+    finally:
+        await pool.close()

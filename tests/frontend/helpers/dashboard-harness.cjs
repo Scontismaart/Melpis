@@ -79,7 +79,8 @@ function responseBody(pathname) {
   }
   if (pathname === "/api/conoscenza/dati-struttura") return { servizi: [], orari: "" };
   if (pathname === "/api/impostazioni/organizzazione") return { timezone: "UTC", timezone_disponibili: ["UTC"] };
-  if (pathname === "/api/whatsapp/settings" || pathname === "/api/instagram/account") return {};
+  if (pathname === "/api/whatsapp/settings") return { connesso: false };
+  if (pathname === "/api/instagram/account") return {};
   if (pathname === "/api/billing/subscription") return {};
   if (/^\/api\/(calendar|reviews\/google|v1\/integrations\/booking|v1\/integrations\/airtable)\//.test(pathname)) return {};
   if (/^\/api\/audit(?:\/|$)/.test(pathname)) return { items: [], events: [], total: 0 };

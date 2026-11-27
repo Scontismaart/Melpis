@@ -528,7 +528,7 @@ const VIEW_FALLBACK = {
   reviews: { view: "impostazioni", tab: "reviews" },
   documenti: { view: "conoscenza" },
   report: { view: "panoramica" },
-  onboarding: { view: "onboarding" },
+  onboarding: { view: "configurazione-ai" },
 };
 
 function apriVistaImpostazioni(cat = "generale") {

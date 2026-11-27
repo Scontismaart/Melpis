@@ -63,6 +63,7 @@
         loadedProfile = null;
         draftRevision = 0;
         currentRules = [];
+        if (addRuleInput) addRuleInput.value = "";
         if (nomeInput) nomeInput.value = "";
         if (vertSelect) vertSelect.selectedIndex = 0;
         if (descTextarea) descTextarea.value = "";
@@ -76,7 +77,11 @@
         if (saveBtn) saveBtn.disabled = true;
       }
 
-      function renderRules(checkedByIndex = null) {
+      function checkedRules() {
+        return [...(rulesContainer?.querySelectorAll(".ai-cfg-rule-checkbox") ?? [])].map((input) => input.checked);
+      }
+
+      function renderRules(checkedByIndex = []) {
         if (!rulesContainer) return;
         rulesContainer.replaceChildren();
         if (!currentRules.length) {
@@ -91,7 +96,7 @@
           item.className = "settings-rule-item";
           const label = document.createElement("label");
           label.className = "settings-rule-label";
-          const checked = checkedByIndex ? checkedByIndex.get(index) !== false : true;
+          const checked = checkedByIndex[index] !== false;
           label.innerHTML = `<input type="checkbox" class="ai-cfg-rule-checkbox" data-rule-index="${index}" ${checked ? "checked" : ""}> <span>${sanitize(rule)}</span>`;
           const deleteButton = document.createElement("button");
           deleteButton.type = "button";
@@ -102,9 +107,11 @@
           deleteButton.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
           deleteButton.addEventListener("click", () => {
             if (!active) return;
+            const checked = checkedRules();
+            checked.splice(index, 1);
             currentRules.splice(index, 1);
-            dirty = true;
-            renderRules();
+            markDirty();
+            renderRules(checked);
           });
           item.append(label, deleteButton);
           rulesContainer.appendChild(item);
@@ -231,7 +238,7 @@
           descrizione: description,
           tono: tone,
           servizi: Array.isArray(profile?.servizi) ? profile.servizi : [],
-          regole_escalation: selectedRules.length ? selectedRules : currentRules,
+          regole_escalation: selectedRules,
           whatsapp_collegato: Boolean(profile?.whatsapp_collegato),
           documenti_importati: Boolean(profile?.documenti_importati),
           lingue_supportate: supportedLanguages,
@@ -270,7 +277,7 @@
               }
               return null;
             }
-            if (!data?.profilo || typeof data.profilo !== "object") {
+            if (!data?.profilo || typeof data.profilo !== "object" || Array.isArray(data.profilo)) {
               if (saveStatus) {
                 saveStatus.textContent = translate("settings:ai_configuration.save_error");
                 saveStatus.style.color = "var(--red)";
@@ -322,10 +329,7 @@
 
       document.querySelectorAll(".ai-cfg-lang-opt").forEach((checkbox) => {
         checkbox.addEventListener("change", () => {
-          const checked = new Map([...document.querySelectorAll(".ai-cfg-rule-checkbox")]
-            .map((input) => [Number(input.dataset.ruleIndex), input.checked]));
           updateDefaultLanguage();
-          renderRules(checked);
           markDirty();
         });
       });
@@ -333,11 +337,11 @@
         if (!active || !addRuleInput) return;
         const text = addRuleInput.value.trim();
         if (!text) return;
+        const checked = checkedRules();
         currentRules.push(text);
         addRuleInput.value = "";
-        dirty = true;
-        draftRevision += 1;
-        renderRules();
+        markDirty();
+        renderRules(checked);
       });
       addRuleInput?.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
@@ -395,10 +399,7 @@
       }
 
       function refreshLanguage() {
-        if (!active) return;
-        const checked = new Map([...document.querySelectorAll(".ai-cfg-rule-checkbox")]
-          .map((input) => [Number(input.dataset.ruleIndex), input.checked]));
-        renderRules(checked);
+        if (active) renderRules(checkedRules());
       }
 
       return Object.freeze({ onEnter, onExit, invalidate, refreshLanguage });

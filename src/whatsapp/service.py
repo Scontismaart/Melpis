@@ -59,7 +59,8 @@ HUMAN_REQUEST_KEYWORDS = {
     "en": ["operator", "human", "talk to a person", "real person"],
 }
 
-_FAST_PATH_GREETINGS = ["ciao", "buongiorno", "buonasera", "salve", "hey", "hello", "hi"]
+_FAST_PATH_GREETINGS = ["ciao", "buongiorno", "buonasera", "salve"]
+_FAST_PATH_GREETINGS_EN = {"hey", "hello", "hi"}
 _FAST_PATH_THANKS = ["grazie", "grazie mille", "grazie tante", "perfetto", "ok grazie", "grazie arrivederci"]
 
 
@@ -260,7 +261,12 @@ class WhatsAppService:
             # Messaggi articolati o con richieste/prenotazioni vanno sempre all'agente LLM
             return None
 
-        name = (business_profile or {}).get("nome") or (business_profile or {}).get("name") or ""
+        profile = business_profile or {}
+        name = profile.get("nome") or profile.get("name") or ""
+        if normalized in _FAST_PATH_GREETINGS_EN:
+            if "en" in (profile.get("lingue_supportate") or []):
+                return f"Hello! Welcome to {name}. How can we help you?" if name else "Hello! How can we help you?"
+            return None  # Let the existing language and clinical policies handle this case.
         for g in _FAST_PATH_GREETINGS:
             if normalized == g:
                 if name:

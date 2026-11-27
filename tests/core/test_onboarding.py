@@ -39,6 +39,18 @@ def test_build_business_profile_con_default_dal_template():
     assert "Taglio donna e uomo" in profile.servizi_principali
 
 
+@pytest.mark.asyncio
+async def test_explicitly_cleared_escalation_rules_are_empty_in_storage_and_runtime(repo, sample_org):
+    org = sample_org["id"]
+    await onboarding.save_profile(org, _profile(), repo)
+    await onboarding.save_profile(org, _profile(regole_escalation=[]), repo)
+
+    assert (await onboarding.get_profile(org, repo))["regole_escalation"] == []
+    assert _profile_from_dict(await repo.get_org_business_profile(org)).note_speciali == []
+    defaults = OnboardingProfileInput(verticale="parrucchiere", nome_attivita="Studio Test")
+    assert onboarding.build_business_profile(defaults).note_speciali == onboarding.VERTICAL_TEMPLATES["parrucchiere"]["escalation"]
+
+
 [pytest.mark.asyncio]
 async def test_save_e_get_profilo_org_scoped(repo, sample_org, other_org):
     saved = await onboarding.save_profile(sample_org["id"], _profile(), repo)
