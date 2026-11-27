@@ -16,7 +16,6 @@
     assistente: "/app/ai-simulator",
     conoscenza: "/app/knowledge",
     "configurazione-ai": "/app/ai-settings",
-    onboarding: "/app/onboarding",
     impostazioni: "/app/settings",
   });
   const SETTINGS_TABS = Object.freeze([
@@ -51,8 +50,8 @@
 
   function resolveRoute(pathname) {
     const normalized = normalizeAppPath(pathname);
-    const view = VIEWS_BY_PATH[normalized];
-    const path = view ? normalized : ROUTES.panoramica;
+    const view = normalized === "/app/onboarding" ? "configurazione-ai" : VIEWS_BY_PATH[normalized];
+    const path = pathForView(view) || ROUTES.panoramica;
     return { view: view || "panoramica", path, canonical: pathname === path };
   }
 

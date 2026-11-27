@@ -176,7 +176,7 @@ async def connect_whatsapp_account(
     return {
         "ok": True,
         "status": "connected",
-        "message": "WhatsApp Business collegato con successo!",
+        "message": "Credenziali WhatsApp salvate. Ricezione e consegna da verificare.",
         "phone_number_id": phone_number_id,
         "waba_id": waba_id,
         "verified_name": verified_name,

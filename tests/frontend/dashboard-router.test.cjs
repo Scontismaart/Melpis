@@ -15,7 +15,6 @@ const primaryRoutes = {
   assistente: "/app/ai-simulator",
   conoscenza: "/app/knowledge",
   "configurazione-ai": "/app/ai-settings",
-  onboarding: "/app/onboarding",
 };
 const routes = { ...primaryRoutes, impostazioni: "/app/settings" };
 
@@ -183,7 +182,9 @@ test("settings and AI settings remain separate routes and a settings deep link k
   assert.deepEqual(rendered, ["impostazioni"]);
   assert.equal(routerApi.resolveRoute("/app/ai-settings").view, "configurazione-ai");
   assert.notEqual(routerApi.pathForView("impostazioni"), routerApi.pathForView("configurazione-ai"));
-  assert.equal(routerApi.resolveRoute("/app/onboarding").view, "onboarding");
+  assert.deepEqual(routerApi.resolveRoute("/app/onboarding"), {
+    view: "configurazione-ai", path: "/app/ai-settings", canonical: false,
+  });
   dom.window.close();
 });
 
@@ -491,7 +492,7 @@ test("dashboard HTML uses canonical semantic links, accessible active state, and
 
 test("changing dashboard language does not rewrite canonical route hrefs", () => {
   const html = fs.readFileSync(path.join(root, "web/index.html"), "utf8");
-  for (const href of Object.values(primaryRoutes).filter((route) => route !== "/app/onboarding")) {
+  for (const href of Object.values(primaryRoutes)) {
     assert.ok(html.includes(`href="${href}"`));
   }
   assert.ok(html.includes('href="/app/settings"'));

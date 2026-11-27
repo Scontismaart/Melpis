@@ -11,7 +11,6 @@ const canonicalRoutes = {
   assistente: "/app/ai-simulator",
   conoscenza: "/app/knowledge",
   "configurazione-ai": "/app/ai-settings",
-  onboarding: "/app/onboarding",
   impostazioni: "/app/settings",
 };
 
@@ -90,8 +89,8 @@ test("real shell routes stay canonical across ten destinations and deep links", 
   assert.deepEqual(JSON.parse(JSON.stringify(harness.window.MelpisDashboardRouter.ROUTES)), canonicalRoutes);
   const routeHrefs = [...new Set([...harness.document.querySelectorAll("[data-app-view]")]
     .map((anchor) => new URL(anchor.href).pathname))].sort();
-  assert.deepEqual(routeHrefs, Object.values(canonicalRoutes).filter((href) => href !== "/app/onboarding").sort());
-  assert.equal(harness.window.MelpisDashboardRouter.pathForView("onboarding"), "/app/onboarding");
+  assert.deepEqual(routeHrefs, Object.values(canonicalRoutes).sort());
+  assert.equal(harness.window.MelpisDashboardRouter.pathForView("onboarding"), null);
   assert.equal(harness.document.querySelector('[data-app-view="report"]'), null);
   assert.equal(harness.document.querySelector('[data-view-panel="report"]'), null);
 

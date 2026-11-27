@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import asynccontextmanager
 
 from src.core.db.scoping import TenantScopedRepository
 
@@ -113,6 +114,14 @@ class ContactRepository(TenantScopedRepository):
                 contact_id, organization_id,
             )
             return row["consent_status"] if row else None
+
+    @asynccontextmanager
+    async def ai_disclosure_guard(self, organization_id, contact_id):
+        """Serialize the first disclosure for this tenant contact across workers."""
+        async with self.scoped_conn(organization_id) as conn, conn.transaction():
+            key = f"ai-disclosure:{organization_id}:{contact_id}"
+            locked = await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))", key)
+            yield bool(locked)
 
     async def mark_ai_disclosure_sent(self, contact_id: uuid.UUID, organization_id) -> bool:
         """Atomicamente segna il contatto come destinatario della disclosure AI.

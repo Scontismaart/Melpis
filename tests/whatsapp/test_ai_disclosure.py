@@ -76,3 +76,18 @@ class TestMarkAiDisclosureSent:
     async def test_missing_contact_returns_false(self, repo):
         result = await repo.mark_ai_disclosure_sent(uuid.uuid4(), uuid.uuid4())
         assert result is False
+
+
+async def test_first_disclosure_guard_serializes_workers_per_tenant_contact(repo):
+    contact = await _make_contact(repo)
+    other_contact = uuid.uuid4()
+    org, contact_id = contact["organization_id"], contact["id"]
+
+    async with repo.ai_disclosure_guard(org, contact_id) as first:
+        assert first
+        async with repo.ai_disclosure_guard(org, contact_id) as concurrent:
+            assert not concurrent
+        async with repo.ai_disclosure_guard(org, other_contact) as independent:
+            assert independent
+    async with repo.ai_disclosure_guard(org, contact_id) as retry:
+        assert retry

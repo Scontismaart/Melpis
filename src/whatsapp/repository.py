@@ -164,6 +164,9 @@ class Repository(TenantScopedRepository):
     async def get_contact_consent(self, contact_id, organization_id) -> str | None:
         return await self._contact_repo.get_contact_consent(contact_id, organization_id)
 
+    def ai_disclosure_guard(self, organization_id, contact_id):
+        return self._contact_repo.ai_disclosure_guard(organization_id, contact_id)
+
     async def mark_ai_disclosure_sent(self, contact_id: uuid.UUID, organization_id) -> bool:
         return await self._contact_repo.mark_ai_disclosure_sent(contact_id, organization_id)
 

@@ -440,12 +440,12 @@ document.getElementById("wa-connect-form")?.addEventListener("submit", async (e)
     const contextAfterRequest = isIntegrationContextCurrent(actionContext);
     const data = await res.json().catch(() => ({}));
     if (!contextAfterRequest || !isIntegrationContextCurrent(actionContext)) return;
-    if (res.ok) {
+    if (res.ok && data?.ok === true) {
       const tokenInput = document.getElementById("wa-access-token");
       if (tokenInput?.value.trim() === token) tokenInput.value = "";
       const warning = data.webhook_subscription_warning;
       if (statusEl) statusEl.textContent = warning || "";
-      toast(warning || data.message || "Credenziali WhatsApp salvate.", warning ? "info" : "success");
+      toast(warning || "Credenziali WhatsApp salvate. Ricezione e consegna da verificare.", warning ? "info" : "success");
       _setWaWizardStep(3);
     } else {
       const errMsg = _estraiMessaggioErroreApi(res, data, "Errore durante la connessione con Meta.");

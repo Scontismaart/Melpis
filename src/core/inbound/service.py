@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
@@ -43,6 +44,7 @@ DISCLOSURE_TEXT = (
     "artificiale. Scrivi OPERATORE se vuoi parlare con una persona."
 )
 HUMAN_WAIT_REPLY = "Ti passo una persona dello staff, un attimo!"
+HUMAN_WAIT_REPLY_EN = "I'll connect you with a member of our staff. One moment, please!"
 
 
 @dataclass(frozen=True)
@@ -198,14 +200,13 @@ def _customer_name_from_messages(rows) -> str | None:
 
 async def decorate_with_disclosure(
     org_id, from_number: str, testo: str, repo, nome_attivita: str = "Attivita"
-) -> str:
+) -> tuple[str, uuid.UUID | None]:
     if not from_number:
-        return testo
+        return testo, None
     contact = await repo.get_or_create_contact(org_id, from_number)
-    sent = await repo.mark_ai_disclosure_sent(contact["id"], org_id)
-    if not sent:
-        return testo
-    return DISCLOSURE_TEXT.format(nome=nome_attivita) + "\n\n" + testo
+    if contact.get("ai_disclosure_sent_at"):
+        return testo, None
+    return DISCLOSURE_TEXT.format(nome=nome_attivita) + "\n\n" + testo, contact["id"]
 
 
 class InboundProcessingService:
@@ -335,7 +336,47 @@ class InboundProcessingService:
         provider_message_id(result)
         return result
 
-    async def _escalate(self, org_id, msg, content, tenant_config, text, handling_type="escalated"):
+    async def _send_automated_reply(
+        self, org_id, msg, content, tenant_config, text, nome, *, handling_type="ai_handled", dedup=False,
+    ):
+        decorate = _get_proc_symbol("decorate_with_disclosure", decorate_with_disclosure)
+        sender = _extract_from(content)
+        decorated, contact_id = await decorate(org_id, sender, text, self.repo, nome)
+        guard = getattr(type(self.repo), "ai_disclosure_guard", None)
+        first = contact_id is not None and guard is not None
+        scope = guard(self.repo, org_id, contact_id) if first else nullcontext(True)
+        async with scope as acquired:
+            if not acquired:
+                raise DeliveryUnconfirmed("First AI disclosure is being sent")
+            if first:
+                decorated, contact_id = await decorate(org_id, sender, text, self.repo, nome)
+            if sender and msg.get("id"):
+                # A receipt on this or another reply can change the contact marker.
+                # On retry, preserve only the known disclosure variant of the
+                # authorized text and let the adapter validate the full payload.
+                lookup = getattr(self.repo, "check_idempotency", None)
+                if lookup is not None:
+                    existing = await lookup(str(org_id), f"reply:{msg['id']}")
+                    if isinstance(existing, dict) and existing.get("direction") == "outbound":
+                        stored = existing.get("content_text")
+                        prefix, suffix = DISCLOSURE_TEXT.split("{nome}", 1)
+                        ending = suffix + "\n\n" + text
+                        if (isinstance(stored, str) and len(stored) > len(prefix) + len(ending)
+                                and stored.startswith(prefix) and stored.endswith(ending)):
+                            decorated = stored
+            if dedup:
+                await self.repo.save_outbound_dedup(msg["id"], org_id, decorated)
+            result = await self._send_reply(org_id, msg, content, tenant_config, decorated, handling_type)
+            if contact_id is not None:
+                try:
+                    await self.repo.mark_ai_disclosure_sent(contact_id, org_id)
+                except Exception:
+                    # An unrecorded receipt can repeat the disclosure on a later
+                    # reply. It must never suppress disclosure or replay this send.
+                    logger.warning("disclosure=receipt_not_persisted organization_id=%s message_id=%s", org_id, msg["id"])
+            return result, decorated
+
+    async def _escalate(self, org_id, msg, content, tenant_config, text, handling_type="escalated", *, ai_name=None):
         """Create the staff ticket regardless of courtesy-message delivery."""
         try:
             conv = await self.repo.escalate_to_human(str(msg["conversation_id"]), org_id)
@@ -353,7 +394,12 @@ class InboundProcessingService:
         meta_id = None
         try:
             if text:
-                res = await self._send_reply(org_id, msg, content, tenant_config, text, handling_type)
+                if ai_name is None:
+                    res = await self._send_reply(org_id, msg, content, tenant_config, text, handling_type)
+                else:
+                    res, _ = await self._send_automated_reply(
+                        org_id, msg, content, tenant_config, text, ai_name, handling_type=handling_type,
+                    )
                 meta_id = provider_message_id(res)
         except Exception:
             # The deterministic staff transition already succeeded. Retrying
@@ -578,6 +624,14 @@ class InboundProcessingService:
                 cfg_loader = _get_proc_symbol("load_tenant_config", load_tenant_config)
                 tenant_config = await cfg_loader(org_id, self.app_config, self.repo)
                 return await self._escalate(org_id, msg, content, tenant_config, HUMAN_WAIT_REPLY)
+            if await self.service.check_human_request(text, "en"):
+                cfg_loader = _get_proc_symbol("load_tenant_config", load_tenant_config)
+                tenant_config = await cfg_loader(org_id, self.app_config, self.repo)
+                profile = getattr(tenant_config, "business_profile", None)
+                if not isinstance(profile, dict):
+                    profile = await self.repo.get_org_business_profile(org_id)
+                if isinstance(profile, dict) and "en" in (profile.get("lingue_supportate") or []):
+                    return await self._escalate(org_id, msg, content, tenant_config, HUMAN_WAIT_REPLY_EN)
 
         # ── STEP 4: Feedback Emoji Customer (👍 / 👎) ──────────────────────────
         feedback_emoji = rileva_feedback_emoji(text)
@@ -799,15 +853,9 @@ class InboundProcessingService:
         if not replay_marker_present and self.service:
             fast_reply = await self.service.fast_path_match(text, business_profile_raw)
             if fast_reply:
-                from_number = _extract_from(content)
-                nome = (business_profile_raw or {}).get("nome") or "Attivita"
-                decorated = await decorate_with_disclosure(
-                    org_id, from_number, fast_reply, self.repo, nome_attivita=nome
-                )
+                nome = business_profile_raw.get("nome") or "Attivita"
                 try:
-                    res = await self._send_reply(
-                        org_id, msg, content, tenant_config, decorated
-                    )
+                    res, _ = await self._send_automated_reply(org_id, msg, content, tenant_config, fast_reply, nome)
                     meta_id = provider_message_id(res)
                     await self._finalize_message(
                         msg["id"],
@@ -1110,18 +1158,12 @@ class InboundProcessingService:
                         if richiede_umano:
                             return await self._escalate(
                                 org_id, msg, content, tenant_config, risposta_text,
+                                ai_name=business_profile_raw.get("nome") or "Attivita",
                             )
-                from_number = _extract_from(content)
-                nome = (business_profile_raw or {}).get("nome") or "Attivita"
-                decorated = await decorate_with_disclosure(
-                    org_id, from_number,
-                    risposta_text if canonical_response is not None else legacy_res.response_text,
-                    self.repo, nome,
-                )
+                nome = business_profile_raw.get("nome") or "Attivita"
+                response = risposta_text if canonical_response is not None else legacy_res.response_text
                 try:
-                    res = await self._send_reply(
-                        org_id, msg, content, tenant_config, decorated
-                    )
+                    res, _ = await self._send_automated_reply(org_id, msg, content, tenant_config, response, nome)
                     meta_id = provider_message_id(res)
                     await self._finalize_message(
                         msg["id"],
@@ -1190,18 +1232,12 @@ class InboundProcessingService:
         nome_attivita = (business_profile_raw or {}).get("nome") or "Attivita"
 
         if richiede_umano:
-            return await self._escalate(org_id, msg, content, tenant_config, risposta_text)
-
-        from_number = _extract_from(content)
-        dec_fn = _get_proc_symbol("decorate_with_disclosure", decorate_with_disclosure)
-        decorated = await dec_fn(
-            org_id, from_number, risposta_text, self.repo, nome_attivita
-        )
-
-        await self.repo.save_outbound_dedup(msg["id"], org_id, decorated)
+            return await self._escalate(org_id, msg, content, tenant_config, risposta_text, ai_name=nome_attivita)
 
         try:
-            res = await self._send_reply(org_id, msg, content, tenant_config, decorated)
+            res, decorated = await self._send_automated_reply(
+                org_id, msg, content, tenant_config, risposta_text, nome_attivita, dedup=True,
+            )
             meta_message_id = provider_message_id(res)
             await self._finalize_message(
                 msg["id"],
@@ -1214,7 +1250,7 @@ class InboundProcessingService:
             return ProcessingOutcome(
                 action="error",
                 error=str(e),
-                response_text=decorated,
+                response_text=risposta_text,
             )
 
         # Se in modalità legacy e sussistono le condizioni, salva in FAQ Cache

@@ -28,3 +28,18 @@ def test_configured_tone_changes_model_context_for_same_customer_message():
     assert "formale ed elegante" in formal_agent.backstory
     assert "informale e amichevole" in friendly_agent.backstory
     assert formal_agent.backstory != friendly_agent.backstory
+
+
+def test_responder_uses_configured_language_fallback_for_ambiguous_input():
+    profile = ProfiloAttivita(
+        nome="Studio Test", tipo_attivita="Centro estetico", verticale="centro_estetico",
+        tono="Professionale", orari="",
+        lingue_supportate=["it", "en"], lingua_default="en",
+    )
+
+    with patch("src.agents.responder_agent.crea_llm", return_value="openai/mock-model"):
+        context = crea_responder_agent(profile).backstory
+
+    assert "Lingue supportate dall'attività: it, en" in context
+    assert "Lingua di default dell'attività: en" in context
+    assert "breve o ambiguo e la lingua non è chiara, usa la lingua di default" in context

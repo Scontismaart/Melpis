@@ -93,11 +93,8 @@ async function caricaStatoOnboarding(token = capture()) {
 
     const hasDocs = Number(d.chunk_indicizzati) > 0;
     const hasBookingHours = Object.values(b.capienze_orarie).some((value) => Number.isFinite(Number(value)) && Number(value) > 0);
-    const hasWa = Boolean(
-      (typeof w.phone_number_id === "string" && w.phone_number_id.trim())
-      || w.status === "connected"
-      || w.configured === true
-    );
+    if (typeof w.connesso !== "boolean") return { unavailable: true };
+    const hasWa = w.connesso;
 
     return {
       hasDocs,
@@ -160,9 +157,9 @@ async function aggiornaPrioritari(silent = false) {
               </div>
               <div>
                 <h3 class="onboarding-checklist-title">Completa la configurazione iniziale</h3>
-                <p class="onboarding-checklist-sub">Segui questi 3 passaggi per attivare l'assistente con i tuoi clienti.</p>
+                <p class="onboarding-checklist-sub">Controlla la configurazione del tuo assistente.</p>
               </div>
-              <button type="button" class="onboarding-step-btn" data-action="setup-wizard">${_tDash("onboarding.full_guide", "Guida completa · 7 passaggi")}</button>
+              <button type="button" class="onboarding-step-btn" data-action="setup-ai">${_tDash("sidebar.nav_configurazione_ai", "Configurazione AI")}</button>
             </div>
             <div class="onboarding-checklist-steps">
               <div class="onboarding-step-row">
@@ -171,7 +168,7 @@ async function aggiornaPrioritari(silent = false) {
                   <span class="onboarding-step-text ${cfg.hasWa ? "done" : ""}">Collega il numero WhatsApp Business</span>
                 </div>
                 ${cfg.hasWa
-                  ? '<span class="onboarding-step-done-badge">Completato</span>'
+                  ? '<button type="button" class="onboarding-step-btn" data-action="setup-wa">Ricezione da verificare</button>'
                   : '<button type="button" class="onboarding-step-btn" data-action="setup-wa">Collega →</button>'}
               </div>
               <div class="onboarding-step-row">
@@ -198,8 +195,8 @@ async function aggiornaPrioritari(silent = false) {
         li.querySelector('[data-action="setup-wa"]')?.addEventListener("click", () => {
           apriVistaImpostazioni("whatsapp");
         });
-        li.querySelector('[data-action="setup-wizard"]')?.addEventListener("click", () => {
-          apriView("onboarding");
+        li.querySelector('[data-action="setup-ai"]')?.addEventListener("click", () => {
+          apriView("configurazione-ai");
         });
         li.querySelector('[data-action="setup-docs"]')?.addEventListener("click", () => {
           apriView("conoscenza");
@@ -217,7 +214,7 @@ async function aggiornaPrioritari(silent = false) {
         li.appendChild(_emptyState(
           ICONS.check,
           _tDash("overview.runtime.no_messages_title", "Nessun messaggio oggi"),
-          _tDash("overview.runtime.no_messages_desc", "L'assistente è configurato e pronto a rispondere automaticamente ai tuoi clienti.")
+          _tDash("overview.runtime.waiting_desc", "I messaggi dei clienti e le risposte dell'assistente compariranno qui in tempo reale.")
         ));
       }
       priorityList.appendChild(li);

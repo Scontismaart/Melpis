@@ -293,6 +293,23 @@ test("WhatsApp connect failure never reports success and restores the submit con
   assert.equal(harness.errors.some((args) => args.some((value) => String(value).includes("success"))), false);
 });
 
+test("WhatsApp connect keeps the form on an unconfirmed 2xx response", async (t) => {
+  const h = createDashboardHarness({
+    url: "https://melpis.test/app/settings?tab=whatsapp",
+    overrides: { "POST /api/whatsapp/connect": {} },
+  });
+  t.after(h.dispose);
+  await h.ready();
+  const input = h.document.getElementById("wa-access-token");
+  h.document.getElementById("wa-phone-number-id").value = "phone-id";
+  h.document.getElementById("wa-waba-id").value = "waba-id";
+  input.value = "synthetic-test-token";
+  h.document.getElementById("wa-connect-form").dispatchEvent(new h.window.Event("submit", { cancelable: true }));
+  await h.settle();
+  assert.equal(input.value, "synthetic-test-token");
+  assert.ok(h.document.getElementById("wa-connect-status").classList.contains("err"));
+});
+
 test("integration scope invalidation clears organization A credentials before organization B is denied", async (t) => {
   let loads = 0;
   const harness = createDashboardHarness({

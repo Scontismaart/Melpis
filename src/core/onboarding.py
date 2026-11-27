@@ -122,7 +122,8 @@ def list_verticals() -> list[dict[str, Any]]:
 def build_business_profile(payload: OnboardingProfileInput) -> ProfiloAttivita:
     template = VERTICAL_TEMPLATES[payload.verticale]
     servizi = payload.servizi or template["servizi"]
-    escalation = payload.regole_escalation or template["escalation"]
+    escalation = (payload.regole_escalation if "regole_escalation" in payload.model_fields_set
+                  else template["escalation"])
     tono = payload.tono or template["tono"]
     return ProfiloAttivita(
         nome=payload.nome_attivita,

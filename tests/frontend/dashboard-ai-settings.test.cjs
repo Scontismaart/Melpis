@@ -296,3 +296,40 @@ test("AI settings discards a pending save after logout invalidates its context",
   assert.deepEqual(settings.toasts, []);
   settings.dom.window.close();
 });
+
+
+test("AI settings persist an empty rule selection and clear unsubmitted rule text on tenant change", async (t) => {
+  let saved = { nome_attivita: "Studio test", regole_escalation: ["Prima regola", "Seconda regola"] };
+  const settings = createSettings({ apiFetch: async (_url, options) => {
+    if (options?.method === "POST") saved = JSON.parse(options.body);
+    return response({ profilo: saved });
+  } });
+  t.after(() => settings.dom.window.close());
+  const doc = settings.dom.window.document;
+  const wait = () => new Promise((resolve) => setImmediate(resolve));
+  settings.module.onEnter();
+  await wait();
+
+  const unsubmitted = doc.getElementById("ai-cfg-new-rule-input");
+  const add = doc.getElementById("ai-cfg-add-rule-btn");
+  const boxes = () => [...doc.querySelectorAll(".ai-cfg-rule-checkbox")];
+  boxes().forEach((input) => input.click());
+  settings.module.refreshLanguage();
+  assert.deepEqual(boxes().map((input) => input.checked), [false, false]);
+  unsubmitted.value = "Da rimuovere";
+  add.click();
+  assert.deepEqual(boxes().map((input) => input.checked), [false, false, true]);
+  doc.querySelectorAll(".settings-rule-remove-btn")[2].click();
+  assert.deepEqual(boxes().map((input) => input.checked), [false, false]);
+  doc.getElementById("ai-config-form").dispatchEvent(new settings.dom.window.Event("submit", { cancelable: true }));
+  await wait();
+  assert.deepEqual(saved.regole_escalation, []);
+
+  unsubmitted.value = "Bozza del primo tenant";
+  Object.assign(settings.context, { selectedOrganizationId: "org-2", transition: 2 });
+  settings.module.onExit();
+  settings.module.onEnter();
+  await wait();
+  assert.equal(unsubmitted.value, "");
+  assert.equal(boxes().length, 0);
+});

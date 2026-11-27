@@ -98,7 +98,8 @@ class BaseVerticalStrategy(ABC):
             f"\n\nLINGUE:\n"
             f"- Lingue supportate dall'attività: {', '.join(lingue)}.\n"
             f"- Lingua di default dell'attività: {lingua_default}.\n"
-            f"- Rileva automaticamente la lingua usata dal cliente nel messaggio e rispondi SEMPRE in quella lingua.\n"
+            "- Rileva la lingua del messaggio e rispondi nella stessa lingua.\n"
+            "- Se il messaggio è breve o ambiguo e la lingua non è chiara, usa la lingua di default.\n"
         )
         if self.code == "studio_medico_dentista":
             blocco += (

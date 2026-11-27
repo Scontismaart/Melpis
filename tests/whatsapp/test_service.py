@@ -143,6 +143,11 @@ class TestWhatsAppService:
         assert result is not None
         assert "Trattoria Da Mario" in result
 
+    async def test_fast_path_greeting_respects_english_setting(self, app_config, mock_repo):
+        service = WhatsAppService(app_config, mock_repo)
+        assert await service.fast_path_match("hello", {"lingue_supportate": ["it", "en"]}) == "Hello! How can we help you?"
+        assert await service.fast_path_match("hello", {"lingue_supportate": ["it"]}) is None
+
     async def test_fast_path_hours(self, app_config, mock_repo):
         service = WhatsAppService(app_config, mock_repo)
         bp = {"orari": "Lun-Sab 12:00-22:30"}
