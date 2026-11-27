@@ -44,12 +44,16 @@ jobs:
       - name: Build web and launch a loopback-only container
         run: |
           docker build --file web/Dockerfile --tag melpis-landing-v2:ci web
-          docker run --detach --rm --name melpis-landing-v2-ci --publish 127.0.0.1:4180:80 \
+          docker run --detach --name melpis-landing-v2-ci --publish 127.0.0.1:4180:80 \
             --env LEGAL_RENDER_ENABLED=true --env 'LEGAL_ENTITY_NAME=Melpis Synthetic QA' \
             --env 'LEGAL_ENTITY_REGISTERED_OFFICE=Via Test 1' --env LEGAL_ENTITY_VAT_NUMBER=IT12345678901 \
             --env LEGAL_PRIVACY_CONTACT_EMAIL=privacy@melpis.invalid --env LEGAL_FORUM=Roma \
             --env LEGAL_DOCUMENT_EFFECTIVE_DATE=2026-09-21 melpis-landing-v2:ci
-          curl --fail --silent --show-error --retry 12 --retry-connrefused http://127.0.0.1:4180/ --output /dev/null
+          if ! curl --fail --silent --show-error --retry-all-errors --retry-delay 1 --retry 12 \
+            http://127.0.0.1:4180/ --output /dev/null; then
+            docker logs melpis-landing-v2-ci
+            exit 1
+          fi
 
       - name: Verify public routing, legal gates, dashboard and assets
         run: node web/landing-v2/tests/container-smoke.mjs
@@ -73,4 +77,4 @@ jobs:
 
       - name: Remove the disposable container
         if: always()
-        run: docker stop melpis-landing-v2-ci || true
+        run: docker rm --force melpis-landing-v2-ci || true
