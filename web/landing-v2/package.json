@@ -7,7 +7,7 @@
     "astro:check": "astro check",
     "preview": "node tools/preview.mjs",
     "check": "node tools/nginx-policy.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "test:browser": "node tests/browser-qa.cjs",
     "test:routes": "node tests/container-smoke.mjs",
     "test:pricing": "node qa-pricing.cjs"

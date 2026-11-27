@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,9 +20,6 @@ test('V2 symbol and favicon preserve the canonical Melpis SVG', async () => {
 });
 
 test('build allowlist is self-contained and preview is isolated', async (t) => {
-  const build = spawn(node, ['tools/build.mjs'], { cwd: root, stdio: 'inherit' });
-  const [buildCode] = await once(build, 'exit');
-  assert.equal(buildCode, 0);
   const html = await readFile(path.join(root, 'dist/index.html'), 'utf8');
   assert.doesNotMatch(html, /id="mv2-contenuto">\s*---/, 'page does not leak an Astro frontmatter delimiter into main');
   assert.match(html, /href="#mv2-percorso"/);

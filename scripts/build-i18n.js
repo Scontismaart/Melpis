@@ -23,6 +23,7 @@ const WEB_DIR = path.join(ROOT_DIR, 'web');
 const DOMAIN = 'https://melpis.it';
 
 const SUPPORTED_LANGS = ['it', 'en', 'es', 'fr', 'de'];
+const SITEMAP_EXCLUDED_PATHS = new Set(['/', '/prezzi/', '/piani/']);
 
 // Central Canonical Route Map
 const ROUTE_MAP = {
@@ -2276,11 +2277,12 @@ function generateMultilingualSitemap() {
     const priority = (routeKey === 'home') ? '1.0' : (routeKey === 'pricing' ? '0.9' : (routeKey.startsWith('settori') || routeKey === 'restaurants' || routeKey === 'beauty' || routeKey === 'medical' || routeKey === 'hotels' ? '0.8' : '0.7'));
     const changefreq = (routeKey === 'home' || routeKey === 'pricing') ? 'weekly' : 'monthly';
 
-    for (const lang of SUPPORTED_LANGS) {
+    const indexedLanguages = SUPPORTED_LANGS.filter(lang => !SITEMAP_EXCLUDED_PATHS.has(routes[lang]));
+    for (const lang of indexedLanguages) {
       const locUrl = `${DOMAIN}${routes[lang]}`;
       xml += `  <url>\n`;
       xml += `    <loc>${locUrl}</loc>\n`;
-      for (const altLang of SUPPORTED_LANGS) {
+      for (const altLang of indexedLanguages) {
         xml += `    <xhtml:link rel="alternate" hreflang="${altLang}" href="${DOMAIN}${routes[altLang]}" />\n`;
       }
       xml += `    <xhtml:link rel="alternate" hreflang="x-default" href="${DOMAIN}${routes.en || routes.it}" />\n`;
@@ -2325,6 +2327,7 @@ function generateMultilingualSitemap() {
 module.exports = {
   ROUTE_MAP,
   SUPPORTED_LANGS,
+  SITEMAP_EXCLUDED_PATHS,
   generateHreflangs,
   generateLanguageSelector,
   generateMultilingualSitemap,
