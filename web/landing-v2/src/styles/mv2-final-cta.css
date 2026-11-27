@@ -1,0 +1,406 @@
+/* Melpis Landing V2 — Final CTA and minimal Lemni-inspired dark footer.
+   - Compact pearl stage with centered headline and primary CTA.
+   - Multi-layered soft silver wave transition seamlessly joining the dark ground.
+   - Minimal 4-column architectural layout (Logo + Socials, Prodotto, Risorse, Azienda).
+   - Right area open and airy for refined negative space.
+   - Uniform typography: 14px 500 column titles (#D5D8DF), 14px 400 links (#7D8290) hovering to #FFFFFF.
+   - Seamless ink curve handoff without horizontal lines or subpixel gaps. */
+
+/* ------------------------------------------------------------------ */
+/* 1. Pearl CTA stage                                                 */
+/* ------------------------------------------------------------------ */
+
+.mv2-final-cta {
+  position: relative;
+  display: block;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(56px, 5.5vw, 84px) 0 0;
+  text-align: center;
+  background:
+    radial-gradient(
+      ellipse 54% 46% at 50% 6%,
+      rgba(255, 255, 255, 0.98) 0%,
+      rgba(255, 255, 255, 0) 72%
+    ),
+    radial-gradient(
+      ellipse 66% 54% at 16% 54%,
+      rgba(255, 255, 255, 0.88) 0%,
+      rgba(255, 255, 255, 0) 70%
+    ),
+    radial-gradient(
+      ellipse 74% 62% at 88% 38%,
+      rgba(226, 229, 235, 0.45) 0%,
+      rgba(226, 229, 235, 0) 72%
+    ),
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #fbfbfc 40%,
+      #f5f6f8 76%,
+      #edf0f3 100%
+    );
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mv2-final-cta .mv2-final-cta-body {
+  position: relative;
+  z-index: 1;
+  width: min(1180px, calc(100% - 48px));
+  margin-inline: auto;
+  padding-bottom: clamp(28px, 3.2vw, 44px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Headline                                                           */
+/* ------------------------------------------------------------------ */
+
+.mv2-final-cta .mv2-final-cta-title {
+  max-width: 1040px;
+  margin: 0 auto;
+  font-family: var(--mv2-font-heading);
+  font-size: clamp(34px, 3.8vw, 56px);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  text-align: center;
+}
+
+@media (min-width: 1000px) {
+  .mv2-final-cta .mv2-final-cta-title {
+    font-size: clamp(50px, 3.8vw, 56px);
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 999px) {
+  .mv2-final-cta .mv2-final-cta-title {
+    font-size: clamp(39px, 4.5vw, 44px);
+    white-space: nowrap;
+  }
+}
+
+.mv2-final-cta .mv2-final-cta-title-strong {
+  color: #0b0d10;
+}
+
+.mv2-final-cta .mv2-final-cta-title-muted {
+  color: #6c7078;
+}
+
+/* ------------------------------------------------------------------ */
+/* Single CTA Button                                                  */
+/* ------------------------------------------------------------------ */
+
+.mv2-final-cta .mv2-final-cta-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 56px;
+  height: 56px;
+  margin-top: clamp(24px, 2.4vw, 32px);
+  padding: 0 34px;
+  border-radius: 12px;
+  background: #0b0d10;
+  color: #ffffff !important;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 1;
+  box-shadow: 0 10px 28px rgba(11, 13, 16, 0.16);
+  transition:
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.mv2-final-cta .mv2-final-cta-button:hover {
+  background: #1c1f24;
+  box-shadow: 0 14px 34px rgba(11, 13, 16, 0.22);
+  transform: translateY(-1px);
+}
+
+.mv2-final-cta .mv2-final-cta-arrow {
+  display: inline-block;
+  font-size: 17px;
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mv2-final-cta .mv2-final-cta-button:hover .mv2-final-cta-arrow {
+  transform: translateX(3px);
+}
+
+.mv2-final-cta .mv2-final-cta-button:focus-visible {
+  outline: 3px solid #0b0d10;
+  outline-offset: 4px;
+  box-shadow:
+    0 0 0 7px rgba(255, 255, 255, 0.95),
+    0 10px 28px rgba(11, 13, 16, 0.16);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wave transition to footer                                          */
+/* ------------------------------------------------------------------ */
+
+.mv2-final-cta .mv2-final-cta-curve {
+  position: relative;
+  width: 100%;
+  height: clamp(140px, 11vw, 175px);
+  min-height: 140px;
+  line-height: 0;
+  pointer-events: none;
+  user-select: none;
+  margin-bottom: -1px;
+}
+
+.mv2-final-cta .mv2-final-cta-wave {
+  display: block;
+  width: 100%;
+  height: 100%;
+  vertical-align: bottom;
+}
+
+/* ------------------------------------------------------------------ */
+/* 2. Lemni-Style Minimal Dark Footer                                 */
+/* ------------------------------------------------------------------ */
+
+.mv2-page .mv2-footer,
+.mv2-footer {
+  position: relative;
+  border-top: 0 !important;
+  background: #0b0d10 !important;
+  color: #f7f7f5;
+  padding: clamp(64px, 6.5vw, 90px) 0 clamp(40px, 4vw, 56px);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mv2-footer .mv2-footer-inner {
+  width: min(1200px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+/* Lemni-inspired 4-column layout with open negative space on the right */
+.mv2-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) repeat(3, minmax(130px, 160px));
+  justify-content: start;
+  gap: clamp(28px, 4vw, 64px);
+  align-items: start;
+}
+
+/* Col 1: Brand Symbol Only & Social Icons */
+.mv2-footer-col-brand .mv2-footer-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  text-decoration: none;
+  transition: opacity 0.2s ease;
+}
+
+.mv2-footer-col-brand .mv2-footer-brand-mark:hover {
+  opacity: 0.82;
+}
+
+.mv2-footer-col-brand .mv2-footer-brand-mark:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.mv2-footer-col-brand .mv2-mark {
+  width: 36px;
+  height: 26px;
+  filter: invert(1) brightness(1.08) saturate(0);
+}
+
+.mv2-footer-socials {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.mv2-footer-social-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #7d8290;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.mv2-footer-social-icon:hover {
+  color: #ffffff;
+}
+
+.mv2-footer-social-icon:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+  border-radius: 3px;
+  color: #ffffff;
+}
+
+/* Columns 2, 3, 4: Prodotto, Risorse, Azienda */
+.mv2-footer-heading {
+  font-family: var(--mv2-font-body);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #d5d8df;
+  margin: 0 0 18px;
+  letter-spacing: -0.01em;
+}
+
+.mv2-footer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mv2-footer-list li {
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+/* Strictly uniform link styling across all links and informational spans */
+.mv2-footer-link,
+.mv2-footer-list a,
+.mv2-footer-list span {
+  display: inline-block;
+  font-family: var(--mv2-font-body);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: #7d8290;
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.mv2-footer-list a:hover,
+.mv2-footer-list a:focus-visible,
+.mv2-footer-list span:hover {
+  color: #ffffff;
+}
+
+.mv2-footer-list a:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Bottom Bar */
+.mv2-footer-bottom {
+  margin-top: clamp(48px, 5.5vw, 72px);
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.mv2-footer-copyright {
+  color: #9aa0a8;
+  font-family: var(--mv2-font-body);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .mv2-footer-grid {
+    grid-template-columns: repeat(3, minmax(110px, 1fr));
+    gap: 32px 24px;
+  }
+
+  .mv2-footer-col-brand {
+    grid-column: 1 / -1;
+    margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 680px) {
+  .mv2-final-cta {
+    padding-top: 48px;
+  }
+
+  .mv2-final-cta .mv2-final-cta-body {
+    width: calc(100% - 40px);
+    padding-bottom: 28px;
+  }
+
+  .mv2-final-cta .mv2-final-cta-title {
+    font-size: clamp(30px, 7.8vw, 38px);
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    white-space: normal;
+  }
+
+  .mv2-final-cta .mv2-final-cta-title-strong,
+  .mv2-final-cta .mv2-final-cta-title-muted {
+    display: inline;
+  }
+
+  .mv2-final-cta .mv2-final-cta-button {
+    width: 100%;
+    max-width: 320px;
+    min-height: 56px;
+    height: 56px;
+    margin-top: 24px;
+    border-radius: 12px;
+  }
+
+  .mv2-final-cta .mv2-final-cta-curve {
+    height: 140px;
+    min-height: 140px;
+  }
+
+  .mv2-footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 28px 18px;
+  }
+
+  .mv2-footer-col-brand {
+    grid-column: 1 / -1;
+    margin-bottom: 4px;
+  }
+
+  .mv2-footer-bottom {
+    margin-top: 36px;
+    padding-top: 20px;
+  }
+}
+
+@media (max-width: 400px) {
+  .mv2-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv2-final-cta .mv2-final-cta-button,
+  .mv2-final-cta .mv2-final-cta-arrow,
+  .mv2-footer-list a,
+  .mv2-footer-list span,
+  .mv2-footer-social-icon,
+  .mv2-footer-brand-mark {
+    transition: none !important;
+  }
+}

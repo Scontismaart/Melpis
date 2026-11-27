@@ -1,0 +1,24 @@
+---
+import ProductShowcase from './ProductShowcase.jsx';
+---
+<section class="mv2-showcase mv2-section" id="mv2-showcase" aria-labelledby="mv2-showcase-title">
+  <div class="mv2-showcase-inner">
+    <div class="mv2-showcase-intro mv2-section-heading">
+      <header class="mv2-showcase-head">
+        <p class="mv2-showcase-eyebrow" data-mv2-reveal="fade">Dashboard operativa</p>
+        <h2 class="mv2-showcase-title" id="mv2-showcase-title" data-mv2-reveal="title">
+          Tutto sotto controllo,<br />in un’unica interfaccia.
+        </h2>
+      </header>
+
+      <p class="mv2-showcase-lead" data-mv2-reveal="up">
+        Conversazioni, prenotazioni, recensioni e simulazioni AI: Melpis riunisce ogni attività
+        operativa in una dashboard semplice, veloce e sempre aggiornata.
+      </p>
+    </div>
+
+    <div class="mv2-showcase-frame">
+      <ProductShowcase client:load />
+    </div>
+  </div>
+</section>

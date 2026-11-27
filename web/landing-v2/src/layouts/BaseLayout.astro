@@ -1,0 +1,52 @@
+---
+import '../styles/landing.css';
+import '../styles/mv2-dashboard.css';
+import '../styles/mv2-flow-demo.css';
+import '../styles/mv2-features.css';
+import '../styles/mv2-showcase.css';
+import '../styles/mv2-sectors.css';
+import '../styles/mv2-control.css';
+import '../styles/mv2-capabilities-experience.css';
+import '../styles/mv2-capabilities.css';
+import '../styles/mv2-setup.css';
+import '../styles/mv2-pricing.css';
+import '../styles/mv2-final-cta.css';
+const base = import.meta.env.BASE_URL;
+interface Props {
+  title?: string;
+  description?: string;
+  canonicalPath?: string;
+  /** Opt-in page scope. Only the homepage uses it, so sector pages keep their current styling. */
+  pageClass?: string;
+}
+const {
+  title = 'Melpis — Le conversazioni, sotto controllo',
+  description = 'Melpis aiuta le attività a gestire richieste, prenotazioni e conversazioni dal pannello. Scopri un percorso illustrativo.',
+  canonicalPath,
+  pageClass,
+} = Astro.props;
+---
+<!doctype html>
+<html lang="it" class="mv2-document">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+    {canonicalPath && <link rel="canonical" href={new URL(canonicalPath, 'https://melpis.it').href} />}
+    <script is:inline src={`${base}assets/mv2-early.js`}></script>
+    <link rel="icon" href={`${base}assets/favicon.svg`} type="image/svg+xml" />
+    <link rel="preload" href={`${base}assets/fonts/mv2-inter-variable.woff2`} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={`${base}assets/fonts/mv2-geist-sans.woff2`} as="font" type="font/woff2" crossorigin />
+  </head>
+  <body class:list={['mv2-page', pageClass]}>
+    <a class="mv2-skip" href="#mv2-contenuto">Vai al contenuto</a>
+    <slot />
+    <script src="../scripts/mv2-motion.js"></script>
+    <script src="../scripts/mv2-control-motion.js"></script>
+    <script src="../scripts/mv2-capabilities-motion.js"></script>
+    <script src="../scripts/mv2-pricing-motion.js"></script>
+  </body>
+</html>

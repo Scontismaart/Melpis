@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 144" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Melpis symbol</title>
+  <defs>
+    <linearGradient id="left" x1="10" y1="16" x2="100" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#090A0C"/>
+      <stop offset=".48" stop-color="#34373B"/>
+      <stop offset="1" stop-color="#101113"/>
+    </linearGradient>
+    <linearGradient id="silver" x1="44" y1="22" x2="151" y2="117" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D7D9DC"/>
+      <stop offset=".48" stop-color="#F8F9FA"/>
+      <stop offset="1" stop-color="#74777B"/>
+    </linearGradient>
+    <linearGradient id="right" x1="118" y1="14" x2="190" y2="132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6F7F8"/>
+      <stop offset=".54" stop-color="#B7BABE"/>
+      <stop offset="1" stop-color="#55585C"/>
+    </linearGradient>
+  </defs>
+  <path d="M17 8h10.8c4.3 0 8.4 1.5 11.7 4.2L100 59l-17.5 15.2a9 9 0 0 1-11.4.2L35 47.6v82.1a9 9 0 0 1-9 9h-9a9 9 0 0 1-9-9V25A17 17 0 0 1 17 8Z" fill="url(#left)"/>
+  <path d="m38.5 47.2 42.6 33.5a9 9 0 0 0 11.2-.2L100 74l20.5 16.1a9 9 0 0 0 11.2-.2L162 65.8v63.9a9 9 0 0 1-9 9h-9a9 9 0 0 1-9-9V94.1l-21.4 16.8a9 9 0 0 1-11.2 0L38.5 63.8V47.2Z" fill="url(#silver)"/>
+  <path d="M183 8h-10.8c-4.3 0-8.4 1.5-11.7 4.2L100 59l17.5 15.2a9 9 0 0 0 11.4.2L165 47.6v82.1a9 9 0 0 0 9 9h9a9 9 0 0 0 9-9V25a17 17 0 0 0-17-17Z" fill="url(#right)"/>
+</svg>

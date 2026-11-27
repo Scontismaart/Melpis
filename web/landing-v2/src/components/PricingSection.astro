@@ -1,0 +1,337 @@
+---
+interface Props {
+  id?: string;
+  ctaHref?: string;
+  showEyebrow?: boolean;
+  showLead?: boolean;
+  showFootnote?: boolean;
+}
+
+const {
+  id = 'mv2-piani',
+  ctaHref = '/registrati/',
+  showEyebrow = true,
+  showLead = true,
+  showFootnote = true,
+} = Astro.props;
+---
+
+<section
+  class="mv2-pricing-section"
+  id={id}
+  aria-labelledby="mv2-pricing-heading"
+  data-mv2-pricing-section
+>
+  {id !== 'mv2-piani' && <span id="mv2-piani" class="mv2-pricing-anchor" aria-hidden="true"></span>}
+  {id !== 'mv2-rest-piani' && <span id="mv2-rest-piani" class="mv2-pricing-anchor" aria-hidden="true"></span>}
+  <div class="mv2-pricing-container">
+    <header class={`mv2-pricing-header ${!showLead ? 'mv2-pricing-header--no-lead' : ''}`} data-mv2-pricing-header>
+      <div class="mv2-pricing-header-left">
+        {showEyebrow && (
+          <p class="mv2-pricing-eyebrow">
+            <span>UN RIFERIMENTO SEMPLICE</span>
+          </p>
+        )}
+
+        <h2 id="mv2-pricing-heading" class="mv2-pricing-title">
+          <span class="mv2-pricing-title-strong">Scegli il passo</span>
+          <span class="mv2-pricing-title-muted">adatto a te.</span>
+        </h2>
+      </div>
+
+      {showLead && (
+        <p class="mv2-pricing-lead">
+          Listino mensile di riferimento. Le condizioni commerciali definitive
+          vanno verificate prima dell’attivazione.
+        </p>
+      )}
+    </header>
+
+    <ul class="mv2-pricing-cards" role="list">
+      <li class="mv2-pricing-card" data-mv2-pricing-card data-card-index="0">
+        <div class="mv2-pricing-card-inner">
+          <div class="mv2-pricing-card-top">
+            <h3 class="mv2-pricing-card-name">Free</h3>
+            <p class="mv2-pricing-card-subtitle">Per provare Melpis per 1 settimana.</p>
+          </div>
+
+          <div class="mv2-pricing-card-price-wrap">
+            <div class="mv2-pricing-card-price">
+              <span class="mv2-pricing-sr">0 euro per 7 giorni</span>
+              <span class="mv2-pricing-amount" aria-hidden="true">0</span>
+              <span class="mv2-pricing-currency" aria-hidden="true">€</span>
+              <span class="mv2-pricing-period" aria-hidden="true">/ 7 giorni</span>
+            </div>
+          </div>
+
+          <ul class="mv2-pricing-card-features" role="list" aria-label="Cosa include la prova Free">
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span><strong class="mv2-pricing-feature-strong">150</strong> risposte AI incluse</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>1 numero WhatsApp Business</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Accesso alla demo operativa</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Risposte su orari, FAQ e listino</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Inbox condivisa e passaggio allo staff</span>
+            </li>
+          </ul>
+
+          <div class="mv2-pricing-card-dividers" aria-hidden="true">
+            <span class="mv2-pricing-divider-line"></span>
+            <span class="mv2-pricing-divider-line"></span>
+          </div>
+
+          <div class="mv2-pricing-card-footer">
+            <a
+              href={ctaHref}
+              class="mv2-pricing-card-cta"
+              aria-label="Prova Melpis, piano Free: vai alla registrazione"
+            >
+              Prova Melpis
+            </a>
+          </div>
+        </div>
+      </li>
+
+      <li class="mv2-pricing-card" data-mv2-pricing-card data-card-index="1">
+        <div class="mv2-pricing-card-inner">
+          <div class="mv2-pricing-card-top">
+            <h3 class="mv2-pricing-card-name">Essenziale</h3>
+            <p class="mv2-pricing-card-subtitle">Per iniziare a gestire le richieste senza essere sempre al telefono.</p>
+          </div>
+
+          <div class="mv2-pricing-card-price-wrap">
+            <div class="mv2-pricing-card-price">
+              <span class="mv2-pricing-sr">29 euro al mese</span>
+              <span class="mv2-pricing-amount" aria-hidden="true">29</span>
+              <span class="mv2-pricing-currency" aria-hidden="true">€</span>
+              <span class="mv2-pricing-period" aria-hidden="true">/ mese</span>
+            </div>
+          </div>
+
+          <ul class="mv2-pricing-card-features" role="list" aria-label="Cosa include il piano Essenziale">
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span><strong class="mv2-pricing-feature-strong">500</strong> risposte AI al mese</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>1 numero WhatsApp Business</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>1 account operatore</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Risposte su orari, listini e FAQ</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Inbox condivisa e passaggio allo staff</span>
+            </li>
+          </ul>
+
+          <div class="mv2-pricing-card-dividers" aria-hidden="true">
+            <span class="mv2-pricing-divider-line"></span>
+            <span class="mv2-pricing-divider-line"></span>
+          </div>
+
+          <div class="mv2-pricing-card-footer">
+            <a
+              href={ctaHref}
+              class="mv2-pricing-card-cta"
+              aria-label="Prova Melpis, piano Essenziale: vai alla registrazione"
+            >
+              Prova Melpis
+            </a>
+          </div>
+        </div>
+      </li>
+
+      <li
+        class="mv2-pricing-card mv2-pricing-card--featured"
+        data-mv2-pricing-card
+        data-card-index="2"
+        data-mv2-pricing-featured
+      >
+        <div class="mv2-pricing-card-sheen" data-mv2-pricing-sheen aria-hidden="true"></div>
+
+        <div class="mv2-pricing-card-inner">
+          <div class="mv2-pricing-card-top">
+            <h3 class="mv2-pricing-card-name">Crescita</h3>
+            <p class="mv2-pricing-card-subtitle">Per le attività che ricevono più richieste e lavorano in squadra.</p>
+          </div>
+
+          <div class="mv2-pricing-card-price-wrap">
+            <div class="mv2-pricing-card-price">
+              <span class="mv2-pricing-sr">69 euro al mese</span>
+              <span class="mv2-pricing-amount" aria-hidden="true">69</span>
+              <span class="mv2-pricing-currency" aria-hidden="true">€</span>
+              <span class="mv2-pricing-period" aria-hidden="true">/ mese</span>
+            </div>
+          </div>
+
+          <ul class="mv2-pricing-card-features" role="list" aria-label="Cosa include il piano Crescita">
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span><strong class="mv2-pricing-feature-strong">2.000</strong> risposte AI al mese</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Tutto ciò che è incluso in Essenziale</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Fino a 3 account operatore</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Recensioni Google, soggette a verifica operativa</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Bozze di risposta con revisione umana</span>
+            </li>
+          </ul>
+
+          <div class="mv2-pricing-card-dividers" aria-hidden="true">
+            <span class="mv2-pricing-divider-line"></span>
+            <span class="mv2-pricing-divider-line"></span>
+          </div>
+
+          <div class="mv2-pricing-card-footer">
+            <a
+              href={ctaHref}
+              class="mv2-pricing-card-cta"
+              aria-label="Prova Melpis, piano Crescita: vai alla registrazione"
+            >
+              Prova Melpis
+            </a>
+          </div>
+        </div>
+      </li>
+
+      <li class="mv2-pricing-card mv2-pricing-card--scala" data-mv2-pricing-card data-card-index="3">
+        <div class="mv2-pricing-card-inner">
+          <div class="mv2-pricing-card-top">
+            <h3 class="mv2-pricing-card-name">Scala</h3>
+            <p class="mv2-pricing-card-subtitle">Per volumi elevati di conversazioni e più persone da coordinare.</p>
+          </div>
+
+          <div class="mv2-pricing-card-price-wrap">
+            <div class="mv2-pricing-card-price">
+              <span class="mv2-pricing-sr">149 euro al mese</span>
+              <span class="mv2-pricing-amount" aria-hidden="true">149</span>
+              <span class="mv2-pricing-currency" aria-hidden="true">€</span>
+              <span class="mv2-pricing-period" aria-hidden="true">/ mese</span>
+            </div>
+          </div>
+
+          <ul class="mv2-pricing-card-features" role="list" aria-label="Cosa include il piano Scala">
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span><strong class="mv2-pricing-feature-strong">10.000</strong> risposte AI al mese</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Tutto ciò che è incluso in Crescita</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Operatori senza limite numerico di piano</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Più numeri WhatsApp secondo configurazione</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Conoscenza aziendale da documenti inclusa</span>
+            </li>
+          </ul>
+
+          <div class="mv2-pricing-card-dividers" aria-hidden="true">
+            <span class="mv2-pricing-divider-line"></span>
+            <span class="mv2-pricing-divider-line"></span>
+          </div>
+
+          <div class="mv2-pricing-card-footer">
+            <a
+              href={ctaHref}
+              class="mv2-pricing-card-cta"
+              aria-label="Prova Melpis, piano Scala: vai alla registrazione"
+            >
+              Prova Melpis
+            </a>
+          </div>
+        </div>
+      </li>
+    </ul>
+
+    <p class="mv2-pricing-shared-note" data-mv2-pricing-shared>
+      Prenotazioni con verifica disponibilità, inbox condivisa
+      e intervento dello staff sono disponibili su tutti i piani, secondo la
+      configurazione. Cambiano la quota di risposte AI, gli account operatore, i
+      numeri WhatsApp e i moduli inclusi.
+    </p>
+
+    {showFootnote && (
+      <p class="mv2-pricing-footnote" data-mv2-pricing-footnote>
+        Prezzi indicativi mensili; condizioni, imposte e disponibilità sono da
+        confermare. Nessuna attivazione o acquisto da questa pagina. Google Calendar è soggetto a certificazione operativa.
+      </p>
+    )}
+  </div>
+</section>

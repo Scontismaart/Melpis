@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="100%" height="100%" preserveAspectRatio="none">
+  <defs>
+    <!-- Stage base background gradient -->
+    <linearGradient id="stage-base" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#06080d" />
+      <stop offset="38%" stop-color="#080b13" />
+      <stop offset="75%" stop-color="#07090e" />
+      <stop offset="100%" stop-color="#050609" />
+    </linearGradient>
+
+    <!-- Ambient depth glow in the right half of the stage -->
+    <radialGradient id="stage-ambient-glow" cx="74%" cy="60%" r="55%">
+      <stop offset="0%" stop-color="#18224c" stop-opacity="0.38" />
+      <stop offset="35%" stop-color="#101736" stop-opacity="0.22" />
+      <stop offset="70%" stop-color="#080c1b" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#06080d" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Top-left subtle platinum atmospheric haze -->
+    <radialGradient id="stage-tl-haze" cx="12%" cy="12%" r="48%">
+      <stop offset="0%" stop-color="#e2e8f0" stop-opacity="0.035" />
+      <stop offset="100%" stop-color="#06080d" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Primary wave body gradient -->
+    <linearGradient id="wave-smoke-1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#101526" stop-opacity="0.04" />
+      <stop offset="22%" stop-color="#1c264a" stop-opacity="0.26" />
+      <stop offset="46%" stop-color="#2a386e" stop-opacity="0.38" />
+      <stop offset="68%" stop-color="#202c58" stop-opacity="0.32" />
+      <stop offset="88%" stop-color="#222e5a" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#12182b" stop-opacity="0.05" />
+    </linearGradient>
+
+    <!-- Secondary undulating ribbon gradient -->
+    <linearGradient id="wave-smoke-2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#12182b" stop-opacity="0.02" />
+      <stop offset="30%" stop-color="#223062" stop-opacity="0.28" />
+      <stop offset="50%" stop-color="#32458a" stop-opacity="0.36" />
+      <stop offset="76%" stop-color="#24336c" stop-opacity="0.26" />
+      <stop offset="92%" stop-color="#263570" stop-opacity="0.20" />
+      <stop offset="100%" stop-color="#0e1322" stop-opacity="0.03" />
+    </linearGradient>
+
+    <!-- Tertiary luminescent silk veil -->
+    <linearGradient id="wave-smoke-3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#182244" stop-opacity="0" />
+      <stop offset="38%" stop-color="#324682" stop-opacity="0.22" />
+      <stop offset="54%" stop-color="#4662b2" stop-opacity="0.30" />
+      <stop offset="82%" stop-color="#304484" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#182244" stop-opacity="0" />
+    </linearGradient>
+
+    <!-- Deep smoky shadow underneath the ribbon -->
+    <linearGradient id="wave-shadow-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#05070c" stop-opacity="0" />
+      <stop offset="55%" stop-color="#060810" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#05060a" stop-opacity="0.82" />
+    </linearGradient>
+
+    <!-- Hairline wave crest strokes -->
+    <linearGradient id="crest-stroke-plat" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e2e8f0" stop-opacity="0.02" />
+      <stop offset="18%" stop-color="#c8d6ea" stop-opacity="0.14" />
+      <stop offset="38%" stop-color="#edf4ff" stop-opacity="0.42" />
+      <stop offset="62%" stop-color="#9fc0ff" stop-opacity="0.32" />
+      <stop offset="86%" stop-color="#e6eeff" stop-opacity="0.40" />
+      <stop offset="100%" stop-color="#94a9d4" stop-opacity="0.06" />
+    </linearGradient>
+
+    <linearGradient id="crest-stroke-blue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2020e8" stop-opacity="0" />
+      <stop offset="25%" stop-color="#3b62f0" stop-opacity="0.22" />
+      <stop offset="48%" stop-color="#557cff" stop-opacity="0.42" />
+      <stop offset="72%" stop-color="#3b5fe0" stop-opacity="0.30" />
+      <stop offset="90%" stop-color="#5073ff" stop-opacity="0.38" />
+      <stop offset="100%" stop-color="#2020e8" stop-opacity="0.03" />
+    </linearGradient>
+
+    <!-- Glowing Node Gradients -->
+    <radialGradient id="node-outer-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3b65f8" stop-opacity="0.8" />
+      <stop offset="30%" stop-color="#243bd0" stop-opacity="0.42" />
+      <stop offset="65%" stop-color="#142178" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#0a1030" stop-opacity="0" />
+    </radialGradient>
+
+    <radialGradient id="node-core-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1" />
+      <stop offset="20%" stop-color="#d0e2ff" stop-opacity="0.95" />
+      <stop offset="55%" stop-color="#4e7cff" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#2020e8" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- SVG Filters for soft glows -->
+    <filter id="glow-blur-broad" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="32" result="blur" />
+    </filter>
+    <filter id="glow-blur-mid" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="13" result="blur" />
+    </filter>
+    <filter id="glow-blur-tight" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4.5" result="blur" />
+    </filter>
+    <filter id="wave-soft-blur" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
+    </filter>
+  </defs>
+
+  <!-- Base Stage Background -->
+  <rect width="1200" height="700" fill="url(#stage-base)" />
+  <rect width="1200" height="700" fill="url(#stage-ambient-glow)" />
+  <rect width="1200" height="700" fill="url(#stage-tl-haze)" />
+
+  <!-- Layer 1: Broad soft atmospheric smoke wave (deep base) -->
+  <path
+    d="M-20,545 C150,580 320,610 490,560 C640,515 780,445 930,480 C1060,510 1150,485 1220,465 L1220,720 L-20,720 Z"
+    fill="url(#wave-smoke-1)"
+    filter="url(#glow-blur-broad)"
+    opacity="0.85"
+  />
+
+  <!-- Layer 2: Lower dark grounding shadow -->
+  <path
+    d="M-20,595 C170,630 340,645 500,605 C650,565 790,505 940,535 C1070,565 1160,545 1220,525 L1220,720 L-20,720 Z"
+    fill="url(#wave-shadow-grad)"
+  />
+
+  <!-- Layer 3: Main translucent fluid wave ribbon (undulating crest) -->
+  <path
+    d="M-20,525 C150,562 315,592 485,548 C632,504 778,438 925,472 C1058,502 1148,478 1220,458 L1220,605 C1148,622 1058,635 925,595 C778,552 632,608 485,648 C315,692 150,670 -20,630 Z"
+    fill="url(#wave-smoke-2)"
+    filter="url(#wave-soft-blur)"
+    opacity="0.9"
+  />
+
+  <!-- Layer 4: Intersecting luminous silk ribbon veil -->
+  <path
+    d="M-20,555 C165,588 335,605 502,558 C645,512 780,455 918,485 C1045,512 1140,492 1220,472 L1220,555 C1140,578 1045,592 918,562 C780,528 645,575 502,620 C335,662 165,638 -20,605 Z"
+    fill="url(#wave-smoke-3)"
+    opacity="0.75"
+  />
+
+  <!-- Layer 5: Fine luminous hairline crest strokes -->
+  <!-- Primary platinum hairline stroke -->
+  <path
+    d="M-20,525 C150,562 315,592 485,548 C632,504 778,438 925,472 C1058,502 1148,478 1220,458"
+    fill="none"
+    stroke="url(#crest-stroke-plat)"
+    stroke-width="1.4"
+  />
+
+  <!-- Secondary ultramarine hairline stroke (gracefully running along and slightly dipping) -->
+  <path
+    d="M-20,548 C160,580 325,598 495,552 C638,508 775,448 918,478 C1048,506 1142,485 1220,465"
+    fill="none"
+    stroke="url(#crest-stroke-blue)"
+    stroke-width="1.2"
+  />
+
+  <!-- Tertiary whispering hairline stroke (subtle top boundary veil) -->
+  <path
+    d="M-20,500 C140,540 305,572 472,530 C620,488 762,425 905,458 C1035,490 1132,468 1220,448"
+    fill="none"
+    stroke="rgba(195, 220, 255, 0.2)"
+    stroke-width="0.8"
+  />
+
+  <!-- ============================================================== -->
+  <!-- LUMINOUS PINPOINT NODES (STARLIGHT ACCENTS)                     -->
+  <!-- ============================================================== -->
+
+  <!-- Node 1: Near the lower-middle curve (cx=535, cy=552) -->
+  <g class="mv2-setup-node-1" transform="translate(535, 552)">
+    <!-- Outer ambient ultramarine halo -->
+    <circle cx="0" cy="0" r="46" fill="url(#node-outer-glow)" filter="url(#glow-blur-broad)" />
+    <!-- Mid blue flare -->
+    <circle cx="0" cy="0" r="20" fill="url(#node-outer-glow)" filter="url(#glow-blur-mid)" />
+    <!-- Inner bright aura -->
+    <circle cx="0" cy="0" r="8" fill="url(#node-core-glow)" filter="url(#glow-blur-tight)" />
+    <!-- Subtle optical glint cross -->
+    <line x1="-30" y1="0" x2="30" y2="0" stroke="rgba(220, 238, 255, 0.6)" stroke-width="0.8" />
+    <line x1="0" y1="-30" x2="0" y2="30" stroke="rgba(220, 238, 255, 0.6)" stroke-width="0.8" />
+    <line x1="-12" y1="-12" x2="12" y2="12" stroke="rgba(190, 218, 255, 0.32)" stroke-width="0.5" />
+    <line x1="-12" y1="12" x2="12" y2="-12" stroke="rgba(190, 218, 255, 0.32)" stroke-width="0.5" />
+    <!-- Pinpoint core dot -->
+    <circle cx="0" cy="0" r="2.4" fill="#ffffff" />
+  </g>
+
+  <!-- Node 2: In Panel 04 (cx=1072, cy=468) -->
+  <g class="mv2-setup-node-2" transform="translate(1072, 468)">
+    <!-- Outer ambient ultramarine halo -->
+    <circle cx="0" cy="0" r="40" fill="url(#node-outer-glow)" filter="url(#glow-blur-broad)" />
+    <!-- Mid blue flare -->
+    <circle cx="0" cy="0" r="16" fill="url(#node-outer-glow)" filter="url(#glow-blur-mid)" />
+    <!-- Inner bright aura -->
+    <circle cx="0" cy="0" r="6.5" fill="url(#node-core-glow)" filter="url(#glow-blur-tight)" />
+    <!-- Subtle optical glint cross -->
+    <line x1="-24" y1="0" x2="24" y2="0" stroke="rgba(220, 238, 255, 0.55)" stroke-width="0.8" />
+    <line x1="0" y1="-24" x2="0" y2="24" stroke="rgba(220, 238, 255, 0.55)" stroke-width="0.8" />
+    <!-- Pinpoint core dot -->
+    <circle cx="0" cy="0" r="2.0" fill="#ffffff" />
+  </g>
+</svg>

@@ -1,0 +1,293 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import RestaurantHeader from '../../components/RestaurantHeader.astro';
+import RestaurantApprovalStack from '../../components/RestaurantApprovalStack';
+import RestaurantKnowledgeShowcase from '../../components/RestaurantKnowledgeShowcase';
+import HotelScenariosShowcase from '../../components/HotelScenariosShowcase';
+import RestaurantReviewsShowcase from '../../components/RestaurantReviewsShowcase';
+import RestaurantFaqAccordion from '../../components/RestaurantFaqAccordion';
+import PricingSection from '../../components/PricingSection.astro';
+import FinalCta from '../../components/FinalCta.astro';
+import Footer from '../../components/Footer.astro';
+import MelpisFlowDemoConsole from '../../components/MelpisFlowDemoConsole.jsx';
+import '../../styles/mv2-restaurants.css';
+
+const base = import.meta.env.BASE_URL;
+const title = "Melpis per Hotel — L'assistente AI per la tua struttura";
+const description = "Meno richieste ripetitive alla reception, più tempo da dedicare agli ospiti. Risposte istantanee su orari, check-in, colazione, servizi e richieste di soggiorno.";
+const canonicalPath = `${base}hotel/`;
+
+const hotelFaqs = [
+  {
+    q: "Come fa Melpis a conoscere gli orari della colazione, i servizi e le regole della struttura?",
+    a: "Puoi caricare documenti PDF della struttura, link alle pagine del sito web o note con le informazioni su check-in/out, orari della spa, colazione, parcheggio e animali ammessi. Le informazioni sono aggiornabili in tempo reale dal pannello."
+  },
+  {
+    q: "Melpis si integra con il nostro gestionale alberghiero (PMS)?",
+    a: "Melpis gestisce la comunicazione con gli ospiti e la raccolta strutturata delle richieste. Per le prenotazioni complesse o richieste speciali, raccoglie tutti i dettagli necessari e li inoltra alla reception, garantendo che ogni conferma sia sempre verificata dal tuo staff."
+  },
+  {
+    q: "Posso utilizzare il numero WhatsApp ufficiale dell'hotel?",
+    a: "Sì. Melpis si collega tramite WhatsApp Business API ufficiale. Puoi utilizzare il numero telefonico principale della struttura o un numero dedicato all'accoglienza e al concierge digitale."
+  },
+  {
+    q: "Come vengono gestite le richieste fuori orario o durante la notte?",
+    a: "Melpis è operativo 24 ore su 24: risponde immediatamente alle domande più frequenti sui servizi della struttura e raccoglie le richieste di arrivo tardivo o modifiche, notificandole alla reception per la riapertura del mattino."
+  },
+  {
+    q: "Melpis applica commissioni sulle prenotazioni o sui soggiorni?",
+    a: "No, nessuna percentuale o commissione. Melpis prevede solo un canone mensile fisso per l'assistente AI e la gestione delle conversazioni sui tuoi canali proprietari."
+  }
+];
+---
+
+<BaseLayout title={title} description={description} canonicalPath={canonicalPath} pageClass="mv2-restaurants-page">
+  <RestaurantHeader scenarioLabel="Accoglienza ospiti" navAriaLabel="Navigazione Hotel" />
+
+  <main id="mv2-contenuto" class="mv2-restaurants mv2-sector--hotel">
+    {/* ======================================================================
+        B. HERO SECTION
+        ====================================================================== */}
+    <section class="mv2-rest-hero" id="mv2-rest-hero" aria-labelledby="mv2-rest-hero-title">
+      <div class="mv2-rest-container">
+        <div class="mv2-rest-eyebrow-pill">
+          <span>Hotel</span>
+        </div>
+
+        <h1 class="mv2-rest-hero-title" id="mv2-rest-hero-title">
+          L'assistente AI che lavora anche<br />
+          <span class="mv2-rest-highlight">quando la reception</span><br />
+          è occupata.
+        </h1>
+
+        <p class="mv2-rest-hero-desc">
+          Melpis risponde alle domande dei tuoi ospiti, consulta le informazioni della struttura e aiuta il tuo team a gestire le richieste, anche fuori dagli orari di maggiore attività.
+        </p>
+
+        <div class="mv2-rest-hero-actions">
+          <a class="mv2-rest-btn-primary" href="#mv2-rest-piani">
+            <span>Prova Melpis gratis</span>
+            <span aria-hidden="true">→</span>
+          </a>
+          <a class="mv2-rest-btn-secondary" href="#mv2-rest-demo">
+            <span>Scopri come funziona in reception</span>
+          </a>
+        </div>
+
+        {/* Hero Demo Container */}
+        <div class="mv2-rest-hero-mock-wrap" id="mv2-rest-demo">
+          <div class="mv2-flow-stage" data-mv2-reveal="stage">
+            <div class="mv2-flow-aurora" aria-hidden="true" data-mv2-aurora-pause="true" data-inview="true">
+              <span class="mv2-flow-aurora-layer mv2-flow-aurora-layer-a"></span>
+              <span class="mv2-flow-aurora-layer mv2-flow-aurora-layer-b"></span>
+              <span class="mv2-flow-aurora-drift"></span>
+            </div>
+            <MelpisFlowDemoConsole client:load variant="hotel" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {/* ======================================================================
+        D & E. SCENARI DIMOSTRATIVI SCROLL-DRIVEN
+        ====================================================================== */}
+    <section class="mv2-rest-scenari-section" id="mv2-rest-scenari" aria-labelledby="mv2-rest-scenari-title">
+      <div class="mv2-rest-container">
+        <HotelScenariosShowcase client:load>
+          <div class="mv2-rest-editorial-header">
+            <h2 class="mv2-rest-editorial-title mv2-rest-sr-only" id="mv2-rest-scenari-title">
+              Rispondi a ogni ospite.<br />
+              <span class="mv2-rest-highlight">Senza appesantire la reception.</span>
+            </h2>
+
+            <p class="mv2-rest-editorial-desc">
+              Check-in, colazione, parcheggio, servizi e richieste di soggiorno: Melpis risponde subito alle domande frequenti e coinvolge il personale solo quando serve un tocco umano.
+            </p>
+          </div>
+        </HotelScenariosShowcase>
+      </div>
+    </section>
+
+    {/* ======================================================================
+        F. SEZIONI FUNZIONALI ALTERNATE (3 Blocks)
+        ====================================================================== */}
+    <section class="mv2-rest-features-wrapper" id="mv2-rest-funzioni" aria-label="Funzionalità dettagliate per hotel">
+      {/* Block 01 */}
+      <div class="mv2-rest-feature-block">
+        <div class="mv2-rest-container">
+          <div class="mv2-rest-feature-grid">
+            <div class="mv2-rest-feature-text-col">
+              <h2 class="mv2-rest-feature-title">
+                Tutte le informazioni della struttura<br />
+                <span class="mv2-rest-highlight">disponibili H24 per i tuoi ospiti.</span>
+              </h2>
+              <p class="mv2-rest-feature-desc">
+                Orari check-in e check-out, colazione, spa, parcheggio, Wi-Fi e regolamento animali: l'AI consulta la documentazione ufficiale della struttura e risponde con precisione in qualsiasi momento del giorno e della notte.
+              </p>
+
+              <ul class="mv2-rest-checklist">
+                <li>
+                  <span class="mv2-rest-check-circle" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <polyline points="3 8.5 6.5 12 13 4"></polyline>
+                    </svg>
+                  </span>
+                  <span>Conosce orari, servizi, dotazioni camere e convenzioni esterne</span>
+                </li>
+                <li>
+                  <span class="mv2-rest-check-circle" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <polyline points="3 8.5 6.5 12 13 4"></polyline>
+                    </svg>
+                  </span>
+                  <span>Risponde in italiano, inglese, tedesco, francese e spagnolo ai turisti internazionali</span>
+                </li>
+                <li>
+                  <span class="mv2-rest-check-circle" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <polyline points="3 8.5 6.5 12 13 4"></polyline>
+                    </svg>
+                  </span>
+                  <span>Tono accogliente e professionale, calibrato sull'identità della tua struttura</span>
+                </li>
+              </ul>
+
+              <a class="mv2-rest-btn-primary" href="#mv2-rest-piani">
+                <span>Prova Melpis gratis</span>
+                <span aria-hidden="true">→</span>
+              </a>
+            </div>
+
+            <div class="mv2-rest-feature-mock-col">
+              <RestaurantKnowledgeShowcase client:load variant="hotel" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Block 03 */}
+      <div class="mv2-rest-feature-block">
+        <div class="mv2-rest-container">
+          <div class="mv2-rest-feature-grid">
+            <div class="mv2-rest-feature-text-col">
+              <h2 class="mv2-rest-feature-title">
+                L'assistente accoglie.<br />
+                La reception decide.
+              </h2>
+              <p class="mv2-rest-feature-desc">
+                Le risposte partono sempre dalle informazioni e dalle regole del tuo hotel. Quando una richiesta riguarda soggiorni lunghi, gruppi o esigenze speciali, il tuo team riceve una notifica e può verificare o prendere in carico la conversazione con un clic.
+              </p>
+
+              <div class="mv2-rest-boxes-row">
+                <div class="mv2-rest-info-box">
+                  <h4 class="mv2-rest-info-box-title">Soglia gruppi</h4>
+                  <p class="mv2-rest-info-box-desc">Verifica manuale es. oltre 2 camere o soggiorni prolungati.</p>
+                </div>
+                <div class="mv2-rest-info-box">
+                  <h4 class="mv2-rest-info-box-title">Presa in carico</h4>
+                  <p class="mv2-rest-info-box-desc">La reception entra in chat quando vuole con un solo clic.</p>
+                </div>
+              </div>
+
+              <a class="mv2-rest-btn-primary" href="#mv2-rest-piani">
+                <span>Prova Melpis gratis</span>
+                <span aria-hidden="true">→</span>
+              </a>
+            </div>
+
+            <div class="mv2-rest-feature-mock-col">
+              <RestaurantApprovalStack client:load variant="hotel" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Block 04 */}
+      <div class="mv2-rest-feature-block">
+        <div class="mv2-rest-container mv2-rest-container--reviews">
+          <div class="mv2-rest-feature-grid mv2-rest-feature-grid--reverse mv2-rest-feature-grid--reviews">
+            <div class="mv2-rest-feature-text-col">
+              <h2 class="mv2-rest-feature-title">
+                Migliora la reputazione online e<br />
+                <span class="mv2-rest-highlight">valorizza la tua struttura.</span>
+              </h2>
+              <p class="mv2-rest-feature-desc">
+                Centralizza la gestione delle recensioni e valorizza la reputazione del tuo hotel. Melpis ti aiuta a predisporre risposte professionali e cortesi ai feedback degli ospiti e a mantenere il profilo della tua struttura sempre curato.
+              </p>
+
+              <ul class="mv2-rest-checklist">
+                <li>
+                  <span class="mv2-rest-check-circle" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <polyline points="3 8.5 6.5 12 13 4"></polyline>
+                    </svg>
+                  </span>
+                  <span>Anteprima della gestione delle recensioni Google con bozze AI personalizzate</span>
+                </li>
+                <li>
+                  <span class="mv2-rest-check-circle" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                      <polyline points="3 8.5 6.5 12 13 4"></polyline>
+                    </svg>
+                  </span>
+                  <span>Revisione e approvazione delle risposte da parte della direzione prima dell'invio</span>
+                </li>
+              </ul>
+
+              <a class="mv2-rest-btn-primary" href="#mv2-rest-piani">
+                <span>Prova Melpis gratis</span>
+                <span aria-hidden="true">→</span>
+              </a>
+            </div>
+
+            <div class="mv2-rest-feature-mock-col">
+              <RestaurantReviewsShowcase client:load variant="hotel" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {/* ======================================================================
+        I. PIANI (White Section)
+        ====================================================================== */}
+    <PricingSection
+      id="mv2-rest-piani"
+      ctaHref="/registrati/"
+      showEyebrow={false}
+      showLead={false}
+      showFootnote={false}
+    />
+
+    {/* ======================================================================
+        J. FAQ (White Section)
+        ====================================================================== */}
+    <section class="mv2-rest-faq-section" id="mv2-rest-faq" aria-labelledby="mv2-rest-faq-title">
+      <div class="mv2-rest-container">
+        <div class="mv2-rest-faq-grid">
+          <div>
+            <h2 class="mv2-rest-editorial-title" id="mv2-rest-faq-title">
+              Prima di attivare<br />
+              Melpis in hotel.
+            </h2>
+            <p class="mv2-rest-editorial-desc mv2-rest-faq-description">
+              Le risposte alle domande più comuni degli albergatori su accoglienza ospiti,
+              orari, canali WhatsApp e gestione richieste fuori orario.
+            </p>
+          </div>
+
+          <div>
+            <RestaurantFaqAccordion client:load items={hotelFaqs} ariaLabel="Domande frequenti per hotel" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {/* ======================================================================
+        K. FINAL CTA
+        ====================================================================== */}
+    <FinalCta id="mv2-rest-cta" ctaHref="/registrati/" />
+  </main>
+
+  <Footer isSubpage={true} currentPath={canonicalPath} />
+</BaseLayout>

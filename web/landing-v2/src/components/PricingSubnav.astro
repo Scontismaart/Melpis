@@ -1,0 +1,22 @@
+---
+import { pageIntro, subnavLinks } from '../data/pricing.mjs';
+---
+
+<div class="mv2-pp-subnav" data-pp-subnav>
+  <div class="mv2-pp-container mv2-pp-subnav-inner">
+    <p class="mv2-pp-subnav-title">{pageIntro.subnavTitle}</p>
+    <details class="mv2-pp-subnav-menu" data-pp-subnav-menu>
+      <summary>
+        <span>{pageIntro.subnavMenuLabel}</span>
+        <span class="mv2-pp-subnav-caret" aria-hidden="true">▾</span>
+      </summary>
+      <nav aria-label="Sezioni della pagina">
+        <ul class="mv2-pp-subnav-list">
+          {subnavLinks.map((link) => (
+            <li><a href={link.href}>{link.label}</a></li>
+          ))}
+        </ul>
+      </nav>
+    </details>
+  </div>
+</div>

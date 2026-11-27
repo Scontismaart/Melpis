@@ -1,0 +1,37 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Header from '../../components/Header.astro';
+import Footer from '../../components/Footer.astro';
+import PricingSubnav from '../../components/PricingSubnav.astro';
+import PricingPlans from '../../components/PricingPlans.astro';
+import PricingCompare from '../../components/PricingCompare.astro';
+import PricingFaq from '../../components/PricingFaq.astro';
+import { pageIntro } from '../../data/pricing.mjs';
+import '../../styles/mv2-pricing-page.css';
+
+const canonicalPath = '/piani/';
+const title = 'Piani e prezzi — Melpis';
+const description = 'Confronta i piani Melpis: prova gratuita di 7 giorni, Essenziale, Crescita e Scala. Prezzi mensili, limiti di risposte AI, operatori e canali.';
+---
+
+<BaseLayout title={title} description={description} canonicalPath={canonicalPath} pageClass="mv2-pricing-page">
+  <Header isSubpage={true} currentPath={canonicalPath} />
+  <PricingSubnav />
+
+  <main id="mv2-contenuto">
+    <div class="mv2-pp-hero">
+      <div class="mv2-pp-container">
+        <h1 id="mv2-pp-title">{pageIntro.title}</h1>
+      </div>
+    </div>
+
+    <PricingPlans />
+    <PricingCompare />
+    <PricingFaq />
+  </main>
+
+  <Footer isSubpage={true} currentPath={canonicalPath} />
+</BaseLayout>
+
+<script src="../../scripts/mobile-menu.js"></script>
+<script src="../../scripts/mv2-pricing-page.js"></script>

@@ -1,0 +1,61 @@
+---
+const homeUrl = '/';
+const loginUrl = '/accedi/';
+
+interface Props {
+  scenarioLabel?: string;
+  navAriaLabel?: string;
+}
+
+const { scenarioLabel = "Gestione sala", navAriaLabel = "Navigazione Ristoranti" } = Astro.props;
+---
+
+<header class="mv2-rest-header">
+  <div class="mv2-rest-container mv2-rest-nav-wrap">
+    <div class="mv2-rest-nav-left">
+      <a class="mv2-rest-brand" href={homeUrl} aria-label="Melpis, torna alla homepage">
+        <img class="mv2-rest-mark" src="/landing-v2/assets/mv2-symbol.svg" alt="" width="36" height="26" />
+        <span class="mv2-rest-brand-name">melpis</span>
+      </a>
+    </div>
+
+    <button
+      class="mv2-rest-menu-toggle"
+      type="button"
+      aria-expanded="false"
+      aria-controls="mv2-rest-nav"
+      aria-label="Apri menu navigazione"
+      id="mv2-rest-menu-btn"
+    >
+      <span>Menu</span>
+      <span aria-hidden="true">☰</span>
+    </button>
+
+    <nav class="mv2-rest-nav" id="mv2-rest-nav" aria-label={navAriaLabel}>
+      <a href="#mv2-rest-demo">Il percorso</a>
+      <a href="#mv2-rest-scenari">{scenarioLabel}</a>
+      <a href="#mv2-rest-funzioni">Controllo</a>
+      <a href="/piani/">Piani</a>
+      <a href="#mv2-rest-faq">FAQ</a>
+    </nav>
+
+    <div class="mv2-rest-nav-right">
+      <a href={loginUrl} class="mv2-rest-btn-cta">
+        <span>Accedi</span>
+        <span aria-hidden="true">↗</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<script>
+  const toggleBtn = document.getElementById('mv2-rest-menu-btn');
+  const nav = document.getElementById('mv2-rest-nav');
+  if (toggleBtn && nav) {
+    toggleBtn.addEventListener('click', () => {
+      const isOpen = toggleBtn.getAttribute('aria-expanded') === 'true';
+      toggleBtn.setAttribute('aria-expanded', String(!isOpen));
+      nav.classList.toggle('is-open', !isOpen);
+    });
+  }
+</script>

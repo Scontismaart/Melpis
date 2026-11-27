@@ -1,0 +1,99 @@
+---
+const faqs = [
+  {
+    id: "gestione-poltrone-barbieri",
+    q: "Melpis può gestire più poltrone o barbieri diversi?",
+    a: "Sì. Puoi configurare le singole poltrone o i diversi barbieri del team. Melpis assegna l'appuntamento alla prima poltrona libera oppure permette al cliente abituale di richiedere il proprio operatore di fiducia."
+  },
+  {
+    id: "durate-taglio-barba",
+    q: "Posso impostare durate diverse per taglio e modellatura barba?",
+    a: "Certamente. Ogni servizio è configurabile con tempi precisi (es. 30 minuti taglio classico, 20 minuti regolazione barba express, 45 minuti combo completa con panno caldo), evitando buchi o sovrapposizioni in agenda."
+  },
+  {
+    id: "giorni-chiusura-barberia",
+    q: "Come gestisce i giorni di riposo o le chiusure?",
+    a: "Melpis rispetta rigorosamente i giorni di riposo (come domenica e lunedì) e le pause del negozio. Se un cliente scrive mentre il salone è chiuso, risponde immediatamente e propone gli slot disponibili alla riapertura."
+  },
+  {
+    id: "collegamento-google-calendar",
+    q: "Posso collegare Google Calendar?",
+    a: "Il collegamento a Google Calendar è previsto, con attivazione subordinata alla certificazione operativa."
+  },
+  {
+    id: "numero-whatsapp-barberia",
+    q: "Funziona con il numero WhatsApp attuale del negozio?",
+    a: "Sì. Melpis si integra con il tuo numero WhatsApp Business tramite le API ufficiali di Meta. Puoi continuare a leggere le conversazioni e rispondere manualmente quando preferisci."
+  },
+  {
+    id: "promemoria-riduzione-noshow",
+    q: "Come funzionano i promemoria per evitare che i clienti non si presentino?",
+    a: "Melpis invia promemoria automatici (es. 2 ore o 24 ore prima dell'appuntamento), permettendo ai clienti di confermare o avvisare in tempo per riassegnare la poltrona."
+  },
+  {
+    id: "costo-servizio-barbieri",
+    q: "Quanto costa Melpis per una barberia?",
+    a: "I piani partono da 29 €/mese (piano Essenziale, 500 risposte AI) e 69 €/mese (piano Crescita, 2.000 risposte AI e gestione feedback), con condizioni trasparenti e disdetta flessibile in qualsiasi momento."
+  },
+  {
+    id: "prova-gratuita-barberia",
+    q: "Posso provarlo gratuitamente?",
+    a: "Sì. Puoi attivare la prova gratuita di 7 giorni con risposte AI incluse per impostare i tuoi servizi, verificare la disponibilità delle poltrone e testare l'assistente prima di scegliere un piano."
+  }
+];
+---
+
+<section class="mv2-sector-section-faq" id="mv2-barbieri-faq" aria-labelledby="mv2-barbieri-faq-title">
+  <div class="mv2-sector-faq__grid">
+    <!-- Left Column: Title & Intro -->
+    <div class="mv2-sector-faq__intro" data-sector-reveal>
+      <span class="mv2-sector-eyebrow">DOMANDE FREQUENTI</span>
+      <h2 class="mv2-sector-faq__title" id="mv2-barbieri-faq-title">
+        <span class="mv2-sector-title-dark">Tutto quello che vuoi sapere.</span>
+        <span class="mv2-sector-title-accent">Prima di iniziare.</span>
+      </h2>
+      <p class="mv2-sector-faq__desc">
+        Le risposte ai dubbi più comuni dei titolari di barberie su gestione poltrone, orari di punta, promemoria WhatsApp e integrazione con il calendario.
+      </p>
+      <div class="mv2-sector-faq__link-wrap">
+        <a class="mv2-sector-link-arrow" href={`${import.meta.env.BASE_URL}#mv2-piani`}>
+          <span>Consulta tutti i dettagli dei piani</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M3.5 12.5l9-9M4 3.5h8.5V12" />
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Right Column: Accordion List -->
+    <div class="mv2-sector-faq__list" role="region" aria-label="Domande frequenti per barbieri">
+      {faqs.map((faq, idx) => (
+        <div class="mv2-sector-faq__item" data-sector-reveal>
+          <button
+            type="button"
+            class="mv2-sector-faq__trigger"
+            aria-expanded={idx === 0 ? "true" : "false"}
+            aria-controls={`faq-answer-${faq.id}`}
+            id={`faq-btn-${faq.id}`}
+          >
+            <span class="mv2-sector-faq__question">{faq.q}</span>
+            <span class="mv2-sector-faq__icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </span>
+          </button>
+          <div
+            id={`faq-answer-${faq.id}`}
+            class="mv2-sector-faq__answer"
+            role="region"
+            aria-labelledby={`faq-btn-${faq.id}`}
+            hidden={idx !== 0}
+          >
+            <p>{faq.a}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

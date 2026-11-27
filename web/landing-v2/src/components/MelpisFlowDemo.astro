@@ -1,0 +1,37 @@
+---
+import MelpisFlowDemoConsole from './MelpisFlowDemoConsole.jsx';
+---
+
+<section class="mv2-section mv2-flow" id="mv2-percorso" aria-labelledby="mv2-path-title">
+  <div class="mv2-container">
+    <span id="come-funziona" class="mv2-legacy-anchor" aria-hidden="true"></span>
+    <div class="mv2-flow-heading">
+      <p class="mv2-kicker" data-mv2-reveal="up">DEMO INTERATTIVA</p>
+      <h2 id="mv2-path-title" data-mv2-reveal="title">Guarda come <em>lavora Melpis.</em></h2>
+      <p data-mv2-reveal="up" data-mv2-delay="2">Tu invii un solo messaggio. Nella demo Melpis comprende la richiesta, controlla la disponibilità, simula i passaggi a calendario e risponde al cliente.</p>
+    </div>
+
+    <div class="mv2-flow-stack">
+      <div class="mv2-flow-fallback">
+        <p class="mv2-flow-disclosure">Demo interattiva · Dati simulati</p>
+        <h3>Quattro richieste di esempio</h3>
+        <ol>
+          <li><strong>Prenotazione tavolo</strong><p>«Vorrei prenotare un tavolo per 2 persone domani alle 12:00» · il controllo dello slot mostra le 12:00 disponibili. La disponibilità resta in attesa della conferma del cliente: nessuna prenotazione viene registrata da sola.</p></li>
+          <li><strong>Allergeni e menu</strong><p>La risposta sugli allergeni arriva soltanto dalle schede configurate, con la segnalazione da girare in cucina e senza promesse oltre le informazioni disponibili.</p></li>
+          <li><strong>Orario occupato</strong><p>Per le 18:00 non c’è posto: vengono proposti 17:30 o 18:30 e l’appuntamento si crea solo dopo la scelta del cliente.</p></li>
+          <li><strong>Evento su richiesta</strong><p>Una richiesta oltre il perimetro configurato viene passata a un operatore, con la conversazione pronta per essere presa in carico.</p></li>
+        </ol>
+        <noscript><p>La demo interattiva richiede JavaScript. Qui sopra trovi gli scenari e i relativi esiti con le condizioni applicate.</p></noscript>
+      </div>
+
+      <div class="mv2-flow-stage" data-mv2-reveal="stage">
+        <div class="mv2-flow-aurora" aria-hidden="true" data-mv2-aurora-pause="true" data-inview="true">
+          <span class="mv2-flow-aurora-layer mv2-flow-aurora-layer-a"></span>
+          <span class="mv2-flow-aurora-layer mv2-flow-aurora-layer-b"></span>
+          <span class="mv2-flow-aurora-drift"></span>
+        </div>
+        <MelpisFlowDemoConsole client:visible />
+      </div>
+    </div>
+  </div>
+</section>

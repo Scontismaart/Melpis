@@ -1,0 +1,101 @@
+---
+const faqs = [
+  {
+    id: "gestione-prenotazioni-camere",
+    q: "Melpis può gestire prenotazioni per le camere?",
+    a: "Sì. Quando un ospite richiede una stanza, Melpis verifica le date nel calendario, propone le tipologie disponibili con le tariffe corrette e registra la prenotazione non appena l’ospite dà il suo assenso."
+  },
+  {
+    id: "tariffe-politiche-soggiorno",
+    q: "È possibile impostare tariffe e politiche di soggiorno?",
+    a: "In qualsiasi momento. Dalla dashboard puoi configurare tariffe stagionali, soggiorni minimi, orari di check-in/out, opzioni colazione e termini di cancellazione."
+  },
+  {
+    id: "supporto-multilingua",
+    q: "Funziona anche in più lingue?",
+    a: "Sì. Melpis riconosce automaticamente la lingua in cui scrive l'ospite (italiano, inglese, tedesco, francese, spagnolo) e risponde fluidamente con le informazioni esatte della tua struttura."
+  },
+  {
+    id: "collegamento-calendario-pms",
+    q: "Posso collegare Google Calendar o il gestionale?",
+    a: "Il collegamento a Google Calendar è previsto, con attivazione subordinata alla certificazione operativa."
+  },
+  {
+    id: "richieste-speciali-ospiti",
+    q: "Cosa succede quando un ospite ha richieste particolari?",
+    a: "Richieste come late check-in, culla in camera, piani alti o intolleranze per la colazione vengono registrate nella scheda dell'ospite o inoltrate direttamente alla reception per un'accoglienza impeccabile."
+  },
+  {
+    id: "whatsapp-business-hotel",
+    q: "Posso utilizzare il numero WhatsApp ufficiale dell’hotel?",
+    a: "Sì. Melpis si integra con il tuo numero WhatsApp Business tramite le API ufficiali di Meta, consentendo al team di reception di monitorare e intervenire sulle chat in qualsiasi momento."
+  },
+  {
+    id: "costo-servizio-hotel",
+    q: "Quanto costa Melpis per un hotel o struttura ricettiva?",
+    a: "I piani partono da 29 €/mese (Essenziale) e 69 €/mese (Crescita con 2.000 risposte AI e bozze di risposta alle recensioni), senza vincoli contrattuali a lungo termine."
+  },
+  {
+    id: "prova-gratuita-hotel",
+    q: "Posso provarlo gratuitamente?",
+    a: "Sì. È disponibile una prova gratuita di 7 giorni con 150 risposte AI incluse per configurare camere e servizi e verificare l'interazione con gli ospiti prima dell'attivazione."
+  }
+];
+---
+
+<section class="mv2-sector-section-faq" id="mv2-hotel-faq" aria-labelledby="mv2-hotel-faq-title">
+  <div class="mv2-sector-faq__grid">
+    <!-- Left Column: Title & Intro -->
+    <div class="mv2-sector-faq__intro" data-sector-reveal>
+      <span class="mv2-sector-eyebrow">DOMANDE FREQUENTI</span>
+      <h2 class="mv2-sector-faq__title" id="mv2-hotel-faq-title">
+        <span class="mv2-sector-title-dark">Tutto quello che vuoi sapere.</span>
+        <span class="mv2-sector-title-accent">Prima di iniziare.</span>
+      </h2>
+      <p class="mv2-sector-faq__desc">
+        Le risposte ai dubbi più frequenti di albergatori e gestori su prenotazioni di camere, supporto multilingua, politiche di soggiorno e integrazione WhatsApp.
+      </p>
+      <div class="mv2-sector-faq__link-wrap">
+        <a class="mv2-sector-link-arrow" href={`${import.meta.env.BASE_URL}#mv2-piani`}>
+          <span>Consulta tutti i dettagli dei piani</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Right Column: Minimal Accordion List -->
+    <div class="mv2-sector-faq__list" role="region" aria-label="Domande frequenti per hotel e strutture ricettive" data-sector-reveal>
+      {faqs.map((faq, index) => (
+        <div class="mv2-sector-faq__item" data-open="false">
+          <button
+            type="button"
+            class="mv2-sector-faq__trigger"
+            id={`hotel-faq-trig-${index}`}
+            aria-controls={`hotel-faq-pane-${index}`}
+            aria-expanded="false"
+          >
+            <span class="mv2-sector-faq__question">{faq.q}</span>
+            <span class="mv2-sector-faq__icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="3" x2="8" y2="13" class="mv2-sector-icon-v-line" />
+                <line x1="3" y1="8" x2="13" y2="8" />
+              </svg>
+            </span>
+          </button>
+          <div
+            class="mv2-sector-faq__pane"
+            id={`hotel-faq-pane-${index}`}
+            role="region"
+            aria-labelledby={`hotel-faq-trig-${index}`}
+          >
+            <div class="mv2-sector-faq__answer">
+              <p>{faq.a}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

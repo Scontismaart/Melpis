@@ -1,0 +1,76 @@
+name: Landing V2 integrated web
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/landing-v2.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/landing-v2.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  landing:
+    name: Verify Landing V2 in Nginx
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/landing-v2/package-lock.json
+
+      - name: Install pinned landing dependencies and browser
+        working-directory: web/landing-v2
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npx playwright install --with-deps chromium
+
+      - name: Check static output and synthetic scenario guards
+        working-directory: web/landing-v2
+        run: |
+          npm test
+          npm run astro:check
+
+      - name: Build web and launch a loopback-only container
+        run: |
+          docker build --file web/Dockerfile --tag melpis-landing-v2:ci web
+          docker run --detach --rm --name melpis-landing-v2-ci --publish 127.0.0.1:4180:80 \
+            --env LEGAL_RENDER_ENABLED=true --env 'LEGAL_ENTITY_NAME=Melpis Synthetic QA' \
+            --env 'LEGAL_ENTITY_REGISTERED_OFFICE=Via Test 1' --env LEGAL_ENTITY_VAT_NUMBER=IT12345678901 \
+            --env LEGAL_PRIVACY_CONTACT_EMAIL=privacy@melpis.invalid --env LEGAL_FORUM=Roma \
+            --env LEGAL_DOCUMENT_EFFECTIVE_DATE=2026-09-21 melpis-landing-v2:ci
+          curl --fail --silent --show-error --retry 12 --retry-connrefused http://127.0.0.1:4180/ --output /dev/null
+
+      - name: Verify public routing, legal gates, dashboard and assets
+        run: node web/landing-v2/tests/container-smoke.mjs
+
+      - name: Verify homepage in Chromium with the container CSP
+        working-directory: web/landing-v2
+        env:
+          V2_QA_URL: http://127.0.0.1:4180/
+        run: node tests/browser-qa.cjs
+
+      - name: Verify pricing interactions in Chromium with the container CSP
+        working-directory: web/landing-v2
+        run: node qa-pricing.cjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: landing-v2-browser-evidence
+          path: web/landing-v2/artifacts/
+          if-no-files-found: ignore
+
+      - name: Remove the disposable container
+        if: always()
+        run: docker stop melpis-landing-v2-ci || true

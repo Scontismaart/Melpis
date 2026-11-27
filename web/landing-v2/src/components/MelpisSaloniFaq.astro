@@ -1,0 +1,101 @@
+---
+const faqs = [
+  {
+    id: "gestione-appuntamenti",
+    q: "Melpis può gestire appuntamenti e disponibilità?",
+    a: "Sì. Melpis verifica in tempo reale gli orari liberi nell'agenda del salone, propone gli slot compatibili con la durata del servizio e registra l'appuntamento non appena la cliente dà conferma esplicita."
+  },
+  {
+    id: "definizione-trattamenti",
+    q: "Posso definire trattamenti, durate e prezzi?",
+    a: "Certamente. Dalla dashboard puoi configurare ogni trattamento (taglio, colore, piega, schiariture, trattamenti benessere), impostando la durata minima necessaria e il listino prezzi aggiornato."
+  },
+  {
+    id: "collegamento-google-calendar",
+    q: "Posso collegare Google Calendar?",
+    a: "Il collegamento a Google Calendar è previsto, con attivazione subordinata alla certificazione operativa."
+  },
+  {
+    id: "richieste-complesse-consulenze",
+    q: "Cosa succede per richieste complesse o cambi look importanti?",
+    a: "Quando una cliente richiede un servizio speciale, una consulenza approfondita o una variazione fuori listino, Melpis trasferisce la conversazione all’inbox dello staff notificando il team per un riscontro diretto."
+  },
+  {
+    id: "whatsapp-business-salone",
+    q: "Posso continuare a utilizzare il mio numero WhatsApp Business?",
+    a: "Sì. Melpis si collega direttamente al tuo numero WhatsApp Business tramite le API ufficiali di Meta. Il tuo team può intervenire o leggere le chat in ogni momento dalla dashboard."
+  },
+  {
+    id: "promemoria-riduzione-noshow",
+    q: "Come funzionano i promemoria automatici?",
+    a: "Puoi programmare l'invio automatico di un messaggio di promemoria (es. 24 ore prima dell'appuntamento), riducendo drasticamente le dimenticanze e i no-show."
+  },
+  {
+    id: "costo-servizio-saloni",
+    q: "Quanto costa Melpis per un salone di bellezza?",
+    a: "I piani partono da 29 €/mese (piano Essenziale, 500 risposte AI) e 69 €/mese (piano Crescita, 2.000 risposte AI e gestione feedback), con condizioni trasparenti e disdetta flessibile in qualunque momento."
+  },
+  {
+    id: "prova-gratuita-saloni",
+    q: "Posso provarlo gratuitamente?",
+    a: "Sì. Puoi iniziare con una prova gratuita di 7 giorni con 150 risposte AI incluse per impostare i trattamenti del tuo salone e collaudare il flusso prima di attivare un piano."
+  }
+];
+---
+
+<section class="mv2-sector-section-faq" id="mv2-saloni-faq" aria-labelledby="mv2-saloni-faq-title">
+  <div class="mv2-sector-faq__grid">
+    <!-- Left Column: Title & Intro -->
+    <div class="mv2-sector-faq__intro" data-sector-reveal>
+      <span class="mv2-sector-eyebrow">DOMANDE FREQUENTI</span>
+      <h2 class="mv2-sector-faq__title" id="mv2-saloni-faq-title">
+        <span class="mv2-sector-title-dark">Tutto quello che vuoi sapere.</span>
+        <span class="mv2-sector-title-accent">Prima di iniziare.</span>
+      </h2>
+      <p class="mv2-sector-faq__desc">
+        Le risposte ai dubbi più comuni dei professionisti della bellezza su gestione appuntamenti, listino trattamenti, promemoria e integrazione WhatsApp Business.
+      </p>
+      <div class="mv2-sector-faq__link-wrap">
+        <a class="mv2-sector-link-arrow" href={`${import.meta.env.BASE_URL}#mv2-piani`}>
+          <span>Consulta tutti i dettagli dei piani</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Right Column: Minimal Accordion List -->
+    <div class="mv2-sector-faq__list" role="region" aria-label="Domande frequenti per saloni di bellezza" data-sector-reveal>
+      {faqs.map((faq, index) => (
+        <div class="mv2-sector-faq__item" data-open="false">
+          <button
+            type="button"
+            class="mv2-sector-faq__trigger"
+            id={`saloni-faq-trig-${index}`}
+            aria-controls={`saloni-faq-pane-${index}`}
+            aria-expanded="false"
+          >
+            <span class="mv2-sector-faq__question">{faq.q}</span>
+            <span class="mv2-sector-faq__icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="3" x2="8" y2="13" class="mv2-sector-icon-v-line" />
+                <line x1="3" y1="8" x2="13" y2="8" />
+              </svg>
+            </span>
+          </button>
+          <div
+            class="mv2-sector-faq__pane"
+            id={`saloni-faq-pane-${index}`}
+            role="region"
+            aria-labelledby={`saloni-faq-trig-${index}`}
+          >
+            <div class="mv2-sector-faq__answer">
+              <p>{faq.a}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

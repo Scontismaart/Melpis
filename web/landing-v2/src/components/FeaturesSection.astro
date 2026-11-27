@@ -1,0 +1,94 @@
+---
+const base = import.meta.env.BASE_URL;
+const checks = [
+  {
+    title: 'Attivo in pochi minuti',
+    body: "Dopo la configurazione e le verifiche del canale WhatsApp Business, l’assistente può iniziare a rispondere.",
+  },
+  {
+    title: 'Supporto 24/7',
+    body: 'Il tuo agente lavora senza sosta, anche mentre tu ti concentri sul tuo business.',
+  },
+  {
+    title: 'WhatsApp Business API ufficiale',
+    body: 'Integrazione nativa, sicura e conforme, per conversazioni affidabili e scalabili.',
+  },
+];
+const features = [
+  {
+    art: 'feature-risposte.webp',
+    alt: '',
+    width: 880,
+    height: 555,
+    title: 'Risposte in tempo reale',
+    body: 'Il tuo AI agent risponde istantaneamente alle domande, fornisce informazioni precise e guida ogni cliente verso l\u2019azione.',
+  },
+  {
+    art: 'feature-prenotazioni.webp',
+    alt: '',
+    width: 880,
+    height: 449,
+    title: 'Verifica delle disponibilità',
+    body: 'Consulta date e orari in tempo reale, guida i clienti verso gli slot disponibili e prepara le richieste per il tuo team.',
+  },
+  {
+    art: 'feature-escalation.webp',
+    alt: '',
+    width: 880,
+    height: 517,
+    title: 'Escalation a operatore umano',
+    body: 'Quando serve, la conversazione viene passata automaticamente al tuo team, con tutto il contesto gi\u00e0 disponibile.',
+  },
+];
+---
+
+<section class="mv2-features" id="mv2-funzioni" aria-labelledby="mv2-features-title">
+  <div class="mv2-features-head">
+    <p class="mv2-features-label mv2-features-label--start" data-mv2-reveal="up" data-mv2-delay="1"><span>Pensata per</span><span>automatizzare.</span></p>
+    <h2 class="mv2-features-title" id="mv2-features-title" data-mv2-reveal="title">Configura una volta.<br />Il tuo assistente AI gestisce il resto.</h2>
+    <p class="mv2-features-label mv2-features-label--end" data-mv2-reveal="up" data-mv2-delay="2"><span>Costruita</span><span>per scalare.</span></p>
+  </div>
+
+  <ul class="mv2-features-grid">
+    {features.map((feature, index) => (
+      <li class="mv2-features-col" data-mv2-reveal="up" data-mv2-delay={String(index + 1)}>
+        <div class="mv2-features-art">
+          <img src={`${base}assets/section-02/${feature.art}`} alt={feature.alt} width={feature.width} height={feature.height} loading="lazy" decoding="async" />
+        </div>
+        <h3>{feature.title}</h3>
+        <p>{feature.body}</p>
+      </li>
+    ))}
+  </ul>
+
+  <div class="mv2-features-photo" data-mv2-reveal="fade">
+    <img
+      class="mv2-features-img"
+      src={`${base}assets/section-02/photo-lavoro-1440.webp`}
+      srcset={`${base}assets/section-02/photo-lavoro-960.webp 960w, ${base}assets/section-02/photo-lavoro-1440.webp 1440w, ${base}assets/section-02/photo-lavoro-2169.webp 2169w`}
+      sizes="(min-width: 1600px) 1560px, calc(100vw - 40px)"
+      width="1440"
+      height="481"
+      alt="Una professionista al lavoro al computer in un ufficio luminoso"
+      loading="lazy"
+      decoding="async"
+    />
+    <ul class="mv2-features-cards">
+      {checks.map((check, index) => (
+        <li class="mv2-features-card" data-mv2-reveal="up" data-mv2-delay={String(index + 1)}>
+          <div class="mv2-features-card-in">
+            <span class="mv2-features-check" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" focusable="false">
+                <path d="M6.8 12.6l3.3 3.3 7.1-7.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <div class="mv2-features-card-copy">
+              <h3>{check.title}</h3>
+              <p>{check.body}</p>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
