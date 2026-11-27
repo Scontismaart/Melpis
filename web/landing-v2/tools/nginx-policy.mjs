@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const pages = ['index', 'piani', 'ristoranti', 'hotel', 'barbieri', 'saloni'];
@@ -11,6 +12,21 @@ const policies = pages.map((page) => {
   }
   assert.match(policy, /script-src 'self' 'sha256-/);
   assert.doesNotMatch(policy, /unsafe-|strict-dynamic/);
+  for (const [directive, pattern] of [
+    ['script-src', /<script\b([^>]*)>([\s\S]*?)<\/script>/gi],
+    ['style-src', /<style\b([^>]*)>([\s\S]*?)<\/style>/gi],
+  ]) {
+    const sources = policy.split(';').map((value) => value.trim()).find((value) => value.startsWith(`${directive} `));
+    for (const [, attributes, body] of html.matchAll(pattern)) {
+      if (directive === 'script-src' && /\ssrc=/.test(attributes)) {
+        assert.match(attributes, /\ssrc="\/landing-v2\//, `Unexpected script URL on ${page}`);
+        continue;
+      }
+      const hash = createHash('sha256').update(body).digest('base64');
+      assert.ok(sources?.split(' ').includes(`'sha256-${hash}'`), `Unapproved inline ${directive} on ${page}`);
+    }
+  }
+  assert.doesNotMatch(html, /<[a-z][^>]*\s(?:style|on[a-z]+)="/i, `Inline style or event attribute on ${page}`);
   assert.match(html, /<meta name="robots" content="noindex, nofollow, noarchive"/);
   return policy;
 });

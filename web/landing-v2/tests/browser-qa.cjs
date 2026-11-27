@@ -143,8 +143,16 @@ async function axeRun(page) {
         const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
         await monitor(page, sector);
         await page.goto(new URL(`/landing-v2/${sector}/`, origin).href, { waitUntil: 'networkidle' });
-        const accessibility = await axeRun(page);
-        check(accessibility.violations.length === 0, `${sector}: Axe WCAG A/AA`, accessibility.violations.map(item => ({ id: item.id, targets: item.nodes.map(node => node.target) })));
+        const scenarios = page.locator('.mv2-rest-scenarios-cards-col').getByRole('tab');
+        for (const tab of await scenarios.all()) {
+          await tab.focus();
+          await page.keyboard.press('Enter');
+          const target = await tab.getAttribute('aria-controls');
+          await page.locator(`[id="${target}"]`).waitFor({ state: 'visible' });
+          check(await tab.getAttribute('aria-selected') === 'true', `${sector}: keyboard selects ${target}`);
+          const accessibility = await axeRun(page);
+          check(accessibility.violations.length === 0, `${sector}: Axe WCAG A/AA for ${target}`, accessibility.violations.map(item => ({ id: item.id, targets: item.nodes.map(node => node.target) })));
+        }
         check((await page.evaluate(() => window.__mv2Csp)).length === 0, `${sector}: no CSP violations`);
         await page.close();
       }
