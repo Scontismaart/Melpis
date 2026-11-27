@@ -344,7 +344,7 @@ class InboundProcessingService:
         decorated, contact_id = await decorate(org_id, sender, text, self.repo, nome)
         guard = getattr(type(self.repo), "ai_disclosure_guard", None)
         first = contact_id is not None and guard is not None
-        scope = guard(self.repo, org_id, contact_id) if first else nullcontext(True)
+        scope = guard(self.repo, org_id, contact_id, postgres_dsn=self.app_config.postgres_dsn) if first else nullcontext(True)
         async with scope as acquired:
             if not acquired:
                 raise DeliveryUnconfirmed("First AI disclosure is being sent")

@@ -2,6 +2,8 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 
+import asyncpg
+
 from src.core.db.scoping import TenantScopedRepository
 
 
@@ -116,12 +118,17 @@ class ContactRepository(TenantScopedRepository):
             return row["consent_status"] if row else None
 
     @asynccontextmanager
-    async def ai_disclosure_guard(self, organization_id, contact_id):
-        """Serialize the first disclosure for this tenant contact across workers."""
-        async with self.scoped_conn(organization_id) as conn, conn.transaction():
-            key = f"ai-disclosure:{organization_id}:{contact_id}"
-            locked = await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))", key)
-            yield bool(locked)
+    async def ai_disclosure_guard(self, organization_id, contact_id, *, postgres_dsn):
+        """Serialize the first disclosure without reserving an application pool slot."""
+        org, contact = uuid.UUID(str(organization_id)), uuid.UUID(str(contact_id))
+        key = f"ai-disclosure:{org}:{contact}"
+        conn = await asyncpg.connect(postgres_dsn, timeout=5, command_timeout=5)
+        try:
+            async with conn.transaction():
+                locked = await conn.fetchval("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))", key)
+                yield bool(locked)
+        finally:
+            await conn.close(timeout=5)
 
     async def mark_ai_disclosure_sent(self, contact_id: uuid.UUID, organization_id) -> bool:
         """Atomicamente segna il contatto come destinatario della disclosure AI.

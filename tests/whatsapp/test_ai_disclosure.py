@@ -78,16 +78,23 @@ class TestMarkAiDisclosureSent:
         assert result is False
 
 
-async def test_first_disclosure_guard_serializes_workers_per_tenant_contact(repo):
+async def test_first_disclosure_guard_does_not_consume_a_slot_from_a_single_slot_pool(repo, postgres_container):
     contact = await _make_contact(repo)
-    other_contact = uuid.uuid4()
     org, contact_id = contact["organization_id"], contact["id"]
+    dsn = postgres_container.get_connection_url().replace("+psycopg2", "")
+    pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=1)
+    from src.whatsapp.repository import Repository
 
-    async with repo.ai_disclosure_guard(org, contact_id) as first:
-        assert first
-        async with repo.ai_disclosure_guard(org, contact_id) as concurrent:
-            assert not concurrent
-        async with repo.ai_disclosure_guard(org, other_contact) as independent:
-            assert independent
-    async with repo.ai_disclosure_guard(org, contact_id) as retry:
-        assert retry
+    single_slot_repo = Repository(pool=pool)
+    try:
+        async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as first:
+            assert first
+            async with pool.acquire(timeout=1):
+                async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as concurrent:
+                    assert not concurrent
+                async with single_slot_repo.ai_disclosure_guard(org, uuid.uuid4(), postgres_dsn=dsn) as independent:
+                    assert independent
+        async with single_slot_repo.ai_disclosure_guard(org, contact_id, postgres_dsn=dsn) as retry:
+            assert retry
+    finally:
+        await pool.close()
