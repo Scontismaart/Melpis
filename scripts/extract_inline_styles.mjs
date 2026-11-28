@@ -7,9 +7,9 @@ const groups = [
   { css: "web/style.css", html: ["web/index.html"] },
   { css: "web/auth.css", html: ["web/login.html", "web/register.html"] },
   { css: "web/landing/style.css", html: [
-    "web/landing/index.html", "web/landing/privacy.html", "web/landing/termini.html",
+    "web/landing/privacy.html", "web/landing/termini.html",
     "web/landing/cookie.html", "web/landing/404.html",
-    "web/landing/prezzi/index.html", "web/landing/documentazione/index.html",
+    "web/landing/documentazione/index.html",
     "web/landing/settori/ristoranti/index.html", "web/landing/settori/saloni-bellezza/index.html",
     "web/landing/settori/studi-medici/index.html", "web/landing/settori/hotel/index.html",
   ] },

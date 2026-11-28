@@ -17,26 +17,8 @@ test('shared visual tokens keep the primary palette monochrome', () => {
   assert.match(read('web/landing/style.css'), /@import url\('\/design-tokens\.css'\)/);
 });
 
-test('landing plan cards match confirmed prices and monthly message quotas', () => {
-  const dom = new JSDOM(read('web/landing/index.html'));
-  const cards = [...dom.window.document.querySelectorAll('.price-card-shell')];
-  assert.equal(cards.length, 3);
-  const expected = [
-    ['29', '500'],
-    ['69', '2.000'],
-    ['149', '10.000'],
-  ];
-  cards.forEach((card, index) => {
-    const price = card.querySelector('.p-amount');
-    assert.equal(price?.dataset.monthly, expected[index][0]);
-    assert.equal(price?.dataset.annual, undefined);
-    assert.ok(card.textContent.includes(`Fino a ${expected[index][1]} messaggi/mese`));
-  });
-});
-
-test('all launch landing home pages show monthly-only pricing', () => {
+test('retained localized home pages show monthly-only pricing', () => {
   const pages = [
-    ['web/landing/index.html', 'Fatturazione Mensile'],
     ['web/landing/en/index.html', 'Monthly'],
     ['web/landing/es/index.html', 'Mensual'],
     ['web/landing/fr/index.html', 'Mensuel'],
@@ -102,12 +84,12 @@ test('landing FAQ states that the trial ends at the first 7-day or 150-message l
   }
 });
 
-test('release hero uses the supplied artwork and keeps the primary action visible', () => {
-  const landing = new JSDOM(read('web/landing/index.html'));
+test('retained localized hero uses the supplied artwork and keeps the primary action visible', () => {
+  const landing = new JSDOM(read('web/landing/en/index.html'));
   const hero = landing.window.document.querySelector('.hero-section');
   assert.ok(hero);
-  assert.match(hero.textContent, /Meno messaggi da gestire\./);
-  assert.match(hero.textContent, /Più tempo per far crescere la tua attività\./);
+  assert.match(hero.textContent, /Fewer messages to manage\./);
+  assert.match(hero.textContent, /More time to grow your business\./);
   assert.ok(hero.querySelector('.hero-cta-row .btn-cta-primary'));
   assert.match(read('web/landing/style.css'), /sfondohero-release\.webp/);
   assert.ok(fs.statSync(path.join(root, 'web/landing/sfondohero-release.webp')).size > 1000);

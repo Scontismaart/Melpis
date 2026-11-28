@@ -6,6 +6,10 @@ Astro compiles the Italian homepage, pricing page and four sector pages into sta
 - Access and registration use `/accedi/` and `/registrati/`. The web image keeps the existing localized pages, documentation, original sector routes and legal rendering.
 - The generated CSP applies to the V2 documents. The demos use local assets and make no network requests. V2 pages carry noindex metadata and response headers and are omitted from the sitemap.
 
+## Retained localized pages
+
+The German, English, Spanish and French home and pricing pages are maintained directly under `web/landing/<locale>/`. The localization build checks their presence and continues to build localized sector, documentation and account pages, keep reviewed legal pages, and sync locale bundles.
+
 ## Verification
 
 Use Node.js 24 and run `npm ci`, `npm test` and `npm run astro:check` from this directory. `npm run build` and `npm run check` compile static output and validate the generated policy.

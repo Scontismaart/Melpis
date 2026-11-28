@@ -3,9 +3,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const { JSDOM } = require("jsdom");
+const localizedHomes = ["de", "en", "es", "fr"].map(lang => `web/landing/${lang}/index.html`);
 
 test("pages have unique IDs", () => {
-  for (const path of ["web/index.html", "web/login.html", "web/register.html", "web/landing/index.html"]) {
+  for (const path of ["web/index.html", "web/login.html", "web/register.html", ...localizedHomes]) {
     const dom = new JSDOM(fs.readFileSync(path, "utf8"));
     const ids = [...dom.window.document.querySelectorAll("[id]")].map(el => el.id);
     assert.equal(new Set(ids).size, ids.length, path);
@@ -15,7 +16,7 @@ test("pages have unique IDs", () => {
 
 test("static pages contain no inline style attributes", () => {
   const files = ["web/index.html", "web/login.html", "web/register.html",
-    "web/landing/index.html", "web/landing/privacy.html", "web/landing/termini.html",
+    ...localizedHomes, "web/landing/privacy.html", "web/landing/termini.html",
     "web/landing/cookie.html"];
   for (const path of files) {
     assert.doesNotMatch(fs.readFileSync(path, "utf8"), /\sstyle=/i, path);
