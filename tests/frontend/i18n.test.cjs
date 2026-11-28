@@ -406,12 +406,11 @@ test("FullCalendar uses only the deployed same-origin stylesheet under CSP", () 
   dom.window.close();
 });
 
-test("pricing copy never promises automatic electronic invoicing", () => {
-  const pricing = fs.readFileSync(path.resolve(__dirname, "../../web/landing/prezzi/index.html"), "utf8");
-  const extraCopy = fs.readFileSync(path.resolve(__dirname, "../../scripts/i18n-extra-copy.js"), "utf8");
-  assert.match(pricing, /Ricevuta Stripe immediata; fattura fiscale su richiesta\./);
-  assert.doesNotMatch(pricing, /Sistema di Interscambio|codice SDI/i);
-  assert.doesNotMatch(extraCopy, /standard compliant tax invoices are automatically generated|facturas oficiales se generan y envían automáticamente|factures avec mentions fiscales légales sont automatiquement générées|Rechnungen mit ausgewiesener Mehrwertsteuer automatisch erstellt/i);
+test("V2 pricing copy never promises automatic electronic invoicing", () => {
+  for (const file of ["data/pricing.mjs", "components/PricingSection.astro"]) {
+    const pricing = fs.readFileSync(path.resolve(__dirname, "../../web/landing-v2/src", file), "utf8");
+    assert.doesNotMatch(pricing, /Sistema di Interscambio|codice SDI|fattur\w+[^.\n]*automatic/i);
+  }
 });
 
 test("localized pricing has one native invoice answer and no Italian residue", () => {

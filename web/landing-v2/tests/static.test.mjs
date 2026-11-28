@@ -104,6 +104,13 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   }
   assert.match(pricingHtml, /Per provare Melpis per 1 settimana\./);
   assert.match(pricingHtml, /<span class="mv2-pricing-period" aria-hidden="true">\/ 7 giorni<\/span>/);
+  const homepageQuotas = [...pricingHtml.matchAll(/<strong class="mv2-pricing-feature-strong">([\d.]+)<\/strong> risposte AI/g)].map(match => match[1]);
+  assert.deepEqual(homepageQuotas, ['150', '500', '2.000', '10.000']);
+
+  const plansHtml = await readFile(path.join(root, 'dist/piani.html'), 'utf8');
+  for (const quota of homepageQuotas) assert.ok(plansHtml.includes(quota), `Pricing page preserves quota ${quota}`);
+  assert.doesNotMatch(plansHtml, /data-annual|id="btnAnnual"/);
+
   assert.equal([...pricingHtml.matchAll(/class="mv2-pricing-card-cta"/g)].length, 4);
   assert.equal([...pricingHtml.matchAll(/href="\/registrati\/"/g)].length, 4, 'pricing CTAs point at real registration');
   assert.doesNotMatch(pricingHtml, /href="#configura-/, 'pricing CTAs must not link to nonexistent configuration anchors');

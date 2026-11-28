@@ -39,18 +39,12 @@ services:
       # Keep the local QA URL on the Compose network so nginx can resolve api.
       - "127.0.0.1:4174:80"
     volumes:
-      - ./web/landing/index.html:/usr/share/nginx/html/index.html:ro
       - ./web/landing/style.css:/usr/share/nginx/html/style.css:ro
       - ./web/landing/app.js:/usr/share/nginx/html/app.js:ro
-      - ./web/landing/panoramica.webp:/usr/share/nginx/html/panoramica.webp:ro
-      - ./web/landing/conoscenza.webp:/usr/share/nginx/html/conoscenza.webp:ro
-      - ./web/landing/prenotazioni.webp:/usr/share/nginx/html/prenotazioni.webp:ro
-      - ./web/landing/inbox.webp:/usr/share/nginx/html/inbox.webp:ro
       - ./web/landing/brand:/usr/share/nginx/html/brand:ro
       - ./web/landing/sfondoherosction.webp:/usr/share/nginx/html/sfondoherosction.webp:ro
       - ./web/landing/sitemap.xml:/usr/share/nginx/html/sitemap.xml:ro
       - ./web/landing/settori:/usr/share/nginx/html/settori:ro
-      - ./web/landing/prezzi:/usr/share/nginx/html/prezzi:ro
       - ./web/landing/documentazione:/usr/share/nginx/html/documentazione:ro
       - ./web/landing/fonts:/usr/share/nginx/html/fonts:ro
       - ./web/landing/navbar.js:/usr/share/nginx/html/navbar.js:ro

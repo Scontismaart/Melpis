@@ -1,6 +1,6 @@
 """Static & proxy dev server for Melpis WhatsApp AI Responder.
-Replicates the exact URL mapping, security headers, and reverse proxy of the Nginx container:
-- Landing page on '/' (from web/landing/)
+Provides a loopback development preview for the frontend and API:
+- Landing V2 on '/' and '/piani/' (build with npm --prefix web/landing-v2 run build)
 - Auth pages on '/accedi/' and '/registrati/' (from web/)
 - Legal pages on '/privacy/', '/termini/', '/cookie/' (from web/landing/)
 - Dashboard on '/app/' (from web/)
@@ -11,7 +11,7 @@ Usage:
 """
 import http.client
 import mimetypes
-import os
+import re
 import sys
 import urllib.parse
 from pathlib import Path
@@ -19,6 +19,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 LANDING = WEB / "landing"
+LANDING_V2 = WEB / "landing-v2" / "dist"
+V2_SECTORS = ("barbieri", "hotel", "ristoranti", "saloni")
+V2_PAGES = {"/": "index.html", "/piani/": "piani.html",
+            **{f"/landing-v2/{sector}/": f"{sector}.html" for sector in V2_SECTORS}}
+V2_REDIRECTS = {
+    "/index.html": "/",
+    "/landing-v2": "/",
+    "/landing-v2/": "/",
+    "/landing-v2/index.html": "/",
+    "/prezzi": "/piani/",
+    "/prezzi/": "/piani/",
+    "/prezzi/index.html": "/piani/",
+    "/piani": "/piani/",
+    "/landing-v2/piani": "/piani/",
+    "/landing-v2/piani/": "/piani/",
+    "/landing-v2/piani.html": "/piani/",
+    "/landing-v2/login": "/accedi/",
+    "/landing-v2/login/": "/accedi/",
+    "/landing-v2/registrazione": "/registrati/",
+    "/landing-v2/registrazione/": "/registrati/",
+    **{f"/landing-v2/{sector}": f"/landing-v2/{sector}/" for sector in V2_SECTORS},
+}
 API_BACKEND_HOST = "127.0.0.1"
 API_BACKEND_PORT = 8000
 
@@ -30,13 +52,15 @@ CSP = (
 
 
 class DevHandler(BaseHTTPRequestHandler):
-    def _headers(self, ctype, status=200):
+    def _headers(self, ctype, status=200, v2_policy=None):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
-        self.send_header("Content-Security-Policy", CSP)
+        if v2_policy is not None:
+            self.send_header("X-Robots-Tag", "noindex, nofollow, noarchive")
+        self.send_header("Content-Security-Policy", v2_policy or CSP)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
@@ -79,9 +103,15 @@ class DevHandler(BaseHTTPRequestHandler):
             conn.close()
 
     def do_GET(self):
-        path = self.path.split("?")[0]
+        path, query_marker, query = self.path.partition("?")
         if self._is_api_path(path):
             self._proxy_request()
+            return
+
+        if path in V2_REDIRECTS:
+            self.send_response(301)
+            self.send_header("Location", f"{V2_REDIRECTS[path]}{query_marker}{query}")
+            self.end_headers()
             return
 
         # 1. Clean URL redirects
@@ -101,7 +131,7 @@ class DevHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path in (
-            "/privacy", "/termini", "/cookie", "/prezzi",
+            "/privacy", "/termini", "/cookie",
             "/settori/ristoranti", "/settori/saloni-bellezza", "/settori/studi-medici", "/settori/hotel"
         ):
             self.send_response(301)
@@ -111,9 +141,36 @@ class DevHandler(BaseHTTPRequestHandler):
 
         # 2. Map routes to filesystem files
         target = None
+        v2_asset = False
 
-        if path in ("/", "/index.html"):
-            target = LANDING / "index.html"
+        if path in V2_PAGES:
+            target = LANDING_V2 / V2_PAGES[path]
+            if not target.is_file():
+                self.send_error(503, "Build Landing V2 with npm --prefix web/landing-v2 run build")
+                return
+            html = target.read_text(encoding="utf-8")
+            policy_tag = re.search(r'<meta http-equiv="content-security-policy" content="([^"]+)"', html, re.I)
+            policy = policy_tag[1] if policy_tag else ""
+            directives = {value.strip() for value in policy.split(";")}
+            required = {"connect-src 'none'", "form-action 'none'", "object-src 'none'", "base-uri 'none'"}
+            if (
+                not re.fullmatch(r"[a-zA-Z0-9:;'=+/ _-]+", policy)
+                or not required <= directives
+                or "unsafe-" in policy
+            ):
+                self.send_error(503, "Landing V2 build lacks a valid content security policy")
+                return
+            self._headers("text/html; charset=utf-8", v2_policy=policy.rstrip(";") + "; frame-ancestors 'none'")
+            self.wfile.write(html.encode("utf-8"))
+            return
+        elif path.startswith("/landing-v2/"):
+            directory, _, relative = path.removeprefix("/landing-v2/").partition("/")
+            if directory in ("_astro", "assets", "images"):
+                asset_root = (LANDING_V2 / directory).resolve()
+                asset = (asset_root / relative).resolve()
+                if asset_root.is_relative_to(LANDING_V2.resolve()) and asset.is_relative_to(asset_root):
+                    target = asset
+                    v2_asset = True
         elif path in ("/privacy/", "/privacy.html"):
             target = LANDING / "privacy.html"
         elif path in ("/termini/", "/termini.html"):
@@ -171,10 +228,12 @@ class DevHandler(BaseHTTPRequestHandler):
             return
 
         # Security check: ensure target is inside WEB directory
-        try:
-            target.resolve().relative_to(WEB.resolve())
-        except ValueError:
+        resolved = target.resolve()
+        if not resolved.is_relative_to(WEB.resolve()):
             self.send_error(403)
+            return
+        if not v2_asset and resolved.is_relative_to(LANDING_V2.parent.resolve()):
+            self.send_error(404)
             return
 
         # Content-Type guessing

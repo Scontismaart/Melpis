@@ -7,6 +7,8 @@ const fs = require("fs");
 const path = require("path");
 
 const WEB_DIR = path.join(process.cwd(), "web");
+// Astro emits its own hash-based policy for V2. Leave that build intact.
+const LANDING_V2 = path.join(WEB_DIR, "landing-v2");
 const ASSET_DIR = path.join(WEB_DIR, "inline-assets");
 const EXCLUDED_HTML = new Set([
   path.join(WEB_DIR, "landing", "hero-glassmorphism.html"),
@@ -17,7 +19,9 @@ const DATA_SCRIPT_TYPES = new Set(["application/json", "application/ld+json"]);
 function walkHtml(dir, files = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const candidate = path.join(dir, entry.name);
-    if (entry.isDirectory()) walkHtml(candidate, files);
+    if (entry.isDirectory()) {
+      if (candidate !== LANDING_V2) walkHtml(candidate, files);
+    }
     else if (entry.name.endsWith(".html") && !EXCLUDED_HTML.has(candidate)) files.push(candidate);
   }
   return files.sort();
