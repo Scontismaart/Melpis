@@ -246,13 +246,17 @@
           membersRenderToken = token;
 
           const { members, total, users_limit, can_add_more } = data;
+          const seatEntitlementUnavailable = users_limit === null && !can_add_more;
+          const unavailable = _tDash("team.runtime.seat_entitlement_unavailable", "Disponibilità del piano non verificata.");
 
           // Aggiorna contatori e badge
           if (countBadge) countBadge.textContent = _tDash("team.runtime.member_count", "{{count}} membri", { count: total });
 
           if (statLimit) {
-            if (users_limit === null) {
-              statLimit.textContent = _tDash("team.runtime.unlimited_accounts", "{{count}} account attivi (illimitati)", { count: total });
+            if (seatEntitlementUnavailable) {
+              statLimit.textContent = unavailable;
+            } else if (users_limit === null) {
+              statLimit.textContent = _tDash("team.runtime.unlimited_accounts", "{{count}} account attivi, senza limite numerico di piano", { count: total });
             } else if (users_limit === 1) {
               statLimit.textContent = _tDash("team.runtime.essential_account", "1 / 1 account (Piano Essenziale - Solo titolare)");
             } else {
@@ -269,7 +273,7 @@
             let nomePiano = _tDash("team.runtime.plan_essential", "Essenziale");
             if (users_limit === 3) nomePiano = _tDash("team.runtime.plan_growth", "Crescita (Pro)");
             else if (users_limit === null) nomePiano = _tDash("team.runtime.plan_scale", "Scala");
-            statPlan.textContent = nomePiano;
+            statPlan.textContent = seatEntitlementUnavailable ? unavailable : nomePiano;
           }
 
           // Gestione banner limite raggiunto
@@ -277,19 +281,21 @@
             if (!can_add_more) {
               limitBanner.hidden = false;
               submitBtn.disabled = true;
-              submitBtn.title = users_limit === 1
+              submitBtn.title = seatEntitlementUnavailable ? unavailable : users_limit === 1
                 ? _tDash("team.runtime.essential_limit_title", "Il piano Essenziale non include collaboratori aggiuntivi")
                 : _tDash("team.runtime.limit_title", "Limite massimo collaboratori raggiunto per il piano corrente");
               if (limitTitle) {
-                limitTitle.textContent = users_limit === 1
+                limitTitle.textContent = seatEntitlementUnavailable ? unavailable : users_limit === 1
                   ? _tDash("team.runtime.essential_limit_banner", "Il piano Essenziale include solo il titolare")
                   : _tDash("team.runtime.limit_banner", "Limite account raggiunto ({{used}}/{{limit}})", { used: total, limit: users_limit });
               }
               if (limitDesc) {
-                if (users_limit === 1) {
+                if (seatEntitlementUnavailable) {
+                  limitDesc.textContent = "";
+                } else if (users_limit === 1) {
                   limitDesc.textContent = "Il piano Essenziale è riservato al solo account titolare. Effettua l'upgrade al piano Crescita per abilitare fino a 2 collaboratori operativi.";
                 } else {
-                  limitDesc.textContent = "Hai occupato tutti gli slot collaboratori inclusi nel tuo piano. Effettua l'upgrade a Scala per aggiungere collaboratori illimitati.";
+                  limitDesc.textContent = "Hai occupato tutti i posti inclusi nel tuo piano. Il piano Scala non prevede un limite numerico di posti.";
                 }
               }
             } else {

@@ -47,7 +47,7 @@ test('ristoranti page is generated, linked from homepage, and serves all assets 
   assert.match(htmlRest, /Melpis gestisce il servizio\./);
   assert.match(htmlRest, /Smetti di rispondere alle stesse domande/);
   assert.match(htmlRest, /L'assistente aiuta\./);
-  assert.match(htmlRest, /Azzera i tavoli vuoti per no-show e/);
+  assert.match(htmlRest, /Organizza i tavoli e/);
   assert.doesNotMatch(htmlRest, /Tutto sotto controllo,/);
   assert.doesNotMatch(htmlRest, /Prima si configura\./);
   assert.match(htmlRest, /Scegli il passo/);

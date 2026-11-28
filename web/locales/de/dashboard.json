@@ -44,7 +44,7 @@
     "title_airtable": "Airtable"
   },
   "kpi": {
-    "total_received": "heute empfangene Nachrichten",
+    "total_received": "heute empfangene Ereignisse",
     "handled_by_ai": "durch KI-Assistent bearbeitet",
     "escalated_human": "an Mitarbeiter übergeben",
     "bookings_created": "bestätigte Buchungen",
@@ -53,7 +53,7 @@
     "trend_negative": "Niedriger als gestern",
     "sparkline_caption": "Letzte 7 Tage",
     "sparkline_unit": "Wo.",
-    "total_received_aria": "Nachrichtendetails",
+    "total_received_aria": "Details zu empfangenen Ereignissen",
     "trend_none": "Keine Eskalationen",
     "ai_details_aria": "Details zur KI-Bearbeitung",
     "human_details_aria": "Details zur Übergabe"
@@ -67,7 +67,7 @@
     "recent_activity": "Letzte Aktivitäten",
     "view_all": "Alle anzeigen",
     "reports_title": "Berichte und Trends",
-    "messages_chart_title": "Nachrichten: letzte 7 Tage",
+    "messages_chart_title": "Ereignisse der letzten 7 Tage",
     "received": "Empfangen",
     "handled_by_ai": "Von KI bearbeitet",
     "key_insights": "Wichtige Erkenntnisse",
@@ -82,7 +82,7 @@
     "regenerate": "Neu erstellen",
     "regenerate_aria": "Bericht neu erstellen",
     "empty_report": "Für heute wurde noch kein Bericht erstellt.",
-    "chart_aria": "Nachrichtenaktivität",
+    "chart_aria": "Ereignisverlauf",
     "insights_aria": "Wichtige Erkenntnisse",
     "runtime": {
       "error_title": "Etwas ist schiefgelaufen",
@@ -289,7 +289,7 @@
     "runtime": {
       "load_error": "Teammitglieder konnten nicht geladen werden: {{detail}}",
       "member_count": "{{count}} Mitglieder",
-      "unlimited_accounts": "{{count}} aktive Konten (unbegrenzt)",
+      "unlimited_accounts": "{{count}} aktive Konten, ohne tarifliche Begrenzung der Plätze",
       "essential_account": "1 / 1 Konto (Essential-Tarif, nur Inhaber)",
       "account_capacity": "{{used}} / {{limit}} Konten ({{operators}} von {{max}} Teammitgliedern)",
       "plan_essential": "Essential",
@@ -298,7 +298,8 @@
       "essential_limit_title": "Der Essential-Tarif umfasst keine weiteren Teammitglieder",
       "limit_title": "Das Teamlimit des aktuellen Tarifs ist erreicht",
       "essential_limit_banner": "Der Essential-Tarif umfasst nur den Inhaber",
-      "limit_banner": "Kontolimit erreicht ({{used}}/{{limit}})"
+      "limit_banner": "Kontolimit erreicht ({{used}}/{{limit}})",
+      "seat_entitlement_unavailable": "Der Tarifanspruch konnte nicht verifiziert werden."
     }
   },
   "reviews": {
@@ -589,5 +590,16 @@
     "end_time": "Ende",
     "midnight_end": "Mitternacht bezeichnet das Ende des Tages.",
     "example_warning": "Prüfe Dauer, Ressourcen und Kapazität vor dem Speichern. Beispiele dienen nur zur Veranschaulichung."
+  },
+  "account_usage": {
+    "definition": "Das Kontingent zählt gültige gespeicherte KI-Antworten. Eingehende Nachrichten, Unterhaltungen, manuelle Aktionen, Anbieterversuche und Token sind separate Kennzahlen.",
+    "unavailable": "Die KI-Nutzung ist derzeit nicht verfügbar.",
+    "trial": "{{used}} / {{limit}} KI-Antworten in der Testphase gezählt.",
+    "period": "{{used}} / {{limit}} KI-Antworten im laufenden Zeitraum gezählt.",
+    "exhausted": "Kontingent ausgeschöpft. Autorisierte manuelle Aktionen bleiben verfügbar.",
+    "trial_quota_reached": "Die Testphase ist beendet, da das Kontingent ausgeschöpft ist.",
+    "trial_ends": "Die Testphase endet am {{date}} oder wenn das Kontingent ausgeschöpft ist.",
+    "trial_ended": "Die Testphase ist beendet.",
+    "period_ends": "Der laufende Zeitraum endet am {{date}}."
   }
 }

@@ -4,25 +4,20 @@ import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from src.api.routes.common import get_billing_snapshot
 from src.core.auth.dependencies import require_ruolo, require_mfa
-from src.core.billing.plans import PLANS, TRIAL_MESSAGES_LIMIT
+from src.core.billing.plans import PLANS
 from src.core.billing.webhook_handler import handle_stripe_webhook
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
 
-def _annual_pricing_enabled() -> bool:
-    if os.getenv("LAUNCH_PROFILE", "").strip().lower() == "commercial_bootstrap":
-        return False
-    return os.getenv("STRIPE_ANNUAL_PRICING_ENABLED", "").strip().lower() == "true"
-
-
 class CheckoutSessionRequest(BaseModel):
     plan: str
     success_url: str
     cancel_url: str
-    interval: str = "monthly"  # "monthly" | "yearly"
+    interval: str = "monthly"
 
 
 class ProviderEvidenceAttestations(BaseModel):
@@ -174,14 +169,6 @@ async def _verify_provider_evidence(request: Request, req: ProviderEvidenceReque
         ) from None
 
 
-def _resolve_price_id(plan, interval: str) -> str:
-    if interval not in ("monthly", "yearly"):
-        raise ValueError(f"interval non valido: {interval}")
-    if interval == "yearly" and not _annual_pricing_enabled():
-        return ""
-    return plan.stripe_price_id_yearly if interval == "yearly" else plan.stripe_price_id
-
-
 def _get_stripe():
     import stripe
 
@@ -233,12 +220,10 @@ async def create_checkout_session(
     if req.plan not in PLANS:
         raise HTTPException(status_code=400, detail=f"Invalid plan: {req.plan}")
 
+    if req.interval != "monthly":
+        raise HTTPException(status_code=400, detail="Il checkout V1 accetta solo piani mensili.")
     org_id = user["organization_id"]
-    plan = PLANS[req.plan]
-    try:
-        price_id = _resolve_price_id(plan, req.interval)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="interval non valido: monthly|yearly")
+    price_id = PLANS[req.plan].stripe_price_id
     if not price_id:
         raise HTTPException(
             status_code=503,
@@ -371,23 +356,15 @@ async def get_subscription(
         raise HTTPException(status_code=503, detail="Database not available")
 
     org_id = user["organization_id"]
-    billing = await repo.get_organization_billing(org_id)
-    plan = billing.get("plan")
-    status = billing.get("subscription_status")
-    messages_limit = billing.get("messages_limit")
-    users_limit = billing.get("users_limit")
-    if (status == "trialing" or not plan):
-        if messages_limit is None:
-            messages_limit = TRIAL_MESSAGES_LIMIT
-        if users_limit is None:
-            users_limit = 3
-
+    billing = await get_billing_snapshot(repo, org_id)
+    if not billing:
+        raise HTTPException(status_code=503, detail="Billing state unavailable")
     return {
-        "plan": plan,
-        "subscription_status": status,
-        "messages_limit": messages_limit,
-        "users_limit": users_limit,
-        "whatsapp_numbers_limit": billing.get("whatsapp_numbers_limit") or 1,
+        "plan": billing.get("plan"),
+        "subscription_status": billing.get("subscription_status"),
+        "messages_limit": billing.get("messages_limit"),
+        "users_limit": billing.get("users_limit"),
+        "whatsapp_numbers_limit": billing.get("whatsapp_numbers_limit"),
         "messages_used_this_period": billing.get("messages_used_this_period"),
         "current_period_start": billing.get("current_period_start"),
         "current_period_end": billing.get("current_period_end"),
@@ -406,16 +383,16 @@ async def get_usage(
         raise HTTPException(status_code=503, detail="Database not available")
 
     org_id = user["organization_id"]
-    billing = await repo.get_organization_billing(org_id)
+    billing = await get_billing_snapshot(repo, org_id)
+    if not billing:
+        raise HTTPException(status_code=503, detail="Billing state unavailable")
     limit = billing.get("messages_limit")
-    if limit is None and (billing.get("subscription_status") == "trialing" or not billing.get("plan")):
-        limit = TRIAL_MESSAGES_LIMIT
-    used = billing.get("messages_used_this_period", 0) or 0
+    used = billing.get("messages_used_this_period")
 
     return {
         "messages_used": used,
         "messages_limit": limit,
-        "percentage": round((used / limit * 100), 1) if limit and limit > 0 else 0,
+        "percentage": round(used / limit * 100, 2) if used is not None and limit and limit > 0 else None,
     }
 
 

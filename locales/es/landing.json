@@ -1,11 +1,11 @@
 {
   "page_title": "Melpis · Asistente de WhatsApp con IA para Empresas | Prueba 7 días",
-  "meta_description": "Activa el asistente de WhatsApp con IA para tu negocio: respuestas 24/7 a clientes, reservas en Google Calendar y pase a operador humano. Prueba 7 días gratis.",
+  "meta_description": "Asistente de IA para WhatsApp Business. Respuestas a clientes, solicitudes de reserva y traspaso al equipo. Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción.",
   "hero": {
     "badge": "Infraestructura oficial Meta Cloud API",
     "title_part1": "El asistente de WhatsApp con IA que",
     "title_highlight": "convierte mensajes en clientes",
-    "subtitle": "Responde en tiempo real las 24 horas, agenda citas en Google Calendar y te avisa cuando tu equipo debe intervenir.",
+    "subtitle": "Asistente de IA para WhatsApp Business. Respuestas a clientes, solicitudes de reserva y traspaso al equipo.",
     "cta_primary": "Empieza la prueba gratis de 7 días",
     "cta_secondary": "Descubre cómo funciona",
     "no_card_required": "Sin tarjeta de crédito requerida",
@@ -26,19 +26,19 @@
     "section_title": "Todo lo que necesitas para no perder ningún cliente en WhatsApp",
     "f1": {
       "title": "Respuestas inteligentes y naturales basadas en tu negocio",
-      "desc": "Sube tus documentos, horarios, cartas y condiciones: Melpis responde con precisión milimétrica sin inventar datos."
+      "desc": "Respuestas sobre horarios, tarifas y preguntas frecuentes con la información que configures. PDF/RAG previsto en todos los planes, sujeto a las pruebas y a la aprobación de seguridad"
     },
     "f2": {
-      "title": "Sincronización de citas en Google Calendar",
-      "desc": "Verifica en tiempo real los huecos libres, confirma la cita y envía recordatorios automáticos al cliente."
+      "title": "Gestión de solicitudes de reserva",
+      "desc": "Google Calendar opcional, sujeto a certificación operativa"
     },
     "f3": {
       "title": "Bandeja compartida y traspaso al equipo humano",
       "desc": "Si una conversación requiere atención personal, tu equipo puede intervenir al instante desde el panel web."
     },
     "f4": {
-      "title": "Gestión de reseñas y satisfacción de clientes",
-      "desc": "Recoge opiniones sinceras e invita a los clientes satisfechos a dejar una reseña de 5 estrellas en Google Maps."
+      "title": "Borradores de respuesta con revisión humana",
+      "desc": "Borradores de respuesta con revisión humana"
     }
   },
   "how_it_works": {
@@ -74,7 +74,7 @@
       },
       {
         "q": "¿Qué sucede si el asistente no sabe responder o la consulta es compleja?",
-        "a": "Melpis responde basándose únicamente en los datos y reglas que tú establezcas. Si la consulta trata sobre información no disponible o requiere acuerdos especiales, el asistente no improvisa: avisa amablemente al cliente y transfiere la consulta al equipo en la bandeja."
+        "a": "Respuestas sobre horarios, tarifas y preguntas frecuentes con la información que configures. PDF/RAG previsto en todos los planes, sujeto a las pruebas y a la aprobación de seguridad"
       },
       {
         "q": "¿Cuánto tiempo lleva la configuración inicial?",
@@ -82,7 +82,7 @@
       },
       {
         "q": "¿Cómo funciona la prueba gratuita de 7 días?",
-        "a": "La prueba termina tras 7 días o 150 mensajes de IA, lo que ocurra primero. No se requiere tarjeta ni hay renovación automática. Al alcanzar el límite de mensajes, la IA deja de responder y las solicitudes pasan a un operador."
+        "a": "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción."
       },
       {
         "q": "¿Están los datos de mis clientes seguros y conformes con el RGPD?",

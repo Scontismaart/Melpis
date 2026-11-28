@@ -1,9 +1,8 @@
-"""B5: griglia prezzi Essenziale/Crescita/Scala + supporto annuale."""
+"""Prezzi e limiti mensili Essenziale, Crescita e Scala."""
 import json
 import re
 from pathlib import Path
 
-import pytest
 from src.core.billing.plans import PLANS
 
 
@@ -14,12 +13,6 @@ def test_prezzi_canonici():
     assert PLANS["starter"].price_monthly_eur == 29
     assert PLANS["pro"].price_monthly_eur == 69
     assert PLANS["business"].price_monthly_eur == 149
-
-
-def test_prezzi_annuali_configurati():
-    assert PLANS["starter"].price_yearly_eur == 288   # 24*12
-    assert PLANS["pro"].price_yearly_eur == 708       # 59*12
-    assert PLANS["business"].price_yearly_eur == 1548 # 129*12
 
 
 def test_prezzi_mensili_coerenti_tra_api_dashboard_e_locali():
@@ -69,32 +62,3 @@ def test_limiti_invariati():
     assert PLANS["business"].users_limit is None
     assert PLANS["pro"].has_reviews is True
     assert PLANS["business"].has_rag is True
-
-
-def test_resolve_price_id_monthly_is_always_available(monkeypatch):
-    from src.core.billing.routes import _resolve_price_id
-    p = PLANS["pro"]
-    monkeypatch.setattr(p, "stripe_price_id", "price_m")
-    monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
-    monkeypatch.delenv("STRIPE_ANNUAL_PRICING_ENABLED", raising=False)
-    monkeypatch.delenv("LAUNCH_PROFILE", raising=False)
-    assert _resolve_price_id(p, "monthly") == "price_m"
-    assert _resolve_price_id(p, "yearly") == ""
-
-
-def test_resolve_price_id_yearly_requires_explicit_non_v1_opt_in(monkeypatch):
-    from src.core.billing.routes import _resolve_price_id
-    p = PLANS["pro"]
-    monkeypatch.setattr(p, "stripe_price_id_yearly", "price_y")
-    monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
-    monkeypatch.delenv("LAUNCH_PROFILE", raising=False)
-    assert _resolve_price_id(p, "yearly") == "price_y"
-
-    monkeypatch.setenv("LAUNCH_PROFILE", "commercial_bootstrap")
-    assert _resolve_price_id(p, "yearly") == ""
-
-
-def test_resolve_price_id_intervallo_invalido():
-    from src.core.billing.routes import _resolve_price_id
-    with pytest.raises(ValueError):
-        _resolve_price_id(PLANS["pro"], "settimanale")

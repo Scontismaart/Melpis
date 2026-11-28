@@ -5,7 +5,7 @@ from datetime import date
 from cryptography.fernet import Fernet
 
 from src.core.db.scoping import TenantScopedRepository, system_scope
-from src.core.billing.plans import TRIAL_MESSAGES_LIMIT
+from src.core.billing.plans import TRIAL_DAYS, TRIAL_MESSAGES_LIMIT
 
 
 class OrganizationRepository(TenantScopedRepository):
@@ -228,7 +228,7 @@ class OrganizationRepository(TenantScopedRepository):
         self,
         auth_user_id: str,
         nome_attivita: str,
-        trial_days: int = 7,
+        trial_days: int = TRIAL_DAYS,
     ) -> dict:
         """Compatibility wrapper: never bypass the first-provisioning policy."""
         return await self.get_or_create_organization_with_owner(
@@ -240,7 +240,7 @@ class OrganizationRepository(TenantScopedRepository):
         self,
         auth_user_id: str,
         nome_attivita: str,
-        trial_days: int = 7,
+        trial_days: int = TRIAL_DAYS,
     ) -> dict:
         """Allow existing access or one first provisioning, never re-provision."""
         uid = uuid.UUID(auth_user_id)

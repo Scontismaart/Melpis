@@ -43,13 +43,13 @@ const STEPS: SetupStep[] = [
     id: 'canali',
     stepTotal: 'CONFIGURAZIONE GUIDATA',
     tabTitle: 'I canali e l\'agenda',
-    tabDesc: 'WhatsApp Business, Instagram e Google Calendar.',
+    tabDesc: 'WhatsApp Business e integrazioni in verifica.',
     cardTitle: 'I canali e Google Calendar',
-    cardDesc: 'Colleghiamo i canali ufficiali del tuo ristorante tramite integrazioni sicure Meta e Google.',
+    cardDesc: 'Il collegamento a WhatsApp Business segue i passaggi previsti da Meta.',
     rows: [
       { label: 'WhatsApp Business API', value: 'Numero ufficiale del ristorante' },
       { label: 'Google Calendar', value: 'In attesa di certificazione operativa' },
-      { label: 'Instagram Direct & Messenger', value: 'Risposte sui social collegati' },
+      { label: 'Instagram Direct & Messenger', value: 'Disponibilità da verificare' },
     ],
   },
   {

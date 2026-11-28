@@ -152,8 +152,9 @@ async def test_phase7_integrations_deny_revoked_phase8_principal(
 
 
 async def test_new_user_is_provisioned_on_first_me_request(
-    pg_pool, auth_client, signing_key
+    pg_pool, auth_client, signing_key, monkeypatch
 ):
+    monkeypatch.setenv("TRIAL_DAYS", "30")
     auth_user_id, _ = await create_auth_user(pg_pool)
     token = signed_access_token(signing_key, auth_user_id)
 
@@ -161,6 +162,15 @@ async def test_new_user_is_provisioned_on_first_me_request(
 
     assert response.status_code == 200
     assert response.json()["ruolo"] == "owner"
+    trial = await pg_pool.fetchrow(
+        "SELECT subscription_status, trial_end - trial_start AS duration, messages_limit, stripe_customer_id "
+        "FROM organizations WHERE id=$1",
+        uuid.UUID(response.json()["organization_id"]),
+    )
+    assert trial["subscription_status"] == "trialing"
+    assert trial["duration"].total_seconds() == 7 * 86400
+    assert trial["messages_limit"] == 150
+    assert trial["stripe_customer_id"] is None
     row = await lifecycle_row(pg_pool, auth_user_id)
     assert row["provisioned_at"] is not None
     assert row["disabled_at"] is None

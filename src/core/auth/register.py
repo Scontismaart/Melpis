@@ -27,10 +27,10 @@ from src.core.auth import bff, throttle
 from src.core.auth.csrf import issue_csrf_token
 from src.core.auth.dependencies import get_repo
 from src.core.auth.signup_policy import beta_email_is_allowed
+from src.core.billing.plans import TRIAL_DAYS
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))
 PASSWORD_MIN = 10
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

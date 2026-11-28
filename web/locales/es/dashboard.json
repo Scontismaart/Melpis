@@ -44,7 +44,7 @@
     "title_airtable": "Airtable"
   },
   "kpi": {
-    "total_received": "mensajes recibidos hoy",
+    "total_received": "eventos recibidos hoy",
     "handled_by_ai": "atendidos por el asistente",
     "escalated_human": "derivados al equipo",
     "bookings_created": "reservas confirmadas",
@@ -53,7 +53,7 @@
     "trend_negative": "Descenso respecto a ayer",
     "sparkline_caption": "Últimos 7 días",
     "sparkline_unit": "sem.",
-    "total_received_aria": "Detalles de mensajes",
+    "total_received_aria": "Detalles de eventos recibidos",
     "trend_none": "Sin escalados",
     "ai_details_aria": "Detalles gestionados por IA",
     "human_details_aria": "Detalles derivados a una persona"
@@ -67,7 +67,7 @@
     "recent_activity": "Actividad reciente",
     "view_all": "Ver todas",
     "reports_title": "Informes y tendencias",
-    "messages_chart_title": "Mensajes: últimos 7 días",
+    "messages_chart_title": "Eventos de los últimos 7 días",
     "received": "Recibidos",
     "handled_by_ai": "Gestionados por IA",
     "key_insights": "Claves principales",
@@ -82,7 +82,7 @@
     "regenerate": "Generar de nuevo",
     "regenerate_aria": "Generar de nuevo el informe",
     "empty_report": "Todavía no se ha generado ningún informe para hoy.",
-    "chart_aria": "Actividad de mensajes",
+    "chart_aria": "Actividad de eventos",
     "insights_aria": "Claves principales",
     "runtime": {
       "error_title": "Algo salió mal",
@@ -289,7 +289,7 @@
     "runtime": {
       "load_error": "No se pudieron cargar los miembros del equipo: {{detail}}",
       "member_count": "{{count}} miembros",
-      "unlimited_accounts": "{{count}} cuentas activas (ilimitadas)",
+      "unlimited_accounts": "{{count}} cuentas activas, sin límite de puestos en el plan",
       "essential_account": "1 / 1 cuenta (Plan Esencial, solo el titular)",
       "account_capacity": "{{used}} / {{limit}} cuentas ({{operators}} de {{max}} colaboradores)",
       "plan_essential": "Esencial",
@@ -298,7 +298,8 @@
       "essential_limit_title": "El plan Esencial no incluye colaboradores adicionales",
       "limit_title": "Se alcanzó el límite de colaboradores del plan actual",
       "essential_limit_banner": "El plan Esencial solo incluye al titular",
-      "limit_banner": "Límite de cuentas alcanzado ({{used}}/{{limit}})"
+      "limit_banner": "Límite de cuentas alcanzado ({{used}}/{{limit}})",
+      "seat_entitlement_unavailable": "No se ha podido verificar la disponibilidad del plan."
     }
   },
   "reviews": {
@@ -589,5 +590,16 @@
     "end_time": "Fin",
     "midnight_end": "La medianoche indica el final del día.",
     "example_warning": "Revisa duraciones, recursos y capacidad antes de guardar. Los ejemplos son solo ilustrativos."
+  },
+  "account_usage": {
+    "definition": "La cuota cuenta las respuestas válidas de IA guardadas. Los mensajes recibidos, las conversaciones, las acciones manuales, los intentos del proveedor y los tokens son métricas distintas.",
+    "unavailable": "El consumo de IA no está disponible en este momento.",
+    "trial": "{{used}} / {{limit}} respuestas de IA contabilizadas en la prueba.",
+    "period": "{{used}} / {{limit}} respuestas de IA contabilizadas en el periodo actual.",
+    "exhausted": "Cuota agotada. Las acciones manuales autorizadas siguen disponibles.",
+    "trial_quota_reached": "La prueba terminó al alcanzar la cuota.",
+    "trial_ends": "La prueba termina el {{date}} o al alcanzar la cuota.",
+    "trial_ended": "La prueba ha terminado.",
+    "period_ends": "El periodo actual termina el {{date}}."
   }
 }

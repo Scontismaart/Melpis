@@ -8,7 +8,7 @@ export interface FaqItem {
 const DEFAULT_FAQS: FaqItem[] = [
   {
     q: 'Come fa Melpis a conoscere il nostro menu, i piatti del giorno e gli allergeni?',
-    a: 'Puoi caricare il menu in PDF, inserire il link al sito o compilare un documento con le schede dei piatti, gli allergeni e le opzioni vegetariane o senza glutine. Per i piatti del giorno, puoi aggiornare la nota rapida in pochi secondi dall\'app o dal pannello prima del servizio.',
+    a: 'Puoi configurare menu, allergeni e opzioni alimentari nelle informazioni del locale. PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo. Per i piatti del giorno, puoi aggiornare la nota rapida in pochi secondi dall\'app o dal pannello prima del servizio.',
   },
   {
     q: 'Come vengono gestite le richieste per tavolate numerose o eventi privati?',
@@ -24,7 +24,7 @@ const DEFAULT_FAQS: FaqItem[] = [
   },
   {
     q: 'Melpis applica commissioni a coperto sulle prenotazioni ricevute?',
-    a: 'No, nessuna commissione. I clienti prenotano direttamente sui tuoi canali proprietari (WhatsApp, Instagram, sito web) e i coperti confermati sono tuoi al 100%. Paghi solo il canone fisso mensile del piano scelto.',
+    a: 'No, nessuna commissione. I clienti prenotano direttamente sul tuo numero WhatsApp Business e i coperti confermati sono tuoi al 100%. Il canone Melpis è mensile e gli eventuali costi WhatsApp Meta sono separati.',
   },
 ];
 

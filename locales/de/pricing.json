@@ -1,10 +1,10 @@
 {
   "page_title": "Preise & Tarife · KI-WhatsApp-Assistent für Unternehmen | Melpis",
-  "meta_description": "Transparente Preise für Ihren KI-WhatsApp-Assistenten. 7 Tage kostenlos testen ohne Kreditkarte, Google Calendar Kalendersynchronisation, jederzeit kündbar.",
+  "meta_description": "KI-Assistent für WhatsApp Business. Kundenanfragen beantworten, Buchungsanfragen bearbeiten und an das Team übergeben. Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
   "hero": {
     "badge": "Transparente Tarife",
     "title": "Der passende Plan für jede Phase Ihres Wachstums",
-    "subtitle": "Kostenloser Test mit PDF/RAG: bis zu 7 Tage oder 150 KI-Antworten, je nachdem, was zuerst eintritt. Keine Kreditkarte und keine Vertragsbindung.",
+    "subtitle": "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
     "monthly_toggle": "Monatlich"
   },
   "plans": {
@@ -17,8 +17,10 @@
       "cta": "Mit Basis starten",
       "features": [
         "1 offizielle WhatsApp Business Rufnummer",
-        "Bis zu 500 KI-Nachrichten/Monat",
-        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
+        "1 Konto insgesamt, einschließlich Inhaber",
+        "Bis zu 500 validierte KI-Antworten pro Monat",
+        "PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests",
+        "Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung",
         "Öffnungszeiten, Preislisten & automatische 24/7-Antworten",
         "Webbasierter Posteingang auf allen Endgeräten",
         "E-Mail-Benachrichtigungen bei Weiterleitungen",
@@ -34,12 +36,12 @@
       "cta": "Wachstum kostenlos testen",
       "features": [
         "Alle Funktionen aus dem Basis-Tarif",
-        "Bis zu 2.000 KI-Nachrichten/Monat",
-        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
+        "Bis zu 2.000 validierte KI-Antworten pro Monat",
+        "PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests",
+        "Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung",
         "Terminverwaltung & automatische No-Show-Erinnerungen",
-        "Bis zu 3 parallele Mitarbeiter im Posteingang",
-        "Prioritäts-Support via WhatsApp und E-Mail",
-        "Google Calendar ist optional; eine autorisierte Einrichtung ist erforderlich"
+        "Bis zu 3 Konten insgesamt, einschließlich Inhaber",
+        "Prioritäts-Support via WhatsApp und E-Mail"
       ]
     },
     "scale": {
@@ -51,10 +53,11 @@
       "cta": "Zu Skalierung wechseln",
       "features": [
         "Alle Funktionen aus dem Wachstum-Tarif",
-        "Bis zu 10.000 KI-Nachrichten/Monat",
-        "PDF/RAG inklusive; Dateikontingent noch festzulegen",
-        "Unbegrenzte Teammitglieder mit differenzierten Rechten",
-        "Instagram Direct, vorbehaltlich Anbieterprüfung",
+        "Bis zu 10.000 validierte KI-Antworten pro Monat",
+        "PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests",
+        "Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung",
+        "Keine tarifliche Obergrenze für Konten, technische Grenzen gelten",
+        "Keine tarifliche Obergrenze für WhatsApp-Nummern, abhängig von den unterstützten Konfigurationen",
         "KI-Konfiguration und Teamverwaltung",
         "Sicherheits-Auditprotokoll & Auftragsverarbeitungsvertrag (AVV/DPA)",
         "Persönlicher Account Manager & betreutes Onboarding"
@@ -66,7 +69,7 @@
     "items": [
       {
         "title": "Keine Kreditkarte für den Test erforderlich",
-        "desc": "In 60 Sekunden mit E-Mail und Firmenname startklar. Keine automatischen Abbuchungen."
+        "desc": "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
       },
       {
         "title": "Jederzeit mit einem Klick kündbar",
@@ -83,7 +86,7 @@
     "items": [
       {
         "q": "Wie wird das monatliche Kontingent angegeben?",
-        "a": "Das Tarifkontingent wird in Nachrichten pro Monat angegeben, nicht in 24-Stunden-Konversationen. Den Verbrauch sehen Sie im Dashboard."
+        "a": "Das Monatskontingent zählt validierte KI-Antworten. Den Verbrauch sehen Sie im Dashboard."
       },
       {
         "q": "Was geschieht beim Erreichen des Nachrichtenlimits?",
@@ -95,7 +98,7 @@
       },
       {
         "q": "Sind die Gebühren für Meta-Nachrichten enthalten?",
-        "a": "Ja, für alle von Kunden initiierten Service-Konversationen (Customer-Initiated) fallen unsererseits keine zusätzlichen Übertragungsgebühren an."
+        "a": "Meta rechnet WhatsApp-Gebühren separat ab."
       }
     ]
   }

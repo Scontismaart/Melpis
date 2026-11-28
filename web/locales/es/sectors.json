@@ -1,11 +1,11 @@
 {
   "restaurants": {
     "page_title": "Melpis para Restaurantes · Reservas por WhatsApp sin interrupciones",
-    "meta_description": "Automatiza las reservas de mesas en WhatsApp 24/7. Gestión de turnos, recordatorios anti-no-show y sincronización con Google Calendar para hostelería.",
+    "meta_description": "Asistente de IA para WhatsApp Business. Respuestas a clientes, solicitudes de reserva y traspaso al equipo. Google Calendar opcional, sujeto a certificación operativa.",
     "hero": {
       "badge": "Sector Restauración",
       "title": "Llena las mesas de tu restaurante sin interrupciones durante el servicio",
-      "subtitle": "Tus clientes escriben por WhatsApp a cualquier hora para reservar mesa. Melpis responde al instante, comprueba la disponibilidad y agenda en tu calendario.",
+      "subtitle": "Asistente de IA para WhatsApp Business. Respuestas a clientes, solicitudes de reserva y traspaso al equipo.",
       "cta": "Empieza la prueba gratis de 7 días"
     },
     "features": [

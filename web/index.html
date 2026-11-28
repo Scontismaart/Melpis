@@ -170,7 +170,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 6h16v12H4V6Z"/><path d="M4 7l8 6 8-6"/></svg>
             </div>
             <div class="kpi-info">
-              <span class="kpi-label" data-i18n="dashboard:kpi.total_received">Messaggi ricevuti</span>
+              <span class="kpi-label" data-i18n="dashboard:kpi.total_received">Eventi ricevuti</span>
               <span class="kpi-value" id="stat-totale">0</span>
             </div>
           </div>
@@ -275,9 +275,9 @@
       <div class="report-panoramica" id="report-panoramica">
         <h2 class="report-panoramica-title" data-i18n="dashboard:overview.reports_title">Report e andamento</h2>
 
-          <div class="dash-card chart-card" id="chart-section" aria-label="Andamento dei messaggi" data-i18n-aria="dashboard:overview.chart_aria" hidden>
+          <div class="dash-card chart-card" id="chart-section" aria-label="Andamento degli eventi" data-i18n-aria="dashboard:overview.chart_aria" hidden>
           <div class="dash-card-header">
-            <span class="dash-card-title" data-i18n="dashboard:overview.messages_chart_title">Messaggi: andamento ultimi 7 giorni</span>
+            <span class="dash-card-title" data-i18n="dashboard:overview.messages_chart_title">Eventi degli ultimi 7 giorni</span>
           </div>
           <div class="chart-legend">
             <span class="chart-legend-item"><span class="chart-legend-dot is-f6d31a338ad4"></span><span data-i18n="dashboard:overview.received">Ricevuti</span></span>
@@ -2759,6 +2759,8 @@
                   <span class="account-plan-prezzo" id="account-plan-prezzo"></span>
                 </div>
                 <p class="settings-help is-c98a9f1869e2" id="account-rinnovo"></p>
+                <p class="settings-help" id="account-usage" aria-live="polite"></p>
+                <p class="settings-help" data-i18n="dashboard:account_usage.definition">La quota conta le risposte AI valide salvate. Messaggi ricevuti, conversazioni, operazioni manuali, tentativi del provider e token sono metriche distinte.</p>
               </div>
             </div>
 

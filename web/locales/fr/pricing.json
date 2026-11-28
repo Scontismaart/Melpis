@@ -1,10 +1,10 @@
 {
   "page_title": "Tarifs & Forfaits · Assistant Virtuel WhatsApp IA | Melpis",
-  "meta_description": "Tarifs clairs pour activer votre assistant virtuel WhatsApp IA. Essai gratuit de 7 jours sans carte bancaire, synchronisation Google Calendar et sans engagement.",
+  "meta_description": "Assistant IA pour WhatsApp Business. Réponses aux clients, demandes de réservation et transfert à l’équipe. Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
   "hero": {
     "badge": "Tarification transparente",
     "title": "Une formule pensée pour chaque étape de votre activité",
-    "subtitle": "Essai gratuit avec PDF/RAG inclus : jusqu’à 7 jours ou 150 réponses IA, selon la première limite atteinte. Sans carte bancaire ni engagement.",
+    "subtitle": "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
     "monthly_toggle": "Mensuel"
   },
   "plans": {
@@ -17,8 +17,10 @@
       "cta": "Démarrer avec Essentiel",
       "features": [
         "1 numéro officiel WhatsApp Business",
-        "Jusqu'à 500 messages IA/mois",
-        "PDF/RAG inclus ; quota de fichiers à définir",
+        "1 compte au total, titulaire inclus",
+        "Jusqu’à 500 réponses IA validées par mois",
+        "PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité",
+        "Google Calendar facultatif, sous réserve de certification opérationnelle",
         "Horaires, tarifs et réponses automatiques 24/7",
         "Boîte de réception web accessible sur tout écran",
         "Notifications d'escalade par e-mail",
@@ -34,12 +36,12 @@
       "cta": "Tester Croissance gratuitement",
       "features": [
         "Tout ce qui est inclus dans Essentiel",
-        "Jusqu'à 2 000 messages IA/mois",
-        "PDF/RAG inclus ; quota de fichiers à définir",
+        "Jusqu’à 2 000 réponses IA validées par mois",
+        "PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité",
+        "Google Calendar facultatif, sous réserve de certification opérationnelle",
         "Gestion des rendez-vous et rappels anti-no-show",
-        "Jusqu'à 3 opérateurs simultanés dans la boîte",
-        "Support prioritaire par WhatsApp et e-mail",
-        "Google Calendar est facultatif ; une configuration autorisée est requise"
+        "Jusqu’à 3 comptes au total, titulaire inclus",
+        "Support prioritaire par WhatsApp et e-mail"
       ]
     },
     "scale": {
@@ -51,10 +53,11 @@
       "cta": "Passer à Échelle",
       "features": [
         "Tout ce qui est inclus dans Croissance",
-        "Jusqu'à 10 000 messages IA/mois",
-        "PDF/RAG inclus ; quota de fichiers à définir",
-        "Opérateurs illimités avec droits personnalisés",
-        "Instagram Direct, sous réserve de vérification du fournisseur",
+        "Jusqu’à 10 000 réponses IA validées par mois",
+        "PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité",
+        "Google Calendar facultatif, sous réserve de certification opérationnelle",
+        "Aucun plafond de comptes dans l’offre, sous réserve des limites techniques",
+        "Aucun plafond de numéros WhatsApp dans l’offre, selon les configurations prises en charge",
         "Configuration IA et gestion des équipes",
         "Journal d'audit de sécurité et accord de traitement des données (DPA)",
         "Responsable de compte dédié et onboarding guidé"
@@ -66,7 +69,7 @@
     "items": [
       {
         "title": "Aucune carte requise pour l'essai",
-        "desc": "Commencez en 60 secondes avec votre e-mail et le nom de votre établissement. Aucun prélèvement surprise."
+        "desc": "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement."
       },
       {
         "title": "Résiliation en un clic à tout moment",
@@ -83,7 +86,7 @@
     "items": [
       {
         "q": "Comment le quota mensuel est-il exprimé ?",
-        "a": "Le quota du forfait est exprimé en messages par mois, et non en conversations de 24 heures. Vous pouvez suivre l'utilisation dans le tableau de bord."
+        "a": "Le quota mensuel compte les réponses IA validées. Vous pouvez consulter votre consommation dans le tableau de bord."
       },
       {
         "q": "Que se passe-t-il lorsque j'atteins la limite de messages ?",
@@ -95,7 +98,7 @@
       },
       {
         "q": "Les frais de messages Meta sont-ils inclus ?",
-        "a": "Oui, pour toutes les conversations de service initiées par les clients (Customer-Initiated), aucun surcoût d'envoi n'est facturé par notre plateforme."
+        "a": "Les frais WhatsApp de Meta sont facturés séparément."
       }
     ]
   }

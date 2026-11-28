@@ -543,7 +543,7 @@ function localizeSector(html, routeKey, lang, bundle) {
   const shared = SECTOR_SHARED[lang];
   if (shared) {
     res = res.replace(/Nessuna carta di credito richiesta/g, shared.trustCard);
-    res = res.replace(/7 giorni di prova completa/g, shared.trustTrial);
+    res = res.replace(/Fino a 7 giorni o 150 risposte AI/g, shared.trustTrial);
     res = res.replace(/Meta Cloud API ufficiale/g, shared.trustApi);
     res = res.replace(/<span>Scopri come funziona<\/span>/g, `<span>${shared.ctaSecondary}</span>`);
     res = res.replace(/<span class="eyebrow-pill">Semplicità di attivazione<\/span>/g, `<span class="eyebrow-pill">${shared.stepsEyebrow}</span>`);
@@ -578,7 +578,7 @@ function localizeSector(html, routeKey, lang, bundle) {
     }
     if (secExt.step2Title) {
       res = res.replace(/<h3>(Carica menu, orari e turni|Carica servizi, durate e collaboratori|Definisci orari, prestazioni e regole|Carica guida, regole e servizi)<\/h3>/, `<h3>${secExt.step2Title}</h3>`);
-      res = res.replace(/<p>(Carica il PDF|Imposta i servizi|Configura orari|Carica le istruzioni).*?<\/p>/, `<p>${secExt.step2Desc}</p>`);
+      res = res.replace(/<p>(Carica le informazioni del menu|Imposta i servizi|Configura orari|Carica le istruzioni).*?<\/p>/, `<p>${secExt.step2Desc}</p>`);
     }
     if (secExt.step3Title) {
       res = res.replace(/<h3>(I tavoli si confermano in automatico|Le poltrone si riempiono da sole|Visite e richieste gestite in sicurezza|Il concierge risponde 24\/7)<\/h3>/, `<h3>${secExt.step3Title}</h3>`);
@@ -617,7 +617,7 @@ function localizeSector(html, routeKey, lang, bundle) {
       if (secExt.chatInQuote) res = res.replace(/“Buonasera! Avete un tavolo per 4 stasera verso le 20:30\?”/, secExt.chatInQuote);
       if (secExt.chatOutAuthor) res = res.replace(/Melpis per il tuo locale/, secExt.chatOutAuthor);
       if (secExt.chatOutQuote) res = res.replace(/“Tavolo per 4 confermato alle 20:30\. Ho inserito la preferenza per la sala interna\.”/, secExt.chatOutQuote);
-      if (secExt.chatSyncPill) res = res.replace(/Google Calendar sincronizzato/, secExt.chatSyncPill);
+      if (secExt.chatSyncPill) res = res.replace(/<span>Google Calendar opzionale, previa certificazione operativa<\/span>/, '<span>' + secExt.chatSyncPill + '</span>');
 
       if (secExt.row2Eyebrow) res = res.replace(/<span class="vantaggi-eyebrow">Rotazione Sala<\/span>/, `<span class="vantaggi-eyebrow">${secExt.row2Eyebrow}</span>`);
       if (secExt.row2Title) res = res.replace(/<h3>Doppi turni e capienza ottimizzata<\/h3>/, `<h3>${secExt.row2Title}</h3>`);
@@ -625,7 +625,7 @@ function localizeSector(html, routeKey, lang, bundle) {
 
       if (secExt.row3Eyebrow) res = res.replace(/<span class="vantaggi-eyebrow">Intelligenza Contestuale<\/span>/, `<span class="vantaggi-eyebrow">${secExt.row3Eyebrow}</span>`);
       if (secExt.row3Title) res = res.replace(/<h3>Menu, allergeni e carta dei vini da PDF<\/h3>/, `<h3>${secExt.row3Title}</h3>`);
-      if (secExt.row3Desc) res = res.replace(/<p>Carica il PDF del tuo menu.*?<\/p>/, `<p>${secExt.row3Desc}</p>`);
+      if (secExt.row3Desc) res = res.replace(/<p>Configura menu e allergeni per le risposte.*?<\/p>/, `<p>${secExt.row3Desc}</p>`);
 
       if (secExt.row4Eyebrow) res = res.replace(/<span class="vantaggi-eyebrow">Zero No-Show<\/span>/, `<span class="vantaggi-eyebrow">${secExt.row4Eyebrow}</span>`);
       if (secExt.row4Title) res = res.replace(/<h3>Promemoria interattivi e sincronizzazione calendario<\/h3>/, `<h3>${secExt.row4Title}</h3>`);

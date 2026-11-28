@@ -28,14 +28,11 @@ from src.core.auth.dependencies import (
     require_ruolo,
 )
 from src.core.auth.signup_policy import beta_email_is_allowed
+from src.core.billing.plans import TRIAL_DAYS
 from src.core.gdpr import token_store
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-
-# Durata trial alla creazione org (registrazione normale e primo accesso
-# Google usano la stessa variabile d'ambiente).
-TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "7"))
 
 # Anti brute-force su /api/auth/login: fallimenti consecutivi per IP.
 # Contatori distribuiti (Redis quando RATE_LIMIT_BACKEND=redis): validi con

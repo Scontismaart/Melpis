@@ -31,17 +31,18 @@
       };
       const integrationTabs = new Set(["whatsapp", "instagram", "calendar", "reviews", "webhook", "booking-pms", "airtable"]);
       const accountPlans = [
-        { slug: "starter", nome: "Essenziale", prezzo: "€29", cadenza: "/mese", limite: "500 messaggi / mese", features: [
-          "1 numero WhatsApp Business", "1 utente staff (operatore)", "PDF/RAG incluso; quota file da definire", "Gestione orari e listino servizi", "Supporto standard",
+        { slug: "starter", nome: "Essenziale", prezzo: "€29", cadenza: "/mese", limite: "500 risposte AI / mese", features: [
+          "1 numero WhatsApp Business", "1 account titolare", "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo",
+          "Google Calendar opzionale, previa certificazione operativa", "Gestione orari e listino servizi", "Supporto standard",
         ], popolare: false },
-        { slug: "pro", nome: "Crescita", prezzo: "€69", cadenza: "/mese", limite: "2.000 messaggi / mese", features: [
-          "WhatsApp + Instagram Direct", "Fino a 3 utenti staff (operatori)",
-          "PDF/RAG incluso; quota file da definire",
-          "Recensioni Google, previa verifica di disponibilità dell'account", "Google Calendar opzionale; richiede configurazione autorizzata", "Supporto prioritario",
+        { slug: "pro", nome: "Crescita", prezzo: "€69", cadenza: "/mese", limite: "2.000 risposte AI / mese", features: [
+          "1 numero WhatsApp Business", "Fino a 3 account, titolare incluso",
+          "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo",
+          "Google Calendar opzionale, previa certificazione operativa", "Supporto prioritario",
         ], popolare: true },
-        { slug: "business", nome: "Scala", prezzo: "€149", cadenza: "/mese", limite: "10.000 messaggi / mese", features: [
-          "PDF/RAG incluso; quota file da definire", "Google Calendar opzionale; richiede configurazione autorizzata", "Operatori configurabili",
-          "Canali disponibili in base alle integrazioni verificate", "Supporto dedicato 1-to-1",
+        { slug: "business", nome: "Scala", prezzo: "€149", cadenza: "/mese", limite: "10.000 risposte AI / mese", features: [
+          "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo", "Google Calendar opzionale, previa certificazione operativa",
+          "Nessun limite numerico di piano per operatori e numeri WhatsApp", "Supporto dedicato 1-to-1",
         ], popolare: false },
       ];
       let active = false;
@@ -158,7 +159,7 @@
         if (auditCount) auditCount.textContent = "";
         for (const [id, value] of Object.entries({
           "account-stato": "…", "account-plan-nome": "…", "account-plan-prezzo": "",
-          "account-rinnovo": "",
+          "account-rinnovo": "", "account-usage": "",
         })) {
           const element = document.getElementById(id);
           if (element) element.textContent = value;
@@ -386,6 +387,8 @@
         const token = capture();
         if (!current(token) || !canManageBilling()) return null;
         const status = document.getElementById("account-status");
+        const usage = document.getElementById("account-usage");
+        const usageUnavailable = () => _tDash("account_usage.unavailable", "Consumo AI al momento non disponibile.");
         try {
           const response = await apiFetch(`${API_BASE}/api/billing/subscription`);
           if (!current(token)) return null;
@@ -405,14 +408,42 @@
           if (sidebarPlan) sidebarPlan.textContent = currentPlan ? `Piano ${currentPlan.nome}` : "Piano e abbonamento";
           const renewal = document.getElementById("account-rinnovo");
           const formatDate = (iso) => {
+            if (!iso) return "";
             const date = new Date(iso);
             if (Number.isNaN(date.getTime())) return "";
             return root.MelpisI18n?.formatDate?.(date) || date.toLocaleDateString(localeCorrente());
           };
+          const trial = state === "trialing";
+          const paidPeriod = currentPlan && ["active", "past_due"].includes(state);
+          const used = subscription.messages_used_this_period;
+          const limit = subscription.messages_limit;
+          const hasUsage = (trial || paidPeriod) && Number.isSafeInteger(used) && used >= 0
+            && Number.isSafeInteger(limit) && limit > 0;
+          const exhausted = hasUsage && used >= limit;
+
+          if (usage) {
+            usage.textContent = usageUnavailable();
+            if (hasUsage) {
+              const numbers = new Intl.NumberFormat(localeCorrente());
+              const values = { used: numbers.format(used), limit: numbers.format(limit) };
+              const label = trial
+                ? _tDash("account_usage.trial", "{{used}} / {{limit}} risposte AI conteggiate nella prova.", values)
+                : _tDash("account_usage.period", "{{used}} / {{limit}} risposte AI conteggiate nel periodo corrente.", values);
+              const quota = exhausted
+                ? _tDash("account_usage.exhausted", "Quota esaurita. Le operazioni manuali autorizzate restano disponibili.")
+                : "";
+              usage.textContent = [label, quota].filter(Boolean).join(" ");
+            }
+          }
           if (renewal) {
-            if (subscription.trial_end) renewal.textContent = `Prova gratuita attiva fino al ${formatDate(subscription.trial_end)}.`;
-            else if (state === "canceled") renewal.textContent = "Abbonamento disattivato: il servizio resta attivo fino al termine del periodo pagato.";
-            else if (subscription.current_period_end) renewal.textContent = `Prossimo rinnovo programmato: ${formatDate(subscription.current_period_end)}.`;
+            const trialEnd = formatDate(subscription.trial_end);
+            const periodEnd = formatDate(subscription.current_period_end);
+            if (trial && exhausted) renewal.textContent = _tDash("account_usage.trial_quota_reached", "Prova conclusa per raggiungimento della quota.");
+            else if (trial && trialEnd) renewal.textContent = new Date(subscription.trial_end).getTime() > Date.now()
+              ? _tDash("account_usage.trial_ends", "Scadenza della prova il {{date}} o al raggiungimento della quota.", { date: trialEnd })
+              : _tDash("account_usage.trial_ended", "Prova conclusa.");
+            else if (state === "canceled") renewal.textContent = "Abbonamento disattivato.";
+            else if (paidPeriod && periodEnd) renewal.textContent = _tDash("account_usage.period_ends", "Fine del periodo corrente il {{date}}.", { date: periodEnd });
             else renewal.textContent = "Nessun rinnovo programmato.";
           }
           const wrap = document.getElementById("account-plans");
@@ -423,7 +454,7 @@
               const card = document.createElement("div");
               card.className = `account-plan-card${isCurrent ? " account-plan-attuale" : ""}${plan.popolare ? " popolare" : ""}`;
               const popularBadge = plan.popolare ? '<span class="account-badge-popolare">Consigliato</span>' : "";
-              const activeBadge = isCurrent ? '<span class="account-stato-pill">Piano Attivo</span>' : "";
+              const activeBadge = isCurrent && state === "active" ? '<span class="account-stato-pill">Piano Attivo</span>' : "";
               const features = plan.features.map((feature) => `<li class="account-plan-feat-item"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="account-feat-check"><polyline points="20 6 9 17 4 12"/></svg><span>${sanitize(feature)}</span></li>`).join("");
               card.innerHTML = `${popularBadge}<div class="dash-card-header" style="margin-bottom: 0;"><span class="dash-card-title">${sanitize(plan.nome)}</span>${activeBadge}</div><div class="account-plan-price-row"><span class="account-plan-price-amount">${sanitize(plan.prezzo)}</span><span class="account-plan-price-period">${sanitize(plan.cadenza || "/mese")}</span></div><p class="account-plan-limit">${sanitize(plan.limite)}</p><ul class="account-plan-feat-list">${features}</ul>`;
               const actions = document.createElement("div");
@@ -431,8 +462,11 @@
               const button = document.createElement("button");
               button.type = "button";
               button.className = isCurrent ? "report-refresh" : (plan.popolare ? "review-analyze" : "report-refresh");
-              button.textContent = isCurrent ? "Piano in uso" : (state === "canceled" ? `Riattiva ${plan.nome}` : `Passa a ${plan.nome}`);
-              if (isCurrent) button.disabled = true;
+              const canSelect = !isCurrent || state === "canceled";
+              button.textContent = canSelect
+                ? (state === "canceled" ? `Riattiva ${plan.nome}` : `Passa a ${plan.nome}`)
+                : (state === "active" ? "Piano in uso" : "Piano associato");
+              if (!canSelect) button.disabled = true;
               else button.addEventListener("click", () => { void changePlan(plan.slug); });
               actions.appendChild(button);
               card.appendChild(actions);
@@ -444,6 +478,7 @@
           return subscription;
         } catch {
           if (!current(token)) return null;
+          if (usage) usage.textContent = usageUnavailable();
           accountStatus("Impossibile caricare lo stato dell'abbonamento: torna su questa sezione per riprovare.");
           return null;
         }
@@ -475,7 +510,7 @@
                 const formatted = Number.isNaN(deadline.getTime())
                   ? "la scadenza della prova gratuita"
                   : (root.MelpisI18n?.formatDate?.(deadline) || deadline.toLocaleDateString(localeCorrente()));
-                accountStatus(`La prova gratuita resta attiva fino a ${formatted}. Non è richiesta una carta; potrai avviare l’abbonamento dopo la scadenza.`);
+              accountStatus(`La scadenza prevista della prova è ${formatted}. Non è richiesta una carta. Il checkout sarà disponibile dopo questa scadenza.`);
                 const status = document.getElementById("account-status");
                 if (status) status.style.color = "var(--green-deep)";
                 return null;

@@ -86,24 +86,24 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.match(pricingHtml, /<p class="mv2-pricing-eyebrow">[\s\S]*?UN RIFERIMENTO SEMPLICE[\s\S]*?<\/p>/);
   assert.doesNotMatch(pricingHtml, /<p class="mv2-pricing-eyebrow">[\s\S]*?05[\s\S]*?<\/p>/);
   assert.match(pricingHtml, /Scegli il passo[\s\S]*?adatto a te\./);
-  assert.match(pricingHtml, /Listino mensile di riferimento\. Le condizioni commerciali definitive/);
-  assert.match(pricingHtml, /Prezzi indicativi mensili; condizioni, imposte e disponibilità sono da[\s\S]*?confermare\. Nessuna attivazione o acquisto da questa pagina\./);
+  assert.match(pricingHtml, /Tre piani a pagamento con prezzi mensili\./);
+  assert.match(pricingHtml, /Costi di abbonamento mensili\. Nessuna attivazione o acquisto da questa pagina\./);
   assert.equal([...pricingHtml.matchAll(/class="mv2-pricing-card(?:"|\s)/g)].length, 4);
   assert.equal([...pricingHtml.matchAll(/data-card-index="[0-3]"/g)].length, 4);
   assert.equal([...pricingHtml.matchAll(/>\s*Prova Melpis\s*</g)].length, 4);
   assert.equal([...pricingHtml.matchAll(/class="mv2-pricing-feature-check"/g)].length, 20, 'every plan feature uses the graphite check icon');
   assert.doesNotMatch(pricingHtml, /mv2-pricing-feature-dot/, 'legacy feature dots are fully removed');
-  const planNames = ['Free', 'Essenziale', 'Crescita', 'Scala'];
+  const planNames = ['Prova gratuita', 'Essenziale', 'Crescita', 'Scala'];
   const planPositions = planNames.map(name => pricingHtml.indexOf(`>${name}<`));
   assert.ok(planPositions.every(position => position > 0), 'all four pricing cards are present');
-  assert.deepEqual([...planPositions].sort((a, b) => a - b), planPositions, 'Free, Essenziale, Crescita and Scala render in order');
-  for (const [name, amount] of [['Free', '0'], ['Essenziale', '29'], ['Crescita', '69'], ['Scala', '149']]) {
+  assert.deepEqual([...planPositions].sort((a, b) => a - b), planPositions, 'Trial, Essenziale, Crescita and Scala render in order');
+  for (const [name, amount] of [['Prova gratuita', '0'], ['Essenziale', '29'], ['Crescita', '69'], ['Scala', '149']]) {
     assert.match(pricingHtml, new RegExp(`>${name}<`), `pricing card ${name} is present`);
-    const priceLabel = name === 'Free' ? '0 euro per 7 giorni' : `${amount} euro al mese`;
+    const priceLabel = name === 'Prova gratuita' ? '0 euro fino a 7 giorni o 150 risposte AI, al primo limite raggiunto' : `${amount} euro al mese`;
     assert.match(pricingHtml, new RegExp(`<span class="mv2-pricing-sr">${priceLabel}</span>`), `pricing card ${name} exposes its price to assistive tech`);
   }
-  assert.match(pricingHtml, /Per provare Melpis per 1 settimana\./);
-  assert.match(pricingHtml, /<span class="mv2-pricing-period" aria-hidden="true">\/ 7 giorni<\/span>/);
+  assert.match(pricingHtml, /Fino a 7 giorni o 150 risposte AI, al primo limite raggiunto\./);
+  assert.match(pricingHtml, /<span class="mv2-pricing-period" aria-hidden="true">\/ prova<\/span>/);
   const homepageQuotas = [...pricingHtml.matchAll(/<strong class="mv2-pricing-feature-strong">([\d.]+)<\/strong> risposte AI/g)].map(match => match[1]);
   assert.deepEqual(homepageQuotas, ['150', '500', '2.000', '10.000']);
 
@@ -114,7 +114,7 @@ test('build allowlist is self-contained and preview is isolated', async (t) => {
   assert.equal([...pricingHtml.matchAll(/class="mv2-pricing-card-cta"/g)].length, 4);
   assert.equal([...pricingHtml.matchAll(/href="\/registrati\/"/g)].length, 4, 'pricing CTAs point at real registration');
   assert.doesNotMatch(pricingHtml, /href="#configura-/, 'pricing CTAs must not link to nonexistent configuration anchors');
-  for (const offer of [/prova gratuita/i, /\btrial\b/i, /\bsconto\b/i, /30 giorni/i, /\bgratis\b/i]) {
+  for (const offer of [/\bsconto\b/i, /30 giorni/i, /risposte AI illimitate/i]) {
     assert.doesNotMatch(pricingHtml, offer, `pricing section must not invent an offer: ${offer}`);
   }
   assert.equal([...pricingHtml.matchAll(/data-mv2-pricing-curve(?=[\s>])/g)].length, 1);

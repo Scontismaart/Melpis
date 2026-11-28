@@ -16,6 +16,8 @@ from fastapi import HTTPException
 from src.core.auth import bff
 from src.core.auth.dependencies import get_http_client
 from src.core.auth.signup_policy import beta_email_is_allowed
+from src.core.billing.plans import PLANS
+from src.core.billing.suspension import is_org_suspended
 from src.core.notifications.email_service import _get_smtp_config
 from src.core.rate_limit import get_rate_limiter
 from src.core.security.docs import is_production
@@ -23,6 +25,19 @@ from src.core.security.docs import is_production
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,100}$")
 _GENERIC = "Se l'invito è valido, riceverai le istruzioni all'indirizzo indicato."
 _UNUSABLE = "Invito non valido o non più utilizzabile."
+
+
+def team_seat_entitlement(org) -> tuple[bool, int | None]:
+    if not org or is_org_suspended(org["subscription_status"], org["trial_end"]):
+        return False, None
+    plan_slug = org["plan"]
+    if plan_slug is None and org["subscription_status"] == "trialing":
+        plan_slug = "pro"
+    plan = PLANS.get(plan_slug)
+    if plan is None:
+        return False, None
+    limit = org["users_limit"]
+    return True, plan.users_limit if limit is None else limit
 
 
 def _dev_links_enabled() -> bool:
@@ -200,7 +215,7 @@ async def accept_invitation(pool, *, raw_token: str, auth_user_id: str, access_t
         org_id = lookup["organization_id"]
         async with conn.transaction():
             org = await conn.fetchrow(
-                """SELECT plan, users_limit FROM organizations WHERE id = $1::uuid
+                """SELECT plan, users_limit, subscription_status, trial_end FROM organizations WHERE id = $1::uuid
                    AND NOT EXISTS (SELECT FROM gdpr_erasure_barriers b
                        WHERE b.organization_id=$1::uuid AND b.scope='organization') FOR UPDATE""", org_id,
             )
@@ -243,9 +258,9 @@ async def accept_invitation(pool, *, raw_token: str, auth_user_id: str, access_t
                 org_id, profile["id"],
             )
             if not existing:
-                from src.core.billing.plans import PLANS
-                plan = PLANS.get(org["plan"] or "pro")
-                users_limit = org["users_limit"] if org["users_limit"] is not None else (plan.users_limit if plan else 3)
+                can_add, users_limit = team_seat_entitlement(org)
+                if not can_add:
+                    raise HTTPException(400, _UNUSABLE)
                 count = await conn.fetchval(
                     "SELECT count(*) FROM organization_memberships WHERE organization_id = $1::uuid", org_id,
                 )

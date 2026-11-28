@@ -23,7 +23,7 @@ function createSettings(role = "owner", apiFetch = async () => ({ ok: true, stat
     <p id="settings-timezone-status"></p><p id="account-status" hidden></p>
     <section id="account-provider-recovery" hidden><div id="account-provider-recovery-list"></div></section>
     <span id="account-stato"></span><span id="account-plan-nome"></span><span id="account-plan-prezzo"></span>
-    <span id="sidebar-account-plan"></span><p id="account-rinnovo"></p><div id="account-plans"></div>
+    <span id="sidebar-account-plan"></span><p id="account-rinnovo"></p><p id="account-usage"></p><div id="account-plans"></div>
     <button id="account-portal-btn"></button><button id="account-cancel-btn"></button>
     <div id="audit-list"></div><span id="audit-count"></span>
   `, { runScripts: "outside-only", url: "https://melpis.test/app/settings" });
@@ -32,7 +32,7 @@ function createSettings(role = "owner", apiFetch = async () => ({ ok: true, stat
   const module = dom.window.MelpisDashboardSettings.create({
     API_BASE: "", apiFetch,
     getContext: () => context, getRole: () => role, t: (key) => key,
-    _tDash: (key, fallback) => key === "sidebar.menu_piano" ? fallback : key,
+    _tDash: (key, fallback, values = {}) => fallback?.replace(/\{\{(\w+)\}\}/g, (_, name) => values[name]) ?? key,
     sanitize: String,
     securityStatus: (el, text) => { el.textContent = text; }, localeCorrente: () => "it-IT",
     navigateTo: () => true, normalizeSettingsTab: (tab) => tab, settingsSearchForTab: () => "",
@@ -237,6 +237,48 @@ test("billing keeps an active application trial card-free when Stripe checkout i
   assert.equal(checkoutCalls, 1);
   assert.deepEqual(redirects, []);
   assert.match(settings.dom.window.document.getElementById("account-status").textContent, /Non è richiesta una carta/);
+  settings.dom.window.close();
+});
+
+test("billing shows canonical AI usage through exhaustion, renewal, trial and unavailable data", async () => {
+  let snapshot = {};
+  let status = 200;
+  const settings = createSettings("owner", async (url) => {
+    if (url.endsWith("/api/billing/subscription")) return response(snapshot, status);
+    return response({});
+  });
+  const usage = settings.dom.window.document.getElementById("account-usage");
+  const renewal = settings.dom.window.document.getElementById("account-rinnovo");
+  settings.module.onEnter("piano");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  snapshot = { plan: "starter", subscription_status: "active", messages_limit: 500,
+    trial_end: "2026-10-08T12:00:00Z", current_period_end: "2026-11-01T12:00:00Z" };
+  for (const used of [80, 499, 500, 0]) {
+    snapshot.messages_used_this_period = used;
+    if (used === 0) snapshot.current_period_end = "2026-12-01T12:00:00Z";
+    await settings.module.loadAccount();
+    assert.ok(usage.textContent.startsWith(`${used} / 500 risposte AI conteggiate nel periodo corrente.`));
+    assert.equal(usage.textContent.includes("Quota esaurita"), used === 500);
+    assert.ok(renewal.textContent.startsWith("Fine del periodo corrente"));
+  }
+  assert.match(renewal.textContent, /01\/12\/2026/);
+
+  snapshot = { subscription_status: "trialing", messages_limit: 150,
+    messages_used_this_period: 149, trial_end: new Date(Date.now() + 86_400_000).toISOString() };
+  await settings.module.loadAccount();
+  assert.match(usage.textContent, /^149 \/ 150 risposte AI conteggiate nella prova/);
+  snapshot.messages_used_this_period = 150;
+  await settings.module.loadAccount();
+  assert.match(usage.textContent, /operazioni manuali autorizzate/);
+  assert.match(renewal.textContent, /Prova conclusa per raggiungimento della quota/);
+
+  snapshot.messages_limit = null;
+  await settings.module.loadAccount();
+  assert.match(usage.textContent, /non disponibile/);
+  status = 503;
+  await settings.module.loadAccount();
+  assert.match(usage.textContent, /non disponibile/);
   settings.dom.window.close();
 });
 
