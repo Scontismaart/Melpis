@@ -1,11 +1,11 @@
 {
   "restaurants": {
     "page_title": "Melpis for Restaurants · Automated WhatsApp Table Bookings",
-    "meta_description": "Automate table bookings on WhatsApp 24/7. Shift management, automated no-show reminders, and instant Google Calendar synchronization for dining venues.",
+    "meta_description": "AI assistant for WhatsApp Business. Customer replies, booking requests and handoff to your team. Optional Google Calendar, subject to operational certification.",
     "hero": {
       "badge": "Food & Beverage Industry",
       "title": "Fill your tables without pulling your staff away from service",
-      "subtitle": "Guests message on WhatsApp day and night to reserve a table. Melpis replies instantly, checks seating availability, and locks in the booking on your calendar.",
+      "subtitle": "AI assistant for WhatsApp Business. Customer replies, booking requests and handoff to your team.",
       "cta": "Start 7-day free trial"
     },
     "features": [

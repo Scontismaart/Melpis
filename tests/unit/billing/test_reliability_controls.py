@@ -40,16 +40,21 @@ class _Pool:
 
 
 @pytest.mark.asyncio
-async def test_commercial_bootstrap_rejects_yearly_checkout_before_stripe(monkeypatch):
+@pytest.mark.parametrize("profile", [None, "sandbox", "commercial_bootstrap"])
+@pytest.mark.parametrize("interval", ["yearly", "weekly"])
+async def test_v1_rejects_non_monthly_checkout_before_stripe(monkeypatch, profile, interval):
     from src.core.billing.plans import PLANS
     from src.core.billing.routes import CheckoutSessionRequest, create_checkout_session
 
-    monkeypatch.setenv("LAUNCH_PROFILE", "commercial_bootstrap")
+    if profile:
+        monkeypatch.setenv("LAUNCH_PROFILE", profile)
+    else:
+        monkeypatch.delenv("LAUNCH_PROFILE", raising=False)
     monkeypatch.setenv("STRIPE_ANNUAL_PRICING_ENABLED", "true")
     monkeypatch.setattr(PLANS["starter"], "stripe_price_id_yearly", "price_test_yearly")
 
     def stripe_must_not_be_initialized():
-        raise AssertionError("yearly commercial-bootstrap checkout reached Stripe")
+        raise AssertionError("non-monthly V1 checkout reached Stripe")
 
     monkeypatch.setattr("src.core.billing.routes._get_stripe", stripe_must_not_be_initialized)
     request = SimpleNamespace(
@@ -58,7 +63,7 @@ async def test_commercial_bootstrap_rejects_yearly_checkout_before_stripe(monkey
     )
     checkout_request = CheckoutSessionRequest(
         plan="starter",
-        interval="yearly",
+        interval=interval,
         success_url="https://app.melpis.it/success",
         cancel_url="https://app.melpis.it/cancel",
     )
@@ -71,8 +76,8 @@ async def test_commercial_bootstrap_rejects_yearly_checkout_before_stripe(monkey
             None,
         )
 
-    assert exc.value.status_code == 503
-    assert "Stripe price ID (yearly) non configurato" in exc.value.detail
+    assert exc.value.status_code == 400
+    assert "solo piani mensili" in exc.value.detail
 
 
 @pytest.mark.asyncio

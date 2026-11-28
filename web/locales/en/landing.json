@@ -1,11 +1,11 @@
 {
   "page_title": "Melpis · WhatsApp AI Assistant for Business | 7-Day Free Trial",
-  "meta_description": "Activate your WhatsApp AI assistant for business: 24/7 instant client replies, Google Calendar bookings, and review management. Try free for 7 days.",
+  "meta_description": "AI assistant for WhatsApp Business. Customer replies, booking requests and handoff to your team. Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
   "hero": {
     "badge": "Official Meta Cloud API Infrastructure",
     "title_part1": "The AI WhatsApp assistant that",
     "title_highlight": "turns conversations into customers",
-    "subtitle": "Replies in real time 24/7, schedules appointments directly on Google Calendar, and alerts your team when a human touch is needed.",
+    "subtitle": "AI assistant for WhatsApp Business. Customer replies, booking requests and handoff to your team.",
     "cta_primary": "Start your 7-day free trial",
     "cta_secondary": "See how it works",
     "no_card_required": "No credit card required",
@@ -26,19 +26,19 @@
     "section_title": "Everything you need to capture every opportunity on WhatsApp",
     "f1": {
       "title": "Smart, natural replies trained on your business data",
-      "desc": "Upload your documents, service menus, prices, and policies: Melpis replies with pinpoint accuracy without making things up."
+      "desc": "Answers about opening hours, price lists and FAQs based on the information you configure. PDF/RAG planned for all plans, subject to security approval and testing"
     },
     "f2": {
-      "title": "Seamless Google Calendar appointment sync",
-      "desc": "Verifies live slot availability, books appointments, and sends automatic confirmations and reminder messages to clients."
+      "title": "Booking request management",
+      "desc": "Optional Google Calendar, subject to operational certification"
     },
     "f3": {
       "title": "Shared Inbox with instant human handoff",
       "desc": "Whenever a conversation requires personal attention, your team can seamlessly take over directly from the web dashboard."
     },
     "f4": {
-      "title": "Review collection & customer satisfaction",
-      "desc": "Gather genuine feedback and prompt delighted customers to leave 5-star reviews on your Google Business profile."
+      "title": "Reply drafts with human review",
+      "desc": "Reply drafts with human review"
     }
   },
   "how_it_works": {
@@ -74,7 +74,7 @@
       },
       {
         "q": "What happens if the assistant receives a complex or unknown request?",
-        "a": "Melpis replies strictly using the documents and rules you provide. If an inquiry covers missing information or requires special arrangements, the assistant will not improvise: it politely informs the customer and hands off the ticket to your staff in the Inbox."
+        "a": "Answers about opening hours, price lists and FAQs based on the information you configure. PDF/RAG planned for all plans, subject to security approval and testing"
       },
       {
         "q": "How long does the initial setup take?",
@@ -82,7 +82,7 @@
       },
       {
         "q": "How does the 7-day free trial work?",
-        "a": "The trial ends after 7 days or 150 AI messages, whichever comes first. No credit card is required and there is no automatic renewal. When the message limit is reached, AI replies stop and requests are handed to an operator."
+        "a": "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
       },
       {
         "q": "Is customer data secure and GDPR-compliant?",

@@ -1,11 +1,11 @@
 {
   "page_title": "Melpis · Assistente WhatsApp AI per la tua attività | Prova 7 giorni",
-  "meta_description": "Attiva l'assistente WhatsApp AI per la tua attività: risposte 24/7 ai clienti, prenotazioni su Google Calendar e bozze recensioni. Prova gratis di 7 giorni.",
+  "meta_description": "Assistente AI per WhatsApp Business. Risposte ai clienti, richieste di prenotazione e passaggio allo staff. Prova gratuita fino a 7 giorni o 150 risposte AI, al primo limite raggiunto. Carta di credito facoltativa. Eventuali addebiti richiedono l’adesione esplicita a un abbonamento.",
   "hero": {
     "badge": "Infrastruttura ufficiale Meta Cloud API",
     "title_part1": "Il tuo assistente WhatsApp AI che",
     "title_highlight": "converte messaggi in clienti",
-    "subtitle": "Risponde in tempo reale 24 ore su 24, registra appuntamenti su Google Calendar e ti avvisa quando serve l'intervento del tuo staff.",
+    "subtitle": "Assistente AI per WhatsApp Business. Risposte ai clienti, richieste di prenotazione e passaggio allo staff.",
     "cta_primary": "Inizia la prova gratuita di 7 giorni",
     "cta_secondary": "Scopri come funziona",
     "no_card_required": "Nessuna carta di credito richiesta",
@@ -26,19 +26,19 @@
     "section_title": "Tutto ciò di cui hai bisogno per non perdere nessun cliente su WhatsApp",
     "f1": {
       "title": "Risposte intelligenti ed empatiche basate sui tuoi dati",
-      "desc": "Carica i tuoi documenti, orari, listini e condizioni: Melpis risponde con precisione millimetrica senza inventare nulla."
+      "desc": "Risposte su orari, listini e domande frequenti in base alle informazioni che configuri. PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo"
     },
     "f2": {
-      "title": "Sincronizzazione prenotazioni su Google Calendar",
-      "desc": "Verifica in tempo reale gli slot liberi, fissa l'appuntamento e invia conferme e promemoria automatici al cliente."
+      "title": "Gestione delle richieste di prenotazione",
+      "desc": "Google Calendar opzionale, previa certificazione operativa"
     },
     "f3": {
       "title": "Shared Inbox e passaggio all'operatore umano",
       "desc": "Se una conversazione necessita di attenzione personale, il tuo team può subentrare istantaneamente dalla dashboard web."
     },
     "f4": {
-      "title": "Gestione recensioni e soddisfazione cliente",
-      "desc": "Raccogli feedback sinceri e invita i clienti soddisfatti a lasciare una recensione a 5 stelle su Google Maps."
+      "title": "Bozze di risposta con revisione umana",
+      "desc": "Bozze di risposta con revisione umana"
     }
   },
   "how_it_works": {
@@ -74,7 +74,7 @@
       },
       {
         "q": "Cosa succede se l'assistente non trova una risposta o riceve una richiesta complessa?",
-        "a": "Melpis risponde basandosi solo sui documenti e sulle regole che imposti. Se la richiesta riguarda informazioni non presenti o necessita di accordi speciali, l'assistente non improvvisa: informa il cliente e inoltra la richiesta allo staff nella Inbox."
+        "a": "Risposte su orari, listini e domande frequenti in base alle informazioni che configuri. PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo"
       },
       {
         "q": "Quanto tempo serve per configurare il servizio?",
@@ -82,7 +82,7 @@
       },
       {
         "q": "Come funziona la prova gratuita di 7 giorni?",
-        "a": "La prova termina dopo 7 giorni o 150 messaggi AI, al primo limite raggiunto. Non è richiesta una carta di credito e non c'è rinnovo automatico. Raggiunta la quota, l'AI si ferma e le richieste passano a un operatore."
+        "a": "Prova gratuita fino a 7 giorni o 150 risposte AI, al primo limite raggiunto. Carta di credito facoltativa. Eventuali addebiti richiedono l’adesione esplicita a un abbonamento."
       },
       {
         "q": "I dati dei clienti sono al sicuro e conformi al GDPR?",

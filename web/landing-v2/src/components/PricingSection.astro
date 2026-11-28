@@ -41,8 +41,7 @@ const {
 
       {showLead && (
         <p class="mv2-pricing-lead">
-          Listino mensile di riferimento. Le condizioni commerciali definitive
-          vanno verificate prima dell’attivazione.
+          Tre piani a pagamento con prezzi mensili. L’attivazione delle integrazioni richiede i collaudi previsti.
         </p>
       )}
     </header>
@@ -51,16 +50,16 @@ const {
       <li class="mv2-pricing-card" data-mv2-pricing-card data-card-index="0">
         <div class="mv2-pricing-card-inner">
           <div class="mv2-pricing-card-top">
-            <h3 class="mv2-pricing-card-name">Free</h3>
-            <p class="mv2-pricing-card-subtitle">Per provare Melpis per 1 settimana.</p>
+            <h3 class="mv2-pricing-card-name">Prova gratuita</h3>
+            <p class="mv2-pricing-card-subtitle">Fino a 7 giorni o 150 risposte AI, al primo limite raggiunto.</p>
           </div>
 
           <div class="mv2-pricing-card-price-wrap">
             <div class="mv2-pricing-card-price">
-              <span class="mv2-pricing-sr">0 euro per 7 giorni</span>
+              <span class="mv2-pricing-sr">0 euro fino a 7 giorni o 150 risposte AI, al primo limite raggiunto</span>
               <span class="mv2-pricing-amount" aria-hidden="true">0</span>
               <span class="mv2-pricing-currency" aria-hidden="true">€</span>
-              <span class="mv2-pricing-period" aria-hidden="true">/ 7 giorni</span>
+              <span class="mv2-pricing-period" aria-hidden="true">/ prova</span>
             </div>
           </div>
 
@@ -106,7 +105,7 @@ const {
             <a
               href={ctaHref}
               class="mv2-pricing-card-cta"
-              aria-label="Prova Melpis, piano Free: vai alla registrazione"
+              aria-label="Prova Melpis, prova gratuita: vai alla registrazione"
             >
               Prova Melpis
             </a>
@@ -135,7 +134,7 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span><strong class="mv2-pricing-feature-strong">500</strong> risposte AI al mese</span>
+              <span><strong class="mv2-pricing-feature-strong">500</strong> risposte AI validate al mese</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -147,7 +146,7 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>1 account operatore</span>
+              <span>1 account totale, titolare incluso</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -208,7 +207,7 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span><strong class="mv2-pricing-feature-strong">2.000</strong> risposte AI al mese</span>
+              <span><strong class="mv2-pricing-feature-strong">2.000</strong> risposte AI validate al mese</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -220,19 +219,19 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>Fino a 3 account operatore</span>
-            </li>
-            <li class="mv2-pricing-card-feature">
-              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-              <span>Recensioni Google, soggette a verifica operativa</span>
+              <span>Fino a 3 account totali, titolare incluso</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
               <span>Bozze di risposta con revisione umana</span>
+            </li>
+            <li class="mv2-pricing-card-feature">
+              <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+              <span>Gestione delle richieste di prenotazione</span>
             </li>
           </ul>
 
@@ -274,7 +273,7 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span><strong class="mv2-pricing-feature-strong">10.000</strong> risposte AI al mese</span>
+              <span><strong class="mv2-pricing-feature-strong">10.000</strong> risposte AI validate al mese</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -286,19 +285,19 @@ const {
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>Operatori senza limite numerico di piano</span>
+              <span>Account senza limite numerico di piano, soggetti ai limiti tecnici</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>Più numeri WhatsApp secondo configurazione</span>
+              <span>Numeri WhatsApp senza limite numerico di piano, secondo le configurazioni supportate</span>
             </li>
             <li class="mv2-pricing-card-feature">
               <svg class="mv2-pricing-feature-check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                 <path d="M3.4 8.35 6.35 11.3 12.6 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span>Conoscenza aziendale da documenti inclusa</span>
+              <span>Inbox condivisa e passaggio allo staff</span>
             </li>
           </ul>
 
@@ -324,13 +323,12 @@ const {
       Prenotazioni con verifica disponibilità, inbox condivisa
       e intervento dello staff sono disponibili su tutti i piani, secondo la
       configurazione. Cambiano la quota di risposte AI, gli account operatore, i
-      numeri WhatsApp e i moduli inclusi.
+      numeri WhatsApp e i moduli inclusi. Google Calendar è opzionale e previsto per Essenziale, Crescita e Scala, con attivazione subordinata alla certificazione operativa. PDF/RAG è previsto per tutti e tre i piani, con attivazione subordinata al collaudo e all’approvazione di sicurezza.
     </p>
 
     {showFootnote && (
       <p class="mv2-pricing-footnote" data-mv2-pricing-footnote>
-        Prezzi indicativi mensili; condizioni, imposte e disponibilità sono da
-        confermare. Nessuna attivazione o acquisto da questa pagina. Google Calendar è soggetto a certificazione operativa.
+        Costi di abbonamento mensili. Nessuna attivazione o acquisto da questa pagina. Costi WhatsApp Meta addebitati separatamente. La prova dura 7 giorni o 150 risposte AI, al primo limite raggiunto. Per iniziare non è richiesta una carta di credito. Qualsiasi addebito richiede l’adesione esplicita a un abbonamento.
       </p>
     )}
   </div>

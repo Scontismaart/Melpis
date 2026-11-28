@@ -6,7 +6,7 @@
 const SECTOR_SHARED = {
   en: {
     trustCard: "No credit card required",
-    trustTrial: "Full 7-day free trial",
+    trustTrial: "Up to 7 days or 150 AI replies",
     trustApi: "Official Meta Cloud API",
     ctaSecondary: "See how it works",
     stepsEyebrow: "Quick &amp; Easy Setup",
@@ -14,7 +14,7 @@ const SECTOR_SHARED = {
   },
   es: {
     trustCard: "Sin tarjeta de crédito",
-    trustTrial: "Prueba completa de 7 días",
+    trustTrial: "Hasta 7 días o 150 respuestas de IA",
     trustApi: "API oficial Meta Cloud",
     ctaSecondary: "Cómo funciona",
     stepsEyebrow: "Activación Sencilla",
@@ -22,7 +22,7 @@ const SECTOR_SHARED = {
   },
   fr: {
     trustCard: "Sans carte bancaire",
-    trustTrial: "Essai complet de 7 jours",
+    trustTrial: "Jusqu’à 7 jours ou 150 réponses IA",
     trustApi: "API officielle Meta Cloud",
     ctaSecondary: "Comment ça marche",
     stepsEyebrow: "Simplicité d'Activation",
@@ -30,7 +30,7 @@ const SECTOR_SHARED = {
   },
   de: {
     trustCard: "Keine Kreditkarte nötig",
-    trustTrial: "7 Tage vollwertige Testphase",
+    trustTrial: "Bis zu 7 Tage oder 150 KI-Antworten",
     trustApi: "Offizielle Meta Cloud API",
     ctaSecondary: "So funktioniert's",
     stepsEyebrow: "Einfache Einrichtung",
@@ -50,16 +50,16 @@ const SECTOR_EXTRAS = {
       chatInQuote: "“Good evening! Do you have a table for 4 tonight around 8:30 PM?”",
       chatOutAuthor: "Melpis for your restaurant",
       chatOutQuote: "“Table for 4 confirmed at 8:30 PM. I have noted your preference for indoor seating.”",
-      chatSyncPill: "Google Calendar synchronized",
+      chatSyncPill: "Optional Google Calendar, subject to operational certification",
       row2Eyebrow: "Seating Shifts",
       row2Title: "Double shifts and optimized table turnover",
       row2Desc: "Configure dinner shifts (e.g. 1st shift 7:45 PM, 2nd shift 9:30 PM). If the first is full, Melpis smoothly suggests the second slot so you never lose a guest.",
       row3Eyebrow: "Contextual Intelligence",
       row3Title: "Menus, dietary allergies, and wine lists from PDF",
-      row3Desc: "Upload your PDF menu and allergy list. Melpis answers with pinpoint precision on gluten-free, vegan dishes, and pairings without ever hallucinating.",
+      row3Desc: "Answers about opening hours, price lists and FAQs based on the information you configure. PDF/RAG planned for all plans, subject to security approval and testing.",
       row4Eyebrow: "Zero No-Shows",
       row4Title: "Interactive reminders and calendar synchronization",
-      row4Desc: "Send an automated WhatsApp reminder ahead of service. Guests confirm or cancel with one tap, freeing up tables for waitlisted diners. Everything stays synced to Google Calendar.",
+      row4Desc: "Booking request management. Optional Google Calendar, subject to operational certification.",
       noshowQuote: "“Dear Marco, friendly reminder about your table for 4 tonight at 8:30 PM at Osteria Bella Vista.”",
       noshowConfirm: "Confirm attendance",
       noshowCancel: "Cancel booking",
@@ -68,9 +68,9 @@ const SECTOR_EXTRAS = {
       step1Title: "Connect your WhatsApp",
       step1Desc: "Connect your WhatsApp Business number via the official Meta Cloud API with enterprise security and full compliance.",
       step2Title: "Upload menus, hours, and shifts",
-      step2Desc: "Upload your PDF menu, allergen list, opening hours, and seating preferences. Melpis replies strictly according to these facts.",
+      step2Desc: "Answers about opening hours, price lists and FAQs based on the information you configure. PDF/RAG planned for all plans, subject to security approval and testing.",
       step3Title: "Tables confirm automatically",
-      step3Desc: "Every confirmed table appears straight on your Google Calendar and inside the Melpis Inbox, complete with allergy notes, highchair requests, and seating preferences.",
+      step3Desc: "Booking request management. Optional Google Calendar, subject to operational certification.",
       faqTitle: "Everything you need to know for your restaurant",
       faqItems: [
         {
@@ -79,7 +79,7 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "What happens when a guest asks for specific ingredients or dietary allergies?",
-          a: "Melpis references the uploaded menu PDF and allergen list. For complex requests or custom menu alterations, it logs a note in the reservation and alerts your staff."
+          a: "Answers about opening hours, price lists and FAQs based on the information you configure. PDF/RAG planned for all plans, subject to security approval and testing."
         },
         {
           q: "How does the assistant reduce weekend no-shows?",
@@ -91,11 +91,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "How does the 7-day free trial work for my restaurant?",
-          a: "Sign up with your venue name and email, no credit card required. You get 7 full days to upload menus, test AI responses, and manage real bookings before choosing a plan."
+          a: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
         }
       ],
       finalTitle: "Spend more time on food and hospitality.<br>Let Melpis manage the reservations.",
-      finalSub: "Configure Melpis in a few simple steps and try it free for 7 days without a credit card.",
+      finalSub: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
       finalBtn: "Activate the trial for your restaurant"
     },
     es: {
@@ -108,13 +108,13 @@ const SECTOR_EXTRAS = {
       chatInQuote: "“¡Buenas tardes! ¿Tienen mesa para 4 esta noche sobre las 20:30?”",
       chatOutAuthor: "Melpis para tu local",
       chatOutQuote: "“Mesa para 4 confirmada a las 20:30. He anotado su preferencia por el salón interior.”",
-      chatSyncPill: "Google Calendar sincronizado",
+      chatSyncPill: "Google Calendar opcional, sujeto a certificación operativa",
       row2Eyebrow: "Rotación de Sala",
       row2Title: "Turnos dobles y capacidad optimizada",
       row2Desc: "Configura turnos de noche (ej. 1º turno 19:45, 2º turno 21:30). Si el primero está completo, Melpis propone con naturalidad el segundo slot para no perder comensales.",
       row3Eyebrow: "Inteligencia Contextual",
       row3Title: "Menús, alérgenos y carta de vinos desde PDF",
-      row3Desc: "Sube el PDF de tu carta y la lista de alérgenos. Melpis responde con precisión exacta sobre celiaquía, opciones veganas y maridajes sin improvisar jamás.",
+      row3Desc: "Respuestas sobre horarios, tarifas y preguntas frecuentes con la información que configures. PDF/RAG previsto en todos los planes, sujeto a las pruebas y a la aprobación de seguridad.",
       row4Eyebrow: "Cero No-Shows",
       row4Title: "Recordatorios interactivos y sincronización de agenda",
       row4Desc: "Envía un recordatorio automático por WhatsApp unas horas antes. El comensal confirma o cancela con un toque y la mesa queda libre para la lista de espera.",
@@ -126,9 +126,9 @@ const SECTOR_EXTRAS = {
       step1Title: "Conecta tu WhatsApp",
       step1Desc: "Vincula tu número de WhatsApp Business a través de la API oficial de Meta Cloud con total seguridad y cumplimiento normativo.",
       step2Title: "Sube carta, horarios y turnos",
-      step2Desc: "Carga el PDF de tu menú, alérgenos, horarios de apertura y preferencias de reserva. Melpis responderá única y exclusivamente con estos datos.",
+      step2Desc: "Respuestas sobre horarios, tarifas y preguntas frecuentes con la información que configures. PDF/RAG previsto en todos los planes, sujeto a las pruebas y a la aprobación de seguridad.",
       step3Title: "Las mesas se confirman solas",
-      step3Desc: "Cada reserva confirmada aparece al instante en tu Google Calendar y en la bandeja de Melpis con notas sobre alergias, tronas o preferencias de mesa.",
+      step3Desc: "Gestión de solicitudes de reserva. Google Calendar opcional, sujeto a certificación operativa.",
       faqTitle: "Todo lo que necesitas saber para tu restaurante",
       faqItems: [
         {
@@ -137,7 +137,7 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "¿Qué sucede si un comensal consulta ingredientes o intolerancias complejas?",
-          a: "Melpis responde consultando directamente la carta en PDF y la tabla de alérgenos subida al panel. Si la consulta supera las reglas, añade una nota a la reserva y avisa al equipo."
+          a: "Respuestas sobre horarios, tarifas y preguntas frecuentes con la información que configures. PDF/RAG previsto en todos los planes, sujeto a las pruebas y a la aprobación de seguridad."
         },
         {
           q: "¿De qué forma ayuda el asistente a reducir el no-show en fin de semana?",
@@ -149,11 +149,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "¿Cómo funciona la prueba gratuita de 7 días para mi restaurante?",
-          a: "Regístrate con el nombre de tu restaurante y tu email, sin tarjeta de crédito. Tienes 7 días completos para subir tu menú y probar el servicio antes de decidir si continúas."
+          a: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción."
         }
       ],
       finalTitle: "Dedica más tiempo a la cocina y a la sala.<br>De las reservas se encarga Melpis.",
-      finalSub: "Configura Melpis en pocos pasos y pruébalo gratis durante 7 días sin tarjeta de crédito.",
+      finalSub: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción.",
       finalBtn: "Activar la prueba para tu restaurante"
     },
     fr: {
@@ -166,13 +166,13 @@ const SECTOR_EXTRAS = {
       chatInQuote: "“Bonsoir ! Avez-vous une table pour 4 ce soir vers 20h30 ?”",
       chatOutAuthor: "Melpis pour votre établissement",
       chatOutQuote: "“Table pour 4 confirmée à 20h30. J'ai noté votre préférence pour la salle intérieure.”",
-      chatSyncPill: "Google Calendar synchronisé",
+      chatSyncPill: "Google Calendar facultatif, sous réserve de certification opérationnelle",
       row2Eyebrow: "Gestion des Services",
       row2Title: "Double service et capacité optimisée",
       row2Desc: "Paramétrez vos services du soir (ex. 1er service à 19h45, 2nd service à 21h30). Si le premier est complet, Melpis oriente le client avec courtoisie vers le second créneau.",
       row3Eyebrow: "Intelligence Contextuelle",
       row3Title: "Menus, allergènes et carte des vins via PDF",
-      row3Desc: "Importez le PDF de votre carte et vos allergènes. Melpis répond au détail près sur les intolérances au gluten, les plats végétariens et les suggestions sans jamais improviser.",
+      row3Desc: "Réponses sur les horaires, les tarifs et les questions fréquentes à partir des informations que vous configurez. PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité.",
       row4Eyebrow: "Zéro No-Show",
       row4Title: "Rappels interactifs et synchronisation d'agenda",
       row4Desc: "Envoyez un rappel WhatsApp automatique avant le service. Le client valide ou annule en un clic, ce qui libère immédiatement la table pour votre liste d'attente.",
@@ -184,9 +184,9 @@ const SECTOR_EXTRAS = {
       step1Title: "Connectez votre WhatsApp",
       step1Desc: "Reliez votre numéro WhatsApp Business via l'API officielle Meta Cloud en toute sécurité et conformément aux exigences de conformité.",
       step2Title: "Importez menus, horaires et services",
-      step2Desc: "Téléversez le PDF de votre carte, vos allergènes et vos horaires. Melpis répondra exclusivement sur la base de ces documents officiels.",
+      step2Desc: "Réponses sur les horaires, les tarifs et les questions fréquentes à partir des informations que vous configurez. PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité.",
       step3Title: "Les tables se confirment toutes seules",
-      step3Desc: "Chaque réservation confirmée s'inscrit en direct sur votre Google Calendar et dans la boîte Melpis avec les mentions utiles (allergies, chaise bébé, etc.).",
+      step3Desc: "Gestion des demandes de réservation. Google Calendar facultatif, sous réserve de certification opérationnelle.",
       faqTitle: "Tout ce que vous devez savoir pour votre restaurant",
       faqItems: [
         {
@@ -195,7 +195,7 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Que se passe-t-il si un client signale des allergies ou demande des plats sur mesure ?",
-          a: "Melpis s'appuie directement sur votre carte PDF et la liste des allergènes. En cas de demande complexe ou non prévue, l'assistant ajoute une mention et prévient votre personnel."
+          a: "Réponses sur les horaires, les tarifs et les questions fréquentes à partir des informations que vous configurez. PDF/RAG prévu dans toutes les offres, sous réserve des tests et de l’approbation de sécurité."
         },
         {
           q: "De quelle manière l'assistant prévient-il les no-shows du week-end ?",
@@ -207,11 +207,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Comment se déroule l'essai gratuit de 7 jours pour mon restaurant ?",
-          a: "Inscrivez-vous avec le nom de votre établissement et votre e-mail, sans carte bancaire. Vous bénéficiez de 7 jours complets pour tester les réponses et les réservations."
+          a: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement."
         }
       ],
       finalTitle: "Consacrez plus de temps à la cuisine et au service.<br>Melpis gère les réservations.",
-      finalSub: "Configurez Melpis en quelques étapes et testez-le gratuitement pendant 7 jours sans carte bancaire.",
+      finalSub: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
       finalBtn: "Activer l'essai pour votre restaurant"
     },
     de: {
@@ -224,13 +224,13 @@ const SECTOR_EXTRAS = {
       chatInQuote: "“Guten Abend! Haben Sie heute Abend gegen 20:30 Uhr einen Tisch für 4?”",
       chatOutAuthor: "Melpis für Ihren Betrieb",
       chatOutQuote: "“Tisch für 4 um 20:30 Uhr bestätigt. Ihr Wunsch nach Innenbereich ist vermerkt.”",
-      chatSyncPill: "Google Calendar synchronisiert",
+      chatSyncPill: "Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung",
       row2Eyebrow: "Schichtverwaltung",
       row2Title: "Zwei Schichten und optimale Auslastung",
       row2Desc: "Richten Sie Abendschichten ein (z. B. 1. Schicht 19:45 Uhr, 2. Schicht 21:30 Uhr). Ist die erste belegt, schlägt Melpis höflich den zweiten Termin vor.",
       row3Eyebrow: "Kontextuelle Intelligenz",
       row3Title: "Speisekarten, Allergene und Weinauswahl aus PDF",
-      row3Desc: "Laden Sie Ihre Menü-PDF und Allergenliste hoch. Melpis antwortet präzise zu glutenfreien Gerichten, veganen Optionen und Empfehlungen, ohne jemals zu halluzinieren.",
+      row3Desc: "Antworten zu Öffnungszeiten, Preislisten und häufigen Fragen anhand Ihrer Angaben. PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests.",
       row4Eyebrow: "Keine No-Shows",
       row4Title: "Interaktive Terminerinnerungen und Kalendersynchronisation",
       row4Desc: "Versenden Sie automatische WhatsApp-Erinnerungen vor dem Service. Gäste bestätigen oder stornieren mit einem Fingertipp – so wird der Tisch sofort wieder frei.",
@@ -244,7 +244,7 @@ const SECTOR_EXTRAS = {
       step2Title: "Speisekarte, Zeiten &amp; Schichten hochladen",
       step2Desc: "Laden Sie Speisekarte, Allergene und Öffnungszeiten hoch. Melpis antwortet ausschließlich auf Grundlage dieser verifizierten Unterlagen.",
       step3Title: "Tische bestätigen sich automatisch",
-      step3Desc: "Jede bestätigte Reservierung erscheint direkt in Ihrem Google Calendar und im Melpis-Posteingang, inklusive Hinweisen zu Unverträglichkeiten oder Kinderstühlen.",
+      step3Desc: "Verwaltung von Buchungsanfragen. Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung.",
       faqTitle: "Alles Wissenswerte für Ihren Gastronomiebetrieb",
       faqItems: [
         {
@@ -253,7 +253,7 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Was passiert, wenn Gäste nach Allergenen oder Zutaten fragen?",
-          a: "Melpis greift direkt auf Ihre hochgeladene Menü-PDF und Allergentabelle zu. Bei komplexen Sonderwünschen vermerkt der Assistent dies und leitet an Ihr Personal weiter."
+          a: "Antworten zu Öffnungszeiten, Preislisten und häufigen Fragen anhand Ihrer Angaben. PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests."
         },
         {
           q: "Wie hilft Melpis, No-Shows am Wochenende zu reduzieren?",
@@ -265,11 +265,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Wie läuft die 7-tägige kostenlose Testphase für meinen Betrieb ab?",
-          a: "Registrieren Sie sich einfach mit Ihrem Betriebsnamen und E-Mail ohne Kreditkarte. Sie haben 7 Tage lang vollen Zugriff, um das System live zu testen."
+          a: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
         }
       ],
       finalTitle: "Konzentrieren Sie sich auf Küche und Gäste.<br>Die Reservierungen regelt Melpis.",
-      finalSub: "Richten Sie Melpis in wenigen Schritten ein und testen Sie es 7 Tage kostenlos ohne Kreditkarte.",
+      finalSub: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
       finalBtn: "Testphase für Ihren Betrieb starten"
     }
   },
@@ -283,7 +283,7 @@ const SECTOR_EXTRAS = {
       step2Title: "Upload treatment list &amp; staff hours",
       step2Desc: "Add treatments, individual operator schedules, and service durations for seamless automated bookings.",
       step3Title: "Appointments book themselves",
-      step3Desc: "Clients book appointments directly into Google Calendar while you focus on the client in the styling chair.",
+      step3Desc: "Booking request management. Optional Google Calendar, subject to operational certification.",
       faqTitle: "Everything you need to know for your salon",
       faqItems: [
         {
@@ -300,15 +300,15 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Can I manage emergency block-outs or staff sick leave?",
-          a: "Yes. Blocking hours in Google Calendar or toggling unavailability in the dashboard instantly updates the assistant's booking slots."
+          a: "Booking request management. Optional Google Calendar, subject to operational certification."
         },
         {
           q: "How does the 7-day free trial work for beauty salons?",
-          a: "Sign up in 2 minutes without a credit card. You can configure your services, staff, and test bookings immediately for 7 days."
+          a: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
         }
       ],
       finalTitle: "More focus on your salon clients.<br>Let Melpis manage your appointments.",
-      finalSub: "Configure Melpis in a few steps and test it free for 7 days without a credit card.",
+      finalSub: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
       finalBtn: "Activate the trial for your salon"
     },
     es: {
@@ -320,7 +320,7 @@ const SECTOR_EXTRAS = {
       step2Title: "Sube servicios, tarifas y estilistas",
       step2Desc: "Añade tratamientos, turnos por profesional y duraciones para una gestión de citas impecable.",
       step3Title: "Las citas se agendan solas",
-      step3Desc: "Los clientes reservan directamente en Google Calendar mientras tú atiendes sin distracciones a tus clientes en el salón.",
+      step3Desc: "Gestión de solicitudes de reserva. Google Calendar opcional, sujeto a certificación operativa.",
       faqTitle: "Todo lo que necesitas saber para tu salón",
       faqItems: [
         {
@@ -337,15 +337,15 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "¿Puedo bloquear franjas horarias por descansos o imprevistos?",
-          a: "Sí. Cualquier bloqueo que añadas en Google Calendar o en el panel actualiza al instante las horas disponibles del asistente."
+          a: "Gestión de solicitudes de reserva. Google Calendar opcional, sujeto a certificación operativa."
         },
         {
           q: "¿Cómo funciona la prueba gratuita de 7 días para salones?",
-          a: "Empieza en 2 minutos sin tarjeta de crédito. Tienes 7 días para configurar tu carta de servicios y comprobar el ahorro de tiempo."
+          a: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción."
         }
       ],
       finalTitle: "Más atención a tus clientes en el salón.<br>De las citas se encarga Melpis.",
-      finalSub: "Configura Melpis en pocos pasos y pruébalo gratis durante 7 días sin tarjeta de crédito.",
+      finalSub: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción.",
       finalBtn: "Activar la prueba para tu salón"
     },
     fr: {
@@ -357,7 +357,7 @@ const SECTOR_EXTRAS = {
       step2Title: "Renseignez soins, tarifs et collaborateurs",
       step2Desc: "Indiquez les prestations, la durée des soins et les plannings par collaborateur pour automatiser les prises de rendez-vous.",
       step3Title: "Les rendez-vous se réservent tout seuls",
-      step3Desc: "Les clients planifient directement dans Google Calendar pendant que vous vous consacrez pleinement à vos prestations.",
+      step3Desc: "Gestion des demandes de réservation. Google Calendar facultatif, sous réserve de certification opérationnelle.",
       faqTitle: "Tout ce que vous devez savoir pour votre salon",
       faqItems: [
         {
@@ -374,15 +374,15 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Est-il possible de bloquer des créneaux en cas d'absence imprévue ?",
-          a: "Oui. Tout événement bloqué dans Google Calendar ou dans le tableau de bord actualise instantanément les créneaux proposés."
+          a: "Gestion des demandes de réservation. Google Calendar facultatif, sous réserve de certification opérationnelle."
         },
         {
           q: "Comment se déroule l'essai gratuit de 7 jours pour les salons ?",
-          a: "Lancez votre essai en 2 minutes sans carte bancaire. Vous disposez de 7 jours complets pour tester la réservation automatisée."
+          a: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement."
         }
       ],
       finalTitle: "Plus d'attention pour vos clients au salon.<br>Melpis s'occupe de vos rendez-vous.",
-      finalSub: "Configurez Melpis en quelques étapes et testez-le gratuitement pendant 7 jours sans carte bancaire.",
+      finalSub: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
       finalBtn: "Activer l'essai pour votre salon"
     },
     de: {
@@ -394,7 +394,7 @@ const SECTOR_EXTRAS = {
       step2Title: "Leistungen, Preise &amp; Mitarbeiter hinterlegen",
       step2Desc: "Tragen Sie Behandlungen, Behandlungsdauern und Arbeitszeiten Ihrer Mitarbeiter für nahtlose Buchungen ein.",
       step3Title: "Termine buchen sich von selbst",
-      step3Desc: "Kunden buchen freie Zeiten direkt in Google Calendar, während Sie sich ganz auf den Kunden im Stuhl konzentrieren.",
+      step3Desc: "Verwaltung von Buchungsanfragen. Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung.",
       faqTitle: "Alles Wissenswerte für Ihren Salon",
       faqItems: [
         {
@@ -411,15 +411,15 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Können Pausen oder spontane Ausfälle blockiert werden?",
-          a: "Ja. Jeder in Google Calendar eingetragene Blocker wird in Echtzeit von Melpis für Buchungen gesperrt."
+          a: "Verwaltung von Buchungsanfragen. Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung."
         },
         {
           q: "Wie funktioniert die 7-tägige Testphase für Salons?",
-          a: "Starten Sie in 2 Minuten ohne Kreditkarte. Sie können 7 Tage lang Ihre Leistungen hinterlegen und Kundenchats testen."
+          a: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
         }
       ],
       finalTitle: "Mehr Zeit für Ihre Kunden im Salon.<br>Die Terminvergabe regelt Melpis.",
-      finalSub: "Richten Sie Melpis in wenigen Schritten ein und testen Sie es 7 Tage kostenlos ohne Kreditkarte.",
+      finalSub: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
       finalBtn: "Testphase für Ihren Salon starten"
     }
   },
@@ -454,11 +454,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "How does the 7-day free trial work for medical practices?",
-          a: "Register with your clinic name and email without a credit card. Test pre-visit triage and patient messaging for 7 full days."
+          a: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
         }
       ],
       finalTitle: "More time dedicated to patient care.<br>Let Melpis manage front-desk communications.",
-      finalSub: "Configure Melpis in a few steps and test it free for 7 days without a credit card.",
+      finalSub: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
       finalBtn: "Activate the trial for your clinic"
     },
     es: {
@@ -491,11 +491,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "¿Cómo funciona la prueba gratuita de 7 días para centros médicos?",
-          a: "Date de alta con el nombre de tu clínica y tu email sin tarjeta de crédito. Prueba el triaje y la gestión de citas durante 7 días."
+          a: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción."
         }
       ],
       finalTitle: "Más tiempo para el cuidado de tus pacientes.<br>De la secretaría se encarga Melpis.",
-      finalSub: "Configura Melpis en pocos pasos y pruébalo gratis durante 7 días sin tarjeta de crédito.",
+      finalSub: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción.",
       finalBtn: "Activar la prueba para tu clínica"
     },
     fr: {
@@ -528,11 +528,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Comment se déroule l'essai gratuit de 7 jours pour les cabinets médicaux ?",
-          a: "Inscrivez-vous avec le nom de votre structure et votre e-mail, sans carte bancaire. Testez l'accueil patient pendant 7 jours."
+          a: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement."
         }
       ],
       finalTitle: "Plus de temps pour soigner vos patients.<br>Melpis prend en charge le secrétariat.",
-      finalSub: "Configurez Melpis en quelques étapes et testez-le gratuitement pendant 7 jours sans carte bancaire.",
+      finalSub: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
       finalBtn: "Activer l'essai pour votre cabinet"
     },
     de: {
@@ -565,11 +565,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Wie funktioniert die 7-tägige Testphase für Arztpraxen?",
-          a: "Melden Sie sich mit Praxisnamen und E-Mail ohne Kreditkarte an. Testen Sie den Patientenempfang 7 Tage lang unverbindlich."
+          a: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
         }
       ],
       finalTitle: "Mehr Zeit für die Behandlung Ihrer Patienten.<br>Den Telefonservice übernimmt Melpis.",
-      finalSub: "Richten Sie Melpis in wenigen Schritten ein und testen Sie es 7 Tage kostenlos ohne Kreditkarte.",
+      finalSub: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
       finalBtn: "Testphase für Ihre Praxis starten"
     }
   },
@@ -604,11 +604,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "How does the 7-day free trial work for hospitality businesses?",
-          a: "Get started in minutes with no credit card required. Upload your hotel guide and test the concierge live for 7 days."
+          a: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
         }
       ],
       finalTitle: "Elevate every guest experience.<br>Let Melpis power your WhatsApp concierge.",
-      finalSub: "Configure Melpis in a few steps and test it free for 7 days without a credit card.",
+      finalSub: "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
       finalBtn: "Activate the trial for your hotel"
     },
     es: {
@@ -641,11 +641,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "¿Cómo funciona la prueba gratuita de 7 días para hoteles?",
-          a: "Comienza en pocos minutos sin tarjeta de crédito. Sube la información de tu hotel y prueba el conserje virtual 7 días."
+          a: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción."
         }
       ],
       finalTitle: "Mejora la experiencia de cada viajero.<br>Del conserje en WhatsApp se encarga Melpis.",
-      finalSub: "Configura Melpis en pocos pasos y pruébalo gratis durante 7 días sin tarjeta de crédito.",
+      finalSub: "Prueba gratuita de hasta 7 días o 150 respuestas de IA, lo que ocurra primero. No se requiere tarjeta de crédito. Los cargos requieren la aceptación expresa de una suscripción.",
       finalBtn: "Activar la prueba para tu hotel"
     },
     fr: {
@@ -678,11 +678,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Comment se déroule l'essai gratuit de 7 jours pour l'hôtellerie ?",
-          a: "Démarrez en quelques minutes sans carte bancaire. Téléversez votre guide d'accueil et testez la conciergerie pendant 7 jours."
+          a: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement."
         }
       ],
       finalTitle: "Sublimez le séjour de chaque voyageur.<br>Melpis assure votre conciergerie WhatsApp.",
-      finalSub: "Configurez Melpis en quelques étapes et testez-le gratuitement pendant 7 jours sans carte bancaire.",
+      finalSub: "Essai gratuit de 7 jours ou 150 réponses IA au maximum, selon la première limite atteinte. Aucune carte bancaire requise. Tout paiement exige une adhésion explicite à un abonnement.",
       finalBtn: "Activer l'essai pour votre hôtel"
     },
     de: {
@@ -715,11 +715,11 @@ const SECTOR_EXTRAS = {
         },
         {
           q: "Wie funktioniert die 7-tägige Testphase für Hotels?",
-          a: "Starten Sie in wenigen Schritten ohne Kreditkarte. Hinterlegen Sie Ihre Hoteldaten und testen Sie den Concierge 7 Tage lang."
+          a: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
         }
       ],
       finalTitle: "Begeistern Sie jeden Gast ab der ersten Sekunde.<br>Den WhatsApp-Concierge übernimmt Melpis.",
-      finalSub: "Richten Sie Melpis in wenigen Schritten ein und testen Sie es 7 Tage kostenlos ohne Kreditkarte.",
+      finalSub: "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
       finalBtn: "Testphase für Ihr Hotel starten"
     }
   }

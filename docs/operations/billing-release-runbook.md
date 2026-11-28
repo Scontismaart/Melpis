@@ -2,7 +2,7 @@
 
 ## V1 mensile e trial
 
-Piani Essenziale/Crescita/Scala: 29/69/149 EUR al mese. `STRIPE_ANNUAL_PRICING_ENABLED=false` è richiesto nel profilo `commercial_bootstrap`; startup guard e preflight bloccano l'annuale. Il client mostra solo il mensile se la configurazione pubblica non conferma il flag. Un'offerta annuale futura richiede una modifica esplicita revisionata.
+Piani Essenziale/Crescita/Scala a 29/69/149 EUR al mese. Il checkout applicativo V1 accetta esclusivamente il mensile. `STRIPE_ANNUAL_PRICING_ENABLED=false` resta richiesto nel profilo `commercial_bootstrap`. Gli identificativi annuali restano disponibili per il riconoscimento storico. La certificazione del catalogo del portale Stripe rientra nella #99.
 
 Il trial applicativo termina dopo sette giorni o 150 risposte, al primo limite. Non richiede carta per iniziare, non viene ricreato dai webhook e non si converte implicitamente a pagamento. La quota commerciale delle risposte è distinta dai tentativi provider. A04 è collegata a tutte le risposte AI finali inbound instradate da `InboundProcessingService`, inclusi WhatsApp e Instagram, oltre a simulatore autenticato e Q&A documentale; ogni risposta accettata viene persistita una sola volta con il contatore commerciale. Preview, bozze recensioni, invii manuali, handoff deterministici/manuali prima della generazione e automazioni deterministiche restano fuori dal conteggio A04. Una risposta cliente valida effettivamente generata dall'AI resta conteggiata anche se `richiede_umano=true` attiva un follow-up umano.
 

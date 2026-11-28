@@ -456,6 +456,7 @@ class TestProvisioningPrimoAccesso:
         )
 
     async def test_primo_accesso_provisiona_org_con_trial_7(self, oauth_client, monkeypatch):
+        monkeypatch.setenv("TRIAL_DAYS", "30")
         resp = await self._do_callback(oauth_client, monkeypatch)
         assert resp.status_code == 302
         repo = _get_repo(oauth_client._transport.app)

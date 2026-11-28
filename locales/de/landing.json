@@ -1,11 +1,11 @@
 {
   "page_title": "Melpis · KI-WhatsApp-Assistent für Unternehmen | 7 Tage Testphase",
-  "meta_description": "Aktivieren Sie den KI-WhatsApp-Assistenten für Ihren Betrieb: 24/7-Kundenantworten, Termine in Google Calendar und Bewertungsmanagement. 7 Tage kostenlos.",
+  "meta_description": "KI-Assistent für WhatsApp Business. Kundenanfragen beantworten, Buchungsanfragen bearbeiten und an das Team übergeben. Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement.",
   "hero": {
     "badge": "Offizielle Meta Cloud API Infrastruktur",
     "title_part1": "Der KI-WhatsApp-Assistent, der",
     "title_highlight": "Anfragen in zahlende Kunden verwandelt",
-    "subtitle": "Antwortet in Echtzeit rund um die Uhr, trägt Termine zuverlässig in Google Calendar ein und benachrichtigt Ihr Team, sobald persönliche Betreuung nötig ist.",
+    "subtitle": "KI-Assistent für WhatsApp Business. Kundenanfragen beantworten, Buchungsanfragen bearbeiten und an das Team übergeben.",
     "cta_primary": "7 Tage kostenlos testen",
     "cta_secondary": "Funktionsweise entdecken",
     "no_card_required": "Keine Kreditkarte erforderlich",
@@ -26,19 +26,19 @@
     "section_title": "Alles, was Sie brauchen, um keinen einzigen Kunden auf WhatsApp zu verpassen",
     "f1": {
       "title": "Präzise und empathische Antworten auf Basis Ihrer Unternehmensdaten",
-      "desc": "Laden Sie Dokumente, Öffnungszeiten, Preislisten und Konditionen hoch: Melpis antwortet exakt und verlässlich, ohne zu fabulieren."
+      "desc": "Antworten zu Öffnungszeiten, Preislisten und häufigen Fragen anhand Ihrer Angaben. PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests"
     },
     "f2": {
-      "title": "Zuverlässige Terminsynchronisierung mit Google Calendar",
-      "desc": "Prüft Live-Verfügbarkeiten, bucht freie Zeitfenster und sendet Bestätigungen sowie Terminerinnerungen automatisch an Ihre Kunden."
+      "title": "Verwaltung von Buchungsanfragen",
+      "desc": "Google Calendar optional, vorbehaltlich der betrieblichen Zertifizierung"
     },
     "f3": {
       "title": "Gemeinsamer Posteingang und nahtlose Team-Übernahme",
       "desc": "Sobald eine Anfrage persönliche Aufmerksamkeit erfordert, kann Ihr Team direkt über die Web-Oberfläche die Unterhaltung übernehmen."
     },
     "f4": {
-      "title": "Bewertungsmanagement und Kundenzufriedenheit",
-      "desc": "Holen Sie ehrliches Feedback ein und leiten Sie begeisterte Kunden unkompliziert zu einer 5-Sterne-Bewertung auf Google Maps weiter."
+      "title": "Antwortentwürfe mit menschlicher Prüfung",
+      "desc": "Antwortentwürfe mit menschlicher Prüfung"
     }
   },
   "how_it_works": {
@@ -74,7 +74,7 @@
       },
       {
         "q": "Was passiert, wenn der Assistent eine Information nicht weiß oder die Anfrage komplex ist?",
-        "a": "Melpis antwortet streng auf Grundlage der hinterlegten Dokumente und Vorgaben. Sind Informationen nicht vorhanden oder erfordern Sonderabsprachen, improvisiert der Assistent nicht: Er informiert den Kunden freundlich und leitet die Nachricht an den Posteingang Ihres Teams weiter."
+        "a": "Antworten zu Öffnungszeiten, Preislisten und häufigen Fragen anhand Ihrer Angaben. PDF/RAG für alle Tarife vorgesehen, vorbehaltlich Sicherheitsfreigabe und Abnahmetests"
       },
       {
         "q": "Wie viel Zeit nimmt die Ersteinrichtung in Anspruch?",
@@ -82,7 +82,7 @@
       },
       {
         "q": "Wie funktioniert die kostenlose 7-tägige Testphase?",
-        "a": "Die Testphase endet nach 7 Tagen oder 150 KI-Nachrichten, je nachdem, was zuerst eintritt. Eine Kreditkarte ist nicht erforderlich und es gibt keine automatische Verlängerung. Nach Erreichen des Nachrichtenlimits stoppt die KI und Anfragen werden an einen Mitarbeiter übergeben."
+        "a": "Kostenloser Test bis zu 7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird. Eine Kreditkarte ist nicht erforderlich. Kosten entstehen erst nach ausdrücklicher Zustimmung zu einem Abonnement."
       },
       {
         "q": "Sind Kundendaten geschützt und entspricht das System der DSGVO?",

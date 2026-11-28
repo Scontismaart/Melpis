@@ -12,6 +12,7 @@ from fastapi import Depends, Header, HTTPException, Request
 
 from src.core.auth.denylist import is_token_revoked
 from src.core.auth.signup_policy import beta_email_is_allowed
+from src.core.billing.plans import TRIAL_DAYS
 
 # Firme JWT emesse da Supabase Auth: i progetti con le chiavi di firma
 # asimmetriche (default 2025+) usano ES256, i piu' vecchi RS256. L'alg e'
@@ -323,11 +324,10 @@ async def get_organization_context(
         try:
             email = current_user.get("email") or "La tua attività"
             nome_org = email.split("@")[0].replace(".", " ").title() if "@" in email else email
-            trial_days = int(os.getenv("TRIAL_DAYS", "7"))
             await repo.get_or_create_organization_with_owner(
                 str(current_user["auth_user_id"]),
                 nome_org,
-                trial_days,
+                TRIAL_DAYS,
             )
             memberships = await repo.get_memberships_by_auth(current_user["auth_user_id"])
         except Exception:

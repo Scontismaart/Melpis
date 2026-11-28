@@ -44,7 +44,7 @@
     "title_airtable": "Airtable"
   },
   "kpi": {
-    "total_received": "messaggi ricevuti oggi",
+    "total_received": "eventi ricevuti oggi",
     "handled_by_ai": "gestiti dall'assistente",
     "escalated_human": "girati allo staff",
     "bookings_created": "prenotazioni fissate",
@@ -53,7 +53,7 @@
     "trend_negative": "In calo rispetto a ieri",
     "sparkline_caption": "Ultimi 7 giorni",
     "sparkline_unit": "sett.",
-    "total_received_aria": "Dettagli messaggi ricevuti",
+    "total_received_aria": "Dettagli eventi ricevuti",
     "trend_none": "Nessuna escalation",
     "ai_details_aria": "Dettagli gestiti AI",
     "human_details_aria": "Dettagli girati a umano"
@@ -67,7 +67,7 @@
     "recent_activity": "Attività recente",
     "view_all": "Visualizza tutte",
     "reports_title": "Report e andamento",
-    "messages_chart_title": "Messaggi: andamento ultimi 7 giorni",
+    "messages_chart_title": "Eventi degli ultimi 7 giorni",
     "received": "Ricevuti",
     "handled_by_ai": "Gestiti da AI",
     "key_insights": "Insights principali",
@@ -82,7 +82,7 @@
     "regenerate": "Rigenera",
     "regenerate_aria": "Rigenera report",
     "empty_report": "Nessun report ancora generato per oggi.",
-    "chart_aria": "Andamento dei messaggi",
+    "chart_aria": "Andamento degli eventi",
     "insights_aria": "Insight principali",
     "runtime": {
       "error_title": "Qualcosa è andato storto",
@@ -289,7 +289,7 @@
     "runtime": {
       "load_error": "Impossibile caricare i membri del team: {{detail}}",
       "member_count": "{{count}} membri",
-      "unlimited_accounts": "{{count}} account attivi (illimitati)",
+      "unlimited_accounts": "{{count}} account attivi, senza limite numerico di piano",
       "essential_account": "1 / 1 account (Piano Essenziale - Solo titolare)",
       "account_capacity": "{{used}} / {{limit}} account ({{operators}} di {{max}} collaboratori)",
       "plan_essential": "Essenziale",
@@ -298,7 +298,8 @@
       "essential_limit_title": "Il piano Essenziale non include collaboratori aggiuntivi",
       "limit_title": "Limite massimo collaboratori raggiunto per il piano corrente",
       "essential_limit_banner": "Il piano Essenziale include solo il titolare",
-      "limit_banner": "Limite account raggiunto ({{used}}/{{limit}})"
+      "limit_banner": "Limite account raggiunto ({{used}}/{{limit}})",
+      "seat_entitlement_unavailable": "Disponibilità del piano non verificata."
     }
   },
   "reviews": {
@@ -589,5 +590,16 @@
     "end_time": "Fine",
     "midnight_end": "La mezzanotte indica la fine della giornata.",
     "example_warning": "Verifica durate, risorse e capacità prima di salvare. Gli esempi sono soltanto dimostrativi."
+  },
+  "account_usage": {
+    "definition": "La quota conta le risposte AI valide salvate. Messaggi ricevuti, conversazioni, operazioni manuali, tentativi del provider e token sono metriche distinte.",
+    "unavailable": "Consumo AI al momento non disponibile.",
+    "trial": "{{used}} / {{limit}} risposte AI conteggiate nella prova.",
+    "period": "{{used}} / {{limit}} risposte AI conteggiate nel periodo corrente.",
+    "exhausted": "Quota esaurita. Le operazioni manuali autorizzate restano disponibili.",
+    "trial_quota_reached": "Prova conclusa per raggiungimento della quota.",
+    "trial_ends": "Scadenza della prova il {{date}} o al raggiungimento della quota.",
+    "trial_ended": "Prova conclusa.",
+    "period_ends": "Fine del periodo corrente il {{date}}."
   }
 }

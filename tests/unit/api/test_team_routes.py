@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -70,16 +71,23 @@ def test_get_team_members_unauthorized(client):
     assert resp.status_code == 401
 
 
-def test_get_team_members_trial_pro_limits(client):
+@pytest.mark.parametrize("status,plan,limit,can_add", [
+    ("trialing", None, 3, True),
+    ("active", "business", None, True),
+    ("active", "unknown", None, False),
+    (None, "pro", None, False),
+])
+def test_get_team_members_preserves_access_and_requires_verified_seat_entitlement(client, status, plan, limit, can_add):
     test_org_id = str(uuid.uuid4())
     test_user_id = str(uuid.uuid4())
 
     mock_conn = MockConnection(
         fetchrow_data={
-            "SELECT plan, users_limit, subscription_status FROM organizations": {
-                "plan": None,
+            "SELECT plan, users_limit, subscription_status, trial_end FROM organizations": {
+                "plan": plan,
                 "users_limit": None,
-                "subscription_status": "trialing",
+                "subscription_status": status,
+                "trial_end": datetime.now(timezone.utc) + timedelta(days=1) if status == "trialing" else None,
             }
         },
         fetch_data=[
@@ -107,8 +115,8 @@ def test_get_team_members_trial_pro_limits(client):
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
-        assert data["users_limit"] == 3  # In trial defaults to Pro = 3!
-        assert data["can_add_more"] is True
+        assert data["users_limit"] == limit
+        assert data["can_add_more"] is can_add
         assert len(data["members"]) == 1
         assert data["members"][0]["email"] == "owner@azienda.it"
     finally:

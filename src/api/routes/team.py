@@ -17,8 +17,7 @@ from pydantic import BaseModel, field_validator
 from src.api.dependencies import get_pool, require_ruolo
 from src.api.routes.common import audit_event
 from src.core.auth.dependencies import get_current_user, get_token
-from src.core.billing.plans import PLANS
-from src.core.team_invitations import accept_invitation, create_invitation
+from src.core.team_invitations import accept_invitation, create_invitation, team_seat_entitlement
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +74,10 @@ async def list_team_members(
 
     async with pool.acquire() as conn:
         org_row = await conn.fetchrow(
-            "SELECT plan, users_limit, subscription_status FROM organizations WHERE id = $1::uuid",
+            "SELECT plan, users_limit, subscription_status, trial_end FROM organizations WHERE id = $1::uuid",
             uuid.UUID(org_id),
         )
-        plan = org_row["plan"] if org_row else None
-        # Se non c'è un piano o l'organizzazione è in prova gratuita, applichiamo il tier 'pro' (3 utenti)
-        effective_plan = plan or "pro"
-        plan_def = PLANS.get(effective_plan)
-        if org_row and org_row["users_limit"] is not None:
-            users_limit = org_row["users_limit"]
-        elif plan_def:
-            users_limit = plan_def.users_limit
-        else:
-            users_limit = 3
+        can_add, users_limit = team_seat_entitlement(org_row)
 
         rows = await conn.fetch("""
             SELECT om.id, om.user_id, up.nome, up.email, om.ruolo, om.joined_at
@@ -113,7 +103,7 @@ async def list_team_members(
         for r in rows
     ]
     total = len(members)
-    can_add_more = (users_limit is None) or (total < users_limit)
+    can_add_more = can_add and (users_limit is None or total < users_limit)
 
     return TeamListResponse(
         members=members,

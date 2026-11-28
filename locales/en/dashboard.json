@@ -44,7 +44,7 @@
     "title_airtable": "Airtable"
   },
   "kpi": {
-    "total_received": "messages received today",
+    "total_received": "events received today",
     "handled_by_ai": "handled by AI assistant",
     "escalated_human": "routed to team",
     "bookings_created": "confirmed bookings",
@@ -53,7 +53,7 @@
     "trend_negative": "Down compared to yesterday",
     "sparkline_caption": "Last 7 days",
     "sparkline_unit": "wk.",
-    "total_received_aria": "Message details",
+    "total_received_aria": "Received event details",
     "trend_none": "No escalations",
     "ai_details_aria": "AI handled details",
     "human_details_aria": "Human handoff details"
@@ -67,7 +67,7 @@
     "recent_activity": "Recent activity",
     "view_all": "View all",
     "reports_title": "Reports and trends",
-    "messages_chart_title": "Messages: last 7 days",
+    "messages_chart_title": "Events over the last 7 days",
     "received": "Received",
     "handled_by_ai": "Handled by AI",
     "key_insights": "Key insights",
@@ -82,7 +82,7 @@
     "regenerate": "Regenerate",
     "regenerate_aria": "Regenerate report",
     "empty_report": "No report has been generated for today yet.",
-    "chart_aria": "Message activity",
+    "chart_aria": "Event activity",
     "insights_aria": "Key insights",
     "runtime": {
       "error_title": "Something went wrong",
@@ -289,7 +289,7 @@
     "runtime": {
       "load_error": "Unable to load team members: {{detail}}",
       "member_count": "{{count}} members",
-      "unlimited_accounts": "{{count}} active accounts (unlimited)",
+      "unlimited_accounts": "{{count}} active accounts, with no plan seat limit",
       "essential_account": "1 / 1 account (Essential plan - Owner only)",
       "account_capacity": "{{used}} / {{limit}} accounts ({{operators}} of {{max}} team members)",
       "plan_essential": "Essential",
@@ -298,7 +298,8 @@
       "essential_limit_title": "The Essential plan does not include additional team members",
       "limit_title": "The current plan's team member limit has been reached",
       "essential_limit_banner": "The Essential plan includes the owner only",
-      "limit_banner": "Account limit reached ({{used}}/{{limit}})"
+      "limit_banner": "Account limit reached ({{used}}/{{limit}})",
+      "seat_entitlement_unavailable": "Plan entitlement could not be verified."
     }
   },
   "reviews": {
@@ -589,5 +590,16 @@
     "end_time": "End",
     "midnight_end": "Midnight marks the end of the day.",
     "example_warning": "Check durations, resources and capacity before saving. Examples are illustrative only."
+  },
+  "account_usage": {
+    "definition": "The allowance counts valid saved AI replies. Incoming messages, conversations, manual actions, provider attempts and tokens are separate metrics.",
+    "unavailable": "AI usage is currently unavailable.",
+    "trial": "{{used}} / {{limit}} AI replies counted during the trial.",
+    "period": "{{used}} / {{limit}} AI replies counted in the current period.",
+    "exhausted": "Allowance reached. Authorized manual actions remain available.",
+    "trial_quota_reached": "The trial ended because its allowance was reached.",
+    "trial_ends": "The trial ends on {{date}} or when its allowance is reached.",
+    "trial_ended": "The trial has ended.",
+    "period_ends": "The current period ends on {{date}}."
   }
 }

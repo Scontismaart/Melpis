@@ -16,6 +16,13 @@ const legacyPages = [
 const legalPages = ['/privacy/', '/termini/', '/cookie/', '/en/privacy/', '/en/terms/', '/en/cookies/',
   '/es/privacidad/', '/es/terminos/', '/es/cookies/', '/fr/confidentialite/', '/fr/conditions/', '/fr/cookies/',
   '/de/datenschutz/', '/de/agb/', '/de/cookies/'];
+const signupTrialCopy = new Map([
+  ['/registrati/', /7 giorni o 150 risposte AI, al primo limite raggiunto/],
+  ['/en/signup/', /7 days or 150 AI replies, whichever comes first/],
+  ['/es/registro/', /7 días o 150 respuestas de IA, lo que ocurra primero/],
+  ['/fr/inscription/', /7 jours ou 150 réponses IA.*selon la première limite atteinte/],
+  ['/de/registrieren/', /7 Tage oder 150 KI-Antworten, je nachdem, welche Grenze zuerst erreicht wird/],
+]);
 const assets = new Set();
 const pages = new Map();
 for (const route of [...v2Pages, ...legacyPages, ...legalPages]) {
@@ -23,6 +30,11 @@ for (const route of [...v2Pages, ...legacyPages, ...legalPages]) {
   assert.equal(response.status, 200, route);
   assert.match(response.headers.get('content-type') ?? '', /^text\/html/, route);
   const html = await response.text();
+  if (signupTrialCopy.has(route)) {
+    const trialCopy = signupTrialCopy.get(route);
+    assert.match(html.match(/id="register-help">([^<]*)/)?.[1] ?? '', trialCopy, route);
+    assert.match(html.match(/name="description" content="([^"]*)/)?.[1] ?? '', trialCopy, route);
+  }
   if (legalPages.includes(route)) {
     assert.doesNotMatch(html, /\{\{LEGAL_/, route);
     if (route === '/privacy/') assert.ok(html.includes('Melpis Synthetic QA'), route);

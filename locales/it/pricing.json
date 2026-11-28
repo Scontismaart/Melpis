@@ -1,10 +1,10 @@
 {
   "page_title": "Piani e Prezzi · Assistente WhatsApp AI | Melpis",
-  "meta_description": "Piani e prezzi trasparenti per attivare l'assistente WhatsApp AI nella tua attività. Prova gratuita di 7 giorni senza carta di credito, disdici quando vuoi.",
+  "meta_description": "Assistente AI per WhatsApp Business. Risposte ai clienti, richieste di prenotazione e passaggio allo staff. Prova gratuita fino a 7 giorni o 150 risposte AI, al primo limite raggiunto. Carta di credito facoltativa. Eventuali addebiti richiedono l’adesione esplicita a un abbonamento.",
   "hero": {
     "badge": "Prezzi trasparenti",
     "title": "Un piano per ogni fase della tua attività",
-    "subtitle": "Prova gratis con PDF/RAG incluso: fino a 7 giorni o 150 risposte AI, al primo limite raggiunto; senza carta di credito e senza vincoli contrattuali.",
+    "subtitle": "Prova gratuita fino a 7 giorni o 150 risposte AI, al primo limite raggiunto. Carta di credito facoltativa. Eventuali addebiti richiedono l’adesione esplicita a un abbonamento.",
     "monthly_toggle": "Mensile"
   },
   "plans": {
@@ -17,8 +17,10 @@
       "cta": "Inizia con Essenziale",
       "features": [
         "1 numero WhatsApp Business ufficiale",
-        "Fino a 500 messaggi AI/mese",
-        "PDF/RAG incluso; quota file da definire",
+        "1 account totale, titolare incluso",
+        "Fino a 500 risposte AI validate al mese",
+        "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo",
+        "Google Calendar opzionale, previa certificazione operativa",
         "Orari, listino e risposte automatiche 24/7",
         "Inbox condivisa web da qualsiasi dispositivo",
         "Notifiche di escalation via email",
@@ -34,12 +36,12 @@
       "cta": "Prova Crescita gratis",
       "features": [
         "Tutto ciò che è incluso in Essenziale",
-        "Fino a 2.000 messaggi AI/mese",
-        "PDF/RAG incluso; quota file da definire",
+        "Fino a 2.000 risposte AI validate al mese",
+        "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo",
+        "Google Calendar opzionale, previa certificazione operativa",
         "Gestione prenotazioni e promemoria no-show",
-        "Fino a 3 operatori contemporanei nella Inbox",
-        "Supporto prioritario WhatsApp ed email",
-        "Google Calendar opzionale; richiede configurazione autorizzata"
+        "Fino a 3 account totali, titolare incluso",
+        "Supporto prioritario WhatsApp ed email"
       ]
     },
     "scale": {
@@ -51,10 +53,11 @@
       "cta": "Passa a Scala",
       "features": [
         "Tutto ciò che è incluso in Crescita",
-        "Fino a 10.000 messaggi AI/mese",
-        "PDF/RAG incluso; quota file da definire",
-        "Operatori illimitati con permessi dedicati",
-        "Instagram Direct, previa verifica del provider",
+        "Fino a 10.000 risposte AI validate al mese",
+        "PDF/RAG previsto per tutti i piani, previa approvazione di sicurezza e collaudo",
+        "Google Calendar opzionale, previa certificazione operativa",
+        "Account senza limite numerico di piano, soggetti ai limiti tecnici",
+        "Numeri WhatsApp senza limite numerico di piano, secondo le configurazioni supportate",
         "Configurazione AI e gestione team",
         "Log di audit di sicurezza e accordo sul trattamento dati (DPA)",
         "Account manager dedicato e onboarding assistito"
@@ -66,7 +69,7 @@
     "items": [
       {
         "title": "Nessuna carta richiesta per la prova",
-        "desc": "Inizi in 60 secondi con email e nome attività. Nessun addebito a sorpresa."
+        "desc": "Prova gratuita fino a 7 giorni o 150 risposte AI, al primo limite raggiunto. Carta di credito facoltativa. Eventuali addebiti richiedono l’adesione esplicita a un abbonamento."
       },
       {
         "title": "Disdici in un clic quando vuoi",
@@ -83,7 +86,7 @@
     "items": [
       {
         "q": "Come viene espressa la quota mensile?",
-        "a": "La quota del piano è espressa in messaggi al mese, non in conversazioni di 24 ore. Puoi controllare il consumo nella dashboard."
+        "a": "La quota mensile conta le risposte AI validate. Puoi vedere il consumo nella dashboard."
       },
       {
         "q": "Cosa succede quando raggiungo il limite di messaggi del piano?",
@@ -95,7 +98,7 @@
       },
       {
         "q": "I costi dei messaggi Meta sono inclusi?",
-        "a": "Sì, per tutte le conversazioni di servizio avviate dai clienti (Customer-Initiated) non ci sono costi aggiuntivi di invio da parte nostra."
+        "a": "I costi WhatsApp Meta sono addebitati separatamente."
       }
     ]
   }

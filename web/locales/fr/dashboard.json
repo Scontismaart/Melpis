@@ -44,7 +44,7 @@
     "title_airtable": "Airtable"
   },
   "kpi": {
-    "total_received": "messages reçus aujourd'hui",
+    "total_received": "événements reçus aujourd’hui",
     "handled_by_ai": "traités par l'assistant IA",
     "escalated_human": "transmis à l'équipe",
     "bookings_created": "réservations confirmées",
@@ -53,7 +53,7 @@
     "trend_negative": "En baisse par rapport à hier",
     "sparkline_caption": "7 derniers jours",
     "sparkline_unit": "sem.",
-    "total_received_aria": "Détails des messages",
+    "total_received_aria": "Détails des événements reçus",
     "trend_none": "Aucune escalade",
     "ai_details_aria": "Détails traités par l’IA",
     "human_details_aria": "Détails transmis à une personne"
@@ -67,7 +67,7 @@
     "recent_activity": "Activité récente",
     "view_all": "Tout afficher",
     "reports_title": "Rapports et tendances",
-    "messages_chart_title": "Messages : 7 derniers jours",
+    "messages_chart_title": "Événements des 7 derniers jours",
     "received": "Reçus",
     "handled_by_ai": "Traités par l’IA",
     "key_insights": "Principaux enseignements",
@@ -82,7 +82,7 @@
     "regenerate": "Générer à nouveau",
     "regenerate_aria": "Générer à nouveau le rapport",
     "empty_report": "Aucun rapport n’a encore été généré aujourd’hui.",
-    "chart_aria": "Activité des messages",
+    "chart_aria": "Activité des événements",
     "insights_aria": "Principaux enseignements",
     "runtime": {
       "error_title": "Une erreur s’est produite",
@@ -289,7 +289,7 @@
     "runtime": {
       "load_error": "Impossible de charger les membres de l’équipe : {{detail}}",
       "member_count": "{{count}} membres",
-      "unlimited_accounts": "{{count}} comptes actifs (illimités)",
+      "unlimited_accounts": "{{count}} comptes actifs, sans plafond de comptes dans l’offre",
       "essential_account": "1 / 1 compte (offre Essentiel, titulaire uniquement)",
       "account_capacity": "{{used}} / {{limit}} comptes ({{operators}} sur {{max}} collaborateurs)",
       "plan_essential": "Essentiel",
@@ -298,7 +298,8 @@
       "essential_limit_title": "L’offre Essentiel n’inclut pas de collaborateurs supplémentaires",
       "limit_title": "La limite de collaborateurs de l’offre actuelle est atteinte",
       "essential_limit_banner": "L’offre Essentiel est réservée au titulaire",
-      "limit_banner": "Limite de comptes atteinte ({{used}}/{{limit}})"
+      "limit_banner": "Limite de comptes atteinte ({{used}}/{{limit}})",
+      "seat_entitlement_unavailable": "La disponibilité du forfait n’a pas pu être vérifiée."
     }
   },
   "reviews": {
@@ -589,5 +590,16 @@
     "end_time": "Fin",
     "midnight_end": "Minuit indique la fin de la journée.",
     "example_warning": "Vérifiez les durées, les ressources et la capacité avant de sauvegarder. Les exemples sont uniquement indicatifs."
+  },
+  "account_usage": {
+    "definition": "Le quota compte les réponses IA valides enregistrées. Les messages reçus, les conversations, les actions manuelles, les tentatives du fournisseur et les jetons sont des mesures distinctes.",
+    "unavailable": "La consommation IA est actuellement indisponible.",
+    "trial": "{{used}} / {{limit}} réponses IA comptabilisées pendant l’essai.",
+    "period": "{{used}} / {{limit}} réponses IA comptabilisées sur la période en cours.",
+    "exhausted": "Quota atteint. Les actions manuelles autorisées restent disponibles.",
+    "trial_quota_reached": "L’essai a pris fin car le quota a été atteint.",
+    "trial_ends": "L’essai prend fin le {{date}} ou lorsque le quota est atteint.",
+    "trial_ended": "L’essai est terminé.",
+    "period_ends": "La période en cours prend fin le {{date}}."
   }
 }

@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 
+TRIAL_DAYS = 7
 TRIAL_MESSAGES_LIMIT = 150
 # Commercial file budgets await explicit founder approval. None is not unlimited.
 TRIAL_RAG_FILE_BYTES_LIMIT: int | None = None
@@ -17,7 +18,6 @@ class Plan:
     has_rag: bool
     price_monthly_eur: int
     stripe_price_id_yearly: str = ""
-    price_yearly_eur: int = 0
     rag_file_bytes_limit: int | None = None
 
 
@@ -32,7 +32,6 @@ PLANS: dict[str, Plan] = {
         has_rag=True,
         price_monthly_eur=29,
         stripe_price_id_yearly=os.getenv("STRIPE_PRICE_STARTER_YEARLY", ""),
-        price_yearly_eur=288,
     ),
     "pro": Plan(
         name="Crescita",
@@ -44,7 +43,6 @@ PLANS: dict[str, Plan] = {
         has_rag=True,
         price_monthly_eur=69,
         stripe_price_id_yearly=os.getenv("STRIPE_PRICE_PRO_YEARLY", ""),
-        price_yearly_eur=708,
     ),
     "business": Plan(
         name="Scala",
@@ -56,7 +54,6 @@ PLANS: dict[str, Plan] = {
         has_rag=True,
         price_monthly_eur=149,
         stripe_price_id_yearly=os.getenv("STRIPE_PRICE_BUSINESS_YEARLY", ""),
-        price_yearly_eur=1548,
     ),
 }
 

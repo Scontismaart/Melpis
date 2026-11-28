@@ -1,6 +1,7 @@
 """Security contracts for the pending Team invitation boundary."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -27,7 +28,8 @@ class _Context:
 
 
 class _Connection:
-    def __init__(self, *, live=True, email="invitee@example.test", seat_count=1, seat_limit=3):
+    def __init__(self, *, live=True, email="invitee@example.test", seat_count=1, seat_limit=3,
+                 status="active", plan="pro", trial_end=None):
         self.org = uuid.uuid4()
         self.invitation = uuid.uuid4()
         self.inviter = uuid.uuid4()
@@ -36,6 +38,9 @@ class _Connection:
         self.email = email
         self.seat_count = seat_count
         self.seat_limit = seat_limit
+        self.status = status
+        self.plan = plan
+        self.trial_end = trial_end
         self.statements = []
 
     def transaction(self):
@@ -49,8 +54,11 @@ class _Connection:
         self.statements.append((sql, args))
         if "SELECT organization_id FROM team_invitations" in sql:
             return {"organization_id": self.org}
-        if "SELECT plan, users_limit FROM organizations" in sql:
-            return {"plan": "pro", "users_limit": self.seat_limit}
+        if "SELECT plan, users_limit, subscription_status, trial_end FROM organizations" in sql:
+            return {
+                "plan": self.plan, "users_limit": self.seat_limit,
+                "subscription_status": self.status, "trial_end": self.trial_end,
+            }
         if "SELECT id FROM organizations" in sql:
             return {"id": self.org}
         if "SELECT id, email, ruolo, invited_by FROM team_invitations" in sql:
@@ -102,10 +110,15 @@ async def test_create_invitation_never_grants_membership(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_accept_invitation_grants_only_after_verified_email(monkeypatch):
+@pytest.mark.parametrize("status", ["active", "past_due", "trialing"])
+async def test_accept_invitation_grants_only_after_verified_email(monkeypatch, status):
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("MELPIS_BETA_ALLOWED_EMAILS", "invitee@example.test")
-    conn = _Connection()
+    conn = _Connection(status=status)
+    if status == "trialing":
+        conn.plan = None
+        conn.seat_limit = None
+        conn.trial_end = datetime.now(timezone.utc) + timedelta(days=1)
     token = "A" * 43
     auth_id = str(uuid.uuid4())
     monkeypatch.setattr(invitations, "verified_supabase_identity", AsyncMock(return_value="invitee@example.test"))
@@ -136,6 +149,21 @@ async def test_accept_rejects_replay_wrong_email_and_full_team(monkeypatch, live
             auth_user_id=str(uuid.uuid4()), access_token="verified-session",
         )
     assert not any("INSERT INTO organization_memberships" in sql for sql, _ in conn.statements)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,plan", [(None, "pro"), ("active", "unknown"), ("trialing", None)])
+async def test_accept_rejects_unverified_billing_without_consuming_invitation(monkeypatch, status, plan):
+    conn = _Connection(status=status, plan=plan)
+    monkeypatch.setattr(invitations, "verified_supabase_identity", AsyncMock(return_value="invitee@example.test"))
+    with pytest.raises(HTTPException) as exc:
+        await invitations.accept_invitation(
+            _Pool(conn), raw_token="A" * 43,
+            auth_user_id=str(uuid.uuid4()), access_token="verified-session",
+        )
+    assert exc.value.status_code == 400
+    assert not any("INSERT INTO organization_memberships" in sql for sql, _ in conn.statements)
+    assert not any("UPDATE team_invitations SET consumed_at" in sql for sql, _ in conn.statements)
 
 
 @pytest.mark.asyncio

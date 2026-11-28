@@ -1,10 +1,10 @@
 {
   "page_title": "Plans & Pricing · WhatsApp AI Assistant for Business | Melpis",
-  "meta_description": "Clear, transparent pricing for your WhatsApp AI assistant. 7-day free trial with no credit card required, Google Calendar sync, cancel anytime.",
+  "meta_description": "AI assistant for WhatsApp Business. Customer replies, booking requests and handoff to your team. Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
   "hero": {
     "badge": "Transparent pricing",
     "title": "A plan tailored to every stage of your growth",
-    "subtitle": "Free trial with PDF/RAG included: up to 7 days or 150 AI replies, whichever comes first. No credit card or long-term commitment required.",
+    "subtitle": "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription.",
     "monthly_toggle": "Monthly"
   },
   "plans": {
@@ -17,8 +17,10 @@
       "cta": "Start with Essential",
       "features": [
         "1 official WhatsApp Business phone number",
-        "Up to 500 AI messages/month",
-        "PDF/RAG included; file quota to be defined",
+        "1 account in total, including the owner",
+        "Up to 500 validated AI replies per month",
+        "PDF/RAG planned for all plans, subject to security approval and testing",
+        "Optional Google Calendar, subject to operational certification",
         "Business hours, pricing, and 24/7 automated replies",
         "Shared web inbox accessible from any device",
         "Email escalation notifications",
@@ -34,12 +36,12 @@
       "cta": "Try Growth free",
       "features": [
         "Everything included in Essential",
-        "Up to 2,000 AI messages/month",
-        "PDF/RAG included; file quota to be defined",
+        "Up to 2,000 validated AI replies per month",
+        "PDF/RAG planned for all plans, subject to security approval and testing",
+        "Optional Google Calendar, subject to operational certification",
         "Appointment management and no-show reminders",
-        "Up to 3 concurrent team operators in the Inbox",
-        "Priority WhatsApp and email support",
-        "Google Calendar is optional; authorized setup is required"
+        "Up to 3 accounts in total, including the owner",
+        "Priority WhatsApp and email support"
       ]
     },
     "scale": {
@@ -51,10 +53,11 @@
       "cta": "Upgrade to Scale",
       "features": [
         "Everything included in Growth",
-        "Up to 10,000 AI messages/month",
-        "PDF/RAG included; file quota to be defined",
-        "Unlimited operators with granular permissions",
-        "Instagram Direct, subject to provider verification",
+        "Up to 10,000 validated AI replies per month",
+        "PDF/RAG planned for all plans, subject to security approval and testing",
+        "Optional Google Calendar, subject to operational certification",
+        "No plan limit on the number of accounts; technical limits apply",
+        "No plan limit on the number of WhatsApp numbers; supported configurations only",
         "AI configuration and team management",
         "Security audit logs & Data Processing Agreement (DPA)",
         "Dedicated account manager & guided onboarding"
@@ -66,7 +69,7 @@
     "items": [
       {
         "title": "No credit card required for trial",
-        "desc": "Get started in 60 seconds with your email and business name. No surprise charges."
+        "desc": "Free trial for up to 7 days or 150 AI replies, whichever comes first. No credit card is required. Charges require explicit agreement to a subscription."
       },
       {
         "title": "One-click cancellation anytime",
@@ -83,7 +86,7 @@
     "items": [
       {
         "q": "How is the monthly allowance expressed?",
-        "a": "Plan allowances are measured in messages per month, not 24-hour conversations. You can check usage in the dashboard."
+        "a": "Your monthly allowance counts validated AI replies. You can view usage in the dashboard."
       },
       {
         "q": "What happens when I reach my plan's message limit?",
@@ -95,7 +98,7 @@
       },
       {
         "q": "Are Meta message fees included?",
-        "a": "Yes. All customer-initiated service conversations (Customer-Initiated) incur no additional delivery charges from us."
+        "a": "Meta WhatsApp fees are billed separately."
       }
     ]
   }
