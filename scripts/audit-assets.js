@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.join(process.cwd(), "web");
+// V2 assets are resolved from the Astro output by its container tests.
+const landingV2Root = path.join(root, "landing-v2");
 const excluded = new Set([
   path.join(root, "landing", "hero-glassmorphism.html"),
   path.join(root, "landing", "knowledge-hero.html"),
@@ -24,7 +26,9 @@ if (fs.existsSync(dashboardCssManifest)) {
 function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(file);
+    if (entry.isDirectory()) {
+      if (file !== landingV2Root) walk(file);
+    }
     else if ((entry.name.endsWith(".html") || entry.name.endsWith(".css")) && !excluded.has(file)) check(file);
   }
 }

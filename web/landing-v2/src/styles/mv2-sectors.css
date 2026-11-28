@@ -1,0 +1,1371 @@
+/* ==========================================================================
+   MELPIS LANDING V2 — SECTORS DESIGN SYSTEM (Saloni, Hotel, Eventi)
+   ========================================================================== */
+
+:root {
+  --sector-container-max: 1360px;
+  --sector-font-sans: var(--mv2-font-body, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  --sector-font-heading: var(--mv2-font-heading, 'Geist Sans', -apple-system, BlinkMacSystemFont, sans-serif);
+  --sector-font-serif: 'Newsreader', 'Playfair Display', 'Iowan Old Style', Georgia, serif;
+
+  --sector-text-dark: #141517;
+  --sector-text-muted: #5A5D62;
+  --sector-border-card: rgba(20, 21, 23, 0.07);
+  --sector-border-divider: #DCDDD6;
+  --sector-shadow-card: 0 2px 8px rgba(20, 21, 23, 0.03), 0 8px 24px rgba(20, 21, 23, 0.04);
+  --sector-shadow-card-hover: 0 4px 14px rgba(20, 21, 23, 0.05), 0 16px 36px rgba(20, 21, 23, 0.07);
+}
+
+/* ==========================================================================
+   THEME PALETTES (Reference 1:1)
+   ========================================================================== */
+
+/* 1. Saloni di Bellezza (Plum / Berry Theme) */
+.mv2-sector--saloni {
+  --sector-primary: #7D2D44;
+  --sector-primary-hover: #632134;
+  --sector-text-accent: #7D2D44;
+  --sector-accent-bar: #8B324D;
+  --sector-badge-bg: rgba(125, 45, 68, 0.12);
+  --sector-badge-color: #7D2D44;
+  --sector-glow: rgba(125, 45, 68, 0.14);
+  --sector-glow-soft: rgba(125, 45, 68, 0.08);
+  --sector-bg-ambient-top: #FAF5F4;
+  --sector-bg-ambient-bot: #F4EBE9;
+  --sector-card-highlight-bg: #7D2D44;
+  --sector-card-highlight-text: #FFFFFF;
+  --sector-banner-bg: #541B2B;
+}
+
+/* 2. Hotel (Aegean / Slate / Navy Blue Theme) */
+.mv2-sector--hotel {
+  --sector-primary: #204E6D;
+  --sector-primary-hover: #163B54;
+  --sector-text-accent: #204E6D;
+  --sector-accent-bar: #2B648C;
+  --sector-badge-bg: rgba(32, 78, 109, 0.12);
+  --sector-badge-color: #204E6D;
+  --sector-glow: rgba(32, 78, 109, 0.14);
+  --sector-glow-soft: rgba(32, 78, 109, 0.08);
+  --sector-bg-ambient-top: #F4F7F9;
+  --sector-bg-ambient-bot: #E9EFF4;
+  --sector-card-highlight-bg: #204E6D;
+  --sector-card-highlight-text: #FFFFFF;
+  --sector-banner-bg: #15344A;
+}
+
+/* 3. Eventi (Warm Amber / Ochre / Bronze Theme) */
+.mv2-sector--eventi {
+  --sector-primary: #945610;
+  --sector-primary-hover: #754209;
+  --sector-text-accent: #945610;
+  --sector-accent-bar: #A86518;
+  --sector-badge-bg: rgba(148, 86, 16, 0.12);
+  --sector-badge-color: #945610;
+  --sector-glow: rgba(148, 86, 16, 0.14);
+  --sector-glow-soft: rgba(148, 86, 16, 0.08);
+  --sector-bg-ambient-top: #FAF7F2;
+  --sector-bg-ambient-bot: #F3ECE0;
+  --sector-card-highlight-bg: #945610;
+  --sector-card-highlight-text: #FFFFFF;
+  --sector-banner-bg: #543009;
+}
+
+/* 4. Barbieri (Warm Tobacco / Amber Bronze / Burnished Leather Theme) */
+.mv2-sector--barbieri {
+  --sector-primary: #784A28;
+  --sector-primary-hover: #5F381D;
+  --sector-text-accent: #784A28;
+  --sector-accent-bar: #8E5830;
+  --sector-badge-bg: rgba(120, 74, 40, 0.12);
+  --sector-badge-color: #784A28;
+  --sector-glow: rgba(120, 74, 40, 0.14);
+  --sector-glow-soft: rgba(120, 74, 40, 0.08);
+  --sector-bg-ambient-top: #FAF7F4;
+  --sector-bg-ambient-bot: #F3ECE6;
+  --sector-card-highlight-bg: #784A28;
+  --sector-card-highlight-text: #FFFFFF;
+  --sector-banner-bg: #4A2B14;
+}
+
+/* ==========================================================================
+   PAGE FOUNDATION & WRAPPER
+   ========================================================================== */
+.mv2-sector-page {
+  position: relative;
+  background-color: #FAF8F5;
+  color: var(--sector-text-dark);
+  font-family: var(--sector-font-sans);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mv2-sector-wrapper {
+  position: relative;
+  z-index: 1;
+  max-width: var(--sector-container-max);
+  margin: 0 auto;
+  padding: 0 clamp(20px, 4vw, 56px) clamp(64px, 7vw, 96px);
+}
+
+/* Ambient Silk Curves in Background */
+.mv2-sector-ambient-waves {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 940px;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.mv2-sector-ambient-waves svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.9;
+}
+
+/* Shared Eyebrow Badge */
+.mv2-sector-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  background: var(--sector-badge-bg);
+  color: var(--sector-badge-color);
+  border-radius: 999px;
+  font-family: var(--sector-font-sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+
+.mv2-sector-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.mv2-sector-eyebrow {
+  display: block;
+  font-family: var(--sector-font-sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sector-badge-color);
+  margin-bottom: 12px;
+}
+
+/* ==========================================================================
+   1. HERO SECTION (90% SVH, 2-Column Split)
+   ========================================================================== */
+.mv2-sector-hero {
+  position: relative;
+  z-index: 2;
+  min-height: min(88svh, 780px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(32px, 4vw, 64px);
+  padding: clamp(24px, 3.5vw, 44px) 0 clamp(36px, 4.5vw, 60px);
+}
+
+.mv2-sector-hero__content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.mv2-sector-hero__title {
+  margin: 0;
+  font-family: var(--sector-font-serif);
+  font-size: clamp(42px, 4.2vw, 64px);
+  line-height: 1.06;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.mv2-sector-hero__title-primary {
+  display: block;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-hero__title-accent {
+  display: block;
+  color: var(--sector-text-accent);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.mv2-sector-hero__accent-bar {
+  width: 72px;
+  height: 3.5px;
+  background: var(--sector-accent-bar);
+  border-radius: 999px;
+  margin: 18px 0 24px;
+}
+
+.mv2-sector-hero__desc {
+  font-family: var(--sector-font-sans);
+  font-size: clamp(15px, 1.15vw, 16.5px);
+  line-height: 1.55;
+  color: var(--sector-text-muted);
+  max-width: 500px;
+  margin: 0 0 32px;
+}
+
+.mv2-sector-hero__actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mv2-sector-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--sector-primary);
+  color: #FFFFFF;
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 13px 26px;
+  border-radius: 999px;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mv2-sector-btn-primary:hover {
+  background: var(--sector-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.mv2-sector-btn-primary svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
+.mv2-sector-btn-primary:hover svg {
+  transform: translate(2px, -2px);
+}
+
+.mv2-sector-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #FFFFFF;
+  color: var(--sector-text-dark);
+  border: 1px solid rgba(20, 21, 23, 0.12);
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 13px 24px;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.mv2-sector-btn-secondary:hover {
+  background: #FDFCFB;
+  border-color: rgba(20, 21, 23, 0.2);
+  transform: translateY(-1px);
+}
+
+/* Hero Frame with Curved Polygon Clip */
+.mv2-sector-hero__visual-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1115 / 550;
+  max-height: 480px;
+}
+
+.mv2-sector-hero__frame {
+  width: 100%;
+  height: 100%;
+  clip-path: url(#mv2-sector-hero-clip);
+  overflow: hidden;
+  box-shadow: 0 20px 48px -12px rgba(20, 21, 23, 0.15);
+  border-radius: 28px;
+  position: relative;
+}
+
+.mv2-sector-hero__frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.mv2-sector-card-tall__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.mv2-sector-card-tall:hover .mv2-sector-card-tall__media img {
+  transform: scale(1.02);
+}
+
+.mv2-sector-knowledge-top__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  transition: transform 0.4s ease;
+}
+
+.mv2-sector-knowledge-top__media:hover img {
+  transform: scale(1.02);
+}
+
+.mv2-sector-bento-subcard__thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--sector-badge-bg);
+  margin-bottom: 16px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(20, 21, 23, 0.08);
+}
+
+.mv2-sector-bento-subcard__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Empty Media Placeholder (lascia i riquadri vuoti) */
+.mv2-sector-media-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(145deg, rgba(20, 21, 23, 0.02) 0%, rgba(20, 21, 23, 0.06) 100%);
+  border: 1.5px dashed rgba(20, 21, 23, 0.14);
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.mv2-sector-media-placeholder::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 50%, var(--sector-glow-soft), transparent 70%);
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   2. DEMO INTERATTIVA STAGE & ENGINE
+   ========================================================================== */
+.mv2-sector-section-demo {
+  margin-top: clamp(48px, 5.5vw, 84px);
+  margin-bottom: clamp(64px, 7vw, 100px);
+  scroll-margin-top: clamp(84px, 8vw, 110px);
+  position: relative;
+  z-index: 2;
+}
+
+.mv2-sector-demo-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: clamp(30px, 4vw, 60px);
+  align-items: flex-end;
+  margin-bottom: clamp(34px, 4vw, 52px);
+}
+
+.mv2-sector-demo-header__left {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mv2-sector-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--sector-badge-bg);
+  color: var(--sector-badge-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mv2-sector-demo-title {
+  margin: 0;
+  font-family: var(--sector-font-serif);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.mv2-sector-demo-title__main {
+  display: block;
+  font-size: clamp(32px, 3.6vw, 44px);
+  font-weight: 700;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-demo-title__sub {
+  display: block;
+  font-size: clamp(20px, 2.1vw, 28px);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--sector-text-accent);
+  margin-top: 4px;
+}
+
+.mv2-sector-demo-header__right {
+  border-left: 1.5px solid rgba(20, 21, 23, 0.12);
+  padding-left: clamp(20px, 2.5vw, 36px);
+  padding-bottom: 6px;
+}
+
+.mv2-sector-demo-header__right p {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: clamp(14px, 1.05vw, 15.5px);
+  line-height: 1.55;
+  color: var(--sector-text-muted);
+}
+
+/* Stage Card Wrapper */
+.mv2-sector-demo-stage {
+  position: relative;
+  background: linear-gradient(160deg, var(--sector-bg-ambient-top) 0%, #FFFFFF 50%, var(--sector-bg-ambient-bot) 100%);
+  border: 1px solid var(--sector-border-divider);
+  border-radius: clamp(24px, 2.8vw, 38px);
+  padding: clamp(26px, 3.5vw, 48px);
+  box-shadow: 0 24px 64px -16px rgba(20, 21, 23, 0.08), 0 4px 16px rgba(20, 21, 23, 0.02);
+  overflow: hidden;
+}
+
+.mv2-sector-demo-aurora {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.mv2-sector-demo-aurora-layer {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(55px);
+  opacity: 0.5;
+}
+
+.mv2-sector-demo-aurora-layer-a {
+  width: 480px;
+  height: 380px;
+  top: -80px;
+  left: 20%;
+  background: var(--sector-glow);
+}
+
+.mv2-sector-demo-aurora-layer-b {
+  width: 520px;
+  height: 400px;
+  bottom: -90px;
+  right: 15%;
+  background: var(--sector-glow-soft);
+}
+
+.mv2-sector-demo-aurora-waves {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.85;
+}
+
+/* Console Shell Integration in Sector Page */
+.mv2-flow-console--sector .mv2-flow-shell {
+  position: relative;
+  z-index: 1;
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-divider);
+  border-radius: 20px;
+  box-shadow: 0 16px 40px -12px rgba(20, 21, 23, 0.1);
+}
+
+.mv2-flow-console--sector .mv2-flow-scenario[data-active="true"] {
+  background: var(--sector-primary);
+  color: #FFFFFF;
+  border-color: var(--sector-primary);
+}
+
+.mv2-flow-console--sector .mv2-flow-chat-btn {
+  background: var(--sector-primary);
+  color: #FFFFFF;
+}
+
+.mv2-flow-console--sector .mv2-flow-chat-btn:not(:disabled):hover {
+  background: var(--sector-primary-hover);
+}
+
+.mv2-flow-console--sector .mv2-flow-slot[data-target="true"] {
+  background: var(--sector-primary);
+  color: #FFFFFF;
+  border-color: var(--sector-primary);
+}
+
+/* ==========================================================================
+   3. SECTION 2: BENTO CONFIGURAZIONE E REGOLE
+   ========================================================================== */
+.mv2-sector-section-config {
+  padding: clamp(72px, 8vw, 108px) 0;
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+}
+
+.mv2-sector-split-header {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  align-items: end;
+  gap: clamp(24px, 3vw, 44px);
+  margin-bottom: clamp(28px, 3vw, 36px);
+  padding: 0 4px;
+}
+
+.mv2-sector-section-title {
+  margin: 0;
+  font-family: var(--sector-font-heading);
+  font-size: clamp(32px, 2.8vw, 44px);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.mv2-sector-title-dark {
+  display: block;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-title-accent {
+  display: block;
+  color: var(--sector-text-accent);
+}
+
+.mv2-sector-split-header__right {
+  justify-self: end;
+  max-width: 440px;
+  border-left: 1.5px solid rgba(20, 21, 23, 0.12);
+  padding-left: 28px;
+  padding-bottom: 6px;
+}
+
+.mv2-sector-split-header__right p {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: clamp(14px, 1.05vw, 15px);
+  line-height: 1.55;
+  color: var(--sector-text-muted);
+}
+
+.mv2-sector-bento-config {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Left Tall Card */
+.mv2-sector-card-tall {
+  height: 545px;
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-card);
+  border-radius: 22px;
+  padding: 10px;
+  box-shadow: var(--sector-shadow-card);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.mv2-sector-card-tall:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sector-shadow-card-hover);
+}
+
+.mv2-sector-card-tall__media {
+  position: relative;
+  height: 420px;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.mv2-sector-card-tall__footer {
+  padding: 16px 18px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mv2-sector-card-tall__title {
+  font-family: var(--sector-font-heading);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-card-tall__desc {
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  color: var(--sector-text-muted);
+  margin-top: 3px;
+}
+
+.mv2-sector-circle-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(20, 21, 23, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--sector-text-dark);
+  transition: background-color 0.18s ease;
+}
+
+.mv2-sector-card-tall:hover .mv2-sector-circle-btn,
+.mv2-sector-bento-subcard:hover .mv2-sector-circle-btn {
+  background: rgba(20, 21, 23, 0.1);
+}
+
+.mv2-sector-circle-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Right 2x2 Grid of Bento Cards */
+.mv2-sector-bento-right-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 16px;
+  height: 545px;
+}
+
+.mv2-sector-bento-subcard {
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-card);
+  border-radius: 20px;
+  padding: 24px 22px;
+  box-shadow: var(--sector-shadow-card);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.mv2-sector-bento-subcard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sector-shadow-card-hover);
+}
+
+.mv2-sector-bento-subcard__icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--sector-badge-bg);
+  color: var(--sector-badge-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.mv2-sector-bento-subcard__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mv2-sector-bento-subcard__body h3 {
+  margin: 0 0 6px;
+  font-family: var(--sector-font-heading);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-bento-subcard__body p {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--sector-text-muted);
+}
+
+.mv2-sector-bento-subcard__footer {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ==========================================================================
+   4. SECTION 3: INFORMAZIONI, KNOWLEDGE & CALENDARIO SYNC
+   ========================================================================== */
+.mv2-sector-section-knowledge {
+  padding: clamp(72px, 8vw, 108px) 0;
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+}
+
+.mv2-sector-knowledge-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Top Row: Pill list on left, Shaded Curved Frame on right */
+.mv2-sector-knowledge-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.45fr);
+  gap: clamp(24px, 3.5vw, 44px);
+  align-items: center;
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-card);
+  border-radius: 24px;
+  padding: clamp(28px, 3vw, 40px);
+  box-shadow: var(--sector-shadow-card);
+}
+
+.mv2-sector-knowledge-top__left h2 {
+  margin: 0 0 10px;
+  font-family: var(--sector-font-heading);
+  font-size: clamp(26px, 2.4vw, 34px);
+  line-height: 1.12;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.mv2-sector-knowledge-top__left p {
+  margin: 0 0 24px;
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sector-text-muted);
+}
+
+.mv2-sector-pill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mv2-sector-pill-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #FAF8F5;
+  border: 1px solid rgba(20, 21, 23, 0.06);
+  border-radius: 12px;
+  padding: 10px 16px;
+  font-family: var(--sector-font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-pill-item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--sector-text-accent);
+}
+
+.mv2-sector-knowledge-top__media {
+  position: relative;
+  height: 280px;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+/* Bottom Row: Calendar White Card + Sync Explanation */
+.mv2-sector-knowledge-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.45fr);
+  gap: clamp(24px, 3.5vw, 44px);
+  align-items: center;
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-card);
+  border-radius: 24px;
+  padding: clamp(24px, 3vw, 36px);
+  box-shadow: var(--sector-shadow-card);
+}
+
+.mv2-sector-cal-card {
+  background: #FAF8F5;
+  border: 1px solid rgba(20, 21, 23, 0.08);
+  border-radius: 16px;
+  padding: 18px 20px;
+}
+
+.mv2-sector-cal-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  font-family: var(--sector-font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-cal-card__header svg {
+  width: 15px;
+  height: 15px;
+  color: var(--sector-text-accent);
+}
+
+.mv2-sector-cal-card__items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mv2-sector-cal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #FFFFFF;
+  border: 1px solid rgba(20, 21, 23, 0.06);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: var(--sector-font-sans);
+  font-size: 13px;
+}
+
+.mv2-sector-cal-row__time {
+  font-weight: 700;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-cal-row__service {
+  background: var(--sector-badge-bg);
+  color: var(--sector-badge-color);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mv2-sector-sync-text h3 {
+  margin: 0 0 6px;
+  font-family: var(--sector-font-heading);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-sync-text p {
+  margin: 0 0 16px;
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sector-text-muted);
+}
+
+.mv2-sector-google-cal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #FFFFFF;
+  border: 1px solid rgba(20, 21, 23, 0.12);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-family: var(--sector-font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #383B40;
+}
+
+.mv2-sector-google-cal-badge svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ==========================================================================
+   5. SECTION 4: DOPO IL SERVIZIO (3 Cards)
+   ========================================================================== */
+.mv2-sector-section-after {
+  padding: clamp(72px, 8vw, 108px) 0;
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+}
+
+.mv2-sector-after__title {
+  margin: 0 0 clamp(28px, 3.5vw, 40px);
+  font-family: var(--sector-font-heading);
+  font-size: clamp(30px, 2.7vw, 42px);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.mv2-sector-after-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(16px, 2vw, 24px);
+  align-items: stretch;
+}
+
+.mv2-sector-after-card {
+  background: #FFFFFF;
+  border: 1px solid var(--sector-border-card);
+  border-radius: 20px;
+  padding: clamp(24px, 2.5vw, 32px);
+  box-shadow: var(--sector-shadow-card);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.mv2-sector-after-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sector-shadow-card-hover);
+}
+
+/* Middle highlighted card (solid sector color) */
+.mv2-sector-after-card--highlight {
+  background: var(--sector-card-highlight-bg);
+  border-color: var(--sector-card-highlight-bg);
+  color: var(--sector-card-highlight-text);
+}
+
+.mv2-sector-after-card__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--sector-badge-bg);
+  color: var(--sector-badge-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.mv2-sector-after-card--highlight .mv2-sector-after-card__icon {
+  background: rgba(255, 255, 255, 0.18);
+  color: #FFFFFF;
+}
+
+.mv2-sector-after-card__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mv2-sector-after-card h3 {
+  margin: 0 0 8px;
+  font-family: var(--sector-font-heading);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--sector-text-dark);
+}
+
+.mv2-sector-after-card--highlight h3 {
+  color: #FFFFFF;
+}
+
+.mv2-sector-after-card p {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sector-text-muted);
+}
+
+.mv2-sector-after-card--highlight p {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* ==========================================================================
+   6. SECTION 5: FAQ MINIMALE (2 Colonne)
+   ========================================================================== */
+.mv2-sector-section-faq {
+  padding: clamp(72px, 8vw, 108px) 0;
+  border-top: 1px solid rgba(20, 21, 23, 0.06);
+  position: relative;
+  z-index: 2;
+}
+
+.mv2-sector-faq__grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.45fr);
+  gap: clamp(36px, 5vw, 80px);
+  align-items: flex-start;
+}
+
+.mv2-sector-faq__intro {
+  position: sticky;
+  top: 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mv2-sector-faq__title {
+  margin: 0;
+  font-family: var(--sector-font-heading);
+  font-size: clamp(32px, 2.9vw, 42px);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.mv2-sector-faq__desc {
+  font-family: var(--sector-font-sans);
+  font-size: clamp(14px, 1.05vw, 15.5px);
+  line-height: 1.52;
+  color: var(--sector-text-muted);
+  margin: 4px 0 12px;
+  max-width: 440px;
+}
+
+.mv2-sector-faq__link-wrap {
+  display: inline-flex;
+}
+
+.mv2-sector-link-arrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--sector-font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--sector-text-accent);
+  text-decoration: none;
+  transition: transform 0.18s ease;
+}
+
+.mv2-sector-link-arrow:hover {
+  transform: translateX(2px);
+}
+
+.mv2-sector-link-arrow svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  transition: transform 0.18s ease;
+}
+
+.mv2-sector-link-arrow:hover svg {
+  transform: translateX(3px);
+}
+
+.mv2-sector-faq__list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--sector-border-divider);
+}
+
+.mv2-sector-faq__item {
+  border-bottom: 1px solid var(--sector-border-divider);
+  background: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.mv2-sector-faq__item:hover {
+  background-color: rgba(20, 21, 23, 0.02);
+}
+
+.mv2-sector-faq__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: clamp(18px, 1.8vw, 24px) 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 8px;
+  transition: color 0.18s ease;
+}
+
+.mv2-sector-faq__trigger:focus-visible {
+  outline: 2px solid var(--sector-primary);
+  outline-offset: 2px;
+}
+
+.mv2-sector-faq__question {
+  font-family: var(--sector-font-heading);
+  font-size: clamp(15.5px, 1.25vw, 17.5px);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--sector-text-dark);
+  letter-spacing: -0.015em;
+  transition: color 0.18s ease;
+}
+
+.mv2-sector-faq__item[data-open="true"] .mv2-sector-faq__question {
+  color: var(--sector-text-accent);
+}
+
+.mv2-sector-faq__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(20, 21, 23, 0.04);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--sector-primary);
+  transition: background-color 0.2s ease;
+}
+
+.mv2-sector-faq__item:hover .mv2-sector-faq__icon {
+  background: var(--sector-badge-bg);
+}
+
+.mv2-sector-faq__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mv2-sector-icon-v-line {
+  transform-origin: center;
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
+}
+
+.mv2-sector-faq__item[data-open="true"] .mv2-sector-icon-v-line {
+  transform: rotate(90deg);
+  opacity: 0;
+}
+
+.mv2-sector-faq__pane {
+  display: none;
+  overflow: hidden;
+}
+
+.mv2-sector-faq__answer {
+  padding: 0 8px clamp(18px, 1.8vw, 24px) 8px;
+}
+
+.mv2-sector-faq__answer p {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: clamp(14px, 1.05vw, 15px);
+  line-height: 1.55;
+  color: var(--sector-text-muted);
+  max-width: 680px;
+}
+
+/* ==========================================================================
+   7. SECTION 6: BOTTOM CTA BANNER (Colorato per Settore)
+   ========================================================================== */
+.mv2-sector-cta-banner {
+  position: relative;
+  background-color: var(--sector-banner-bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 28px;
+  padding: clamp(38px, 4vw, 48px) clamp(36px, 4.2vw, 56px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  overflow: hidden;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin-top: clamp(48px, 6vw, 84px);
+  color: #FFFFFF;
+}
+
+.mv2-sector-cta-banner__wave {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.15;
+}
+
+.mv2-sector-cta-banner__wave svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.mv2-sector-cta-banner__content {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+}
+
+.mv2-sector-cta-banner__title {
+  margin: 0 0 10px;
+  font-family: var(--sector-font-heading);
+  font-size: clamp(28px, 2.7vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  color: #FFFFFF;
+}
+
+.mv2-sector-cta-banner__sub {
+  margin: 0;
+  font-family: var(--sector-font-sans);
+  font-size: clamp(14px, 1.08vw, 15.5px);
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.mv2-sector-cta-banner__btn {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #FFFFFF;
+  color: var(--sector-text-dark);
+  font-family: var(--sector-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 13px 26px;
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mv2-sector-cta-banner__btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.mv2-sector-cta-banner__btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ==========================================================================
+   8. RESPONSIVE BREAKPOINTS
+   ========================================================================== */
+@media (max-width: 1024px) {
+  .mv2-sector-hero {
+    grid-template-columns: 1fr;
+    gap: 36px;
+    min-height: auto;
+    padding: 24px 0 40px;
+  }
+
+  .mv2-sector-bento-config {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .mv2-sector-card-tall {
+    height: auto;
+  }
+
+  .mv2-sector-card-tall__media {
+    height: clamp(260px, 35vw, 340px);
+  }
+
+  .mv2-sector-bento-right-grid {
+    height: auto;
+  }
+
+  .mv2-sector-split-header {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .mv2-sector-split-header__right {
+    border-left: none;
+    border-top: 1px solid rgba(20, 21, 23, 0.08);
+    padding-left: 0;
+    padding-top: 14px;
+  }
+
+  .mv2-sector-knowledge-top,
+  .mv2-sector-knowledge-bottom {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .mv2-sector-faq__grid {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+
+  .mv2-sector-faq__intro {
+    position: static;
+  }
+}
+
+@media (max-width: 768px) {
+  .mv2-sector-wrapper {
+    padding: 0 20px 48px;
+  }
+
+  .mv2-sector-after-cards {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .mv2-sector-bento-right-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .mv2-sector-cta-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 32px 26px;
+    gap: 22px;
+  }
+
+  .mv2-sector-cta-banner__btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .mv2-sector-wrapper {
+    padding: 0 16px 40px;
+  }
+
+  .mv2-sector-demo-header {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .mv2-sector-demo-header__right {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid rgba(20, 21, 23, 0.1);
+    padding-top: 16px;
+  }
+
+  .mv2-sector-demo-stage {
+    padding: 16px;
+    border-radius: 20px;
+  }
+}

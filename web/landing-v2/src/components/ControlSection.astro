@@ -1,0 +1,91 @@
+---
+import ControlDashboard from './ControlDashboard.astro';
+---
+
+<section class="mv2-control" id="mv2-controllo" aria-labelledby="mv2-control-title">
+  <div class="mv2-control-canvas">
+    <div class="mv2-control-aurora" aria-hidden="true">
+      <span class="mv2-control-aurora-layer mv2-control-aurora-layer-a"></span>
+      <span class="mv2-control-aurora-layer mv2-control-aurora-layer-b"></span>
+      <span class="mv2-control-aurora-drift"></span>
+      <svg class="mv2-control-aurora-lines" viewBox="0 0 1200 720" preserveAspectRatio="none" focusable="false">
+        <path d="M-60 518C180 430 360 366 620 334S1010 286 1260 152" />
+        <path d="M-40 606C220 528 430 470 700 432S1080 372 1280 262" />
+        <path d="M118 720C320 604 520 526 760 476S1120 424 1320 336" />
+      </svg>
+    </div>
+
+    <div class="mv2-control-shell">
+      <div class="mv2-control-copy">
+        <p class="mv2-kicker" data-mv2-reveal="up">AUTOMAZIONE CON CONTROLLO</p>
+        <h2 id="mv2-control-title" data-mv2-reveal="title">L’assistente aiuta.<br /><em>Il team decide.</em></h2>
+        <p data-mv2-reveal="up" data-mv2-delay="2">Le risposte partono dalle informazioni e dalle regole della tua attività. Quando una richiesta richiede attenzione, una persona può prendere in carico la conversazione.</p>
+        <a class="mv2-text-link mv2-light-link" href="#mv2-showcase" data-mv2-reveal="up" data-mv2-delay="3">Esplora il pannello <span aria-hidden="true">↗</span></a>
+      </div>
+
+      <div class="mv2-control-stage" data-mv2-control-stage>
+        <ControlDashboard />
+        <ul class="mv2-control-cards">
+          <li class="mv2-control-card mv2-control-card-1">
+            <div class="mv2-control-card-inner">
+              <span class="mv2-control-avatar is-warn" aria-hidden="true">M</span>
+              <div class="mv2-control-card-body">
+                <h3>Richiesta da verificare</h3>
+                <p>La risposta per Giulia Rossi è pronta per la verifica.</p>
+              </div>
+              <div class="mv2-control-card-meta">
+                <span class="mv2-control-chip">Da verificare</span>
+                <span class="mv2-control-time">18:21</span>
+              </div>
+              <p class="mv2-control-card-foot">Disponibilità tavoli · orari di servizio</p>
+            </div>
+          </li>
+          <li class="mv2-control-card mv2-control-card-2">
+            <div class="mv2-control-card-inner">
+              <span class="mv2-control-avatar is-info" aria-hidden="true">L</span>
+              <div class="mv2-control-card-body">
+                <h3>Team in conversazione</h3>
+                <p>Una persona prende in carico la conversazione quando necessario.</p>
+              </div>
+              <div class="mv2-control-card-meta">
+                <span class="mv2-control-chip">Al team</span>
+                <span class="mv2-control-time">18:19</span>
+              </div>
+              <p class="mv2-control-card-foot">
+                <span class="mv2-control-card-mini" aria-hidden="true">LF</span>
+                Luca Ferri · Operatore
+              </p>
+            </div>
+          </li>
+          <li class="mv2-control-card mv2-control-card-3">
+            <div class="mv2-control-card-inner">
+              <span class="mv2-control-avatar" aria-hidden="true">G</span>
+              <div class="mv2-control-card-body">
+                <h3>Approvazione manuale richiesta</h3>
+              </div>
+              <div class="mv2-control-card-meta">
+                <span class="mv2-control-time">18:22</span>
+              </div>
+              <p class="mv2-control-card-quote">La prenotazione richiede una conferma manuale del team.</p>
+              <div class="mv2-control-card-foot mv2-control-card-foot-detail">
+                <svg class="mv2-control-card-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <rect x="2.5" y="3.5" width="11" height="10" rx="2" />
+                  <path d="M2.5 6.5h11M5.5 2.5v2M10.5 2.5v2" />
+                </svg>
+                <div class="mv2-control-card-booking">
+                  <span class="mv2-control-card-booking-title">Prenotazione #24891</span>
+                  <span class="mv2-control-card-booking-meta">Venerdì · 20:30 · 2 persone</span>
+                </div>
+                <div class="mv2-control-card-actions" aria-hidden="true">
+                  <span class="mv2-control-card-action">Rifiuta</span>
+                  <span class="mv2-control-card-action is-strong">Approva</span>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <p class="mv2-control-label">Esempio illustrativo</p>
+</section>

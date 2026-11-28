@@ -1,0 +1,219 @@
+/* Melpis Landing V2 — Dark Product Capabilities, chapter shell.
+   Stacco netto e immediato: il capitolo precedente è bianco, il capitolo
+   capacità è nero (#000000) statico dal primo pixel, senza transizioni
+   cromatiche durante lo scroll. */
+
+.mv2-theme-transition {
+  --mv2-shift-bg: #ffffff;
+  --mv2-shift-muted: #6b7280;
+  position: relative;
+  background: #ffffff;
+}
+
+.mv2-capabilities {
+  --mv2-cap-bg: #000000;
+  --mv2-cap-top-space: clamp(280px, 20vw, 300px);
+  --mv2-cap-gradient-h: clamp(480px, 35vw, 540px);
+  --mv2-cap-panel: #0b0d10;
+  --mv2-cap-panel-raised: #111419;
+  --mv2-cap-line: rgba(255, 255, 255, 0.08);
+  --mv2-cap-line-soft: rgba(255, 255, 255, 0.045);
+  --mv2-cap-text: #f7f8fa;
+  --mv2-cap-text-soft: #d5d8df;
+  --mv2-cap-muted: #8b909c;
+  --mv2-cap-muted-deep: #6f7683;
+  --mv2-cap-signal: #64d29a;
+  --mv2-cap-headline-secondary: #777c88;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: var(--mv2-cap-top-space) 0 clamp(64px, 6.4vw, 96px);
+  background: #000000;
+  background-image: linear-gradient(
+    180deg,
+    #161B65 0%,
+    #131754 calc(var(--mv2-cap-gradient-h) * 0.12),
+    #0C1035 calc(var(--mv2-cap-gradient-h) * 0.28),
+    #080B22 calc(var(--mv2-cap-gradient-h) * 0.46),
+    #050714 calc(var(--mv2-cap-gradient-h) * 0.65),
+    #020308 calc(var(--mv2-cap-gradient-h) * 0.84),
+    #000000 var(--mv2-cap-gradient-h),
+    #000000 100%
+  );
+  background-repeat: no-repeat;
+  color: var(--mv2-cap-text);
+  font-family: var(--mv2-font-body);
+}
+
+/* Animated ultramarine dithering layer */
+.mv2-cap-dither {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--mv2-cap-gradient-h);
+  pointer-events: none;
+  z-index: 0;
+  background-image: url('/landing-v2/assets/mv2-dither-spritesheet.png');
+  background-repeat: repeat;
+  background-size: 1536px 256px;
+  opacity: 0.09;
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.85) calc(var(--mv2-cap-gradient-h) * 0.25),
+    rgba(0, 0, 0, 0.45) calc(var(--mv2-cap-gradient-h) * 0.55),
+    rgba(0, 0, 0, 0.12) calc(var(--mv2-cap-gradient-h) * 0.80),
+    rgba(0, 0, 0, 0) var(--mv2-cap-gradient-h)
+  );
+  mask-image: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.85) calc(var(--mv2-cap-gradient-h) * 0.25),
+    rgba(0, 0, 0, 0.45) calc(var(--mv2-cap-gradient-h) * 0.55),
+    rgba(0, 0, 0, 0.12) calc(var(--mv2-cap-gradient-h) * 0.80),
+    rgba(0, 0, 0, 0) var(--mv2-cap-gradient-h)
+  );
+  animation: mv2-cap-dither-step 0.42s steps(6) infinite;
+  will-change: background-position;
+}
+
+@keyframes mv2-cap-dither-step {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: -1536px 0;
+  }
+}
+
+/* Regola mantenuta per il test harness; nel runtime JavaScript mv2-theme-shift-active non viene attivata */
+.mv2-theme-shift-active .mv2-capabilities.mv2-capabilities--visible {
+  background: transparent;
+}
+
+.mv2-capabilities-frame {
+  position: relative;
+  z-index: 1;
+  width: min(1400px, calc(100% - 56px));
+  margin-inline: auto;
+}
+
+/* The empty band reserves the lower knowledge cell the chapter hands over to the next block.
+   It must stay empty: no children, no generated content, no text. */
+.mv2-capabilities-future {
+  min-height: 72px;
+  background: transparent;
+}
+
+/* Chapter typography hooks ------------------------------------------------------------------ */
+
+.mv2-capabilities .mv2-capabilities-headline {
+  margin: 0 0 18px;
+  font-family: var(--mv2-font-body);
+  font-size: 62px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.04;
+}
+
+.mv2-capabilities-headline-primary {
+  display: block;
+  color: #f7f8fa;
+}
+
+.mv2-capabilities-headline-secondary {
+  max-width: 585px;
+  margin: 0;
+  color: var(--mv2-cap-headline-secondary);
+  font-family: var(--mv2-font-body);
+  font-size: 16.2px;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+/* The inner stylesheet also carries the hero copy class, so the chapter colour hook needs
+   the same specificity to win the cascade. */
+.mv2-capabilities .mv2-capabilities-headline-secondary {
+  color: var(--mv2-cap-headline-secondary);
+}
+
+/* Contenuto statico e visibile: nessun cambio di opacità o transform durante lo scroll */
+.mv2-capabilities [data-mv2-cap-panel] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Responsive -------------------------------------------------------------------------------- */
+
+@media (max-width: 1279px) {
+  .mv2-capabilities {
+    --mv2-cap-top-space: clamp(220px, 19vw, 250px);
+    --mv2-cap-gradient-h: clamp(380px, 32vw, 440px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .mv2-capabilities-frame {
+    width: 100%;
+  }
+}
+
+@media (max-width: 1023px) {
+  .mv2-capabilities {
+    --mv2-cap-top-space: clamp(160px, 18vw, 190px);
+    --mv2-cap-gradient-h: clamp(280px, 30vw, 340px);
+    padding: var(--mv2-cap-top-space) 0 clamp(56px, 7vw, 72px);
+  }
+}
+
+@media (max-width: 767px) {
+  .mv2-capabilities {
+    --mv2-cap-top-space: clamp(100px, 15vw, 120px);
+    --mv2-cap-gradient-h: clamp(160px, 26vw, 220px);
+    padding: var(--mv2-cap-top-space) 0 clamp(48px, 6vw, 64px);
+  }
+}
+
+@media (max-width: 560px) {
+  .mv2-capabilities .mv2-capabilities-headline {
+    font-size: 34px;
+  }
+
+  .mv2-capabilities-headline-secondary {
+    font-size: 14.6px;
+  }
+}
+
+@media (max-width: 360px) {
+  .mv2-capabilities .mv2-capabilities-headline {
+    font-size: 31px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv2-cap-dither {
+    display: none;
+  }
+
+  .mv2-theme-transition {
+    background: #ffffff;
+  }
+
+  .mv2-capabilities {
+    background: #000000;
+  }
+
+  .mv2-capabilities-headline-primary,
+  .mv2-capabilities-headline-secondary {
+    transition: none;
+    color: #f7f8fa;
+  }
+
+  .mv2-capabilities [data-mv2-cap-panel] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}

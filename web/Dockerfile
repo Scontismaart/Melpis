@@ -23,10 +23,21 @@ RUN node ./web/scripts/compose-dashboard.mjs --output /tmp/dashboard.html && \
     node ./web/scripts/compose-dashboard-css.mjs --output /tmp/style.css && \
     cmp --silent /tmp/style.css ./web/style.css
 
+FROM node:24-alpine AS landing-builder
+
+WORKDIR /landing-v2
+COPY landing-v2/package.json landing-v2/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY landing-v2/astro.config.mjs ./
+COPY landing-v2/src/ ./src/
+COPY landing-v2/public/ ./public/
+COPY landing-v2/tools/build.mjs landing-v2/tools/nginx-policy.mjs ./tools/
+RUN npm run build && node tools/nginx-policy.mjs
+
 FROM nginx:1.27-alpine AS runtime
 
 # â”€â”€ Landing e pagine pubbliche multilingua (root del docroot) â”€
-COPY landing/index.html landing/style.css landing/app.js landing/navbar.js /usr/share/nginx/html/
+COPY landing/style.css landing/app.js landing/navbar.js /usr/share/nginx/html/
 COPY design-tokens.css /usr/share/nginx/html/
 COPY landing/404.html /usr/share/nginx/html/
 COPY landing/robots.txt landing/sitemap.xml landing/*.jpg /usr/share/nginx/html/
@@ -35,7 +46,6 @@ COPY landing/brand/ /usr/share/nginx/html/brand/
 COPY inline-assets/ /usr/share/nginx/html/inline-assets/
 COPY landing/fonts/ /usr/share/nginx/html/fonts/
 COPY landing/settori/ /usr/share/nginx/html/settori/
-COPY landing/prezzi/ /usr/share/nginx/html/prezzi/
 COPY landing/documentazione/ /usr/share/nginx/html/documentazione/
 COPY landing/en/ /usr/share/nginx/html/en/
 COPY landing/es/ /usr/share/nginx/html/es/
@@ -43,6 +53,11 @@ COPY landing/fr/ /usr/share/nginx/html/fr/
 COPY landing/de/ /usr/share/nginx/html/de/
 COPY locales/ /usr/share/nginx/html/locales/
 COPY i18n-client.js /usr/share/nginx/html/
+COPY --from=landing-builder /landing-v2/dist/*.html /opt/melpis/landing-v2/
+COPY --from=landing-builder /landing-v2/dist/_astro/ /usr/share/nginx/html/landing-v2/_astro/
+COPY --from=landing-builder /landing-v2/dist/assets/ /usr/share/nginx/html/landing-v2/assets/
+COPY --from=landing-builder /landing-v2/dist/images/ /usr/share/nginx/html/landing-v2/images/
+COPY --from=landing-builder /landing-v2/nginx-policy.conf /etc/nginx/melpis-landing-v2.conf
 
 # â”€â”€ Pagine di accesso e registrazione dedicate (/accedi/, /registrati/) â”€â”€
 COPY login.html login.js register.html register.js auth.js auth.css /usr/share/nginx/html/
@@ -87,7 +102,7 @@ RUN apk add --no-cache gettext python3 && \
     chown -R nginx:nginx /usr/share/nginx/html
 
 # Sostituisce il default.conf dell'immagine base.
-RUN rm /etc/nginx/conf.d/default.conf
+RUN rm /etc/nginx/conf.d/default.conf /usr/share/nginx/html/index.html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security-headers.conf /etc/nginx/conf.d/security-headers.conf
 

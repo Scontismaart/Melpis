@@ -1,0 +1,61 @@
+---
+import MelpisFlowDemoConsole from './MelpisFlowDemoConsole.jsx';
+---
+
+<section class="mv2-rest-section-demo" id="mv2-rest-demo" aria-labelledby="mv2-rest-demo-title">
+  <div class="mv2-rest-demo-header" data-rest-reveal>
+    <div class="mv2-rest-demo-header__left">
+      <div class="mv2-rest-demo-badge">
+        <span>DEMO INTERATTIVA</span>
+      </div>
+      <h2 class="mv2-rest-demo-title" id="mv2-rest-demo-title">
+        <span class="mv2-rest-demo-title__main">Dalla richiesta alla conferma.</span>
+        <span class="mv2-rest-demo-title__sub">Melpis gestisce il flusso prenotazione del tuo ristorante.</span>
+      </h2>
+    </div>
+
+    <div class="mv2-rest-demo-header__right">
+      <p>Il cliente scrive, Melpis interpreta la richiesta, controlla le regole del locale e verifica la disponibilità prima di confermare.</p>
+    </div>
+  </div>
+
+  <!-- Stage wrapper: Hero-like card block with ambient green glow & silk reflections -->
+  <div class="mv2-rest-demo-stage">
+    <div class="mv2-rest-demo-aurora" aria-hidden="true">
+      <span class="mv2-rest-demo-aurora-layer mv2-rest-demo-aurora-layer-a"></span>
+      <span class="mv2-rest-demo-aurora-layer mv2-rest-demo-aurora-layer-b"></span>
+      <span class="mv2-rest-demo-aurora-beam"></span>
+      <svg class="mv2-rest-demo-aurora-waves" viewBox="0 0 1340 820" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="mv2-rest-stageWaveTop" x1="0" y1="0" x2="1340" y2="820" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+            <stop offset="35%" stop-color="#F5F3EB" stop-opacity="0.65" />
+            <stop offset="68%" stop-color="#E8EEDF" stop-opacity="0.40" />
+            <stop offset="100%" stop-color="#DCE6D2" stop-opacity="0.12" />
+          </linearGradient>
+          <linearGradient id="mv2-rest-stageWaveBottom" x1="180" y1="820" x2="1340" y2="520" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FAF8F2" stop-opacity="0.55" />
+            <stop offset="55%" stop-color="#E9F0E1" stop-opacity="0.32" />
+            <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.85" />
+          </linearGradient>
+          <filter id="mv2-rest-stageRidgeShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="-1" dy="4" stdDeviation="5" flood-color="#5F6F4B" flood-opacity="0.10" />
+          </filter>
+        </defs>
+        <!-- Top sweeping silk curve -->
+        <path d="M 0 240 C 320 280, 700 180, 1020 120 C 1170 92, 1260 80, 1340 70 L 1340 0 L 0 0 Z" fill="url(#mv2-rest-stageWaveTop)" />
+        <path d="M 0 240 C 320 280, 700 180, 1020 120 C 1170 92, 1260 80, 1340 70" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" filter="url(#mv2-rest-stageRidgeShadow)" />
+        <!-- Bottom warm silk swell -->
+        <path d="M 160 820 C 460 720, 820 750, 1340 650 L 1340 820 Z" fill="url(#mv2-rest-stageWaveBottom)" />
+        <path d="M 160 820 C 460 720, 820 750, 1340 650" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" filter="url(#mv2-rest-stageRidgeShadow)" />
+      </svg>
+    </div>
+
+    <div class="mv2-rest-demo-card-wrap">
+      <MelpisFlowDemoConsole
+        client:visible
+        variant="restaurants"
+      />
+    </div>
+  </div>
+</section>

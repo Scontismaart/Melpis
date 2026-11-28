@@ -1,0 +1,39 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Header from '../components/Header.astro';
+import Hero from '../components/Hero.astro';
+import FeaturesSection from '../components/FeaturesSection.astro';
+import ShowcaseChapter from '../components/ShowcaseChapter.astro';
+import MelpisFlowDemo from '../components/MelpisFlowDemo.astro';
+import Sectors from '../components/Sectors.astro';
+import ControlSection from '../components/ControlSection.astro';
+import CapabilitiesSection from '../components/CapabilitiesSection.astro';
+import SetupSection from '../components/SetupSection.astro';
+import PricingCurve from '../components/PricingCurve.astro';
+import PricingSection from '../components/PricingSection.astro';
+import FaqSection from '../components/FaqSection.astro';
+import FinalCta from '../components/FinalCta.astro';
+import Footer from '../components/Footer.astro';
+import '../styles/mv2-home-typography.css';
+---
+<BaseLayout canonicalPath="/" pageClass="mv2-home">
+  <Header />
+  <main id="mv2-contenuto">
+    <Hero />
+    <FeaturesSection />
+    <ShowcaseChapter />
+    <MelpisFlowDemo />
+    <Sectors />
+    <div class="mv2-theme-transition" data-mv2-theme-transition>
+      <ControlSection />
+      <CapabilitiesSection />
+    </div>
+    <SetupSection />
+    <PricingCurve />
+    <PricingSection />
+    <FaqSection />
+    <FinalCta />
+  </main>
+  <Footer />
+</BaseLayout>
+<script src="../scripts/mobile-menu.js"></script>

@@ -3,6 +3,8 @@ const path = require("path");
 const { isExecutableScript } = require("./extract-inline-assets");
 
 const root = path.join(process.cwd(), "web");
+// The Astro build validates its separately served, hash-based policy.
+const landingV2Root = path.join(root, "landing-v2");
 const excluded = new Set([
   path.join(root, "landing", "hero-glassmorphism.html"),
   path.join(root, "landing", "knowledge-hero.html"),
@@ -12,7 +14,9 @@ const findings = [];
 function walk(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(file);
+    if (entry.isDirectory()) {
+      if (file !== landingV2Root) walk(file);
+    }
     else if (entry.name.endsWith(".html") && !excluded.has(file)) {
       const content = fs.readFileSync(file, "utf8");
       if (/<style\b[^>]*>[\s\S]*?<\/style>/i.test(content)) findings.push(`${file}: inline style block`);

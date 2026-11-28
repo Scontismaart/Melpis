@@ -1,0 +1,655 @@
+/* Melpis Landing V2 — Homepage editorial typography and spacing system.
+   Loaded only by src/pages/index.astro and scoped to body.mv2-home, so the
+   sector pages, the real dashboard and the product demos keep their styling.
+   The dashboard/demo interiors are intentionally excluded: this file only
+   touches editorial headings, commercial copy, navigation and controls. */
+
+.mv2-page.mv2-home {
+  --home-font: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --home-text-primary: #171819;
+  --home-text-body: #34373b;
+  --home-text-secondary: #565a61;
+  --home-text-on-dark: #f6f6f7;
+  --home-text-on-dark-secondary: #b8bec8;
+
+  /* One fluid scale: mobile value at 390–768px, desktop value from ~1050px. */
+  --home-fs-hero: clamp(42px, 6.65vw - 9px, 76px);
+  --home-fs-h2: clamp(34px, 7vw - 20px, 52px);
+  --home-fs-h3: clamp(25px, 3vw, 30px);
+  --home-fs-card: clamp(20px, 2.2vw, 22px);
+  --home-fs-hero-desc: clamp(17px, 1.9vw, 20px);
+  --home-fs-section-desc: clamp(16px, 1.7vw, 18px);
+  --home-fs-body: 16px;
+  --home-fs-nav: 15px;
+  --home-fs-button: 15px;
+  --home-fs-kicker: 12px;
+
+  --home-weight-title: 500;
+  --home-weight-card: 550;
+  --home-weight-body: 400;
+  --home-weight-nav: 450;
+  --home-weight-button: 550;
+  --home-weight-kicker: 600;
+  --home-weight-em: 450;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --home-section-y: clamp(80px, 7.6vw, 108px);
+  font-family: var(--home-font);
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation and controls                                             */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-header .mv2-nav {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-nav);
+  font-weight: var(--home-weight-nav);
+  letter-spacing: -0.006em;
+}
+
+.mv2-home .mv2-header .mv2-nav > a:not(.mv2-button) {
+  font-size: var(--home-fs-nav);
+}
+
+.mv2-home .mv2-header .mv2-button,
+.mv2-home .mv2-header .mv2-menu-toggle {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-button);
+  font-weight: var(--home-weight-button);
+  letter-spacing: -0.01em;
+}
+
+.mv2-home :is(.mv2-button, .mv2-button-small),
+.mv2-home .mv2-hero .mv2-button,
+.mv2-home .mv2-text-link,
+.mv2-home .mv2-final-cta .mv2-final-cta-button,
+.mv2-home .mv2-pricing-section .mv2-pricing-card-cta {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-button);
+  font-weight: var(--home-weight-button);
+  letter-spacing: -0.01em;
+}
+
+/* ------------------------------------------------------------------ */
+/* Kickers and eyebrows                                                */
+/* ------------------------------------------------------------------ */
+
+.mv2-home :is(.mv2-kicker, .mv2-features-label, .mv2-showcase-eyebrow, .mv2-pricing-eyebrow) {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: var(--home-weight-kicker);
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  color: var(--home-text-secondary);
+}
+
+.mv2-home .mv2-setup .mv2-setup-eyebrow,
+.mv2-home .mv2-cap-exp .hero-eyebrow {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: var(--home-weight-kicker);
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  color: var(--home-text-on-dark-secondary);
+}
+
+.mv2-home .mv2-hero .mv2-eyebrow {
+  margin-bottom: var(--space-6);
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: 550;
+  letter-spacing: 0.03em;
+  color: #c7cbd1;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hero                                                               */
+/* ------------------------------------------------------------------ */
+
+.mv2-home #mv2-hero-title {
+  max-width: 1100px;
+  margin-bottom: 20px;
+  font-family: var(--home-font);
+  font-size: var(--home-fs-hero);
+  font-weight: var(--home-weight-title);
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  color: var(--home-text-on-dark);
+  text-wrap: balance;
+}
+
+.mv2-home #mv2-hero-title em {
+  font-family: inherit;
+  font-size: 1em;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  color: #e0e3e7;
+}
+
+.mv2-home .mv2-hero .mv2-lead {
+  max-width: 760px;
+  margin-bottom: clamp(32px, 2.8vw, 38px);
+  font-family: var(--home-font);
+  font-size: var(--home-fs-hero-desc);
+  font-weight: var(--home-weight-body);
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: var(--home-text-on-dark-secondary);
+  text-wrap: balance;
+}
+
+/* ------------------------------------------------------------------ */
+/* Section headings                                                   */
+/* ------------------------------------------------------------------ */
+
+.mv2-home :is(
+  #mv2-features-title,
+  #mv2-showcase-title,
+  #mv2-path-title,
+  #mv2-sector-title,
+  #mv2-control-title,
+  #mv2-capabilities-title,
+  #mv2-setup-title,
+  #mv2-pricing-heading,
+  #mv2-faq-title,
+  #mv2-final-cta-title
+) {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-h2);
+  font-weight: var(--home-weight-title);
+  line-height: 1.09;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+.mv2-home :is(
+  #mv2-features-title,
+  #mv2-showcase-title,
+  #mv2-path-title,
+  #mv2-sector-title,
+  #mv2-control-title,
+  #mv2-faq-title
+) {
+  color: var(--home-text-primary);
+}
+
+.mv2-home #mv2-pricing-heading {
+  color: #111215;
+}
+
+.mv2-home #mv2-final-cta-title {
+  color: #0b0d10;
+}
+
+@media (min-width: 768px) and (max-width: 999px) {
+  .mv2-home #mv2-final-cta-title {
+    font-size: clamp(39px, 4.5vw, 44px);
+  }
+}
+
+@media (min-width: 1000px) {
+  .mv2-home #mv2-final-cta-title {
+    font-size: clamp(50px, 3.8vw, 52px);
+  }
+}
+
+.mv2-home #mv2-setup-title {
+  color: var(--home-text-on-dark);
+}
+
+.mv2-home #mv2-capabilities-title {
+  color: #f7f8fa;
+}
+
+.mv2-home :is(
+  #mv2-features-title,
+  #mv2-showcase-title,
+  #mv2-path-title,
+  #mv2-sector-title,
+  #mv2-control-title,
+  #mv2-faq-title
+) em {
+  font-style: normal;
+  font-weight: var(--home-weight-em);
+}
+
+.mv2-home #mv2-pricing-heading .mv2-pricing-title-strong {
+  font-weight: var(--home-weight-title);
+}
+
+.mv2-home #mv2-pricing-heading .mv2-pricing-title-muted {
+  font-weight: var(--home-weight-em);
+  color: #5a5d64;
+}
+
+.mv2-home #mv2-final-cta-title .mv2-final-cta-title-strong {
+  font-weight: var(--home-weight-title);
+  color: #0b0d10;
+}
+
+.mv2-home #mv2-final-cta-title .mv2-final-cta-title-muted {
+  font-weight: var(--home-weight-em);
+  color: var(--home-text-secondary);
+}
+
+.mv2-home .mv2-capabilities-headline-primary {
+  color: #f7f8fa;
+}
+
+.mv2-home .mv2-setup-headline-line-1 {
+  font-weight: var(--home-weight-title);
+}
+
+.mv2-home .mv2-setup-headline-line-2 {
+  font-weight: var(--home-weight-em);
+  color: var(--home-text-on-dark-secondary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Section descriptions                                               */
+/* ------------------------------------------------------------------ */
+
+.mv2-home :is(
+  .mv2-flow-heading > p:not(.mv2-kicker),
+  .mv2-showcase-lead,
+  .mv2-section-heading > p,
+  .mv2-control-copy > p:not(.mv2-kicker),
+  .mv2-pricing-lead,
+  .mv2-faq-layout > div:first-child > p:last-child
+) {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-section-desc);
+  font-weight: var(--home-weight-body);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--home-text-body);
+}
+
+.mv2-home .mv2-flow-heading > p:not(.mv2-kicker) {
+  max-width: 640px;
+}
+
+.mv2-home .mv2-showcase-lead {
+  max-width: 52ch;
+}
+
+.mv2-home .mv2-control-copy > p:not(.mv2-kicker) {
+  max-width: 460px;
+}
+
+.mv2-home .mv2-pricing-lead {
+  max-width: 360px;
+}
+
+.mv2-home .mv2-faq-layout > div:first-child > p:last-child {
+  max-width: 300px;
+}
+
+.mv2-home .mv2-setup .mv2-setup-header-desc {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-section-desc);
+  font-weight: var(--home-weight-body);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--home-text-on-dark-secondary);
+  max-width: 44ch;
+}
+
+.mv2-home .mv2-capabilities-headline-secondary {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-section-desc);
+  font-weight: var(--home-weight-body);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--mv2-cap-headline-secondary, #777c88);
+  max-width: 620px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Vertical rhythm                                                    */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-kicker,
+.mv2-home .mv2-pricing-eyebrow {
+  margin-bottom: 14px;
+}
+
+.mv2-home .mv2-section-heading {
+  margin-bottom: clamp(40px, 4.2vw, 56px);
+}
+
+/* The showcase intro keeps its compact hand-off to the dashboard frame. */
+.mv2-home .mv2-showcase .mv2-section-heading {
+  margin-bottom: 0;
+}
+
+.mv2-home .mv2-flow {
+  padding-block: var(--home-section-y);
+}
+
+.mv2-home .mv2-flow-heading {
+  max-width: 1000px;
+  margin-bottom: clamp(36px, 3.6vw, 48px);
+}
+
+.mv2-home .mv2-flow-heading h2 {
+  margin-bottom: 20px;
+}
+
+.mv2-home .mv2-sectors,
+.mv2-home .mv2-faq {
+  padding-block: var(--home-section-y);
+}
+
+.mv2-home .mv2-control {
+  padding-block: var(--home-section-y) clamp(84px, 10.5vw, 152px);
+}
+
+.mv2-home .mv2-faq-layout > div:first-child > p:last-child {
+  margin-top: 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Cards and editorial body copy                                      */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-features-col h3 {
+  margin-bottom: 12px;
+  font-family: var(--home-font);
+  font-size: var(--home-fs-card);
+  font-weight: var(--home-weight-card);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--home-text-primary);
+}
+
+.mv2-home .mv2-features-col p {
+  max-width: 38ch;
+  font-family: var(--home-font);
+  font-size: var(--home-fs-body);
+  font-weight: var(--home-weight-body);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: var(--home-text-body);
+}
+
+/* Compact caption role inside the panoramic photo. */
+.mv2-home .mv2-features-card-in h3 {
+  font-family: var(--home-font);
+  font-size: 15px;
+  font-weight: var(--home-weight-card);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.mv2-home .mv2-features-card-in p {
+  font-family: var(--home-font);
+  font-size: 13.5px;
+  font-weight: var(--home-weight-body);
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.mv2-home .mv2-sector-number {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: var(--home-weight-kicker);
+  letter-spacing: 0.1em;
+}
+
+.mv2-home .mv2-sector-card h3 {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-card);
+  font-weight: var(--home-weight-card);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+/* The legacy rule and its 640px override both use !important: keeping the
+   !important here is the only way to align the card copy to the new body role. */
+.mv2-home .mv2-sector-card p {
+  font-family: var(--home-font);
+  font-size: 15px !important;
+  font-weight: var(--home-weight-body);
+  line-height: 1.6;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.86) !important;
+}
+
+.mv2-home .mv2-flow-fallback h3 {
+  font-family: var(--home-font);
+  font-size: 20px;
+  font-weight: var(--home-weight-card);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.mv2-home .mv2-flow-fallback li p {
+  font-family: var(--home-font);
+  font-size: 15px;
+  font-weight: var(--home-weight-body);
+  line-height: 1.65;
+  color: var(--home-text-body);
+}
+
+.mv2-home .mv2-flow-disclosure {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: var(--home-weight-kicker);
+  letter-spacing: 0.1em;
+  color: var(--home-text-secondary);
+}
+
+.mv2-home .mv2-control-copy .mv2-text-link {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-button);
+  font-weight: var(--home-weight-button);
+  letter-spacing: -0.01em;
+}
+
+.mv2-home .mv2-control .mv2-control-label {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-kicker);
+  font-weight: var(--home-weight-body);
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Pricing                                                            */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-pricing-section .mv2-pricing-card-name {
+  font-family: var(--home-font);
+  font-size: clamp(24px, 2.1vw, 30px);
+  font-weight: var(--home-weight-card);
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-card-subtitle {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-body);
+  font-weight: var(--home-weight-body);
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: #4a4e55;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-amount {
+  font-family: var(--home-font);
+  font-size: clamp(30px, 2.6vw, 36px);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-currency {
+  font-family: var(--home-font);
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-period {
+  font-family: var(--home-font);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-card-feature {
+  font-family: var(--home-font);
+  font-size: 15.5px;
+  font-weight: var(--home-weight-body);
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: #4a4e55;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-feature-strong {
+  font-weight: 600;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-shared-note {
+  font-family: var(--home-font);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #4f535a;
+}
+
+.mv2-home .mv2-pricing-section .mv2-pricing-footnote {
+  font-family: var(--home-font);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #555961;
+}
+
+/* ------------------------------------------------------------------ */
+/* FAQ                                                                */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-faq-list summary {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-body);
+  font-weight: var(--home-weight-card);
+  line-height: 1.45;
+  letter-spacing: 0;
+  color: var(--home-text-primary);
+}
+
+.mv2-home .mv2-faq .mv2-faq-list details > p {
+  max-width: 65ch;
+  font-family: var(--home-font);
+  font-size: var(--home-fs-body);
+  font-weight: var(--home-weight-body);
+  line-height: 1.65;
+  letter-spacing: 0;
+  color: var(--home-text-body);
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                             */
+/* ------------------------------------------------------------------ */
+
+.mv2-home .mv2-footer .mv2-footer-heading {
+  margin-bottom: 16px;
+  font-family: var(--home-font);
+  font-size: var(--home-fs-nav);
+  font-weight: var(--home-weight-card);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  color: #d5d8df;
+}
+
+.mv2-home .mv2-footer :is(.mv2-footer-link, .mv2-footer-list a, .mv2-footer-list span) {
+  font-family: var(--home-font);
+  font-size: var(--home-fs-nav);
+  font-weight: var(--home-weight-body);
+  line-height: 1.5;
+  letter-spacing: 0;
+  color: #9aa0a8;
+}
+
+.mv2-home .mv2-footer .mv2-footer-copyright {
+  font-family: var(--home-font);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #9aa0a8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive refinements                                             */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .mv2-home .mv2-flow-heading {
+    max-width: 100%;
+  }
+
+  .mv2-home .mv2-control-copy > p:not(.mv2-kicker),
+  .mv2-home .mv2-showcase-lead {
+    max-width: 56ch;
+  }
+}
+
+@media (max-width: 680px) {
+  .mv2-home .mv2-hero .mv2-eyebrow {
+    margin-bottom: 18px;
+  }
+
+  /* Keeps the four-line mobile lead from ending on a single short word. */
+  .mv2-home .mv2-capabilities-headline-secondary {
+    text-wrap: balance;
+  }
+
+  .mv2-home #mv2-hero-title {
+    max-width: 100%;
+    margin-bottom: 18px;
+  }
+
+  .mv2-home .mv2-hero .mv2-lead {
+    max-width: 100%;
+    margin-bottom: 30px;
+  }
+
+  .mv2-home .mv2-section-heading {
+    margin-bottom: 36px;
+  }
+
+  .mv2-home .mv2-flow-heading h2 {
+    margin-bottom: 16px;
+  }
+
+  .mv2-home .mv2-features-col p {
+    max-width: 42ch;
+  }
+
+  .mv2-home .mv2-sector-card p {
+    font-size: 14px !important;
+  }
+
+  .mv2-home .mv2-pricing-section .mv2-pricing-card-feature {
+    font-size: 15px;
+  }
+
+  .mv2-home .mv2-pricing-section .mv2-pricing-shared-note,
+  .mv2-home .mv2-pricing-section .mv2-pricing-footnote {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 380px) {
+  .mv2-home .mv2-pricing-section .mv2-pricing-card-feature {
+    font-size: 14.5px;
+  }
+}

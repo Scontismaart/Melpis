@@ -1,0 +1,21 @@
+---
+import ConversationStory from './ConversationStory.jsx';
+---
+
+<section class="mv2-section mv2-container mv2-story" id="mv2-percorso" aria-labelledby="mv2-path-title">
+  <div class="mv2-story-heading">
+    <div><p class="mv2-kicker">01 / DAL MESSAGGIO AL PROSSIMO PASSO</p><h2 id="mv2-path-title">Da una domanda,<br /><em>al prossimo passo.</em></h2></div>
+    <p>Una richiesta diventa un’attività chiara: le informazioni vengono verificate e il team segue ciò che serve.</p>
+  </div>
+  <div class="mv2-story-fallback">
+    <p class="mv2-story-disclosure">Demo illustrativa · dati sintetici</p>
+    <h3>Un martedì di esempio · 13 ottobre 2026</h3>
+    <ol>
+      <li><strong>Disponibilità e conferma</strong><p>«Avete un tavolo per due martedì 13 ottobre alle 19:30?» · Il controllo dello slot nell’esempio mostra 2 posti disponibili. Dopo la conferma esplicita e la verifica di capienza, il risultato illustrativo compare nel pannello.</p></li>
+      <li><strong>Nessun posto disponibile</strong><p>Per le 19:30 risultano 0 posti disponibili. La richiesta resta senza prenotazione.</p></li>
+      <li><strong>Informazione da verificare</strong><p>Per una richiesta sul menu di un evento le informazioni non bastano: la conversazione è da seguire dal team.</p></li>
+    </ol>
+    <noscript><p>La demo interattiva richiede JavaScript; i tre esiti e le relative condizioni sono descritti qui.</p></noscript>
+  </div>
+  <ConversationStory client:visible />
+</section>

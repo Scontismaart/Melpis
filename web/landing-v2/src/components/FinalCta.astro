@@ -1,0 +1,99 @@
+---
+interface Props {
+  id?: string;
+  titleStrong?: string;
+  titleMuted?: string;
+  ctaHref?: string;
+  ctaText?: string;
+}
+
+const {
+  id = 'mv2-contatto',
+  titleStrong = 'Porta Melpis',
+  titleMuted = 'nella tua attività.',
+  ctaHref = '/registrati/',
+  ctaText = 'Prova Melpis gratis',
+} = Astro.props;
+---
+
+<section
+  class="mv2-final-cta"
+  id={id}
+  aria-labelledby="mv2-final-cta-title"
+  data-mv2-final-cta
+>
+  {id !== 'mv2-contatto' && <span id="mv2-contatto" class="mv2-pricing-anchor" aria-hidden="true" />}
+  {id !== 'mv2-rest-cta' && <span id="mv2-rest-cta" class="mv2-pricing-anchor" aria-hidden="true" />}
+  <div class="mv2-final-cta-body">
+    <h2 class="mv2-final-cta-title" id="mv2-final-cta-title" data-mv2-reveal="title">
+      <span class="mv2-final-cta-title-strong">{titleStrong}</span>
+      <span class="mv2-final-cta-title-muted">{titleMuted}</span>
+    </h2>
+
+    <a class="mv2-final-cta-button" href={ctaHref} data-mv2-reveal="up" data-mv2-delay="2" data-mv2-magnetic>
+      {ctaText}
+      <span class="mv2-final-cta-arrow" aria-hidden="true">→</span>
+    </a>
+  </div>
+
+  <div class="mv2-final-cta-curve" aria-hidden="true">
+    <svg class="mv2-final-cta-wave" viewBox="0 0 1440 260" preserveAspectRatio="none" focusable="false">
+      <defs>
+        <linearGradient id="mv2-cta-hill-back" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0.8" />
+          <stop offset="0.6" stop-color="#e8ecf1" stop-opacity="0.75" />
+          <stop offset="1" stop-color="#dce1e8" stop-opacity="0.9" />
+        </linearGradient>
+        <linearGradient id="mv2-cta-hill-mid" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#e0e4eb" stop-opacity="0.45" />
+          <stop offset="1" stop-color="#cbd0d8" stop-opacity="0.7" />
+        </linearGradient>
+        <linearGradient id="mv2-cta-ink" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0b0d10" />
+          <stop offset="1" stop-color="#0b0d10" />
+        </linearGradient>
+        <linearGradient id="mv2-cta-rim" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0.3" />
+          <stop offset="0.25" stop-color="#ffffff" stop-opacity="0.85" />
+          <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.45" />
+          <stop offset="0.8" stop-color="#ffffff" stop-opacity="0.95" />
+          <stop offset="1" stop-color="#ffffff" stop-opacity="0.35" />
+        </linearGradient>
+        <filter id="mv2-cta-rim-blur" x="-10%" y="-200%" width="120%" height="500%">
+          <feGaussianBlur stdDeviation="5" />
+        </filter>
+      </defs>
+
+      <!-- Soft silver back crest layer -->
+      <path
+        d="M0 115 C 240 138 420 142 660 125 C 920 105 1100 62 1260 68 C 1350 72 1400 88 1440 98 L1440 260 L0 260 Z"
+        fill="url(#mv2-cta-hill-back)"
+      />
+      <!-- Mid subtle diffuse silver wave -->
+      <path
+        d="M0 130 C 220 152 400 158 640 142 C 890 120 1080 84 1240 90 C 1340 94 1395 108 1440 118 L1440 260 L0 260 Z"
+        fill="url(#mv2-cta-hill-mid)"
+      />
+      <!-- Foreground dark wave (#0b0d10) joining the footer seamlessly -->
+      <path
+        d="M0 145 C 200 170 380 178 620 166 C 860 152 1050 108 1220 104 C 1320 100 1390 116 1440 128 L1440 260 L0 260 Z"
+        fill="url(#mv2-cta-ink)"
+      />
+      <!-- Ambient luminous soft glow on the wave rim -->
+      <path
+        d="M0 145 C 200 170 380 178 620 166 C 860 152 1050 108 1220 104 C 1320 100 1390 116 1440 128"
+        fill="none"
+        stroke="rgba(255, 255, 255, 0.55)"
+        stroke-width="6"
+        filter="url(#mv2-cta-rim-blur)"
+      />
+      <!-- Sharp core catchlight line along the crest -->
+      <path
+        d="M0 145 C 200 170 380 178 620 166 C 860 152 1050 108 1220 104 C 1320 100 1390 116 1440 128"
+        fill="none"
+        stroke="url(#mv2-cta-rim)"
+        stroke-width="1.8"
+      />
+    </svg>
+  </div>
+</section>

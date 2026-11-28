@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DOMAIN = 'https://melpis.it';
-const { ROUTE_MAP, SUPPORTED_LANGS } = require('./build-i18n.js');
+const { ROUTE_MAP, SITEMAP_EXCLUDED_PATHS, SUPPORTED_LANGS } = require('./build-i18n.js');
 const WEB_DIR = path.join(process.cwd(), 'web');
 
 const LOCALE_OG = {
@@ -18,8 +18,6 @@ let errors = [];
 function getExpectedFilePath(routeKey, lang) {
   const url = ROUTE_MAP[routeKey][lang];
   if (lang === 'it') {
-    if (routeKey === 'home') return path.join(WEB_DIR, 'landing', 'index.html');
-    if (routeKey === 'pricing') return path.join(WEB_DIR, 'landing', 'prezzi', 'index.html');
     if (routeKey === 'restaurants') return path.join(WEB_DIR, 'landing', 'settori', 'ristoranti', 'index.html');
     if (routeKey === 'beauty') return path.join(WEB_DIR, 'landing', 'settori', 'saloni-bellezza', 'index.html');
     if (routeKey === 'medical') return path.join(WEB_DIR, 'landing', 'settori', 'studi-medici', 'index.html');
@@ -39,6 +37,8 @@ function getExpectedFilePath(routeKey, lang) {
 // 1. Audit HTML files
 for (const [routeKey, routes] of Object.entries(ROUTE_MAP)) {
   for (const lang of SUPPORTED_LANGS) {
+    // The Nginx integration tests audit the V2 canonical, noindex and aliases.
+    if (SITEMAP_EXCLUDED_PATHS.has(routes[lang])) continue;
     const filePath = getExpectedFilePath(routeKey, lang);
     if (!fs.existsSync(filePath)) {
       errors.push({ type: 'MISSING_FILE', routeKey, lang, filePath });
@@ -101,7 +101,10 @@ if (!fs.existsSync(sitemapPath)) {
   for (const [routeKey, routes] of Object.entries(ROUTE_MAP)) {
     for (const lang of SUPPORTED_LANGS) {
       const url = `${DOMAIN}${routes[lang]}`;
-      if (!sitemapXml.includes(`<loc>${url}</loc>`)) {
+      const inSitemap = sitemapXml.includes(`<loc>${url}</loc>`);
+      if (inSitemap && SITEMAP_EXCLUDED_PATHS.has(routes[lang])) {
+        errors.push({ type: 'SITEMAP_UNEXPECTED_LOC', url });
+      } else if (!inSitemap && !SITEMAP_EXCLUDED_PATHS.has(routes[lang])) {
         errors.push({ type: 'SITEMAP_MISSING_LOC', url });
       }
     }
@@ -113,5 +116,5 @@ console.log(`Total errors found: ${errors.length}`);
 if (errors.length > 0) {
   console.log(JSON.stringify(errors.slice(0, 30), null, 2));
 } else {
-  console.log('✅ ALL 60 pages have valid self-canonical, reciprocal hreflangs, x-default, correct og:locale, titles, and sitemap entries!');
+  console.log('SEO audit passed for retained public pages and sitemap entries.');
 }

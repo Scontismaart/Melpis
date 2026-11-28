@@ -1,0 +1,199 @@
+---
+const conversations = [
+  { initials: 'GR', name: 'Giulia Rossi', preview: 'Prenotazione per venerdì sera', time: '28 ago', channel: 'WhatsApp', tag: 'AI', tone: 'ai', active: true },
+  { initials: 'MB', name: 'Marco Bianchi', preview: 'Vorrei parlare con una persona', time: '31 ago', channel: 'WhatsApp', tag: 'Escalation', tone: 'escalated', active: false },
+  { initials: 'EM', name: 'Elena Moretti', preview: 'Disponibile sabato pomeriggio?', time: '1 set', channel: 'Instagram', tag: 'AI', tone: 'ai', active: false },
+  { initials: 'LF', name: 'Luca Ferri', preview: 'Confermo per due, grazie!', time: '2 set', channel: 'WhatsApp', tag: 'AI', tone: 'ai', active: false },
+  { initials: 'SC', name: 'Sara Conti', preview: 'Ci penso io, grazie.', time: '2 set', channel: 'WhatsApp', tag: 'Operatore', tone: 'operator', active: false },
+];
+
+const messages = [
+  { direction: 'in', time: '18:15', text: 'Ciao! Vorrei prenotare un tavolo per due venerdì sera.' },
+  { direction: 'out', time: '18:16', text: 'Certo! A che ora preferireste?' },
+  { direction: 'in', time: '18:18', text: 'Verso le 20:30, se possibile.' },
+  { direction: 'out', time: '18:19', text: 'Abbiamo disponibilità alle 20:30. Confermo per due persone a nome Giulia?' },
+  { direction: 'in', time: '18:21', text: 'Perfetto, grazie!' },
+];
+---
+
+<div
+  class="mv2-ctl-dash"
+  role="img"
+  aria-label="Dashboard Melpis: inbox con cinque conversazioni, la chat di Giulia Rossi gestita dall’assistente e i dettagli della richiesta di prenotazione"
+>
+  <aside class="mv2-ctl-rail">
+    <div class="mv2-ctl-brand"><span class="mv2-ctl-brand-mark" aria-hidden="true">m</span>melpis</div>
+
+    <div class="mv2-ctl-rail-scroll">
+      <span class="mv2-ctl-rail-label">Principale</span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="2.2" width="4.6" height="4.6" rx="1" /><rect x="9.2" y="2.2" width="4.6" height="4.6" rx="1" /><rect x="2.2" y="9.2" width="4.6" height="4.6" rx="1" /><rect x="9.2" y="9.2" width="4.6" height="4.6" rx="1" /></svg>
+        Panoramica
+      </span>
+      <span class="mv2-ctl-rail-item is-active">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 7.5a5.2 5.2 0 0 1-7.7 4.6L2.8 13l.9-2.6A5.2 5.2 0 1 1 13.2 7.5Z" /><path d="M5.5 6.3h5M5.5 8.8h3.2" /></svg>
+        Inbox
+        <span class="mv2-ctl-count">5</span>
+      </span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.4" y="3.4" width="11.2" height="10.2" rx="2" /><path d="M2.4 6.5h11.2M5.4 2.3v2.2M10.6 2.3v2.2" /></svg>
+        Prenotazioni
+      </span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2.4 1.6 3.2 3.5.5-2.5 2.5.6 3.5L8 10.5l-3.2 1.6.6-3.5-2.5-2.5 3.5-.5L8 2.4Z" /></svg>
+        Recensioni
+      </span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.6" cy="5.3" r="2.1" /><path d="M2.3 12.7c.2-2 1.4-3.2 3.3-3.2s3.1 1.2 3.3 3.2" /><circle cx="11.3" cy="5.8" r="1.7" /><path d="M10 9.7c2.1-.3 3.5.8 3.8 2.7" /></svg>
+        Team &amp; Collaboratori
+      </span>
+
+      <span class="mv2-ctl-rail-label">Assistente</span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2 .9 2.8L11.7 6l-2.8.9L8 9.7l-.9-2.8L4.3 6l2.8-1.2L8 2Z" /><path d="m12.3 9.3.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5Z" /></svg>
+        Simulatore AI
+      </span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.1h4.2c.9 0 1.5.5 1.5 1.4v8.2c0-.7-.6-1.1-1.5-1.1H3V3.1Z" /><path d="M13 3.1H8.8c-.9 0-1.5.5-1.5 1.4v8.2c0-.7.6-1.1 1.5-1.1H13V3.1Z" /></svg>
+        Conoscenza
+      </span>
+      <span class="mv2-ctl-rail-item">
+        <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 4.3h10.8M2.6 8h10.8M2.6 11.7h10.8" /><circle cx="5.7" cy="4.3" r="1.2" fill="currentColor" stroke="none" /><circle cx="10.4" cy="8" r="1.2" fill="currentColor" stroke="none" /><circle cx="7.1" cy="11.7" r="1.2" fill="currentColor" stroke="none" /></svg>
+        Configurazione AI
+      </span>
+    </div>
+
+    <div class="mv2-ctl-account">
+      <span class="mv2-ctl-user-mark" aria-hidden="true">AD</span>
+      <span class="mv2-ctl-account-copy">
+        <strong>attività.demo@melpis.it</strong>
+        <small>Proprietario</small>
+      </span>
+      <svg class="mv2-ctl-icon is-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 6.5 2.5 2.5 2.5-2.5" /></svg>
+    </div>
+  </aside>
+
+  <div class="mv2-ctl-topbar">
+    <span class="mv2-ctl-crumb">Inbox <span aria-hidden="true">/</span> <strong>Giulia Rossi</strong></span>
+    <span class="mv2-ctl-status"><span class="mv2-ctl-dot" aria-hidden="true"></span>Assistente attivo</span>
+    <span class="mv2-ctl-search">
+      <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" /><path d="m10.2 10.2 3 3" /></svg>
+      Cerca in Melpis
+      <kbd>/</kbd>
+    </span>
+    <svg class="mv2-ctl-top-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.2 6.1a3.8 3.8 0 0 1 7.6 0c0 3.6 1.2 4.4 1.2 4.4H3s1.2-.8 1.2-4.4Z" /><path d="M6.7 12.2a1.5 1.5 0 0 0 2.6 0" /></svg>
+  </div>
+
+  <div class="mv2-ctl-list">
+    <div class="mv2-ctl-list-head">
+      <span class="mv2-ctl-list-title">Inbox <span class="mv2-ctl-count">5</span></span>
+      <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.3h10M4.8 8h6.4M6.5 11.7h3" /></svg>
+    </div>
+
+    <div class="mv2-ctl-filters" aria-hidden="true">
+      <span class="mv2-ctl-filter is-active">Tutti</span>
+      <span class="mv2-ctl-filter">WhatsApp</span>
+      <span class="mv2-ctl-filter">Instagram</span>
+      <span class="mv2-ctl-filter">AI</span>
+      <span class="mv2-ctl-filter">Operatore</span>
+      <span class="mv2-ctl-filter">Escalated</span>
+      <span class="mv2-ctl-filter">Risolte</span>
+    </div>
+
+    <span class="mv2-ctl-search mv2-ctl-list-search">
+      <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" /><path d="m10.2 10.2 3 3" /></svg>
+      Cerca conversazione...
+    </span>
+
+    <div class="mv2-ctl-rows" tabindex="0" aria-label="Conversazioni recenti">
+      {conversations.map((conversation) => (
+        <div class={`mv2-ctl-row${conversation.active ? ' is-active' : ''}`}>
+          <span class="mv2-ctl-avatar" aria-hidden="true">{conversation.initials}</span>
+          <span class="mv2-ctl-row-body">
+            <span class="mv2-ctl-row-name">
+              {conversation.name}
+              <small>{conversation.time}</small>
+            </span>
+            <span class="mv2-ctl-row-preview">{conversation.preview}</span>
+            <span class="mv2-ctl-row-tags">
+              <span class="mv2-ctl-tag is-channel">{conversation.channel}</span>
+              <span class={`mv2-ctl-tag is-${conversation.tone}`}>{conversation.tag}</span>
+            </span>
+          </span>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  <div class="mv2-ctl-thread">
+    <div class="mv2-ctl-thread-head">
+      <span class="mv2-ctl-avatar" aria-hidden="true">GR</span>
+      <span class="mv2-ctl-thread-id">
+        <span class="mv2-ctl-thread-title">Giulia Rossi</span>
+        <span class="mv2-ctl-thread-sub">+39 340 123 4567</span>
+      </span>
+      <span class="mv2-ctl-thread-tags">
+        <span class="mv2-ctl-tag is-channel">WhatsApp</span>
+        <span class="mv2-ctl-tag is-ai">AI</span>
+      </span>
+      <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.2" cy="8" r=".9" fill="currentColor" stroke="none" /><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none" /><circle cx="12.8" cy="8" r=".9" fill="currentColor" stroke="none" /></svg>
+    </div>
+
+    <div class="mv2-ctl-assist">
+      <svg class="mv2-ctl-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="m8 2 .8 2.5L11.3 5l-2.5.8L8 8.3l-.8-2.5L4.7 5l2.5-.5L8 2Z" /><path d="m12.2 9.2.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5.5-1.4Z" /></svg>
+      L’assistente sta gestendo la conversazione.
+    </div>
+
+    <div class="mv2-ctl-messages">
+      {messages.map((message) => (
+        <p class={`mv2-ctl-msg mv2-ctl-msg-${message.direction}`}>
+          {message.text}
+          <span class="mv2-ctl-msg-time">{message.time}</span>
+        </p>
+      ))}
+    </div>
+
+    <div class="mv2-ctl-thread-foot">
+      <p>Per rispondere manualmente, prendi prima in carico la conversazione.</p>
+      <span class="mv2-ctl-take">Prendi in carico</span>
+    </div>
+  </div>
+
+  <aside class="mv2-ctl-detail">
+    <section class="mv2-ctl-detail-section">
+      <h4>Informazioni</h4>
+      <dl>
+        <dt>Telefono</dt>
+        <dd>+39 340 123 4567</dd>
+        <dt>Canale</dt>
+        <dd>WhatsApp</dd>
+        <dt>Gestione</dt>
+        <dd>AI</dd>
+        <dt>Richiesta</dt>
+        <dd>Prenotazione</dd>
+        <dt>Stato</dt>
+        <dd>Risposta automatica inviata</dd>
+        <dt>Ultimo messaggio</dt>
+        <dd>28/08, 18:21</dd>
+      </dl>
+    </section>
+
+    <section class="mv2-ctl-detail-section">
+      <h4>Azioni rapide</h4>
+      <div class="mv2-ctl-quick">
+        <span class="mv2-ctl-quick-action">Assegna</span>
+        <span class="mv2-ctl-quick-action">Segna come risolta</span>
+      </div>
+      <span class="mv2-ctl-field-label">Operatore</span>
+      <span class="mv2-ctl-select">
+        Luca · Operatore
+        <svg class="mv2-ctl-icon is-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5.5 6.5 2.5 2.5 2.5-2.5" /></svg>
+      </span>
+    </section>
+
+    <section class="mv2-ctl-detail-section">
+      <h4>Note AI</h4>
+      <p class="mv2-ctl-note">Cliente abituale. Preferisce il tavolo vicino alla finestra.</p>
+    </section>
+  </aside>
+</div>

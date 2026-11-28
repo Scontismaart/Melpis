@@ -1,0 +1,106 @@
+---
+const faqs = [
+  {
+    id: "prenotazioni-autonome",
+    q: "Melpis può confermare autonomamente le prenotazioni?",
+    a: "Sì. Quando la richiesta del cliente rispetta la capienza, i turni di servizio e la disponibilità reale del calendario, Melpis propone lo slot e registra la prenotazione confermata non appena il cliente dà il suo assenso esplicito."
+  },
+  {
+    id: "calendario-prenotazioni",
+    q: "Come funziona il calendario delle prenotazioni?",
+    a: "Dalla dashboard hai a disposizione un calendario dedicato dove visualizzare i tavoli prenotati, impostare i turni di pranzo e cena, definire i coperti massimi per fascia oraria e inserire chiusure speciali o ferie."
+  },
+  {
+    id: "collegamento-google-calendar",
+    q: "Posso collegare Google Calendar?",
+    a: "Il collegamento a Google Calendar è previsto, con attivazione subordinata alla certificazione operativa."
+  },
+  {
+    id: "conoscenza-menu-locale",
+    q: "Melpis utilizza soltanto il mio menù e le mie informazioni?",
+    a: "Esattamente. Melpis attinge in modo rigoroso ed esclusivo dalla Knowledge Base configurata per il tuo locale: piatti, ingredienti, prezzi, allergeni e regole interne. Se un’informazione non è stata inserita dal titolare, Melpis non la inventa mai."
+  },
+  {
+    id: "risposta-sconosciuta",
+    q: "Cosa succede quando Melpis non conosce una risposta?",
+    a: "Se una domanda esula dalle informazioni configurate o riguarda richieste speciali fuori perimetro (come tavolate numerose o eventi privati), la conversazione viene passata all’inbox dello staff con notifica immediata, così il team può intervenire direttamente."
+  },
+  {
+    id: "numero-whatsapp-business",
+    q: "Posso continuare a utilizzare il mio numero WhatsApp Business?",
+    a: "Sì. Melpis si integra direttamente con il tuo numero WhatsApp Business tramite le API ufficiali di Meta. Il tuo team può continuare a leggere e rispondere alle chat in qualsiasi momento dalla dashboard."
+  },
+  {
+    id: "modifica-orari-regole",
+    q: "Posso modificare gli orari e le regole del ristorante?",
+    a: "In qualsiasi momento. Dalla tua area riservata puoi aggiornare istantaneamente orari di apertura, giorni di chiusura, piatti a menù, prezzi e disponibilità per turno: le nuove regole diventano attive da subito nelle risposte future."
+  },
+  {
+    id: "costo-servizio",
+    q: "Quanto costa Melpis per un ristorante?",
+    a: "I piani mensili di riferimento partono da 29 €/mese (piano Essenziale, 500 risposte AI) e 69 €/mese (piano Crescita, 2.000 risposte AI e gestione delle recensioni), con condizioni trasparenti e senza vincoli a lungo termine. Puoi consultare il dettaglio completo nella sezione piani."
+  },
+  {
+    id: "prova-gratuita",
+    q: "Posso provarlo gratuitamente?",
+    a: "Sì. Puoi iniziare con una prova gratuita di 7 giorni con 150 risposte AI incluse per configurare il locale, testare le risposte e verificare il funzionamento nella tua sala prima di attivare un piano."
+  }
+];
+---
+
+<section class="mv2-rest-section-owner-faq" id="mv2-rest-faq" aria-labelledby="mv2-rest-faq-title">
+  <div class="mv2-rest-owner-faq__grid">
+    <!-- Left Column: Title & Intro -->
+    <div class="mv2-rest-owner-faq__intro" data-rest-reveal>
+      <span class="mv2-rest-eyebrow">DOMANDE FREQUENTI</span>
+      <h2 class="mv2-rest-owner-faq__title" id="mv2-rest-faq-title">
+        <span class="mv2-rest-title-dark">Tutto quello che vuoi sapere.</span>
+        <span class="mv2-rest-title-green">Prima di iniziare.</span>
+      </h2>
+      <p class="mv2-rest-owner-faq__desc">
+        Le risposte ai dubbi più comuni dei ristoratori su prenotazioni automatiche, gestione del calendario, WhatsApp Business e regole del locale.
+      </p>
+      <div class="mv2-rest-owner-faq__link-wrap">
+        <a class="mv2-rest-link-arrow" href={`${import.meta.env.BASE_URL}#mv2-piani`}>
+          <span>Consulta tutti i dettagli dei piani</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M3.5 8h9M8.5 4l4 4-4 4" />
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Right Column: Minimal Accordion List -->
+    <div class="mv2-rest-owner-faq__list" role="region" aria-label="Domande frequenti per ristoratori" data-rest-reveal>
+      {faqs.map((faq, index) => (
+        <div class="mv2-rest-owner-faq__item" data-open="false">
+          <button
+            type="button"
+            class="mv2-rest-owner-faq__trigger"
+            id={`rest-owner-faq-trig-${index}`}
+            aria-controls={`rest-owner-faq-pane-${index}`}
+            aria-expanded="false"
+          >
+            <span class="mv2-rest-owner-faq__question">{faq.q}</span>
+            <span class="mv2-rest-owner-faq__icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="3" x2="8" y2="13" class="mv2-rest-icon-v-line" />
+                <line x1="3" y1="8" x2="13" y2="8" />
+              </svg>
+            </span>
+          </button>
+          <div
+            class="mv2-rest-owner-faq__pane"
+            id={`rest-owner-faq-pane-${index}`}
+            role="region"
+            aria-labelledby={`rest-owner-faq-trig-${index}`}
+          >
+            <div class="mv2-rest-owner-faq__answer">
+              <p>{faq.a}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

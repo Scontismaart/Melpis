@@ -1,0 +1,125 @@
+---
+import { comparison } from '../data/pricing.mjs';
+
+const columns = comparison.plans.length + 1;
+
+const formatValue = (value: string) => {
+  const match = value.match(/^(.*?)(\*{1,2})$/);
+  return match ? { text: match[1], marker: match[2] } : { text: value, marker: '' };
+};
+---
+
+<section class="mv2-pp-compare" id="mv2-pp-confronto" aria-labelledby="mv2-pp-confronto-title">
+  <span id="confronto" class="mv2-legacy-anchor" aria-hidden="true"></span>
+  <div class="mv2-pp-container">
+    <header class="mv2-pp-compare-head">
+      <h2 class="mv2-pp-compare-title" id="mv2-pp-confronto-title">{comparison.title}</h2>
+      <p class="mv2-pp-compare-note">{comparison.note}</p>
+    </header>
+
+    <div class="mv2-pp-search">
+      <label class="mv2-pp-visually-hidden" for="mv2-pp-search-input">{comparison.searchLabel}</label>
+      <div class="mv2-pp-search-field">
+        <span class="mv2-pp-search-icon" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" focusable="false">
+            <circle cx="7" cy="7" r="4.6" />
+            <path d="M10.4 10.4L14 14" />
+          </svg>
+        </span>
+        <input
+          class="mv2-pp-search-input"
+          id="mv2-pp-search-input"
+          type="search"
+          placeholder={comparison.searchPlaceholder}
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="mv2-pp-search-status"
+          data-pp-search
+        />
+        <button class="mv2-pp-search-clear" type="button" data-pp-search-clear hidden>
+          {comparison.clearLabel}
+        </button>
+      </div>
+      <p class="mv2-pp-search-status" id="mv2-pp-search-status" role="status" aria-live="polite" data-pp-search-status></p>
+    </div>
+
+    <table class="mv2-pp-table" data-pp-table>
+      <caption class="mv2-pp-visually-hidden">{comparison.title}</caption>
+      <colgroup>
+        <col class="mv2-pp-col-feature" />
+        {comparison.plans.map(() => <col />)}
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col"><span class="mv2-pp-visually-hidden">Funzionalità</span></th>
+          {comparison.plans.map((plan) => (
+            <th scope="col">
+              <div class="mv2-pp-col-head">
+                <span class="mv2-pp-col-name">{plan.name}</span>
+                <a class="mv2-pp-col-cta" href={plan.href}>Prova Melpis</a>
+              </div>
+            </th>
+          ))}
+        </tr>
+      </thead>
+
+      {comparison.groups.map((group) => (
+        <tbody data-pp-group={group.id} data-pp-open="true">
+          <tr class="mv2-pp-group-row" data-pp-group-row>
+            <th scope="rowgroup" colspan={columns}>
+              <button
+                class="mv2-pp-group-toggle"
+                type="button"
+                aria-expanded="true"
+                data-pp-group-toggle
+              >
+                <span>{group.label}</span>
+                <span class="mv2-pp-chevron" aria-hidden="true"></span>
+              </button>
+            </th>
+          </tr>
+          {group.rows.map((row) => (
+            <tr class="mv2-pp-row" data-pp-row data-pp-keywords={`${row.label} ${row.keywords}`}>
+              <th scope="row">{row.label}</th>
+              {row.values.map((value) => {
+                const formatted = typeof value === 'string' ? formatValue(value) : null;
+                return (
+                  <td>
+                    {value === true && (
+                      <span class="mv2-pp-yes">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                          <path d="M3 8.4l3.2 3.2L13 4.6" />
+                        </svg>
+                        <span class="mv2-pp-visually-hidden">Incluso</span>
+                      </span>
+                    )}
+                    {value === false && (
+                      <span class="mv2-pp-no">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true" focusable="false">
+                          <path d="M2.5 6h7" />
+                        </svg>
+                        <span class="mv2-pp-visually-hidden">Non incluso</span>
+                      </span>
+                    )}
+                    {formatted && (
+                      <span>
+                        {formatted.text}
+                        {formatted.marker && <span class="mv2-pp-marker" aria-hidden="true">{formatted.marker}</span>}
+                      </span>
+                    )}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      ))}
+    </table>
+
+    <p class="mv2-pp-empty" data-pp-empty hidden>{comparison.emptyLabel}</p>
+
+    <div class="mv2-pp-footnotes">
+      {comparison.footnotes.map((footnote) => <p>{footnote}</p>)}
+    </div>
+  </div>
+</section>

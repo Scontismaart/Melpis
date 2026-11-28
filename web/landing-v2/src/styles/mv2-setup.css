@@ -1,0 +1,1260 @@
+/* Melpis Landing V2 — Section 04: Un avvio consapevole
+   Editorial dark split canvas with a horizontal expanding glass accordion.
+   - four fumé panels always side by side, same order (01 → 04);
+   - the selected panel expands while the other three stay narrow;
+   - every width interpolates together through flex-grow (CSS only);
+   - one shared mountain panorama behind the four glass masks.
+   Scoped to #mv2-setup: no global tokens, no cross-section side effects. */
+
+.mv2-page .mv2-setup,
+#mv2-setup.mv2-setup {
+  position: relative;
+  scroll-margin-top: calc(78px + 36px);
+  padding-block: clamp(96px, 8.5vw, 138px);
+  background: #060709 !important;
+  color: #f3f6fa;
+  font-family: var(--mv2-font-body);
+  isolation: isolate;
+  overflow: hidden;
+  border-top: 1px solid rgba(226, 232, 240, 0.07);
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Temporary hook for Playwright section-level screenshotting to prevent sticky header stitching */
+html.mv2-screenshotting .mv2-header {
+  position: absolute !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Ground                                                              */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 65% 55% at 94% 6%, rgba(32, 45, 185, 0.28) 0%, rgba(20, 28, 90, 0.12) 42%, transparent 70%),
+    radial-gradient(48% 42% at 8% 92%, rgba(128, 150, 180, 0.04), transparent 70%),
+    linear-gradient(180deg, #050608 0%, #060709 46%, #050608 100%);
+}
+
+.mv2-setup-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 45% at 50% 0%, rgba(255, 255, 255, 0.03), transparent 70%),
+    linear-gradient(180deg, transparent 72%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+.mv2-setup-container {
+  position: relative;
+  z-index: 1;
+  width: min(1240px, calc(100% - clamp(40px, 7vw, 112px)));
+  margin-inline: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.68fr);
+  gap: clamp(24px, 5vw, 88px);
+  align-items: end;
+  padding-bottom: clamp(26px, 3.2vw, 42px);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.12);
+}
+
+.mv2-setup-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  color: rgba(206, 214, 226, 0.68);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.mv2-setup-eyebrow::before {
+  content: "";
+  width: 28px;
+  height: 1px;
+  flex: 0 0 auto;
+  background: linear-gradient(90deg, rgba(226, 232, 240, 0.7), rgba(226, 232, 240, 0.05));
+}
+
+.mv2-setup-headline {
+  margin: 18px 0 0;
+  font-family: var(--mv2-font-heading);
+  font-size: clamp(34px, 3.7vw, 56px);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  color: #f8fafc;
+}
+
+.mv2-setup-headline-line {
+  display: block;
+}
+
+.mv2-setup-headline-line-2 {
+  color: rgba(232, 238, 246, 0.5);
+}
+
+.mv2-setup-header-desc {
+  justify-self: end;
+  max-width: 36ch;
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid rgba(226, 232, 240, 0.1);
+  color: rgba(190, 200, 214, 0.72);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+/* ------------------------------------------------------------------ */
+/* Body layout                                                         */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 266px) minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 56px);
+  align-items: stretch;
+  margin-top: clamp(26px, 3.4vw, 46px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Left: hairline step list                                            */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-tabs {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.mv2-setup-tab {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 18px;
+  gap: 14px;
+  align-content: start;
+  align-items: start;
+  width: 100%;
+  height: 128px;
+  margin: 0;
+  padding: 18px 2px;
+  border: 0;
+  border-top: 1px solid rgba(226, 232, 240, 0.14);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.3s ease;
+}
+
+.mv2-setup-tab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  border-radius: 1px;
+  background: #3b62f0;
+  box-shadow: 0 0 10px rgba(59, 98, 240, 0.6);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mv2-setup-tab:last-child {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.14);
+}
+
+.mv2-setup-tab:focus-visible {
+  outline: 1px solid rgba(226, 232, 240, 0.8);
+  outline-offset: 4px;
+}
+
+.mv2-setup-tab-icon {
+  display: inline-flex;
+  padding-top: 3px;
+  color: rgba(206, 214, 226, 0.42);
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.mv2-setup-tab-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.mv2-setup-tab-title {
+  display: block;
+  color: rgba(226, 234, 244, 0.5);
+  font-size: 16.5px;
+  font-weight: 450;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  transition: color 0.18s ease, font-size 0.22s cubic-bezier(0.22, 1, 0.36, 1), letter-spacing 0.22s ease;
+}
+
+.mv2-setup-tab-desc {
+  display: block;
+  height: 42px;
+  overflow: hidden;
+  color: rgba(182, 193, 208, 0.62);
+  font-size: 12.5px;
+  line-height: 1.6;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.18s ease, transform 0.22s ease;
+}
+
+.mv2-setup-tab-arrow {
+  display: inline-flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+  color: rgba(226, 232, 240, 0.7);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Idle hover: barely lifts, without stealing the active treatment */
+.mv2-setup-tab:hover:not(.is-active) .mv2-setup-tab-title {
+  color: rgba(240, 245, 251, 0.8);
+}
+
+.mv2-setup-tab:hover:not(.is-active) .mv2-setup-tab-icon {
+  color: rgba(226, 234, 244, 0.7);
+}
+
+/* Active step: larger, brighter, with its description revealed */
+.mv2-setup-tab.is-active {
+  padding-block: 18px;
+}
+
+.mv2-setup-tab.is-active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.mv2-setup-tab.is-active .mv2-setup-tab-title {
+  color: #ffffff;
+  font-size: 21px;
+  letter-spacing: -0.028em;
+}
+
+.mv2-setup-tab.is-active .mv2-setup-tab-desc {
+  margin-top: 7px;
+  opacity: 1;
+  transform: none;
+}
+
+.mv2-setup-tab.is-active .mv2-setup-tab-icon {
+  color: #f4f7fb;
+}
+
+.mv2-setup-tab.is-active .mv2-setup-tab-arrow {
+  opacity: 1;
+  color: #4f75ff;
+  transform: none;
+  filter: drop-shadow(0 0 6px rgba(79, 117, 255, 0.45));
+}
+
+/* ------------------------------------------------------------------ */
+/* Right: expanding glass accordion                                    */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-canvas {
+  --mv2-setup-image: url("/landing-v2/assets/section-04/setup-ribbon-stage.svg");
+  /* Width distribution: open 4.8fr vs closed 1fr → 4.8 / 7.8 = 0.61538. */
+  --mv2-setup-open-fr: 4.8;
+  --mv2-setup-open-mult: 0.6153846154;
+  --mv2-setup-gap: clamp(7px, 0.7vw, 10px);
+  /* Fallback height for the pre-hydration paint; the component measures the
+     tallest body and overwrites this custom property once. */
+  --mv2-setup-stage-h: 600px;
+  --mv2-setup-motion: 800ms;
+  --mv2-setup-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+
+/* One shared panorama layer, clipped by the glass surfaces above it. Its box
+   never changes between steps, so the landscape can never jump or rescale. */
+.mv2-setup-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: clamp(16px, 1.4vw, 22px);
+  pointer-events: none;
+}
+
+.mv2-setup-stage-media {
+  position: absolute;
+  inset: 0;
+  background-image: var(--mv2-setup-image);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+}
+
+.mv2-setup-stage-haze {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(6, 7, 9, 0.4) 0%, transparent 24%, transparent 72%, rgba(5, 6, 9, 0.48) 100%),
+    radial-gradient(90% 70% at 50% 50%, transparent 60%, rgba(6, 7, 9, 0.35) 100%);
+}
+
+.mv2-setup-accordion {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  gap: var(--mv2-setup-gap);
+  min-height: var(--mv2-setup-stage-h);
+  min-width: 0;
+  /* Query container for the body width below. */
+  container-type: inline-size;
+}
+
+/* Four glass surfaces: same shell, different width. */
+.mv2-setup-panel {
+  position: relative;
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.08);
+  border-radius: clamp(13px, 1.1vw, 17px);
+  background:
+    linear-gradient(172deg, rgba(16, 20, 28, 0.44) 0%, rgba(8, 10, 15, 0.48) 55%, rgba(6, 8, 12, 0.58) 100%);
+  box-shadow:
+    0 26px 60px -44px rgba(0, 0, 0, 0.95),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(8px) saturate(0.9);
+  -webkit-backdrop-filter: blur(8px) saturate(0.9);
+  isolation: isolate;
+  transition:
+    flex-grow var(--mv2-setup-motion) var(--mv2-setup-ease),
+    border-color 0.5s ease,
+    box-shadow 0.6s var(--mv2-setup-ease),
+    background 0.6s ease,
+    backdrop-filter 0.6s ease;
+}
+
+.mv2-setup-panel[data-active="false"] {
+  flex-grow: 1;
+}
+
+/* Active surface: subtle ultramarine edge light, rim lighting and halo. */
+.mv2-setup-panel[data-active="true"] {
+  flex-grow: var(--mv2-setup-open-fr);
+  border-color: rgba(60, 95, 240, 0.38);
+  background:
+    linear-gradient(172deg, rgba(16, 21, 31, 0.65) 0%, rgba(9, 11, 17, 0.62) 55%, rgba(7, 9, 14, 0.72) 100%);
+  box-shadow:
+    0 32px 80px -28px rgba(0, 0, 0, 0.98),
+    0 0 35px -8px rgba(32, 45, 230, 0.22),
+    0 0 0 1px rgba(60, 95, 240, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 24px -10px rgba(32, 45, 230, 0.15);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+
+/* Dark subtle veil: gentle contrast on text side, transparent over wave. */
+.mv2-setup-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      95deg,
+      rgba(6, 8, 12, 0.72) 0%,
+      rgba(7, 9, 13, 0.58) 45%,
+      rgba(8, 10, 15, 0.28) 75%,
+      rgba(8, 10, 15, 0.14) 100%
+    );
+  opacity: 0;
+  transition: opacity 0.55s ease;
+}
+
+.mv2-setup-panel[data-active="true"]::before {
+  opacity: 1;
+}
+
+/* Subtle ultramarine rim corner accents (top-right and bottom-left curves). */
+.mv2-setup-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      ellipse 48% 38% at 96% 6%,
+      rgba(65, 105, 245, 0.22) 0%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 48% 38% at 4% 94%,
+      rgba(65, 105, 245, 0.15) 0%,
+      transparent 72%
+    );
+  opacity: 0;
+  transition: opacity 0.7s var(--mv2-setup-ease);
+}
+
+.mv2-setup-panel[data-active="true"]::after {
+  opacity: 1;
+  transition-delay: 0.1s;
+}
+
+.mv2-setup-panel:has(.mv2-setup-panel-hit:hover) {
+  border-color: rgba(226, 232, 240, 0.24);
+}
+
+/* ------------------------------------------------------------------ */
+/* Collapsed identity rail                                             */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-rail {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(14px, 1.8vw, 26px);
+  padding: 18px 0 16px;
+  overflow: hidden;
+  opacity: 1;
+  pointer-events: none;
+  /* Narrowing panel: the identity reappears while the glass compresses, so the
+     slab is never left completely empty. */
+  transition: opacity 0.42s ease 0.14s;
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-rail {
+  opacity: 0;
+  transition: opacity 0.18s ease 0s;
+}
+
+.mv2-setup-rail-num {
+  color: rgba(226, 234, 244, 0.52);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  line-height: 1;
+}
+
+.mv2-setup-rail-icon {
+  display: inline-flex;
+  color: rgba(226, 234, 244, 0.58);
+  transition: color 0.3s ease;
+}
+
+.mv2-setup-rail-title {
+  margin-top: auto;
+  color: rgba(226, 234, 244, 0.36);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  transition: color 0.3s ease;
+}
+
+.mv2-setup-panel:has(.mv2-setup-panel-hit:hover) .mv2-setup-rail-icon {
+  color: rgba(244, 248, 253, 0.85);
+}
+
+.mv2-setup-panel:has(.mv2-setup-panel-hit:hover) .mv2-setup-rail-title {
+  color: rgba(238, 244, 251, 0.62);
+}
+
+/* Hit target for a collapsed panel (sibling of the body, never a wrapper). */
+.mv2-setup-panel-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mv2-setup-panel-hit:focus-visible {
+  outline: 1px solid rgba(246, 249, 252, 0.85);
+  outline-offset: -5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Detailed body                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Always laid out at the open-panel width: the text never reflows while the
+   panel narrows or widens, it is just revealed or masked by the glass edge. */
+.mv2-setup-panel-body {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  /* Matches the flex distribution exactly: free space minus the four 1px
+     borders, shared 4.8 : 1 : 1 : 1, plus the panel's own border. */
+  width: calc((100cqw - 3 * var(--mv2-setup-gap) - 8px) * var(--mv2-setup-open-mult) + 2px);
+  padding: clamp(24px, 2.4vw, 36px);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease-out 0s,
+    visibility 0s linear 0.2s;
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-panel-body {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  /* Content only appears once the panel is wide enough to hold it. */
+  transition:
+    opacity 0.18s ease-out 0.28s,
+    visibility 0s linear 0s;
+}
+
+.mv2-setup-panel-content {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: clamp(20px, 1.9vw, 28px);
+  min-width: 0;
+  min-height: 0;
+}
+
+.mv2-setup-panel-head,
+.mv2-setup-row,
+.mv2-setup-test,
+.mv2-setup-panel-foot {
+  opacity: 0;
+  transform: translateY(10px);
+  /* Leaving: everything dissolves at once, before the space gets too tight. */
+  transition:
+    opacity 0.18s ease-out 0s,
+    transform 0.2s ease-out 0s;
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-panel-head,
+.mv2-setup-panel[data-active="true"] .mv2-setup-row,
+.mv2-setup-panel[data-active="true"] .mv2-setup-test,
+.mv2-setup-panel[data-active="true"] .mv2-setup-panel-foot {
+  opacity: 1;
+  transform: none;
+  /* In between 340ms and ~820ms: content is whole before the width settles. */
+  transition:
+    opacity 0.24s var(--mv2-setup-ease) var(--mv2-setup-in-delay, 0.34s),
+    transform 0.28s var(--mv2-setup-ease) var(--mv2-setup-in-delay, 0.34s);
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-panel-head {
+  --mv2-setup-in-delay: 0.34s;
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-row:nth-child(1) { --mv2-setup-in-delay: 0.38s; }
+.mv2-setup-panel[data-active="true"] .mv2-setup-row:nth-child(2) { --mv2-setup-in-delay: 0.41s; }
+.mv2-setup-panel[data-active="true"] .mv2-setup-row:nth-child(3) { --mv2-setup-in-delay: 0.44s; }
+.mv2-setup-panel[data-active="true"] .mv2-setup-row:nth-child(4) { --mv2-setup-in-delay: 0.47s; }
+.mv2-setup-panel[data-active="true"] .mv2-setup-row:nth-child(5) { --mv2-setup-in-delay: 0.5s; }
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-test {
+  --mv2-setup-in-delay: 0.52s;
+}
+
+.mv2-setup-panel[data-active="true"] .mv2-setup-panel-foot {
+  --mv2-setup-in-delay: 0.54s;
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel content                                                       */
+/* ------------------------------------------------------------------ */
+
+.mv2-setup-panel-head,
+.mv2-setup-rows,
+.mv2-setup-panel-foot {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.mv2-setup-panel-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: rgba(214, 223, 235, 0.58);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mv2-setup-panel-kicker::before {
+  content: "";
+  width: 20px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.mv2-setup-main-title {
+  margin: 0;
+  font-family: var(--mv2-font-heading);
+  font-size: clamp(27px, 2.3vw, 37px);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  text-wrap: balance;
+}
+
+.mv2-setup-subtitle {
+  max-width: 46ch;
+  margin: 12px 0 0;
+  color: rgba(208, 218, 231, 0.72);
+  font-size: 14px;
+  line-height: 1.72;
+}
+
+/* Hairline rows — no nested cards */
+.mv2-setup-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mv2-setup-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 14px;
+  align-items: baseline;
+  padding: 13px 0;
+  border-top: 1px solid rgba(226, 232, 240, 0.12);
+}
+
+.mv2-setup-row:last-child {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.12);
+}
+
+.mv2-setup-row:has(.mv2-setup-status) {
+  align-items: center;
+}
+
+.mv2-setup-row-mark {
+  width: 12px;
+  height: 1px;
+  background: rgba(226, 232, 240, 0.44);
+  transform: translateY(-3px);
+}
+
+.mv2-setup-row:has(.mv2-setup-status) .mv2-setup-row-mark {
+  transform: none;
+}
+
+.mv2-setup-row-label {
+  min-width: 0;
+  color: #edf1f7;
+  font-size: 14px;
+  font-weight: 420;
+  line-height: 1.45;
+  letter-spacing: -0.008em;
+}
+
+.mv2-setup-row-value {
+  min-width: 0;
+  color: rgba(204, 214, 228, 0.68);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+/* Channel status chip (step 03) */
+.mv2-setup-status {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e6edf6;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+.mv2-setup-status:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(226, 232, 240, 0.34);
+}
+
+.mv2-setup-status:focus-visible,
+.mv2-setup-test-btn:focus-visible {
+  outline: 1px solid rgba(226, 232, 240, 0.85);
+  outline-offset: 3px;
+}
+
+.mv2-setup-status.is-off {
+  color: rgba(206, 216, 229, 0.6);
+}
+
+.mv2-setup-status-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #a8c9b2;
+  box-shadow: 0 0 0 3px rgba(168, 201, 178, 0.14);
+  transition: background 0.25s ease, box-shadow 0.25s ease;
+}
+
+.mv2-setup-status.is-off .mv2-setup-status-dot {
+  background: rgba(206, 216, 229, 0.4);
+  box-shadow: none;
+}
+
+/* Quick test control (step 04) */
+.mv2-setup-test {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.mv2-setup-test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 16px;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #f2f6fb;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 450;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.25s ease, border-color 0.25s ease, opacity 0.25s ease;
+}
+
+.mv2-setup-test-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(226, 232, 240, 0.36);
+}
+
+.mv2-setup-test-btn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.mv2-setup-test-result {
+  margin: 0;
+  color: rgba(200, 210, 224, 0.62);
+  font-size: 11.5px;
+  line-height: 1.55;
+  transition: color 0.3s ease;
+}
+
+.mv2-setup-test-result.is-ok {
+  color: rgba(168, 201, 178, 0.9);
+}
+
+.mv2-setup-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mv2-setup-typing-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: mv2-setup-typing 0.9s ease-in-out infinite;
+}
+
+.mv2-setup-typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.mv2-setup-typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes mv2-setup-typing {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+
+/* Panel footer: step counter + hairline ticks */
+.mv2-setup-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid rgba(226, 232, 240, 0.1);
+  color: rgba(214, 223, 235, 0.62);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mv2-setup-ticks {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mv2-setup-ticks i {
+  display: block;
+  width: 15px;
+  height: 1px;
+  background: rgba(226, 232, 240, 0.2);
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.mv2-setup-ticks i.is-on {
+  width: 22px;
+  background: rgba(246, 249, 252, 0.75);
+}
+
+/* ------------------------------------------------------------------ */
+/* Legacy V1 text-color overrides                                      */
+/* landing.css still ships a high-specificity rule                        */
+/* (.mv2-page :is(...) :is(.mv2-kicker,p)) that forces #5b6169 on every  */
+/* paragraph inside the old setup section. Re-state the editorial dark   */
+/* palette with an ID so the scoped theme always wins.                   */
+/* ------------------------------------------------------------------ */
+
+#mv2-setup .mv2-setup-eyebrow {
+  color: rgba(206, 214, 226, 0.68);
+}
+
+#mv2-setup .mv2-setup-header-desc {
+  color: rgba(190, 200, 214, 0.72);
+}
+
+#mv2-setup .mv2-setup-panel-kicker {
+  color: rgba(214, 223, 235, 0.58);
+}
+
+#mv2-setup .mv2-setup-subtitle {
+  color: rgba(208, 218, 231, 0.72);
+}
+
+#mv2-setup .mv2-setup-test-result {
+  color: rgba(200, 210, 224, 0.62);
+}
+
+#mv2-setup .mv2-setup-test-result.is-ok {
+  color: rgba(168, 201, 178, 0.9);
+}
+
+/* ------------------------------------------------------------------ */
+/* Responsive                                                          */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 1300px) {
+  .mv2-setup-row {
+    grid-template-columns: 12px minmax(0, 1fr);
+    row-gap: 4px;
+    padding: 12px 0;
+  }
+
+  .mv2-setup-row-value {
+    grid-column: 2;
+    text-align: left;
+    font-size: 12px;
+  }
+
+  .mv2-setup-row:has(.mv2-setup-status) {
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 1080px) {
+  .mv2-setup-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 26px;
+  }
+
+  .mv2-setup-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-self: stretch;
+    padding-top: 0;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.14);
+  }
+
+  .mv2-setup-tab {
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 9px;
+    height: auto;
+    padding: 13px 12px 13px 0;
+    border-top: 1px solid rgba(226, 232, 240, 0.14);
+    border-bottom: 0;
+  }
+
+  .mv2-setup-tab:last-child {
+    border-bottom: 0;
+  }
+
+  .mv2-setup-tab-icon {
+    padding-top: 1px;
+  }
+
+  .mv2-setup-tab-icon svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .mv2-setup-tab-title {
+    font-size: 13px;
+  }
+
+  .mv2-setup-tab-desc,
+  .mv2-setup-tab-arrow {
+    display: none;
+  }
+
+  .mv2-setup-tab.is-active {
+    padding-block: 13px;
+  }
+
+  .mv2-setup-tab.is-active .mv2-setup-tab-title {
+    font-size: 13px;
+    letter-spacing: -0.01em;
+  }
+
+  .mv2-setup-tab.is-active::after {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: 0;
+    right: 12px;
+    height: 1px;
+    background: rgba(246, 249, 252, 0.85);
+  }
+
+  /* Softer open/closed ratio so the four slabs stay recognisable. */
+  .mv2-setup-canvas {
+    --mv2-setup-open-fr: 3.4;
+    --mv2-setup-open-mult: 0.53125;
+  }
+}
+
+@media (max-width: 980px) {
+  .mv2-setup-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+
+  .mv2-setup-header-desc {
+    justify-self: start;
+    max-width: 52ch;
+  }
+
+  .mv2-setup-canvas {
+    --mv2-setup-image: url("/landing-v2/assets/section-04/setup-ribbon-stage.svg");
+  }
+}
+
+/* Compact variant: the four slabs become one detail panel under the horizontal
+   step selectors. Same DOM, same state, no narrow forced columns. */
+@media (max-width: 900px) {
+  .mv2-setup-accordion {
+    display: block;
+    min-height: 0;
+  }
+
+  .mv2-setup-panel {
+    display: none;
+    border-radius: 18px;
+  }
+
+  .mv2-setup-panel[data-active="true"] {
+    display: block;
+  }
+
+  .mv2-setup-rail,
+  .mv2-setup-panel-hit {
+    display: none;
+  }
+
+  .mv2-setup-panel-body {
+    position: relative;
+    width: 100%;
+    padding: 24px 22px;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .mv2-setup-panel-head,
+  .mv2-setup-row,
+  .mv2-setup-test,
+  .mv2-setup-panel-foot {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .mv2-setup-stage-media {
+    background-position: center;
+  }
+
+  .mv2-setup-panel::before {
+    background:
+      linear-gradient(
+        100deg,
+        rgba(6, 8, 12, 0.72) 0%,
+        rgba(7, 9, 13, 0.58) 44%,
+        rgba(8, 10, 15, 0.28) 76%,
+        rgba(8, 10, 15, 0.14) 100%
+      );
+    opacity: 1;
+  }
+
+  .mv2-setup-panel::after {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .mv2-setup-main-title {
+    font-size: clamp(25px, 4.6vw, 31px);
+  }
+
+  .mv2-setup-panel-content {
+    gap: 18px;
+  }
+
+  .mv2-setup-subtitle {
+    font-size: 13.5px;
+  }
+
+  .mv2-setup-row-label {
+    font-size: 13.5px;
+  }
+
+  .mv2-setup-row-value {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 620px) {
+  .mv2-page .mv2-setup,
+  #mv2-setup.mv2-setup {
+    padding-block: 88px 84px;
+  }
+
+  .mv2-setup-container {
+    width: calc(100% - 40px);
+  }
+
+  .mv2-setup-headline {
+    font-size: clamp(31px, 9vw, 40px);
+  }
+
+  .mv2-setup-header-desc {
+    font-size: 13px;
+  }
+
+  /* Steps become a compact vertical list again */
+  .mv2-setup-tabs {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 0;
+  }
+
+  .mv2-setup-tab {
+    grid-template-columns: 22px minmax(0, 1fr) 16px;
+    gap: 12px;
+    padding: 14px 0;
+    border-top: 1px solid rgba(226, 232, 240, 0.14);
+  }
+
+  .mv2-setup-tab:last-child {
+    border-bottom: 1px solid rgba(226, 232, 240, 0.14);
+  }
+
+  .mv2-setup-tab-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .mv2-setup-tab-title {
+    font-size: 16px;
+  }
+
+  .mv2-setup-tab-arrow {
+    display: inline-flex;
+  }
+
+  .mv2-setup-tab.is-active {
+    padding-block: 18px;
+  }
+
+  .mv2-setup-tab.is-active .mv2-setup-tab-title {
+    font-size: 19px;
+  }
+
+  .mv2-setup-tab.is-active .mv2-setup-tab-desc {
+    display: block;
+    height: auto;
+    max-height: 70px;
+    font-size: 12px;
+  }
+
+  .mv2-setup-tab.is-active::after {
+    display: none;
+  }
+
+  .mv2-setup-stage {
+    border-radius: 18px;
+  }
+
+  .mv2-setup-panel-body {
+    padding: 24px 22px;
+  }
+
+  .mv2-setup-main-title {
+    font-size: clamp(25px, 7vw, 31px);
+  }
+
+  .mv2-setup-row {
+    padding: 12px 0;
+  }
+}
+
+@media (max-width: 400px) {
+  .mv2-setup-container {
+    width: calc(100% - 32px);
+  }
+
+  .mv2-setup-panel-body {
+    padding: 20px 18px;
+  }
+
+  .mv2-setup-main-title {
+    font-size: 25px;
+  }
+
+  .mv2-setup-subtitle {
+    font-size: 13px;
+  }
+
+  .mv2-setup-row {
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 10px;
+    padding: 11px 0;
+  }
+
+  .mv2-setup-row:has(.mv2-setup-status) {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .mv2-setup-row:has(.mv2-setup-status) .mv2-setup-status {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 2px;
+  }
+
+  .mv2-setup-panel-foot {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+
+  .mv2-setup-ticks i {
+    width: 12px;
+  }
+
+  .mv2-setup-ticks i.is-on {
+    width: 18px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                      */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .mv2-setup-panel,
+  .mv2-setup-panel::before,
+  .mv2-setup-panel::after,
+  .mv2-setup-panel-body,
+  .mv2-setup-panel-head,
+  .mv2-setup-row,
+  .mv2-setup-test,
+  .mv2-setup-panel-foot,
+  .mv2-setup-rail,
+  .mv2-setup-rail-icon,
+  .mv2-setup-rail-title,
+  .mv2-setup-tab,
+  .mv2-setup-tab-icon,
+  .mv2-setup-tab-title,
+  .mv2-setup-tab-desc,
+  .mv2-setup-tab-arrow,
+  .mv2-setup-ticks i {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+  }
+
+  .mv2-setup-typing-dot {
+    animation: none;
+    opacity: 0.8;
+  }
+}

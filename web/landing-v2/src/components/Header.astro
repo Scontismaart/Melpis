@@ -1,0 +1,26 @@
+---
+const base = import.meta.env.BASE_URL;
+interface Props {
+  isSubpage?: boolean;
+  currentPath?: string;
+}
+const { isSubpage = false, currentPath = '' } = Astro.props;
+const isSub = isSubpage || (currentPath !== '' && currentPath !== base && currentPath !== `${base}/`);
+
+const homeUrl = isSub ? '/' : '#mv2-inizio';
+const percorsoUrl = isSub ? '/#mv2-percorso' : '#mv2-percorso';
+const attivitaUrl = isSub ? '/#mv2-attivita' : '#mv2-attivita';
+const controlloUrl = isSub ? '/#mv2-controllo' : '#mv2-controllo';
+const pianiUrl = '/piani/';
+const loginUrl = '/accedi/';
+---
+<header class="mv2-header" data-mv2-hero="header">
+    <div class="mv2-container mv2-nav-wrap">
+      <a class="mv2-brand" href={homeUrl} aria-label="Melpis, inizio pagina"><img class="mv2-mark" src="/landing-v2/assets/mv2-symbol.svg" alt="" width="40" height="29"><span>melpis</span></a>
+      <button class="mv2-menu-toggle" type="button" aria-expanded="false" aria-controls="mv2-nav" aria-label="Apri menu">Menu <span aria-hidden="true">☰</span></button>
+      <nav class="mv2-nav" id="mv2-nav" aria-label="Navigazione principale">
+        <a href={percorsoUrl}>Il percorso</a><a href={attivitaUrl}>Per chi</a><a href={controlloUrl}>Controllo</a><a href={pianiUrl}>Piani</a>
+        <a class="mv2-button mv2-button-small" href={loginUrl}>Accedi <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>

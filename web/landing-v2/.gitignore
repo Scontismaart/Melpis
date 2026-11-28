@@ -1,0 +1,6 @@
+/dist/
+/.astro/
+/node_modules/
+/artifacts/
+/test-results/
+/nginx-policy.conf

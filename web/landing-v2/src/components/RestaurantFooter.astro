@@ -1,0 +1,73 @@
+---
+const base = import.meta.env.BASE_URL;
+---
+
+<footer class="mv2-rest-footer">
+  {/* Fluid S-Curved Transition from White Page to Dark Footer */}
+  <div class="mv2-rest-footer-curve" aria-hidden="true">
+    <svg viewBox="0 0 1440 120" fill="none" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        d="M 0 120 C 360 120, 480 0, 720 0 C 960 0, 1080 120, 1440 120 L 1440 120 L 0 120 Z"
+        fill="#07090e"
+      />
+    </svg>
+  </div>
+
+  <div class="mv2-rest-footer-body">
+    <div class="mv2-rest-container">
+      <div class="mv2-rest-footer-grid">
+        {/* Brand Column */}
+        <div class="mv2-rest-footer-brand-col">
+          <div class="mv2-rest-footer-brand">
+            <img class="mv2-rest-mark" src="/landing-v2/assets/mv2-symbol.svg" alt="" width="34" height="25" />
+            <span class="mv2-rest-footer-title">melpis</span>
+            <span class="mv2-rest-footer-slash">/</span>
+            <span class="mv2-rest-footer-vertical">ristoranti</span>
+          </div>
+          <p class="mv2-rest-footer-tagline">
+            Meno tempo al telefono. Più tempo per la tua sala e per i tuoi ospiti.
+          </p>
+        </div>
+
+        {/* Link Columns */}
+        <div class="mv2-rest-footer-links-grid">
+          <div class="mv2-rest-footer-col">
+            <h4 class="mv2-rest-footer-col-title">Prodotto</h4>
+            <ul class="mv2-rest-footer-list">
+              <li><a href="#mv2-rest-vantaggi">Il percorso</a></li>
+              <li><a href="#mv2-rest-scenari">Gestione sala</a></li>
+              <li><a href="#mv2-rest-funzioni">Controllo &amp; Inbox</a></li>
+              <li><a href="#mv2-rest-piani">Piani e prezzi</a></li>
+            </ul>
+          </div>
+
+          <div class="mv2-rest-footer-col">
+            <h4 class="mv2-rest-footer-col-title">Settori</h4>
+            <ul class="mv2-rest-footer-list">
+              <li><a href={`${base}ristoranti/`} class="is-active">Ristoranti &amp; Ospitalità</a></li>
+              <li><a href={`${base}hotel/`}>Hotel &amp; Strutture Ricettive</a></li>
+              <li><a href={`${base}barbieri/`}>Barbieri &amp; Saloni</a></li>
+              <li><a href={`${base}saloni/`}>Centri Estetici &amp; Studi</a></li>
+            </ul>
+          </div>
+
+          <div class="mv2-rest-footer-col">
+            <h4 class="mv2-rest-footer-col-title">Azienda</h4>
+            <ul class="mv2-rest-footer-list">
+              <li><a href="#mv2-rest-faq">Domande frequenti</a></li>
+              <li><a href="/privacy/">Privacy Policy</a></li>
+              <li><a href="/termini/">Termini di utilizzo</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="mv2-rest-footer-bottom">
+        <p class="mv2-rest-footer-copy">© 2026 Melpis. Tutti i diritti riservati.</p>
+        <p class="mv2-rest-footer-tokens">
+          Design System: Bianco • Nero Ossidiana • Blu Ultramarino (#1A5CFF)
+        </p>
+      </div>
+    </div>
+  </div>
+</footer>

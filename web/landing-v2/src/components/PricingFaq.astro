@@ -1,0 +1,50 @@
+---
+import { faq } from '../data/pricing.mjs';
+---
+
+<section class="mv2-pp-faq" id="mv2-pp-faq" aria-labelledby="mv2-pp-faq-title">
+  <span id="faq" class="mv2-legacy-anchor" aria-hidden="true"></span>
+  <div class="mv2-pp-container">
+    <div class="mv2-pp-faq-head">
+      <h2 class="mv2-pp-faq-title" id="mv2-pp-faq-title">{faq.title}</h2>
+      <div class="mv2-pp-faq-tabs" role="tablist" aria-label={faq.tabsLabel} data-pp-tabs>
+        {faq.categories.map((category, index) => (
+          <button
+            class="mv2-pp-faq-tab"
+            type="button"
+            role="tab"
+            id={`mv2-pp-tab-${category.id}`}
+            aria-controls={`mv2-pp-panel-${category.id}`}
+            aria-selected={index === 0 ? 'true' : 'false'}
+            tabindex={index === 0 ? 0 : -1}
+            data-pp-tab
+          >
+            {category.label}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    {faq.categories.map((category, index) => (
+      <div
+        class="mv2-pp-faq-panel"
+        role="tabpanel"
+        id={`mv2-pp-panel-${category.id}`}
+        aria-labelledby={`mv2-pp-tab-${category.id}`}
+        data-pp-panel
+        data-active={index === 0 ? 'true' : 'false'}
+        hidden={index !== 0}
+      >
+        {category.items.map((item) => (
+          <details class="mv2-pp-faq-item">
+            <summary>
+              <span>{item.q}</span>
+              <span class="mv2-pp-faq-toggle" aria-hidden="true"></span>
+            </summary>
+            <p class="mv2-pp-faq-answer">{item.a}</p>
+          </details>
+        ))}
+      </div>
+    ))}
+  </div>
+</section>

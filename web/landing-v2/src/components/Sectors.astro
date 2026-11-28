@@ -1,0 +1,81 @@
+---
+const base = import.meta.env.BASE_URL;
+
+const sectors = [
+  {
+    id: 'restaurant',
+    number: '01',
+    title: 'Ristoranti',
+    copy: 'Orari, disponibilità e richieste per la sala, raccolti in un flusso da seguire.',
+    alt: 'Tavolo apparecchiato in un ristorante, con calici e luci calde.',
+    icon: 'food',
+    href: `${base}ristoranti/`,
+  },
+  {
+    id: 'hotel',
+    number: '02',
+    title: 'Hotel',
+    copy: 'Domande ricorrenti e informazioni del soggiorno, con il team vicino alla conversazione.',
+    alt: 'Camera d’albergo con letto rifatto e finestra luminosa.',
+    icon: 'hotel',
+    href: `${base}hotel/`,
+  },
+  {
+    id: 'barber',
+    number: '03',
+    title: 'Barbieri',
+    copy: 'Richieste di appuntamento e disponibilità da verificare secondo le tue regole.',
+    alt: 'Poltrona da barbiere in un salone con specchi e luci calde.',
+    icon: 'barber',
+    href: `${base}barbieri/`,
+  },
+  {
+    id: 'beauty',
+    number: '04',
+    title: 'Centri estetici',
+    copy: 'Servizi e richieste di appuntamento presentati con informazioni chiare.',
+    alt: 'Asciugamani arrotolati e prodotti su un lettino di un centro estetico.',
+    icon: 'beauty',
+    href: `${base}saloni/`,
+  },
+];
+---
+<section class="mv2-sectors" id="mv2-attivita" aria-labelledby="mv2-sector-title"><div class="mv2-container"><div class="mv2-section-heading mv2-sector-heading"><div><p class="mv2-kicker" data-mv2-reveal="up">PENSATO PER LE ATTIVITÀ</p><h2 id="mv2-sector-title" data-mv2-reveal="title">Il tuo lavoro ha<br><em>le sue richieste.</em></h2></div><p data-mv2-reveal="up" data-mv2-delay="2">Informazioni utili e passaggi operativi cambiano da un’attività all’altra. Melpis si configura intorno al modo in cui lavori.</p></div><div class="mv2-sector-grid">
+      {sectors.map((sector) => (
+        <article class={`mv2-sector-card mv2-sector-card-${sector.id}`} data-mv2-reveal="card">
+          <a class="mv2-sector-link" href={sector.href}>
+            <span class="mv2-sector-media">
+              <img
+                src={`${base}assets/sectors/${sector.id}-800.webp`}
+                srcset={`${base}assets/sectors/${sector.id}-480.webp 480w, ${base}assets/sectors/${sector.id}-800.webp 800w, ${base}assets/sectors/${sector.id}.webp 1122w`}
+                sizes="(min-width: 1280px) 300px, (min-width: 700px) 50vw, 92vw"
+                alt={sector.alt}
+                width="1122"
+                height="1402"
+                loading="lazy"
+                decoding="async"
+              />
+            </span>
+            <span class="mv2-sector-body">
+              <span class={`mv2-sector-icon mv2-sector-icon-${sector.icon}`} aria-hidden="true">
+                {sector.icon === 'food' && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v7" /><path d="M5 3v4a3 3 0 0 0 6 0V3" /><path d="M8 10v11" /><path d="M17 3c-2 2.6-3 5-3 7.4 0 1.9 1.1 3 3 3.1V21" /></svg>
+                )}
+                {sector.icon === 'hotel' && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19V9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10" /><path d="M3 15h18" /><path d="M3 19h18" /><path d="M7 13V9.5h4V13" /></svg>
+                )}
+                {sector.icon === 'barber' && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.4" /><circle cx="6" cy="18" r="2.4" /><path d="M8 7.6 20 18" /><path d="M8 16.4 20 6" /></svg>
+                )}
+                {sector.icon === 'beauty' && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19c-3.5 0-6.5-2-8-5 2.9-.3 5.4.6 8 3.2 2.6-2.6 5.1-3.5 8-3.2-1.5 3-4.5 5-8 5Z" /><path d="M12 16.6c-1.9-1.7-2.9-3.8-2.9-6.1 0-2 1-4 2.9-5.5 1.9 1.5 2.9 3.5 2.9 5.5 0 2.3-1 4.4-2.9 6.1Z" /></svg>
+                )}
+              </span>
+              <h3>{sector.title}</h3>
+              <p>{sector.copy}</p>
+            </span>
+            <span class="mv2-sector-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7" /><path d="M9 7h8v8" /></svg></span>
+          </a>
+        </article>
+      ))}
+    </div></div></section>

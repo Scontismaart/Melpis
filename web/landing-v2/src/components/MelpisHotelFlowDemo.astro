@@ -1,0 +1,55 @@
+---
+import MelpisFlowDemoConsole from './MelpisFlowDemoConsole.jsx';
+---
+
+<section class="mv2-sector-section-demo" id="mv2-hotel-demo" aria-labelledby="mv2-hotel-demo-title">
+  <div class="mv2-sector-demo-header" data-sector-reveal>
+    <div class="mv2-sector-demo-header__left">
+      <div class="mv2-sector-demo-badge">
+        <span>DEMO INTERATTIVA</span>
+      </div>
+      <h2 class="mv2-sector-demo-title" id="mv2-hotel-demo-title">
+        <span class="mv2-sector-demo-title__main">Dalla richiesta alla prenotazione confermata.</span>
+        <span class="mv2-sector-demo-title__sub">Scopri come Melpis gestisce disponibilità, informazioni sulla struttura e servizi.</span>
+      </h2>
+    </div>
+
+    <div class="mv2-sector-demo-header__right">
+      <p>L'ospite richiede informazioni in chat, Melpis verifica le camere nel calendario e presenta la proposta con tariffe e servizi inclusi.</p>
+    </div>
+  </div>
+
+  <!-- Stage wrapper: Hero-like card block with ambient blue glow & silk reflections -->
+  <div class="mv2-sector-demo-stage mv2-sector-demo-stage--hotel">
+    <div class="mv2-sector-demo-aurora" aria-hidden="true">
+      <span class="mv2-sector-demo-aurora-layer mv2-sector-demo-aurora-layer-a"></span>
+      <span class="mv2-sector-demo-aurora-layer mv2-sector-demo-aurora-layer-b"></span>
+      <span class="mv2-sector-demo-aurora-beam"></span>
+      <svg class="mv2-sector-demo-aurora-waves" viewBox="0 0 1340 820" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="mv2-hotel-stageWaveTop" x1="0" y1="0" x2="1340" y2="820" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+            <stop offset="35%" stop-color="#F4F7F9" stop-opacity="0.65" />
+            <stop offset="68%" stop-color="#E5EDF3" stop-opacity="0.40" />
+            <stop offset="100%" stop-color="#D3DFE8" stop-opacity="0.12" />
+          </linearGradient>
+          <linearGradient id="mv2-hotel-stageWaveBottom" x1="180" y1="820" x2="1340" y2="520" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#F6F9FB" stop-opacity="0.55" />
+            <stop offset="55%" stop-color="#E8EFF4" stop-opacity="0.32" />
+            <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.85" />
+          </linearGradient>
+          <filter id="mv2-hotel-stageRidgeShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="-1" dy="4" stdDeviation="5" flood-color="#204E6D" flood-opacity="0.10" />
+          </filter>
+        </defs>
+        <path d="M 0 240 C 320 280, 700 180, 1020 120 C 1170 92, 1260 80, 1340 70 L 1340 0 L 0 0 Z" fill="url(#mv2-hotel-stageWaveTop)" />
+        <path d="M 0 240 C 320 280, 700 180, 1020 120 C 1170 92, 1260 80, 1340 70" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" filter="url(#mv2-hotel-stageRidgeShadow)" />
+        <path d="M 160 820 C 460 720, 820 750, 1340 650 L 1340 820 Z" fill="url(#mv2-hotel-stageWaveBottom)" />
+        <path d="M 160 820 C 460 720, 820 750, 1340 650" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" filter="url(#mv2-hotel-stageRidgeShadow)" />
+      </svg>
+    </div>
+
+    <!-- The Interactive Console Island -->
+    <MelpisFlowDemoConsole client:idle variant="hotel" />
+  </div>
+</section>
